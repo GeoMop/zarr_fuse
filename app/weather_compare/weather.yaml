@@ -1,0 +1,9 @@
+# Configuration of the ZARR-FUSE storage
+ATTRS:
+    location_file:
+yr.no:
+    VARS:
+    COORDS:
+    ATTRS:
+        
+meteosat:

@@ -1,0 +1,46 @@
+apiVersion: 1
+providers:
+- name: simple-timeseries-dashboard
+  orgId: 1
+  folder: ""
+  type: file
+  updateIntervalSeconds: 10
+  disableDeletion: false
+  options:
+    json: |
+      [
+         {
+           "dashboard": {
+             "title": "Simple Time Series Dashboard",
+             "uid": "simple-timeseries",
+             "time": {
+               "from": "now-6h",
+               "to": "now"
+             },
+             "panels": [
+               {
+                 "datasource": "TestData DB",
+                 "fieldConfig": {
+                   "defaults": {},
+                   "overrides": []
+                 },
+                 "gridPos": {
+                   "h": 9,
+                   "w": 12,
+                   "x": 0,
+                   "y": 0
+                 },
+                 "id": 1,
+                 "targets": [
+                   {
+                     "scenarioId": "random_walk"
+                   }
+                 ],
+                 "title": "Test Time Series Panel",
+                 "type": "timeseries"
+               }
+             ]
+           },
+           "overwrite": true
+         }
+      ]
