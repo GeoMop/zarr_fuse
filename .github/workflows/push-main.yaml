@@ -19,6 +19,9 @@ jobs:
       options: --privileged
     outputs:
       image-tag: ${{ steps.tag.outputs.image-tag }}
+    defaults:
+      run:
+        working-directory: app/jupyter_test
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-containerize"
       cancel-in-progress: true
