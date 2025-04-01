@@ -1,4 +1,4 @@
-name: Push main - conteinerize app and deploy to e-infra rancher
+name: Push main - conteinerize app and deploy to development environment
 on:
   push:
     branches:
