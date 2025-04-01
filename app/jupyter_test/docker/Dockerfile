@@ -4,7 +4,7 @@ WORKDIR /app
 COPY main.ipynb .
 COPY pyproject.toml .
 
-RUN pip install .
+RUN pip install .[voila-vizualization]
 
 EXPOSE 8080
 CMD ["voila", "main.ipynb", "--port=8080", "--no-browser", "--Voila.ip=0.0.0.0"]

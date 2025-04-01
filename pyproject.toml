@@ -69,6 +69,11 @@ dev = [
     "jupyter"
     # any additional development tools
 ]
+voila-vizualization = [
+    "jupyterlab",
+    "voila",
+    "matplotlib",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
