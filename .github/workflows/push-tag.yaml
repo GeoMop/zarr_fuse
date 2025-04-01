@@ -70,8 +70,8 @@ jobs:
         run: kubectl config set-context --current --namespace="${{ env.namespace }}"
       - name: Deploy app
         run: |
-          helm upgrade jupyter-test jupyter-test \
-          --install --atomic --namespace "${{ env.namespace }}" \
+          helm upgrade jupyter-test-app jupyter-test \
+          --install --atomic --namespace --timeout 10m "${{ env.namespace }}" \
           --set image.registry="${{ env.registry }}" \
           --set image.repository="${{ env.repository }}" \
           --set image.tag="${{ github.ref_name }}"
