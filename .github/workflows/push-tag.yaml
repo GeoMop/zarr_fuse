@@ -71,7 +71,7 @@ jobs:
       - name: Deploy app
         run: |
           helm upgrade jupyter-test-app jupyter-test \
-          --install --atomic --namespace --timeout 10m "${{ env.namespace }}" \
+          --install --atomic --timeout 10m --namespace "${{ env.namespace }}" \
           --set image.registry="${{ env.registry }}" \
           --set image.repository="${{ env.repository }}" \
           --set image.tag="${{ github.ref_name }}"
