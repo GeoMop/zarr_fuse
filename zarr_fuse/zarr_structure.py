@@ -84,6 +84,7 @@ Attrs = Dict[str, Any]
 ZarrNodeStruc = Dict[str, Union[Attrs, Dict[str, Variable], Dict[str, Coord], 'ZarrNodeStruc']]
 
 def set_name(d, name):
+    assert isinstance(d, dict), f"Expected a dictionary, got: {d}"
     d['name'] = name
     return d
 
@@ -97,11 +98,13 @@ def dict_deserialize(content: dict) -> dict:
     Other keys are processed recursively.
     """
     result = {}
-    assert 'VARS' in content, ValueError("VARS key is required.")
-    assert 'COORDS' in content, ValueError("COORDS key is required.")
+    #assert 'VARS' in content, ValueError("VARS key is required.")
+    #assert 'COORDS' in content, ValueError("COORDS key is required.")
     result['ATTRS'] = content.get('ATTRS', {})
-    result['VARS'] = {k: Variable(**set_name(v, k)) for k, v in content['VARS'].items()}
-    result['COORDS'] = {k: Coord(**set_name(c, k)) for k, c in content['COORDS'].items()}
+    vars = content.get('VARS', {})
+    result['VARS'] = {k: Variable(**set_name(v, k)) for k, v in vars.items()}
+    coords = content.get('COORDS', {})
+    result['COORDS'] = {k: Coord(**set_name(c, k)) for k, c in coords.items()}
 
     # Add implicitely defined coords.
     implicit_coords = [
@@ -138,18 +141,13 @@ def deserialize(source: Union[IO, str, bytes, Path]) -> dict:
       TypeError for unsupported types.
     """
 
-    if isinstance(source, (str, Path)):
-        try:
-            # Try to open the source as a file path.
-            with Path(source).open("r", encoding="utf-8") as file:
-                content = file.read()
-        except OSError as e:
-            # If source is a str, assume it's the YAML content if the file open fails.
-            if isinstance(source, str):
-                content = source
-            else:
-                # For a Path, raise an error if the file cannot be opened.
-                raise ValueError(f"File not found or cannot be opened: {source}") from e
+    if isinstance(source, Path):
+        # Try to open the source as a file path.
+        with Path(source).open("r", encoding="utf-8") as file:
+            content = file.read()
+    elif isinstance(source, str):
+        # Assume it's a string containing YAML content.
+        content = source
     elif isinstance(source, bytes):
         # Decode bytes using UTF-8.
         content = source.decode("utf-8")
