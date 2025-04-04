@@ -57,7 +57,7 @@ jobs:
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
       - name: Ensure that the namespace exists
-        run: kubectl create namespace --dry-run=client -o yaml '${{ env.namespace }}' | kubectl apply -f -
+        run: kubectl create namespace --dry-run=client -o yaml '${{ env.namespace }}'
       - name: Set context
         run: kubectl config set-context --current --namespace="${{ env.namespace }}"
       - name: Deploy app
