@@ -1,3 +1,7 @@
+- logging: lag all warning and errors into the dataset or common Zarr log array.
+  log cols: date_time, level, messge
+  log info for each update operation, optionaly keep all update tables unmerged as well
+  or one can have have some more refined policy for merging tree of datasets (yes this could be use case for xarray dataset tree)
 
 
 Notebook:
@@ -20,10 +24,6 @@ Shortcommings:
   assume pure functions, no state.
   Then we can have realtively general update machanism configured through the file.
   So the schema also describes the update step.
-- logging: lag all warning and errors into the dataset or common Zarr log array.
-  log cols: date_time, level, messge
-  log info for each update operation, optionaly keep all update tables unmerged as well
-  or one can have have some more refined policy for merging tree of datasets (yes this could be use case for xarray dataset tree)
 - ZARR complains:
   /home/jb/workspace/zarr_fuse/zarr_fuse/zarr_storage.py:367: RuntimeWarning: Failed to open Zarr store with consolidated metadata, but successfully read with non-consolidated metadata. This is typically much slower for opening a dataset. To silence this warning, consider:
 1. Consolidating metadata in this existing store with zarr.consolidate_metadata().

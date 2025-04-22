@@ -53,3 +53,7 @@ pip install -e .[dev]
 ```
 
 The 'dev' dependency includes all dependencies needed for 'plotting' and 'apps' part.
+
+
+Possible relation to an open source spreadsheet like cloud solutions:
+https://chatgpt.com/share/68026c33-3808-8004-a80e-524428ed9de5
