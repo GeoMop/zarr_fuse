@@ -1,8 +1,8 @@
 # Configuration of the ZARR-FUSE storage
 ATTRS:
-    store_url: probes_weather.zarr
+    store_url: "surface.zarr"
     store_type: 'local'                 # 'guess' type is default
-    location_file: &loc_file seznam_stanovist.csv
+    location_file: &loc_file odyssey_locations.csv
     grid_min: [50.840000, 14.850000]    # unit deg
     grid_max: [50.8900000, 14.9600000]  # unit deg
     grid_step: [1e-2, 1e-2]             # unit deg; about 1000m; approximately resolution of the yr.no service
@@ -14,7 +14,7 @@ yr.no:
         # We put forward varaible keys as valid keywords, but quoted names are valid in YAML
         precipitation_amount:
             unit: "mm"
-            description: "parcipitation in [mm] per hour ?? VERIFY"
+            description: "parcipitation in [mm] per hour (!VERIFY!)"
             coords: ["date_time", "lat_lon"]
        
 #         "probability_of_precipitation":

@@ -85,6 +85,8 @@ def open_storage(schema, **kwargs):
     Function arguments overrides respective schema 'ATTRS' values.
     The schema can be either a dictionary or a path to a YAML file.
 
+    kwargs processed:
+    'wirkdir' used for relative local urls.
     Return: root Node
     """
     if isinstance(schema, dict):
@@ -108,7 +110,10 @@ def open_storage(schema, **kwargs):
         'zip': zarr.storage.ZipStore
     }
     # TODO: get constructor signature and filter out unknown kwargs
-    storage = call_with_filtered_kwargs(storage_resolve[type], zarr_url, **store_attrs)
+    if type == 'local' and not zarr_url.startswith('/') and not zarr_url.startswith('file://'):
+        zarr_url = kwargs.get('workdir', Path()) / zarr_url
+    storage = call_with_filtered_kwargs(storage_resolve[type],
+                                    zarr_url, **store_attrs)
     return Node.open_store(schema_dict, storage)
 
 class Node:

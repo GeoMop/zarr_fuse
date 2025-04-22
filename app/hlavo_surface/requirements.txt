@@ -3,14 +3,15 @@
 
 pytest
 
-openpyxl        # for reading original input datasets
+#openpyxl        # for reading original input datasets
 pandas
 fastparquet     # searialization of pandas tables
-ray             # implicit dependency of tinyda
-tinyda          # for Bayes inversion (WTP processing
-meshio          # MSH - VTK conversion, both directions
 joblib          # memoization, should be dependency of endorse
 
 seaborn
 matplotlib
+requests
+requests_cache
+ipykernel
+jupyter
 
