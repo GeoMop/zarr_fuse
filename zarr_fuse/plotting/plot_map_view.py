@@ -1,3 +1,5 @@
+from operator import ifloordiv
+
 import polars as pl
 import pandas as pd
 import numpy as np
@@ -6,10 +8,11 @@ import matplotlib.patches as patches
 import matplotlib.colors as mcolors
 import contextily as ctx
 import pyproj
+from .store_overview import get_key_for_value
 
 
 class InteractiveMapPlotter:
-    def __init__(self, df, data_selector):
+    def __init__(self, df, data_selector, handlers):
         """
         Parameters:
         -----------
@@ -19,20 +22,15 @@ class InteractiveMapPlotter:
         data_selector : dict
             A dictionary with keys 'lon', 'lat', 'time' used to hold the currently selected point.
         """
+        self.handlers = handlers
+        self.handlers.append(self)
+
         self.df = df
         self.data_selector = data_selector
-
         # List of physical quantities that will be shown as stripes.
-        self.quantities = ['temp', 'perc', 'humidity', 'wind_speed', 'insol']
-
-        # Predefine colormaps for each physical quantity.
-        self.colormaps = {
-            'temp': plt.cm.coolwarm,  # Temperature: cool-to-warm colors
-            'perc': plt.cm.Blues,  # Precipitation: blues
-            'humidity': plt.cm.Greens,  # Humidity: greens
-            'wind_speed': plt.cm.Oranges,  # Wind speed: oranges
-            'insol': plt.cm.YlOrBr  # Insolation: yellow-orange-brown
-        }
+        self.time_coord = get_key_for_value(self.data_selector, 'time_axis')
+        self.lon_coord = get_key_for_value(self.data_selector, 'lon_axis')
+        self.lat_coord = get_key_for_value(self.data_selector, 'lat_axis')
 
         # Create figure and axis.
         self.fig, self.ax = plt.subplots(figsize=(10, 8))
@@ -61,7 +59,19 @@ class InteractiveMapPlotter:
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_hover)
 
         # Initial plot.
-        self._update_plot()
+        self.update_cross()
+
+    @property
+    def quantities(self):
+        return [col
+                for col in self.df.columns
+                if col in self.data_selector and not isinstance(self.data_selector[col], str)
+                ]  # Exclude 'time', 'lon', 'lat'.
+
+    @property
+    def colormaps(self):
+        return self.data_selector
+
 
     def set_rect_patch_style(self, sq, selected=False, highlighted=False):
         """
@@ -88,7 +98,7 @@ class InteractiveMapPlotter:
             sq['rect_patch'].set_edgecolor('black')
             sq['rect_patch'].set_linewidth(1)
 
-    def _update_plot(self):
+    def update_cross(self):
         """
         Internal method to update the plot based on self.df and self.data_selector.
         Called when new data is provided.
@@ -97,11 +107,11 @@ class InteractiveMapPlotter:
         df_pd = self.df.to_pandas()
 
         # If time is not set, default to the first available time.
-        if self.data_selector.get('time') is None:
-            self.data_selector['time'] = df_pd['time'].iloc[0]
+        if self.data_selector['time_point'] is None:
+            self.data_selector['time_point'] = df_pd[self.time_coord].iloc[0]
 
-        selected_time = self.data_selector['time']
-        self.df_selected = df_pd[df_pd['time'] == selected_time]
+        selected_time = self.data_selector['time_point']
+        self.df_selected = df_pd[df_pd[self.time_coord] == selected_time]
         if self.df_selected.empty:
             raise ValueError(f"No data available for time = {selected_time}")
 
@@ -114,8 +124,11 @@ class InteractiveMapPlotter:
 
         # Transform coordinates from EPSG:4326 (lon, lat) to EPSG:3857.
         transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
-        self.df_selected['x'], self.df_selected['y'] = zip(*self.df_selected.apply(
-            lambda row: transformer.transform(row['lon'], row['lat']), axis=1))
+        transform_row = lambda row: transformer.transform(
+            row[self.lat_coord],
+            row[self.lon_coord])
+        self.df_selected['x'], self.df_selected['y'] = zip(
+            *self.df_selected.apply(transform_row, axis=1))
 
         # Compute bounding box with a 10% margin.
         margin = 0.1
@@ -198,6 +211,7 @@ class InteractiveMapPlotter:
         if event.inaxes != self.ax:
             return
 
+
         click_x, click_y = event.xdata, event.ydata
         bounds = self.rect_bounds  # shape (N,4)
         lefts = bounds[:, 0]
@@ -210,10 +224,12 @@ class InteractiveMapPlotter:
             idx = indices[0]
             new_selected = self.squares[idx]
             row = new_selected['row']
-            self.data_selector['lon'] = row['lon']
-            self.data_selector['lat'] = row['lat']
-            self.data_selector['time'] = row['time']
-            print(f"Selected point: lon={row['lon']}, lat={row['lat']}, time={row['time']}")
+            self.data_selector['lon_point'] = row[self.lon_coord]
+            self.data_selector['lat_point'] = row[self.lat_coord]
+            print(f"Selected point: time, lon, lat = ",
+                  self.data_selector['time_point'],
+                  self.data_selector['lon_point'],
+                  self.data_selector['lat_point'])
 
             # Update only the affected squares: old selected, old highlighted, and new selected.
             if self.selected_sq is not None and self.selected_sq != new_selected:
@@ -225,6 +241,11 @@ class InteractiveMapPlotter:
             self.set_rect_patch_style(new_selected, selected=True)
 
             self.fig.canvas.draw_idle()
+            for h in self.handlers:
+                if h is self:
+                    pass # put the axes modification into update()
+                else:
+                    h.update_cross()
 
     def on_hover(self, event):
         """
@@ -304,4 +325,4 @@ class InteractiveMapPlotter:
             New DataFrame to use for updating the plot.
         """
         self.df = new_df
-        self._update_plot()
+        self.update()

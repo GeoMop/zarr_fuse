@@ -13,5 +13,6 @@ matplotlib
 requests
 requests_cache
 ipykernel
+ipympl
 jupyter
 

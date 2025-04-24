@@ -34,8 +34,9 @@ else
     echo "requirements.txt not found. Skipping dependency installation."
 fi
 
-# install endorse
-pip install -e ${SCRIPT_DIR}/../..
+# install zarr_fuse
+pip install -e ${SCRIPT_DIR}/../..[plotting]
+# install hlavo_surface
 pip install -e ${SCRIPT_DIR}
 
 # REgister as a Jupyter kernel

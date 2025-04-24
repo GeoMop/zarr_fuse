@@ -42,7 +42,9 @@ dependencies = [
 [project.optional-dependencies]
 plotting=[
     "matplotlib",
-    "plotly"
+    "plotly",
+    "contextily",
+    "pyproj"
 ]
 apps=[
     "joblib",

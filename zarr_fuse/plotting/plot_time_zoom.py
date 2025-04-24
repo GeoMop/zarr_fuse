@@ -3,19 +3,82 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import datetime
+from .store_overview import get_key_for_value
 
 
 # Class to handle zoom and synchronization
 class MultiZoomer:
-    def __init__(self, fig, axes):
-        self.fig = fig
-        self.axes = np.atleast_2d(axes)
-        self.cid = fig.canvas.mpl_connect('button_press_event', self.onclick)
-        #print(self.axes[0, 0].get_xlim())
+    def __init__(self, df, data_selector, handlers):
+        self.handlers = handlers
+        self.handlers.append(self)
+        self.data_selector = data_selector
+        self.time_coord = get_key_for_value(self.data_selector, 'time_axis')
+        self.lon_coord = get_key_for_value(self.data_selector, 'lon_axis')
+        self.lat_coord = get_key_for_value(self.data_selector, 'lat_axis')
+
+        self.df_full = df
+
+        self.fig, self.axes = plt.subplots(
+            len(self.quantities), 3, figsize=(15, 6),
+            constrained_layout=True, sharey='row', sharex='col')
+
+
+        # Instantiate the multi-zoom handler
+        plt.show()
+        self.cid = self.fig.canvas.mpl_connect('button_press_event', self.onclick)
+
+
+        self.spans = [365, 30, 2]
+
+        self.update_cross()
+
+
+    @property
+    def quantities(self):
+        return [col
+                for col in self.df_full.columns
+                if col in self.data_selector and not isinstance(self.data_selector[col], str)
+                ]  # Exclude 'time', 'lon', 'lat'.
+
+    @property
+    def colormaps(self):
+        return self.data_selector
+
+    def update_cross(self):
+        if self.data_selector['lon_point'] is None:
+            self.data_selector['lon_point'] = self.df_full[self.lon_coord][0]
+        if self.data_selector['lat_point'] is None:
+            self.data_selector['lat_point'] = self.df_full[self.lat_coord][0]
+
+        mask_lon = self.df_full[self.lon_coord] == self.data_selector['lon_point']
+        mask_lat = self.df_full[self.lat_coord] == self.data_selector['lat_point']
+        self.df_sel = self.df_full.filter(mask_lon & mask_lat)
+
+
+        # Plot the data in each axis
+        # Plot data with different spans
+        for ax_row, col in zip(self.axes, self.quantities):
+            for ax in ax_row:
+                ax.clear()
+                df_col = self.df_sel[col]
+                ax.plot(mdates.date2num(self.df_sel[self.time_coord]),
+                        df_col)
+                range = df_col.min(), df_col.max()
+
+                assert range[0] < range[1], f"Col={col}, Invalid range: {range}"
+                ax.set_ylim(*range)
+                ax.grid()
+                # print("X range", ax.get_xlim())
+            ax_row[0].set_ylabel(col)
+
+        labels = ["Year", "Month", "Day"]
+        for i, ax in enumerate(self.axes[0]):
+            ax.set_title(labels[i])
+
         self.x_range = self.axes[0, 0].get_xlim()
-        spans = [365, 30, 2]
-        self.spans = (self.x_range[1] - self.x_range[0]) * np.array([365, 30, 1]) / 365.0
-        #print("Range:", self.x_range)
+        range = max(self.x_range[1] - self.x_range[0], 365.0)
+        self.spans = range * np.array([365, 30, 1]) / 365.0
+        # print("Range:", self.x_range)
         self.x_center = (self.x_range[0] + self.x_range[1]) / 2
 
         self.update()
@@ -61,36 +124,13 @@ class MultiZoomer:
         # Determine the zoom factor based on the button clicked
         if event.button == 1 and event.xdata is not None:  # Left click to zoom in
             self.x_center = event.xdata
-            self.update()
-        else:
-            return
+            for h in self.handlers:
+                if h is self:
+                    h.update()
+                else:
+                    h.update_cross()
 
 
-def zoom_plot_df(df):
-    df.index = pd.to_datetime(df.index)
-    cols = df.columns
-    # Set up the figure and grid of axes (3 columns)
-    fig, axes = plt.subplots(len(cols), 3, figsize=(30, 6), constrained_layout=True, sharey='row', sharex='col')
-    #fig.subplots_adjust(wspace=0.3)
-
-    # Plot data with different spans
-    for ax_row, col in zip(axes, cols):
-        for ax in ax_row:
-            ax.plot(mdates.date2num(df.index), df[col])
-            range = df[col].min(), df[col].max()
-            assert range[0] < range[1], f"Col={col}, Invalid range: {range}"
-            ax.set_ylim(*range)
-            ax.grid()
-            #print("X range", ax.get_xlim())
-        ax_row[0].set_ylabel(col)
-
-    labels = ["Year", "Month", "Day"]
-    for i, ax in enumerate(axes[0]):
-        ax.set_title(labels[i])
-
-    # Instantiate the multi-zoom handler
-    zoom_handler = MultiZoomer(fig, axes)
-    plt.show()
 
 #################################
 if __name__ == '__main__':

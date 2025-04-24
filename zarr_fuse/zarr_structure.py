@@ -76,6 +76,13 @@ class Coord:
         self.values = dict['values']
         self.chunk_size = dict.get('chunk_size', 1024)
 
+    @property
+    def attrs(self):
+        return dict(
+            composed=self.composed,
+            description=f"\n\n{self.description}",
+            chunk_size=self.chunk_size,
+        )
 
     def is_composed(self):
         return len(self.composed) > 1

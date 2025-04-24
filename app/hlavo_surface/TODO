@@ -5,8 +5,17 @@
 
 
 Notebook:
+1. read coords ranges -> dataset overview 
+2. MapPlotter for given overview, map range follows overview
+3. TimeZoom macro zoom follows time range
+4. overview for more datasets (separate nodes)
+5. selection for more datasets (tree view + boxcheck)
+6. zoom in map
+
 2. prompt for node path in th sourece 
 3. load DF from the node, use 
+
+
 
 Shortcommings:
 - read actual yr.no forcast for locations ->df

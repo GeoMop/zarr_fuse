@@ -57,3 +57,14 @@ The 'dev' dependency includes all dependencies needed for 'plotting' and 'apps' 
 
 Possible relation to an open source spreadsheet like cloud solutions:
 https://chatgpt.com/share/68026c33-3808-8004-a80e-524428ed9de5
+
+
+## Future improvments
+
+### Direct ZARR - Polars link, without intermediate Pandas DF
+
+
+ds.to_dask_dataframe().to_parquet() and then pl.scan_parquet()
+
+Lazy Dask Pandas
+ds.to_dask_dataframe() → partition-wise map_partitions(pl.from_pandas)

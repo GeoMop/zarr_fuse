@@ -1,6 +1,6 @@
 import inspect
 import re
-from typing import List, Callable, Dict, Optional, Set, Tuple, Union
+from typing import List, Callable, Dict, Optional, Set, Tuple, Union, Any
 import polars as pl
 import xarray as xr
 import numpy as np
@@ -203,42 +203,49 @@ class Node:
                 raise AttributeError(f"Expceting dict for key: {key}, got {structure[key]}")
 
     @staticmethod
-    def _variable(var: zarr_schema.Variable, coord_names: Set[str]) -> xr.Variable:
+    def _variable(var: zarr_schema.Variable, data: np.ndarray, coords_dict: Dict[str, Any]) -> xr.Variable:
+        """
+        Create an xarray Variable from `data` array and variable schema.
+        All xarray variables should be created this way to ensure structure.
+        """
+        coord_names = set(coords_dict.keys())
         for coord in var.coords:
             assert coord in coord_names, f"Variable {var.name} has unknown coordinate {coord}."
         shape = tuple(0 for coord in var.coords)
         xr_var = xr.Variable(
-                 dims=var.coords,  # Default dimension named after the coordinate key.
-                 data=np.empty(shape, dtype=float),
+                 dims=list(var.coords),  # Default dimension named after the coordinate key.
+                 data=data,
                  attrs=var.attrs
              )
         return xr_var
 
 
     @staticmethod
-    def _coord_variable(name, coord: zarr_schema.Coord, vars) -> xr.Variable:
+    def _coord_variable(name: str, coord: zarr_schema.Coord, vars) -> xr.Variable:
         if coord.composed is None:
-            # simple coordinate
-            assert name in vars
-            xr_var = vars[name]
-            xr_var.attrs['chunks'] = coord.chunk_size
-            xr_var.attrs['description'] += f"\n\n{coord.description}"
-            xr_var.values = coord.values.T
+            composed = (name,)
         else:
-            # composed coordinate
+            composed = coord.composed
+        attrs = coord.attrs.copy()
+        #attrs['composed'] = composed
 
-            # TODO set values to all tuple vars and hashed var as well
-            xr_var = xr.Variable(
-                dims=coord.composed,
-                data=np.empty([], dtype=float),
-                attrs=coord.attrs
-            )
-        return xr_var
+        # simple coordinate
+        np_var = vars[name]
+        assert isinstance(np_var, np.ndarray)
+        assert len(np_var.shape) == 1
+
+        np_var = xr.Variable(
+            dims=(name,),
+            data=np_var,
+            attrs=coord.attrs
+        )
+        return np_var
 
     @staticmethod
     def _create_coords(coords: Dict[str, zarr_schema.Coord], vars: Dict[str, xr.Variable]) -> xr.Coordinates:
         """
-        Create xarray Coordinates from a dictionary of Coord objects using
+        Create xarray Coordinates from a dictionary of Coord schemas
+        and objects using
         the explicit Coordinates constructor. Each coordinate is stored as an xarray.Variable.
 
         If a Coord has no `values`, an empty NumPy array is used.
@@ -251,7 +258,7 @@ class Node:
             Coordinates: An xarray Coordinates object built from the provided variables.
         """
         coord_vars = {
-            Node._coord_variable(k, c, vars)
+            k: Node._coord_variable(k, c, vars)
             for k, c in coords.items()
         }
         return xr.Coordinates(coord_vars)
@@ -369,7 +376,10 @@ class Node:
         """
         rel_path = self.group_path #+ self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
-        return xr.open_zarr(self.store, group=rel_path)
+        ds = xr.open_zarr(self.store, group=rel_path)
+        for coord in ds.coords:
+            assert  'composed' in ds.coords[coord].attrs
+        return ds
 
     @property
     def structure(self):
@@ -390,8 +400,8 @@ class Node:
            -
         """
         ds = pivot_nd(self.structure, polars_df)
-        return self.update_zarr_loop(ds)
-
+        written_ds, merged_coords = self.update_zarr_loop(ds)
+        return written_ds
 
     def write_ds(self, ds, **kwargs):
         rel_path = self.group_path # + self.PATH_SEP + "dataset"
@@ -399,6 +409,7 @@ class Node:
         #path_store = zarr.open_group(self.store, mode=mode, path=rel_path)
         #ds.to_zarr(path_store,  **kwargs)
         ds.to_zarr(self.store, group = rel_path, mode="a", consolidated=False, **kwargs)
+        return ds
 
     def update_zarr_loop(self, ds_update: xr.Dataset) -> xr.Dataset:
         """
@@ -431,18 +442,17 @@ class Node:
         dims_order : list of str, optional
             The list of dimensions to process (in order). If None, defaults to list(ds_update.dims).
 
-        Returns
-        -------
-        merged_coords : dict
-            A dictionary mapping each dimension name to the merged (updated) coordinate array.
+        Returns: (updated DataSet after write, merged_coords)
+        Are merged_coords still necessary?
         """
         ds_existing = self.dataset
+
         # --- Phase 1: Dive (split by dimension) ---
         # We create a dict to hold the extension subset for each dimension.
-        if ds_existing.attrs['__empty__']:
-            self.write_ds(ds_update)
-            return
+        if '__empty__' in ds_existing.attrs:
+            return self.write_ds(ds_update), {}
 
+        last_written_ds = None
         ds_extend_dict = {}
         ds_overlap = ds_update.copy()
         dims_order = tuple(ds_update.dims.keys())
@@ -461,7 +471,7 @@ class Node:
         # in every dimension in dims_order. Write these (overlapping) data using region="auto".
         update_overlap_size = np.prod(list(ds_overlap.sizes.values()))
         if update_overlap_size > 0:
-            self.write_ds(ds_overlap, region="auto")
+            last_written_ds = self.write_ds(ds_overlap, region="auto")
 
         # --- Phase 2: Upward (process extension subsets in reverse order) ---
         # We also update a merged_coords dict from the store.
@@ -469,58 +479,110 @@ class Node:
 
         # Loop upward in reverse order over dims_order.
         for dim in reversed(dims_order):
-            ds_ext = ds_extend_dict[dim]
-            if ds_ext is None or ds_ext.sizes.get(dim, 0) == 0:
+            dim_coord = ds_extend_dict[dim]
+            if dim_coord is None or dim_coord.sizes.get(dim, 0) == 0:
                 continue  # No new coordinates along this dimension.
 
             # For all dimensions other than dim, reindex ds_ext so that the coordinate arrays
             # come from the store (i.e. the full arrays). This ensures consistency.
             # (This constructs an indexers dict using the existing merged coordinates.)
-            indexers = {d: merged_coords[d] for d in ds_ext.dims if d != dim}
-            ds_ext_reindexed = ds_ext.reindex(indexers, fill_value=np.nan)
+            indexers = {d: merged_coords[d] for d in dim_coord.dims if d != dim}
+            ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=np.nan)
 
             # Append the extension subset along the current dimension.
-            self.write_ds(ds_ext_reindexed, append_dim=dim)
+            last_written_ds = self.write_ds(ds_ext_reindexed, append_dim=dim)
 
             # Update merged coordinate for dim: concatenate the old coords with the new ones.
-            new_coords_for_dim = ds_ext[dim].values
+            new_coords_for_dim = dim_coord[dim].values
             merged_coords[dim] = np.concatenate([merged_coords[dim], new_coords_for_dim])
 
-        return merged_coords
+        assert last_written_ds is not None, "No data was written to the dataset."
+        return last_written_ds, merged_coords
 
 
-    def read_df(self, var_name, *args, **kwargs):
+    # def read_df(self, var_name, *args, **kwargs):
+    #     """
+    #     Read a multidimensional sub-range from self.dataset[var_name] and convert it to a Polars DataFrame.
+    #
+    #     Parameters
+    #     ----------
+    #     var_name : str
+    #         The name of the variable in the dataset to extract.
+    #     *args, **kwargs :
+    #         Additional arguments passed to the xarray selection method (defaulting to .sel).
+    #         For example, use keyword arguments to specify coordinate ranges:
+    #             read_df("temperature", time=slice("2025-01-01", "2025-01-31"))
+    #
+    #     Returns
+    #     -------
+    #     pl.DataFrame
+    #         A Polars DataFrame containing the subset data, with coordinate information included as columns.
+    #     """
+    #     # Get the DataArray from the dataset
+    #     da = self.dataset[var_name]
+    #
+    #     # Extract the desired subset.
+    #     # You can change .sel to .isel if you prefer index-based selection.
+    #     sub_da = da.sel(*args, **kwargs)
+    #
+    #     # Convert the subset to a DataFrame.
+    #     # This will put coordinate information in the index, so we reset the index.
+    #     pd_df = sub_da.to_dataframe().reset_index()
+    #
+    #     # Convert the Pandas DataFrame to a Polars DataFrame.
+    #     return pl.from_pandas(pd_df)
+
+
+    def read_df(self, var_names: Union[str, List[str]], *args, **kwargs) -> Tuple[pl.DataFrame, List[str]]:
         """
-        Read a multidimensional sub-range from self.dataset[var_name] and convert it to a Polars DataFrame.
+        Read one or more variables from self.dataset (with coords), convert to a Polars DataFrame,
+        and return that DF along with the list of all coordinate 'dims'.
 
         Parameters
         ----------
-        var_name : str
-            The name of the variable in the dataset to extract.
+        var_names : str or list of str
+            Name(s) of the variable(s) in the dataset to extract.
         *args, **kwargs :
-            Additional arguments passed to the xarray selection method (defaulting to .sel).
-            For example, use keyword arguments to specify coordinate ranges:
-                read_df("temperature", time=slice("2025-01-01", "2025-01-31"))
+            Passed through to xarray's `.sel` (or `.isel` if you swap it).
+            E.g. read_df("temp", time=slice("2025-01-01","2025-01-10"))
+                 read_df(["u","v"], lon=slice(0,10), lat=slice(-5,5))
 
         Returns
         -------
-        pl.DataFrame
-            A Polars DataFrame containing the subset data, with coordinate information included as columns.
+        df : pl.DataFrame
+            Polars DataFrame of the selected data; coords become columns too.
+        dims : List[str]
+            A flattened list of all dimension names used by the coordinate variables
+            in the returned slice.
         """
-        # Get the DataArray from the dataset
-        da = self.dataset[var_name]
+        # 1. Normalize var_names → list
+        if isinstance(var_names, str):
+            var_list = [var_names]
+        else:
+            var_list = list(var_names)
 
-        # Extract the desired subset.
-        # You can change .sel to .isel if you prefer index-based selection.
-        sub_da = da.sel(*args, **kwargs)
+        ds = self.dataset
+        # Get all dimmensions, even composed.
+        dims = set()
+        for coord in ds.coords:
+            print(f"Coord: {coord}, {ds.coords[coord].dims}")
+            dims = dims.union(set(ds.coords[coord].attrs['composed']))
 
-        # Convert the subset to a DataFrame.
-        # This will put coordinate information in the index, so we reset the index.
-        pd_df = sub_da.to_dataframe().reset_index()
+        print(f"Read DF: {var_list}, dimss: {dims}")
+        var_list = var_list + list(dims)
+        # 2. Pull either a DataArray (single var) or Dataset (multiple vars)
+        ds_vars = self.dataset[var_list]
 
-        # Convert the Pandas DataFrame to a Polars DataFrame.
-        return pl.from_pandas(pd_df)
+        # 3. Subset by coordinates/index
+        sub = ds_vars.sel(*args, **kwargs)
 
+        # 4. To pandas → reset index → to polars
+        pd_df = sub.to_dataframe().reset_index()
+        pl_df = pl.from_pandas(pd_df)
+
+        # 5. Collect all coord dims
+
+        return pl_df
 
 def eliminate_dims_if_equal(arr: np.ndarray, dims_to_check: List[bool]) -> np.ndarray:
     """
@@ -624,7 +686,9 @@ def pivot_nd(structure:zarr_schema.ZarrNodeStruc, df: pl.DataFrame, fill_value=n
     idx_arr = np.vstack(idx_list)
     # Compute flat indices for the N-dim output array.
     flat_idx = np.ravel_multi_index(idx_arr, dims=coord_sizes)
+    coords_dict = Node._create_coords(structure['COORDS'], coords_dict)
 
+    # 4. form variables
     # Helper: for a given variable, build the pivoted array.
     def form_var_array(var_struc):
         column_vals = data_vars[var_struc.name]
@@ -637,13 +701,14 @@ def pivot_nd(structure:zarr_schema.ZarrNodeStruc, df: pl.DataFrame, fill_value=n
         # eliminate inappropriate coordinates
         dims_to_eliminate = [d not in var_struc.coords for d in dims]
         np_var = eliminate_dims_if_equal(result, dims_to_eliminate)
-        var_dims = list(var_struc.coords)
-        data_var = xr.Variable(var_dims, np_var, attrs=var_struc.attrs)
+        data_var = Node._variable(var_struc, np_var, coords_dict)
         return data_var
 
     # 4. form arrays (remaining vars)
     # Create DataArrays for each variable using the dims specified in self.dataset.
-    data_vars = {k: form_var_array(var) for k, var in structure['VARS'].items() if k not in coords_dict}
+    data_vars = {k: form_var_array(var)
+                 for k, var in structure['VARS'].items()
+                 if k not in coords_dict}
 
     # Build and return the xarray.Dataset with the computed coordinates.
     attrs = structure['ATTRS']
