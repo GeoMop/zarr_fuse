@@ -23,6 +23,11 @@ This is an inital test of xarray, zarr functionality that we build on.
 This requires dask.
 """
 def aux_read_struc(fname):
+    """
+    Read a schema file from 'inputs_dir',
+    :param fname:
+    :return:
+    """
     struc_path = inputs_dir / fname
     structure = schema.deserialize(struc_path)
     assert set(['COORDS', 'VARS']).issubset(set(structure.keys()))
@@ -51,8 +56,12 @@ def _update_tree(node: Node, df_map: dict):
     assert len(node.dataset.coords) == 1
     assert len(node.dataset.data_vars) == 1
 
-@pytest.mark.skip
+#@pytest.mark.skip
 def test_node_tree():
+    """
+    Test the tree structure of the Zarr storage.
+    :return:
+    """
     # Read the YAML file from the working directory.
     # The file "structure_tree.yaml" must exist in the current working directory.
     # Example YAML file content (as a string for illustration):
@@ -258,7 +267,7 @@ def sample_df():
     return df
 
 
-@pytest.mark.skip
+#@pytest.mark.skip
 def test_pivot_nd():
     # Create a sample Polars DataFrame with columns for a 3D multi-index.
     df = pl.DataFrame({

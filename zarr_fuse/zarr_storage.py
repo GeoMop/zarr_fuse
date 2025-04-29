@@ -8,7 +8,7 @@ import zarr
 from pathlib import Path
 
 from . import zarr_structure as zarr_schema
-
+from .logger import StoreLogHandler
 
 """
 tuple val coords:
@@ -79,6 +79,24 @@ def call_with_filtered_kwargs(func, *args, **kwargs):
 
     return func(*args, **valid_kwargs)
 
+
+def zarr_storage_open(zarr_url, type='guess', **kwargs):
+    if type == 'guess':
+        type = zarr_store_guess_type(zarr_url)
+
+    if type == 'memory':
+        args = (zarr.storage.MemoryStore, dict())
+    elif type == 'local':
+        if not zarr_url.startswith('/') and not zarr_url.startswith('file://'):
+            zarr_url = kwargs.get('workdir', Path()) / zarr_url
+        args = (zarr.storage.LocalStore, zarr_url)
+    elif type == 'remote':
+        args = (zarr.storage.FsspecStore, zarr_url)
+    elif type == 'zip':
+        args = (zarr.storage.ZipStore, zarr_url)
+    storage = call_with_filtered_kwargs(*args, **kwargs)
+    return storage
+
 def open_storage(schema, **kwargs):
     """
     Open existing or create a new ZARR storage according to given schema.
@@ -99,21 +117,8 @@ def open_storage(schema, **kwargs):
     store_attrs.update(kwargs)
     zarr_url = store_attrs['store_url']
     type = store_attrs.get('store_type', 'guess')
-
-    if type == 'guess':
-        type = zarr_store_guess_type(zarr_url)
-
-    storage_resolve = {
-        'local': zarr.storage.LocalStore,
-        'remote': zarr.storage.FsspecStore,
-        'memory': zarr.storage.MemoryStore,
-        'zip': zarr.storage.ZipStore
-    }
-    # TODO: get constructor signature and filter out unknown kwargs
-    if type == 'local' and not zarr_url.startswith('/') and not zarr_url.startswith('file://'):
-        zarr_url = kwargs.get('workdir', Path()) / zarr_url
-    storage = call_with_filtered_kwargs(storage_resolve[type],
-                                    zarr_url, **store_attrs)
+    kwargs.update(store_attrs)
+    storage = zarr_storage_open(zarr_url, type=type, **kwargs)
     return Node.open_store(schema_dict, storage)
 
 class Node:
@@ -337,6 +342,9 @@ class Node:
         self.parent = parent
         self.children = {}
 
+        # Setup logger
+        zarr_root_dict = zarr.open_group(store).store
+        self.logger = StoreLogHandler(zarr_root_dict)
 
     @property
     def _path_list(self):
@@ -367,6 +375,7 @@ class Node:
 
     def __getitem__(self, key):
         return self.children[key]
+
 
     @property
     def dataset(self):
@@ -401,6 +410,10 @@ class Node:
         """
         ds = pivot_nd(self.structure, polars_df)
         written_ds, merged_coords = self.update_zarr_loop(ds)
+        # check unique coords
+        dup_dict = check_unique_coords(written_ds)
+        if  dup_dict:
+            log
         return written_ds
 
     def write_ds(self, ds, **kwargs):
@@ -583,6 +596,33 @@ class Node:
         # 5. Collect all coord dims
 
         return pl_df
+
+
+def check_unique_coords(ds):
+    """
+    Check that all coordinate rows are unique.
+
+    Parameters
+    ----------
+    coords : sequence of tuples or numpy.ndarray of shape (n, m)
+        The dataset of coordinates to check.
+
+    Returns
+    -------
+    dict
+        A mapping from each duplicated coordinate to the list of indices
+        at which it appears. If empty, all coords are unique.
+    """
+    def duplicities(arr):
+        unique_vals, counts = np.unique(arr, return_counts=True)
+        return arr[counts > 1]
+
+    return {
+        name: dup_vals
+        for name, coord in ds.coords.items()
+        if (dup_vals := duplicities(coord.values)).size > 0
+    }
+
 
 def eliminate_dims_if_equal(arr: np.ndarray, dims_to_check: List[bool]) -> np.ndarray:
     """
