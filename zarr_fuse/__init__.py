@@ -4,7 +4,7 @@ set_application_registry(ureg)
 
 # Use of relative imports is recomenden  in __init__.py
 from .zarr_storage import Node, open_storage
-from . import zarr_structure as schema
+from . import zarr_schema as schema
 
 
-__all__ = ['schema', 'Node']
+__all__ = ['schema', 'Node', 'open_storage']

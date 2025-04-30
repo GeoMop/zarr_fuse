@@ -1,14 +1,29 @@
 # zarr-fuse
 Prototype project for collecting, dynamic fusion, viewing and publishing of sciantific datasets.
 
-The project goal is:
+Implemented features:
 - allow deffinition af a scientific dataset using a simple YAML based language
-- allow merging individual contributions to the dataset, checking the dataset constraints, converting to common structure
-- automatized collection of metadata from the format definition and definition of data sources and persons
+- allow merging individual contributions to the dataset, converting to common structure
+- example visualization container web app
+
+Future features:
+- full support for remote (S3) storage, keys management, CESNET specialities
+- generic data collection schemas
+  - container accepting instrument data SEND requests, then writes using instument descriptions schema
+  - container or local script updating the storage with given CSV, the source should be defined in the dataset schema.
+  - container scrap the data, again source should be defined in the dataset schema.
+- checking the dataset constraints
+- data transforms
 - allow selection of subdatasets by various criteria
-- visualization of contributed, merged and selected datasets
+- expressing data source metadata
+- versioning of individual contributions
+- ZENODO export /import (with metadata)
+- person authentication
+- automatized collection of metadata from the format definition and definition of data sources and persons
+- generic data visualization building blocks for web apps
+
 - Documentation of raw data collection and merging process.
-- Reproducible publication on ZENODA under FAIR principles.
+- Reproducible publication on ZENODO under FAIR principles.
 
 Expected usecases:
 - Continuous collection of weather data from yr.no forecast to form a consistent dataset of historical data.
@@ -59,7 +74,11 @@ Possible relation to an open source spreadsheet like cloud solutions:
 https://chatgpt.com/share/68026c33-3808-8004-a80e-524428ed9de5
 
 
-## Future improvments
+## Future improvements
+- test parallel writes and reads
+- linked storage nodes into xarray tree, e.g. different meteosites and moisture measurments in separate nodes, but allowing 
+  to index by common times and locations, but possibly rather support that during read using interpolation if needed.
+  
 
 ### Direct ZARR - Polars link, without intermediate Pandas DF
 

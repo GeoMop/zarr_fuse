@@ -199,6 +199,7 @@ def test_node_read_df():
         coords={"time": times}
     )
     ds = xr.Dataset({"temperature": temperature})
+    ds.coords["time"].attrs["composed"] = ["time"]
 
     # Write the dataset to the Zarr store at the root group.
     ds.to_zarr(store, mode="w")
@@ -267,7 +268,7 @@ def sample_df():
     return df
 
 
-#@pytest.mark.skip
+@pytest.mark.skip
 def test_pivot_nd():
     # Create a sample Polars DataFrame with columns for a 3D multi-index.
     df = pl.DataFrame({

@@ -7,7 +7,7 @@ import numpy as np
 import zarr
 from pathlib import Path
 
-from . import zarr_structure as zarr_schema
+from . import zarr_schema
 from .logger import StoreLogHandler
 
 """
@@ -148,7 +148,7 @@ class Node:
     PATH_SEP = "/"
 
     @classmethod
-    def open_store(cls, schema:zarr_schema.ZarrNodeStruc, zarr_store):
+    def open_store(cls, schema:zarr_schema.ZarrNodeSchema, zarr_store):
         try:
             root = cls.read_store(zarr_store)
         except FileNotFoundError:
@@ -175,7 +175,7 @@ class Node:
         return root
 
     @classmethod
-    def create_storage(cls, structure:zarr_schema.ZarrNodeStruc, zarr_store) -> 'Node':
+    def create_storage(cls, structure:zarr_schema.ZarrNodeSchema, zarr_store) -> 'Node':
         """
         Consturct an empty zarr tree storage in the 'zarr_store' with
         tree structure and node DataSets given by the 'description',
@@ -190,7 +190,7 @@ class Node:
         root.initialize_node(structure)
         return root
 
-    def initialize_node(self, structure:zarr_schema.ZarrNodeStruc):
+    def initialize_node(self, structure:zarr_schema.ZarrNodeSchema):
         """ Write node to ZARR sotrage and create childs."""
         if structure is None:
             structure = {'VARS': {}, 'COORDS': {}, 'ATTRS': {}}
@@ -413,7 +413,7 @@ class Node:
         # check unique coords
         dup_dict = check_unique_coords(written_ds)
         if  dup_dict:
-            log
+            self.logger.error(dup_dict)
         return written_ds
 
     def write_ds(self, ds, **kwargs):
@@ -474,6 +474,12 @@ class Node:
                 raise ValueError(f"Dimension '{dim}' not found in the existing store.")
             old_coords = ds_existing[dim].values
             new_coords = ds_overlap[dim].values
+            min_new, max_new = np.min(new_coords), np.max(new_coords)
+            new_holes = [c for c in old_coords if c > min_new or c < max_new]
+            print(f"Update Zarr: {dim}, new_holes: {new_holes}")
+            min_old, max_old = np.min(old_coords), np.max(old_coords)
+            old_holes = [c for c in new_coords if c > min_old or c < max_old]
+            print(f"Update Zarr: {dim}, old_holes: {old_holes}")
 
             # Determine which coordinates in ds_current already exist.
             overlap_mask = np.isin(new_coords, old_coords)
@@ -674,7 +680,7 @@ def get_df_col(df, col_name):
         #raise ValueError(f"Column '{col_name}' not found in the DataFrame.\n Valid columns: {df.columns}")
 
 
-def pivot_nd(structure:zarr_schema.ZarrNodeStruc, df: pl.DataFrame, fill_value=np.nan):
+def pivot_nd(structure:zarr_schema.ZarrNodeSchema, df: pl.DataFrame, fill_value=np.nan):
     """
     Pivot a Polars DataFrame with columns for each dimension in self.dataset.dims
     and one value column (per variable) into an N-dim xarray.Dataset.
