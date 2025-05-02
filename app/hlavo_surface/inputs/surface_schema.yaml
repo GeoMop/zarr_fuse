@@ -138,4 +138,4 @@ yr.no:
               FN: location_df
               #module: "."   # default relative to calling function module
               attrs_dict: *loc_file     #!Ref .ATTRS    # Helm style variable interpolation. 
-meteosat:
+#meteosat:
