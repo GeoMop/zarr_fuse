@@ -40,7 +40,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-plotting=[
+plot=[
     "matplotlib",
     "plotly",
     "contextily",

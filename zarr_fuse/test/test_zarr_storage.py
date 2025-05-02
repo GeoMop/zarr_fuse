@@ -1,5 +1,4 @@
-import json
-import yaml
+import shutil
 import numpy as np
 import numpy.testing as npt
 from pathlib import Path
@@ -8,7 +7,7 @@ import xarray as xr
 import pytest
 import zarr
 
-from zarr_fuse  import Node, schema
+import zarr_fuse as zf
 
 
 script_dir = Path(__file__).parent
@@ -29,10 +28,13 @@ def aux_read_struc(fname):
     :return:
     """
     struc_path = inputs_dir / fname
-    structure = schema.deserialize(struc_path)
-    assert set(['COORDS', 'VARS']).issubset(set(structure.keys()))
+    schema = zf.schema.deserialize(struc_path)
+    assert set(['COORDS', 'VARS']).issubset(set(schema.keys()))
 
     store_path = (workdir / fname).with_suffix(".zarr")
+
+    # Start with no existiong storage
+    shutil.rmtree(store_path, ignore_errors=True)
     local_store = zarr.storage.LocalStore(store_path)
 
     # memory_store = zarr.storage.MemoryStore()
@@ -42,12 +44,12 @@ def aux_read_struc(fname):
     # s3_fs = fsspec.filesystem('s3', key='YOUR_ACCESS_KEY', secret='YOUR_SECRET_KEY')
     # s3_store = zarr.FSStore('bucket-name/path/to/zarr', filesystem=s3_fs)
 
-    tree = Node.create_storage(structure, local_store)
-    return structure, local_store, tree
+    tree = zf.Node("", local_store, new_schema=schema)
+    return schema, local_store, tree
 
 
 # Recursively update each node with its corresponding data.
-def _update_tree(node: Node, df_map: dict):
+def _update_tree(node: zf.Node, df_map: dict):
     if node.group_path in df_map:
         node.update(df_map[node.group_path])
     for key, child in node.items():
@@ -85,7 +87,7 @@ def test_node_tree():
             collect_nodes(child, nodes_dict)
         return nodes_dict
 
-    root_node = Node.read_store(store)
+    root_node = zf.Node.read_store(store)
     nodes = collect_nodes(root_node, {})
 
     # Expected values for each node: (time coordinate, temperature variable)
@@ -147,7 +149,7 @@ def test_read_structure_weather(tmp_path):
     _check_ds_attrs_weather(updated_ds, structure)
 
     # Now, re-read the entire Zarr storage from scratch.
-    new_tree = Node.read_store(store)
+    new_tree = zf.Node.read_store(store)
     new_ds = new_tree.dataset
     _check_ds_attrs_weather(new_ds, structure)
     print("Updated dataset:")
@@ -202,14 +204,14 @@ def test_node_read_df():
     ds.coords["time"].attrs["composed"] = ["time"]
 
     # Write the dataset to the Zarr store at the root group.
-    ds.to_zarr(store, mode="w")
+    #ds.to_zarr(store, mode="w")
 
     # Create a Node instance for the root (empty name) with the given store.
-    node = Node("", store)
+    #node = zf.Node("", store)
 
     # Use read_df to select a subset of the data.
     # For example, select times from "2025-01-02" to "2025-01-04" (inclusive).
-    df_polars = node.read_df("temperature", time=slice("2025-01-02", "2025-01-04"))
+    df_polars = zf.Node._read_df(ds, "temperature", time=slice("2025-01-02", "2025-01-04"))
 
     # Convert the Polars DataFrame to Pandas for easier assertions.
     df = df_polars.to_pandas()

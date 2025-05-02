@@ -49,8 +49,8 @@ class Coord:
     name: str
     description: Optional[str] = None
     composed: Dict[str, List[Any]] = None
-    values: Optional[np.ndarray]  = None              # Fixed size, given coord values.
     chunk_size: Optional[int] = 1024    # Explicit chunk size, 1024 default. Equal to 'len(values)' for fixed size coord.
+    values: Optional[np.ndarray]  = attrs.field(eq=attrs.cmp_using(eq=np.array_equal), default=None)             # Fixed size, given coord values.
 
     def __init__(self, **dict):
         if 'composed' not in dict or len(dict['composed']) == 0 or dict['composed'] is None:
@@ -207,65 +207,3 @@ def serialize(hierarchy: dict, path: Union[str, Path]=None) -> str:
             file.write(content)
     return content
 
-# Example Usage:
-# tree_structure = read_structure('structure.yaml')
-# write_structure(tree_structure, 'output_structure.yaml')
-
-# def build_xarray_tree(structure: dict, source_path: Path = None) -> xr.DataTree:
-#     """
-#     Recursively builds an xarray DataTree from the given structure.
-#
-#     For each node:
-#       - Create an xarray.Dataset.
-#       - Update global attributes from 'ATTRS' if available.
-#       - Add coordinates from 'COORDS' (empty arrays).
-#       - Add variables from 'VARS' as DataArrays with dummy data.
-#
-#     Child nodes (any keys not in ['ATTRS', 'COORDS', 'VARS'])
-#     are recursively processed and attached to the DataTree.
-#
-#     Parameters:
-#       structure (dict): The deserialized structure.
-#       name (str): Name for the current DataTree node.
-#
-#     Returns:
-#       xr.DataTree: The resulting DataTree.
-#     """
-#     ds = xr.Dataset()
-#
-#     # Set dataset attributes if provided.
-#     if "ATTRS" in structure:
-#         ds.attrs.update(structure["ATTRS"])
-#
-#     # Process coordinates.
-#     for coord in structure.get("COORDS", []):
-#         # Add coordinate as an empty array; in practice you may want to fill real data.
-#         ds = ds.assign_coords({coord.name: []})
-#
-#     # Process variables.
-#     for var in structure.get("VARS", []):
-#         if getattr(var, "shape", None) and getattr(var, "coords", None):
-#             # Create a dummy zeros array using the provided shape and assign dims.
-#             data = np.zeros(var.shape)
-#             ds[var.name] = xr.DataArray(data, dims=var.coords)
-#         else:
-#             # Fallback to a scalar zero if no shape/dims info is provided.
-#             ds[var.name] = xr.DataArray(0)
-#
-#     # Recursively build children DataTree nodes.
-#     children = {}
-#     for key, value in structure.items():
-#         if key not in ['ATTRS', 'COORDS', 'VARS']:
-#             children[key] = build_xarray_tree(value, name=key)
-#
-#     # Create and return the DataTree node.
-#     if source_path:
-#         name = source_path.name
-#     else:
-#         name = "."
-#     ds.attrs["source_path"] = str(source_path)
-#     return xr.DataTree(ds, name=name, children=children)
-
-# def read_storage(yaml_path: Path) -> xr.DataTree:
-#     structure = read_structure(yaml_path)
-#     return build_xarray_tree(structure, source_path=yaml_path)

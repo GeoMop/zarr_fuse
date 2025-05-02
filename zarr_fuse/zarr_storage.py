@@ -6,6 +6,7 @@ import xarray as xr
 import numpy as np
 import zarr
 from pathlib import Path
+from collections import defaultdict
 
 from . import zarr_schema
 from .logger import StoreLogHandler
@@ -97,20 +98,22 @@ def zarr_storage_open(zarr_url, type='guess', **kwargs):
     storage = call_with_filtered_kwargs(*args, **kwargs)
     return storage
 
-def open_storage(schema, **kwargs):
+def open_storage(schema=None, **kwargs):
     """
     Open existing or create a new ZARR storage according to given schema.
     Function arguments overrides respective schema 'ATTRS' values.
     The schema can be either a dictionary or a path to a YAML file.
 
+    'schema': Could be schema dict or YAML string or Path object to YAML file.
+              Could be None just for opening and existing storage.
+
     kwargs processed:
-    'wirkdir' used for relative local urls.
+    'workdir' used for relative local urls.
     Return: root Node
     """
     if isinstance(schema, dict):
         schema_dict = schema
-    else:
-        assert isinstance(schema, (str, Path))
+    elif isinstance(schema, (str, Path)):
         schema_dict = zarr_schema.deserialize(schema)
 
     store_attrs = schema['ATTRS'].copy()
@@ -119,7 +122,7 @@ def open_storage(schema, **kwargs):
     type = store_attrs.get('store_type', 'guess')
     kwargs.update(store_attrs)
     storage = zarr_storage_open(zarr_url, type=type, **kwargs)
-    return Node.open_store(schema_dict, storage)
+    return Node("", storage, new_schema = schema_dict)
 
 class Node:
     """
@@ -142,19 +145,23 @@ class Node:
     - df_cols: List[str] (column names in the DataFrame)
 
     TODO:
-    - initial structure -> initial DataFrame
-    - then use PIVOT to form initial DataSet
+    -  merge of schema:
+        - new nodes ok
+        - change in ATTRS OK
+        - adding vars ok
+        - adding coords ok
+        - distinguisn:
+            - parts that affects the storage (VARS, COORDS)
+            - parts that affects Metadata
+            - change in data acquisition
+        -  possible: renamning of vars and coords
+        -  impossible: change in vars coords
+                       change in chuning
+    - uddate dataset accoridng to the new schema
+    - createion of storage if there is no schema
     """
-    PATH_SEP = "/"
 
-    @classmethod
-    def open_store(cls, schema:zarr_schema.ZarrNodeSchema, zarr_store):
-        try:
-            root = cls.read_store(zarr_store)
-        except FileNotFoundError:
-            # No store exists for given URL.
-            root = cls.create_storage(schema, zarr_store)
-        return root
+    PATH_SEP = "/"
 
 
     @classmethod
@@ -171,41 +178,27 @@ class Node:
         Assumes that the root node is stored at the root group (i.e. with group path "").
         """
         root = cls("", store=zarr_store)
-        root._load_children()
         return root
 
-    @classmethod
-    def create_storage(cls, structure:zarr_schema.ZarrNodeSchema, zarr_store) -> 'Node':
-        """
-        Consturct an empty zarr tree storage in the 'zarr_store' with
-        tree structure and node DataSets given by the 'description',
-        zarr_store is an instance of LocalStore, RemoteStore, MemoryStore, ...
-        but could be also path on local or remote file system.
-        TODO: test and better document
-        Returns:
-        root Node
-        """
-        root = cls("", zarr_store)
-        zarr.group(store=zarr_store, overwrite=True)
-        root.initialize_node(structure)
-        return root
 
-    def initialize_node(self, structure:zarr_schema.ZarrNodeSchema):
-        """ Write node to ZARR sotrage and create childs."""
-        if structure is None:
-            structure = {'VARS': {}, 'COORDS': {}, 'ATTRS': {}}
 
-        empty_ds = Node.empty_ds(structure)
-        self.write_ds(empty_ds)
 
-        for key in structure.keys():
-            if key in zarr_schema.reserved_keys:
-                continue
-            child = self._add_node(key)
-            try:
-                child.initialize_node(structure[key])
-            except AttributeError:
-                raise AttributeError(f"Expceting dict for key: {key}, got {structure[key]}")
+    # def initialize_node(self, schema:zarr_schema.ZarrNodeSchema):
+    #     """ Write node to ZARR sotrage and create childs."""
+    #     if schema is None:
+    #         schema = {'VARS': {}, 'COORDS': {}, 'ATTRS': {}}
+    #
+    #     empty_ds = Node.empty_ds(schema)
+    #     self.write_ds(empty_ds)
+    #
+    #     for key in schema.keys():
+    #         if key in zarr_schema.reserved_keys:
+    #             continue
+    #         child = self._add_node(key)
+    #         try:
+    #             child.initialize_node(schema[key])
+    #         except AttributeError:
+    #             raise AttributeError(f"Expceting dict for key: {key}, got {schema[key]}")
 
     @staticmethod
     def _variable(var: zarr_schema.Variable, data: np.ndarray, coords_dict: Dict[str, Any]) -> xr.Variable:
@@ -269,7 +262,7 @@ class Node:
         return xr.Coordinates(coord_vars)
 
     @staticmethod
-    def empty_ds(structure):
+    def empty_ds(schema) -> xr.Dataset:
         """
         Create an *empty* Zarr storage for multiple indices given by index_col.
         - first index is dynamic, e.g. time, new times are appended by update function
@@ -296,10 +289,10 @@ class Node:
         variables = {}
         coords_obj = {}
         attrs = {
-            '__structure__': zarr_schema.serialize(structure),
+            '__structure__': zarr_schema.serialize(schema),
             '__empty__': True
         }
-        attrs.update(structure['ATTRS'])
+        attrs.update(schema['ATTRS'])
         ds = xr.Dataset(
             data_vars=variables,
             coords=coords_obj,
@@ -308,29 +301,9 @@ class Node:
         return ds
 
 
-    def _add_node(self, name):
-        assert name not in self.children
-        node = Node(name, self.store, self)
-        self.children[name] = node
-        return node
-
-    def _storage_group_paths(self):
-        path = self.group_path.strip(self.PATH_SEP)
-        root_group = zarr.open_group(self.store, path=path, mode='r')
-        sub_groups = list(root_group.groups())
-        return sub_groups
-
-    def _load_children(self):
-        """
-        Recursively find and attach child nodes from the store for this node.
-        A child is detected if there exists a key of the form "{self.group_path}/{child}/.zgroup".
-        """
-        for key, group in self._storage_group_paths():
-            child = self._add_node(key)
-            child._load_children()
 
 
-    def __init__(self, name, store, parent=None):
+    def __init__(self, name, store, parent=None, new_schema=None):
         """
         Parameters:
           name (str): The name of the node. For the root node, use an empty string ("").
@@ -340,14 +313,129 @@ class Node:
         self.name = name
         self.store = store
         self.parent = parent
-        self.children = {}
 
         # Setup logger
         zarr_root_dict = zarr.open_group(store).store
         self.logger = StoreLogHandler(zarr_root_dict)
 
+        self.children = self._make_consistent(new_schema)
+        # TODO: separate class to represent child nodes dict
+        # it must be a separate class with overwritten setitem method to
+        # maintain consistency between node tree and zarr storage.
+        # Alternatively we can eliminate the dict like interface and only provide
+        # access to keys and getitem method (minimalistic corresponding to the zarr storage API)
+
+
+    def _storage_group_paths(self):
+        """
+        Read actual Node subgroups in storage.
+        :return: list of subgoup names
+        TODO: rename to '_read_subgroups'
+        """
+        path = self.group_path.strip(self.PATH_SEP)
+        root_group = zarr.open_group(self.store, path=path, mode='r')
+        sub_groups = list(root_group.groups())
+        return sub_groups
+
+    def _add_node(self, name):
+        assert name not in self.children
+        node = Node(name, self.store, self)
+        self.children[name] = node
+        return node
+
+    def _make_consistent(self, new_schema:zarr_schema.ZarrNodeSchema) -> 'Node':
+        """
+        - merge given new_schema
+        - recreate self.children from the storage
+        - possibly introduce new nodes according to schema with empty_ds
+        Still not completely safe as the storage can be changed by other process.
+        TODO:
+        - introduce kind of lock mechanism when changing DS schema
+        - however only adding groups should be safe
+
+        return children dict
+        """
+        if new_schema is None:
+            new_schema_ds = self.schema
+            new_schema = defaultdict(lambda:None)
+        else:
+            new_schema_ds = {k: v for k, v in new_schema.items() if k in zarr_schema.reserved_keys}
+
+        self._update_schema_ds(new_schema_ds)
+
+        child_names = [key for key, _ in self._storage_group_paths()]
+        child_names.extend([key for key in new_schema.keys() if key not in child_names and key not in zarr_schema.reserved_keys])
+
+        def make_child(key):
+            try:
+                new_child_schema = new_schema[key]
+            except KeyError:
+                self.logger.warning(f"Key {key} is missing in the new schema, keeping it.")
+                new_child_schema = None
+            return Node(key, self.store, parent=self, new_schema=new_child_schema)
+
+        # Process existing child Nodes
+        childern = {
+            key: make_child(key)
+            for key in child_names
+        }
+        return childern
+
+    def _update_schema_ds(self, new_schema):
+        """
+        Update DS according to new schema.
+        :param new_schema:
+        :return: updated_schema
+        TODO:
+        Currently we only support creating new DS.
+        - Implement changes in schema not affecting the DS (descriptions, dims)
+        - Implement changes in schema extending DS (new vars and coords)
+        - Implement versioning and substantial DS changes.
+        """
+        try:
+            old_schema = self.schema
+        except KeyError:
+            old_schema = {}
+        if new_schema == old_schema:
+            return old_schema
+        assert old_schema == {}, (f"Modifying node dataset schema is not supported."
+                                  f"\nold:{old_schema}\nnew{new_schema} ")
+        empty_ds = Node.empty_ds(new_schema)
+        self.write_ds(empty_ds)
+        return new_schema
+
+
+    def items(self):
+        return self.children.items()
+
+    def __getitem__(self, key):
+        return self.children[key]
+
+    # def _load_children(self):
+    #     """
+    #     Recursively find and attach child nodes from the store for this node.
+    #     A child is detected if there exists a key of the form "{self.group_path}/{child}/.zgroup".
+    #     """
+    #     for key, group in self._storage_group_paths():
+    #         child = self._add_node(key)
+    #         child._load_children()
+
+    @property
+    def root(self):
+        """
+        Return the root node of the tree.
+        """
+        if self.parent is None:
+            return self
+        else:
+            return self.parent.root
+
     @property
     def _path_list(self):
+        """
+        Return node address as a list of keys.
+        :return:
+        """
         if self.parent is None:
             return []
         else:
@@ -361,21 +449,6 @@ class Node:
         For child nodes, returns a string like "child" or "parent/child".
         """
         return Node.PATH_SEP.join(self._path_list)
-
-    def items(self):
-        return self.children.items()
-        # for key, item in self.childs:
-        #     gp = self.group_path
-        #     if key.startswith(self.group_path):
-        #         key = key[len(gp):]
-        #         end_child_name = key.find(Node.PATH_SEP)
-        #         end_child_name = len(key) if end_child_name == -1 else end_child_name
-        #         key = key[:end_child_name]
-        #         yield key, item
-
-    def __getitem__(self, key):
-        return self.children[key]
-
 
     @property
     def dataset(self):
@@ -391,8 +464,16 @@ class Node:
         return ds
 
     @property
-    def structure(self):
+    def schema(self):
+        """
+        Return dictionary with node dataset schema.
+        I.e. dictionary with keys 'COORDS', 'VARS', 'ATTRS'.
+        Original schema tree is spread over the storage groups represented by Nodes.
+        :return:
+        """
         return zarr_schema.deserialize(self.dataset.attrs['__structure__'])
+
+
 
     def update(self, polars_df):
         """
@@ -408,7 +489,7 @@ class Node:
            - pivot_nd for DF -> DS conversion, should be a method that uses coords and df_cols
            -
         """
-        ds = pivot_nd(self.structure, polars_df)
+        ds = pivot_nd(self.schema, polars_df)
         written_ds, merged_coords = self.update_zarr_loop(ds)
         # check unique coords
         dup_dict = check_unique_coords(written_ds)
@@ -551,8 +632,11 @@ class Node:
     #     # Convert the Pandas DataFrame to a Polars DataFrame.
     #     return pl.from_pandas(pd_df)
 
+    def read_df(self, var_names: Union[str, List[str]], *args, **kwargs):
+        return Node._read_df(self.dataset, var_names, *args, **kwargs)
 
-    def read_df(self, var_names: Union[str, List[str]], *args, **kwargs) -> Tuple[pl.DataFrame, List[str]]:
+    @staticmethod
+    def _read_df(ds: xr.Dataset, var_names: Union[str, List[str]], *args, **kwargs) -> Tuple[pl.DataFrame, List[str]]:
         """
         Read one or more variables from self.dataset (with coords), convert to a Polars DataFrame,
         and return that DF along with the list of all coordinate 'dims'.
@@ -580,7 +664,7 @@ class Node:
         else:
             var_list = list(var_names)
 
-        ds = self.dataset
+
         # Get all dimmensions, even composed.
         dims = set()
         for coord in ds.coords:
@@ -590,7 +674,7 @@ class Node:
         print(f"Read DF: {var_list}, dimss: {dims}")
         var_list = var_list + list(dims)
         # 2. Pull either a DataArray (single var) or Dataset (multiple vars)
-        ds_vars = self.dataset[var_list]
+        ds_vars = ds[var_list]
 
         # 3. Subset by coordinates/index
         sub = ds_vars.sel(*args, **kwargs)
