@@ -81,7 +81,7 @@ def call_with_filtered_kwargs(func, *args, **kwargs):
     return func(*args, **valid_kwargs)
 
 
-def zarr_storage_open(zarr_url, type='guess', **kwargs):
+def zarr_store_open(zarr_url, type='guess', **kwargs):
     if type == 'guess':
         type = zarr_store_guess_type(zarr_url)
 
@@ -121,7 +121,7 @@ def open_storage(schema=None, **kwargs):
     zarr_url = store_attrs['store_url']
     type = store_attrs.get('store_type', 'guess')
     kwargs.update(store_attrs)
-    storage = zarr_storage_open(zarr_url, type=type, **kwargs)
+    storage = zarr_store_open(zarr_url, type=type, **kwargs)
     return Node("", storage, new_schema = schema_dict)
 
 class Node:
@@ -180,25 +180,6 @@ class Node:
         root = cls("", store=zarr_store)
         return root
 
-
-
-
-    # def initialize_node(self, schema:zarr_schema.ZarrNodeSchema):
-    #     """ Write node to ZARR sotrage and create childs."""
-    #     if schema is None:
-    #         schema = {'VARS': {}, 'COORDS': {}, 'ATTRS': {}}
-    #
-    #     empty_ds = Node.empty_ds(schema)
-    #     self.write_ds(empty_ds)
-    #
-    #     for key in schema.keys():
-    #         if key in zarr_schema.reserved_keys:
-    #             continue
-    #         child = self._add_node(key)
-    #         try:
-    #             child.initialize_node(schema[key])
-    #         except AttributeError:
-    #             raise AttributeError(f"Expceting dict for key: {key}, got {schema[key]}")
 
     @staticmethod
     def _variable(var: zarr_schema.Variable, data: np.ndarray, coords_dict: Dict[str, Any]) -> xr.Variable:
@@ -337,11 +318,11 @@ class Node:
         sub_groups = list(root_group.groups())
         return sub_groups
 
-    def _add_node(self, name):
-        assert name not in self.children
-        node = Node(name, self.store, self)
-        self.children[name] = node
-        return node
+    # def _add_node(self, name):
+    #     assert name not in self.children
+    #     node = Node(name, self.store, self)
+    #     self.children[name] = node
+    #     return node
 
     def _make_consistent(self, new_schema:zarr_schema.ZarrNodeSchema) -> 'Node':
         """
@@ -411,15 +392,6 @@ class Node:
     def __getitem__(self, key):
         return self.children[key]
 
-    # def _load_children(self):
-    #     """
-    #     Recursively find and attach child nodes from the store for this node.
-    #     A child is detected if there exists a key of the form "{self.group_path}/{child}/.zgroup".
-    #     """
-    #     for key, group in self._storage_group_paths():
-    #         child = self._add_node(key)
-    #         child._load_children()
-
     @property
     def root(self):
         """
@@ -473,6 +445,11 @@ class Node:
         """
         return zarr_schema.deserialize(self.dataset.attrs['__structure__'])
 
+    def export_schema(self):
+        """
+        Return schema of whole storage under 'self' Node.
+        :return:
+        """
 
 
     def update(self, polars_df):

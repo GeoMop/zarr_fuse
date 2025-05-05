@@ -3,6 +3,7 @@ set -x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+REQUIREMENTS="${SCRIPT_DIR}/requirements.txt"
 # Name of the virtual environment folder
 VENV_DIR="$SCRIPT_DIR/venv"
 
@@ -26,16 +27,16 @@ source $VENV_DIR/bin/activate
 echo "Virtual environment activated."
 
 # Install dependencies from requirements.txt if the file exists
-if [ -f "requirements.txt" ]; then
+if [ -f "${REQUIREMENTS}" ]; then
     pip install --upgrade pip
-    pip install -r requirements.txt
+    pip install -r "${REQUIREMENTS}"
     echo "Dependencies installed from requirements.txt."
 else
     echo "requirements.txt not found. Skipping dependency installation."
 fi
 
 # install zarr_fuse
-pip install -e ${SCRIPT_DIR}/../..[plotting]
+pip install -e ${SCRIPT_DIR}/../..[plot]
 # install hlavo_surface
 pip install -e ${SCRIPT_DIR}
 

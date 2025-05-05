@@ -88,7 +88,14 @@ class Coord:
         return len(self.composed) > 1
 
 Attrs = Dict[str, Any]
-ZarrNodeSchema = Dict[str, Union[Attrs, Dict[str, Variable], Dict[str, Coord], 'ZarrNodeSchema']]
+#ZarrNodeSchema = Dict[str, Union[Attrs, Dict[str, Variable], Dict[str, Coord], 'ZarrNodeSchema']]
+
+@attrs.define
+class ZarrNodeSchema:
+    attrs: Attrs
+    coords: Dict[str, Coord]
+    vars: Dict[str, Variable]
+
 
 def set_name(d, name):
     assert isinstance(d, dict), f"Expected a dictionary, got: {d}"

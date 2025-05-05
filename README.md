@@ -2,12 +2,23 @@
 Prototype project for collecting, dynamic fusion, viewing and publishing of sciantific datasets.
 
 Implemented features:
-- allow deffinition af a scientific dataset using a simple YAML based language
+- allow definition of a scientific dataset using a simple YAML based language
 - allow merging individual contributions to the dataset, converting to common structure
 - example visualization container web app
 
-Future features:
+Near term future:
+- test more complex updates, non-continuous arrays
+- Refactor schema of single ds to a dedicated class
+- method to get schema of whole dataset
+- review of the schema YAML syntax
 - full support for remote (S3) storage, keys management, CESNET specialities
+- unify design of plotting classes
+
+Contemplated features:
+- move to TileDB backend with native support for checkpointing/versioning and sparse dimensions
+  [ChatGPT research](https://chatgpt.com/share/68173f9f-3748-8004-ab29-4cedd87ce136)
+- test support for vast datasets and parallel IO
+
 - generic data collection schemas
   - container accepting instrument data SEND requests, then writes using instument descriptions schema
   - container or local script updating the storage with given CSV, the source should be defined in the dataset schema.

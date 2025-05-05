@@ -12,7 +12,7 @@ from zarr.core.buffer.core import default_buffer_prototype
 import asyncio
 
 from zarr_fuse.logger import StoreLogHandler  # adjust to your import path
-from zarr_fuse.zarr_storage import zarr_storage_open
+from zarr_fuse.zarr_storage import zarr_store_open
 
 script_dir = Path(__file__).parent
 inputs_dir = script_dir / "inputs"
@@ -26,7 +26,7 @@ def test_store_log_handler(tmp_path, url):
 
 
     # ─── build the store based on our “url” ─────────────────────────────
-    store = zarr_storage_open(url)
+    store = zarr_store_open(url)
     # cleanup
     zarr.open_group(store, mode='w')
 
