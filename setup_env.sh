@@ -23,6 +23,8 @@ then
     rm -rf "$VENV_DIR"
 fi
 
+which python3
+python3 --version
 
 # Check if virtual environment directory already exists
 if [ -d "$VENV_DIR" ]; then

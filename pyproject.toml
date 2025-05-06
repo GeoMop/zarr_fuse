@@ -21,6 +21,7 @@ classifiers = [
     "License :: OSI Approved :: BSD License",
     "Programming Language :: Python :: 3"
 ]
+requires-python = ">=3.11" # at least due to zarr>=3.x
 dependencies = [
     "PyYAML",
     "attrs",
@@ -34,9 +35,9 @@ dependencies = [
     # "filterpy",  # commented out dependency
     "seaborn",
     # "pftools[all]",  # commented out dependency
+    "zarr",       # 3.x does not support write_empty_chunks
     "dask",       # for compatibility with xarray 0.18.2
     "xarray",     # 0.19.0 does not support zarr 2.x well
-    "zarr",       # 3.x does not support write_empty_chunks
 ]
 
 [project.optional-dependencies]
