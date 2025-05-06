@@ -27,13 +27,13 @@ source $VENV_DIR/bin/activate
 echo "Virtual environment activated."
 
 # Install dependencies from requirements.txt if the file exists
-if [ -f "${REQUIREMENTS}" ]; then
-    pip install --upgrade pip
-    pip install -r "${REQUIREMENTS}"
-    echo "Dependencies installed from requirements.txt."
-else
-    echo "requirements.txt not found. Skipping dependency installation."
-fi
+# if [ -f "${REQUIREMENTS}" ]; then
+#     pip install --upgrade pip
+#     pip install -r "${REQUIREMENTS}"
+#     echo "Dependencies installed from requirements.txt."
+# else
+#     echo "requirements.txt not found. Skipping dependency installation."
+# fi
 
 # install zarr_fuse
 pip install -e ${SCRIPT_DIR}/../..[plot]

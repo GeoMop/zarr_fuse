@@ -8,6 +8,23 @@ Use ZARR fuse to compare scrapped yr.no forecast data to historical meteosat and
 bash setup_env 
 ```
 
+## Install environment (on Windows)
+Here is how to install the environment in portable way, 
+manually using only python. 
+Assuming you are in the root dir of 'hlavo_surface' app:
+
+```
+python3 -m venv "venv"
+venv/bin/python3 -m pip install -e ../..[plot] 
+venv/bin/python3 -m pip install -e .
+```
+
+This will:
+
+2. Create virtual environment in folder "venv"
+2. install zarr_fuse in editable mode
+3. install hlavo_surface in editable mode
+
 ## Scrapper scripts
 
 Placed in `scrappers`.
@@ -15,6 +32,8 @@ Placed in `scrappers`.
 `python3 -m hlavo_surface.scrap.weather`
 Scrapes yr.no forecast data for a given location and time range.
 Currently saves to local store under 'workdir' folder.
+
+
 
 **TODO**
 
