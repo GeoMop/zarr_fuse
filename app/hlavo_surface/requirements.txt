@@ -16,3 +16,8 @@ ipykernel
 ipympl
 jupyter
 voila
+
+# web DataFlow xpert.com scrapping
+python-dotenv
+selenium
+requests

@@ -9,3 +9,6 @@ work_dir.mkdir(parents=True, exist_ok=True)
 input_dir = __script_dir__.parent / "inputs"
 surface_schema_yaml = input_dir / "surface_schema.yaml"
 odyssey_locations_csv = input_dir / "odyssey_locations.csv"
+
+# DataFlow Odyssey xpert.com credentials
+odyssey_credentials_env = input_dir / ".env"
