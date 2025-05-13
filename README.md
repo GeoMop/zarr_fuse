@@ -3,11 +3,16 @@ Prototype project for collecting, dynamic fusion, viewing and publishing of scia
 
 Implemented features:
 - allow definition of a scientific dataset using a simple YAML based language
-- allow merging individual contributions to the dataset, converting to common structure
+- allow merging individual contributions to the dataset, 
+  converting to common structure
 - example visualization container web app
 
 Near term future:
 - test more complex updates, non-continuous arrays
+  Coords are not automaticaly sorted !!
+  Updating tables could have different time stepping in each update!!
+  Merge with sort preserved
+  Allow to intepolate table to common coordinates with given time step.
 - Refactor schema of single ds to a dedicated class
 - method to get schema of whole dataset
 - review of the schema YAML syntax
