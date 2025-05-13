@@ -7,8 +7,8 @@ import csv
 import traceback
 from pathlib import Path
 import glob
-import pandas as pd
 import polars as pl
+import numpy as np
 
 from dotenv import load_dotenv
 
@@ -213,8 +213,8 @@ def merge_logger_info_groups(download_dir):
         return
 
     # Read and concatenate all CSV files
-    df_list = [pd.read_csv(file) for file in csv_files]
-    merged_df = pd.concat(df_list, ignore_index=True)
+    df_list = [pl.read_csv(file) for file in csv_files]
+    merged_df = pl.concat(df_list)
 
     # Save to a new merged file
     merged_df.to_csv(download_dir / "logger_gps_list_all.csv", index=False)
@@ -339,7 +339,7 @@ def download_reports(driver, download_dir, logger_count, current_dt):
             link_element = row.find_element(By.XPATH, ".//td[1]/a")
             file_url = link_element.get_attribute("href")
             logger_name = link_element.text.strip().split(':')[1]
-            logger_name = logger_name.replace('__', '_')
+            logger_name = logger_name.replace('__', '-')
 
             res = download_file(file_url, f"{logger_name}.csv", download_dir)
             counter += 1
@@ -406,9 +406,137 @@ def run_dataflow_extraction(download_dir, date_interval, logger_groups, flags):
         driver.quit()  # Ensure the browser is closed after the script runs
 
 
+def parse_datetime_column(column: pl.Series) -> pl.Series:
+    """
+    Parses a datetime column with varying formats into a standardized datetime object.
+
+    Args:
+        column (pd.Series): A Pandas Series containing datetime strings or timestamps.
+
+    Returns:
+        pd.Series: A Series with standardized datetime objects.
+    """
+    def detect_and_parse(value):
+        try:
+            # Format 1: "25-09-2024 08:20:00"
+            return datetime.strptime(value, '%d-%m-%Y %H:%M:%S')
+        except ValueError:
+            pass
+
+        try:
+            # Format 2: "2024-09-25T16:50:24" (ISO format)
+            return datetime.fromisoformat(value)
+        except ValueError:
+            pass
+
+        try:
+            # Format 3: Unix timestamp in milliseconds
+            timestamp = int(value)
+            # return datetime.fromtimestamp(timestamp / 1000)
+            return pl.Datetime("ms")
+        except (ValueError, OverflowError):
+            pass
+
+        # If all parsing attempts fail, return NaT
+        return None
+
+    # Apply the function and return as Polars Series
+    parsed = [detect_and_parse(v) for v in column]
+    return pl.Series(name=column.name, values=parsed).cast(pl.Datetime("ms"))
+
+
+def read_data(file, dt_column='DateTime', sep=';'):
+    """
+    Reads data from CSV file with file structure given by :param:`file_pattern`
+    """
+    # Read each CSV file and append to the list
+    df = pl.read_csv(file, separator=sep)
+
+    # Parse the datetime column
+    parsed_series = parse_datetime_column(df[dt_column])
+    df = df.with_columns(parsed_series)
+    df = df.filter(df[dt_column].is_not_null())
+
+    # Drop unused columns
+    df = df.drop(col for col in df.columns if col in ["ttlDate", "logDateTime"])
+
+    # Replace invalid strings with nulls and cast to Float64
+    df = df.with_columns([
+        pl.col(col).cast(pl.Float64, strict=False) for col in df.columns if col not in [dt_column, "loggerUid"]
+    ])
+
+    # Sort the DataFrame by DateTime
+    df = df.sort(dt_column)
+    return df
+
+
+def read_odyssey_data(download_dir, df_locs: pl.DataFrame):
+    ods_data = []
+    file_pattern = str(download_dir / 'U*-*.csv')
+    csv_files = glob.glob(file_pattern, recursive=False)
+
+    # for each Odyssey logger
+    for file in csv_files:
+        logger_uid = Path(file).stem
+        # column dateTtime is UTC time
+        # it corresponds to column M2(logDateTime) =((M2/1000)/(24*60*60))+DATE(1970;1;1)
+        df = read_data(file, dt_column='dateTime', sep=',')
+        # save the full logger Uid
+        df = df.rename(mapping={"loggerUid": f"fullLoggerUid"})
+        # Add a new column with constant string
+        df = df.with_columns([
+            pl.lit(logger_uid).alias("loggerUid")
+        ])
+        for i in range(5):
+            # moisture - rescale to [0,1]
+            df = df.with_columns([
+                (pl.col(f"s{i+1}") / 100)
+            ])
+            # temperature
+            df = df.rename(mapping={f"s{i+1}t": f"t{i+1}"})
+        # ambient temperature
+        df = df.rename(mapping={f"s11t": f"t0"})
+
+        # Add location columns
+        # print(df_locs.filter(pl.col("logger_id") == logger_uid))
+        lat = df_locs.filter(pl.col("logger_id") == logger_uid).select("latitude").item()
+        lon = df_locs.filter(pl.col("logger_id") == logger_uid).select("longitude").item()
+        df = df.with_columns([
+            pl.lit(lat).alias("latitude"),
+            pl.lit(lon).alias("longitude")
+        ])
+        ods_data.append(df)
+
+    final_df = pl.concat(ods_data)
+    return final_df
+
+
+def location_df(attrs_dict):
+
+    raw_df = pl.read_csv(inputs.input_dir / attrs_dict['location_file'], has_header=True, skip_rows=1)
+
+    col_logger_id = "logger_id"
+    df = raw_df.filter(
+        (pl.col(col_logger_id).is_not_null()) & (pl.col(col_logger_id) != "")
+    )
+
+    df = df.drop(col for col in df.columns if col not in [col_logger_id, "latitude", "longitude"])
+
+    # Replace invalid strings with nulls and cast to Float64
+    df = df.with_columns([
+        pl.col(col).cast(pl.Float64, strict=False) for col in df.columns if col != col_logger_id
+    ])
+
+    # print(raw_df.select(["logger_id", "latitude", "longitude"]))
+    return df
+
+
 
 # Main script only defines parameters
 if __name__ == '__main__':
+    schema = zarr_fuse.schema.deserialize(inputs.surface_schema_yaml)
+    df_locs = location_df(schema['ATTRS'])
+
     download_dir = work_dir / \
                    (datetime.now().strftime("%Y%m%dT%H%M%S") + "_dataflow_scrape")
     # download_dir.mkdir()
@@ -421,3 +549,10 @@ if __name__ == '__main__':
     flags = {'location': False, 'data_reports': True}
     # Run the extraction
     # run_dataflow_extraction(download_dir, date_interval, logger_groups, flags)
+
+    # read and transform CSV
+    ods_df = read_odyssey_data(download_dir, df_locs)
+
+    root_node = zarr_fuse.open_storage(schema, workdir=work_dir)
+    odyssey_node = root_node['odyssey']
+    odyssey_node.update(ods_df)
