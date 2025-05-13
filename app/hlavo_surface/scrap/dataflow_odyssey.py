@@ -514,6 +514,7 @@ def read_odyssey_data(download_dir, df_locs: pl.DataFrame):
 def location_df(attrs_dict):
 
     raw_df = pl.read_csv(inputs.input_dir / attrs_dict['location_file'], has_header=True, skip_rows=1)
+    # print(raw_df.select(["logger_id", "latitude", "longitude"]))
 
     col_logger_id = "logger_id"
     df = raw_df.filter(
@@ -527,7 +528,7 @@ def location_df(attrs_dict):
         pl.col(col).cast(pl.Float64, strict=False) for col in df.columns if col != col_logger_id
     ])
 
-    # print(raw_df.select(["logger_id", "latitude", "longitude"]))
+    # print(df)
     return df
 
 
@@ -552,6 +553,7 @@ if __name__ == '__main__':
 
     # read and transform CSV
     ods_df = read_odyssey_data(download_dir, df_locs)
+    print(ods_df)
 
     root_node = zarr_fuse.open_storage(schema, workdir=work_dir)
     odyssey_node = root_node['odyssey']
