@@ -7,8 +7,100 @@ ATTRS:
     grid_max: [50.8900000, 14.9600000]  # unit deg
     grid_step: [1e-2, 1e-2]             # unit deg; about 1000m; approximately resolution of the yr.no service
 
-    
-    
+
+odyssey:
+    VARS:
+        soil_moist_1:
+            unit: "m3/m3"
+            df_col: "s1"
+            description: "soil moisture at level 10 cm"
+            coords: [ "date_time", "lat_lon" ]
+        soil_moist_2:
+            unit: "m3/m3"
+            df_col: "s2"
+            description: "soil moisture at level 20 cm"
+            coords: [ "date_time", "lat_lon" ]
+        soil_moist_3:
+            unit: "m3/m3"
+            df_col: "s3"
+            description: "soil moisture at level 40 cm"
+            coords: [ "date_time", "lat_lon" ]
+        soil_moist_4:
+            unit: "m3/m3"
+            df_col: "s4"
+            description: "soil moisture at level 60 cm"
+            coords: [ "date_time", "lat_lon" ]
+        soil_moist_5:
+            unit: "m3/m3"
+            df_col: "s5"
+            description: "soil moisture at level 100 cm"
+            coords: [ "date_time", "lat_lon" ]
+
+        temp_0:
+            unit: "C"
+            df_col: "t0"
+            description: "ambient temperature at surface"
+            coords: [ "date_time", "lat_lon" ]
+        temp_1:
+            unit: "C"
+            df_col: "t1"
+            description: "temperature at level 10 cm"
+            coords: [ "date_time", "lat_lon" ]
+        temp_2:
+            unit: "C"
+            df_col: "t2"
+            description: "temperature at level 20 cm"
+            coords: [ "date_time", "lat_lon" ]
+        temp_3:
+            unit: "C"
+            df_col: "t3"
+            description: "temperature at level 40 cm"
+            coords: [ "date_time", "lat_lon" ]
+        temp_4:
+            unit: "C"
+            df_col: "t4"
+            description: "temperature at level 60 cm"
+            coords: [ "date_time", "lat_lon" ]
+        temp_5:
+            unit: "C"
+            df_col: "t5"
+            description: "temperature at level 100 cm"
+            coords: [ "date_time", "lat_lon" ]
+
+        latitude:
+            unit: "deg"
+            description: "Signed Earth longitude."
+            coords: "lat_lon"
+            # df_col = <var's name is default source data frame column>
+            # coords = <var's name is self coordinated variable>
+        longitude:
+            unit: "deg"
+            description: "Signed Earth longitude."
+            coords: "lat_lon"
+        date_time:
+            unit: "TimeStamp"
+            description: "Time coordinate"
+
+    COORDS:
+        date_time: # Defines coord from the variable of the same name.
+            chunk_size: 1024
+
+        lat_lon:
+            # Secondary description valid for composed coordinates.
+            description: "Example of coordinate indexed uniquely by a tuple of values. The source columns are converted to the 1D list of tuples."
+            composed: [ "latitude", "longitude" ]
+            chunk_size: 512
+
+    ATTRS:
+        description:
+            "Dataflow Odyssey logger data at server 'xpert.com'."
+#        update:
+#            module: odyssey_scrapper
+#            url: https://www.xpert.nz/home
+
+
+
+
 yr.no:
     VARS:
         # We put forward varaible keys as valid keywords, but quoted names are valid in YAML
