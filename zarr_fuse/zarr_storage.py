@@ -297,7 +297,7 @@ class Node:
 
         # Setup logger
         zarr_root_dict = zarr.open_group(store).store
-        self.logger = StoreLogHandler(zarr_root_dict)
+        self.logger = StoreLogHandler(zarr_root_dict, self.group_path)
 
         self.children = self._make_consistent(new_schema)
         # TODO: separate class to represent child nodes dict
@@ -466,7 +466,7 @@ class Node:
            - pivot_nd for DF -> DS conversion, should be a method that uses coords and df_cols
            -
         """
-        ds = pivot_nd(self.schema, polars_df)
+        ds = pivot_nd(self.schema, polars_df, self.logger)
         written_ds, merged_coords = self.update_zarr_loop(ds)
         # check unique coords
         dup_dict = check_unique_coords(written_ds)
@@ -741,7 +741,7 @@ def get_df_col(df, col_name):
         #raise ValueError(f"Column '{col_name}' not found in the DataFrame.\n Valid columns: {df.columns}")
 
 
-def pivot_nd(structure:zarr_schema.ZarrNodeSchema, df: pl.DataFrame, fill_value=np.nan):
+def pivot_nd(structure:zarr_schema.ZarrNodeSchema, df: pl.DataFrame, logger):
     """
     Pivot a Polars DataFrame with columns for each dimension in self.dataset.dims
     and one value column (per variable) into an N-dim xarray.Dataset.
