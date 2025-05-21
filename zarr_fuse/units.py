@@ -2,31 +2,12 @@ import re
 import numpy as np
 import pint
 import datetime
-from dateutil import parser, tz
+import dateutil
 import attrs
 import time
 
 ureg = pint.UnitRegistry()
 
-def _tz_converter(val):
-    """
-    Convert tz specification to a datetime.tzinfo object.
-    Accepts None, tzinfo, '+HH:MM' or '-HH:MM', or named zones.
-    """
-    if val is None or isinstance(val, datetime.tzinfo):
-        return val
-    if isinstance(val, str):
-        m = re.match(r'([+-])(\d{2}):(\d{2})$', val)
-        if m:
-            sign = 1 if m.group(1) == '+' else -1
-            hours, mins = int(m.group(2)), int(m.group(3))
-            offset = datetime.timedelta(hours=hours, minutes=mins) * sign
-            return datetime.timezone(offset)
-        tzinfo = tz.gettz(val)
-        if tzinfo is None:
-            raise ValueError(f"Unknown timezone spec '{val}'")
-        return tzinfo
-    raise TypeError(f"Invalid tz type: {type(val)}")
 
 # Map common timezone abbreviations to fixed-offset tzinfo
 # Daylight saving time intantionaly forbiden to avoid duplicit times during transition.
@@ -69,23 +50,48 @@ def build_tzinfos():
 TZINFOS = build_tzinfos()
 
 
-
 @attrs.define
 class DateTimeUnit:
     """
     Configuration for datetime parsing and storage.
+    Stores only a plain‐string `_tz` so that YAML/attrs can serialize without special representers.
     """
     tick: str = 'us'
-    tz: datetime.tzinfo = attrs.field(default=None, converter=_tz_converter)
+    tz: str | None = None
     dayfirst: bool = False
-    yearfirst: bool = False
+    yearfirst: bool = True
+
+    @property
+    def tzinfo(self) -> datetime.tzinfo | None:
+        """
+        Lazily convert the stored zone‐name/_offset string into a tzinfo instance.
+        Accepts None, '+HH:MM' or '-HH:MM', or named zones.
+        """
+        val = self.tz
+        if val is None:
+            return None
+
+        # offset form ±HH:MM
+        m = re.match(r'([+-])(\d{2}):(\d{2})$', val)
+        if m:
+            sign = 1 if m.group(1) == '+' else -1
+            hours, mins = int(m.group(2)), int(m.group(3))
+            offset = datetime.timedelta(hours=hours, minutes=mins) * sign
+            return datetime.timezone(offset)
+
+        # named zone
+        tzinfo = dateutil.tz.gettz(val)
+        if tzinfo is None:
+            raise ValueError(f"Unknown timezone spec '{val}'")
+        return tzinfo
 
     @property
     def tz_shift(self) -> float:
-        """Hours offset from UTC."""
-        if self.tz is None:
+        """Hours offset from UTC for the current datetime."""
+        tzinfo = self.tzinfo
+        if tzinfo is None:
             return 0.0
-        offset = self.tz.utcoffset(datetime.datetime.now())
+        offset = tzinfo.utcoffset(datetime.datetime.now())
         return offset.total_seconds() / 3600.0
 
 class DateTimeQuantity:
@@ -93,12 +99,14 @@ class DateTimeQuantity:
     Wraps a numpy.datetime64 array with its DateTimeUnit config.
     """
     def __init__(self, values: np.ndarray, dt_unit: DateTimeUnit):
+        # 1) Ensure it's some kind of datetime64
         if not np.issubdtype(values.dtype, np.datetime64):
-            raise TypeError(f"values.dtype must be datetime64, got {values.dtype}")
+            raise TypeError(f"values.dtype must be datetime64, got {values.dtype!r}")
+
+        # 2) Compute the target dtype from dt_unit.tick
         expected = np.dtype(f'datetime64[{dt_unit.tick}]')
-        if values.dtype != expected:
-            raise ValueError(f"values.dtype {values.dtype} does not match unit tick {dt_unit.tick}")
-        self._values = values
+
+        self._values = values.astype(expected)
         self._unit = dt_unit
 
     @property
@@ -165,21 +173,20 @@ def create_quantity(values, from_unit):
         return ureg.Quantity(arr, from_unit)
     except Exception:
         pass
-    if not isinstance(from_unit, dict):
-        raise TypeError("from_unit must be dict for datetime parsing")
-    dt_unit = DateTimeUnit(**from_unit)
+    assert isinstance(from_unit, DateTimeUnit), "from_unit must be 'str' or 'DateTimeUnit'"
+    dt_unit = from_unit
     parsed = []
     for val in values:
-        dt = parser.parse(str(val),
+        dt = dateutil.parser.parse(str(val),
                           dayfirst=dt_unit.dayfirst,
                           yearfirst=dt_unit.yearfirst,
                           tzinfos=TZINFOS)
         # If no explicit tz, assign dt_unit tz (or UTC if none)
         if dt.tzinfo is None:
-            target_tz = dt_unit.tz or datetime.timezone.utc
+            target_tz = dt_unit.tzinfo or datetime.timezone.utc
             dt = dt.replace(tzinfo=target_tz)
         # Convert any explicit tz to dt_unit.tz (or UTC)
-        final_tz = dt_unit.tz or datetime.timezone.utc
+        final_tz = dt_unit.tzinfo or datetime.timezone.utc
         dt_utc = dt.astimezone(final_tz)
         # Drop tzinfo to store as numpy.datetime64 local times
         dt_naive = dt_utc.replace(tzinfo=None)

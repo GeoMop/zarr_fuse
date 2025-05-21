@@ -25,6 +25,7 @@ requires-python = ">=3.11" # at least due to zarr>=3.x
 dependencies = [
     "PyYAML",
     "attrs",
+    "tzdata",
     "numpy",
     "polars",
     "pint",
