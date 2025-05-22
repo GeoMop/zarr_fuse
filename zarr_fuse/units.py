@@ -195,3 +195,13 @@ def create_quantity(values, from_unit):
     return DateTimeQuantity(np_dates, dt_unit)
 
 
+def step_unit(unit: str):
+    """
+    Return the step unit for a given unit.
+    """
+    q = create_quantity([], unit)
+    if isinstance(q, DateTimeUnit):
+        return q.tick
+    else:
+        assert isinstance(q, pint.Quantity), "unit must be a string or DateTimeUnit"
+        return unit

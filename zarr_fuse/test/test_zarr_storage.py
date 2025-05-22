@@ -29,8 +29,6 @@ def aux_read_struc(fname):
     """
     struc_path = inputs_dir / fname
     schema = zf.schema.deserialize(struc_path)
-    assert set(['COORDS', 'VARS']).issubset(set(schema.keys()))
-
     store_path = (workdir / fname).with_suffix(".zarr")
 
     # Start with no existiong storage
@@ -58,7 +56,6 @@ def _update_tree(node: zf.Node, df_map: dict):
     assert len(node.dataset.coords) == 1
     assert len(node.dataset.data_vars) == 1
 
-#@pytest.mark.skip
 def test_node_tree():
     """
     Test the tree structure of the Zarr storage.
@@ -119,9 +116,9 @@ def _check_ds_attrs_weather(ds, schema_ds):
         assert ds.coords[key].attrs['chunk_size'] == coord.chunk_size
         if len(coord.composed) > 1:
             assert ds.coords[key].dtype == 'int64'
-            for sub_soord in coord.composed:
-                assert sub_soord in ds.data_vars
-                assert sub_soord not in ds.coords
+            for sub_coord in coord.composed:
+                assert sub_coord in ds.data_vars
+                assert sub_coord not in ds.coords
 
 def test_read_structure_weather(tmp_path):
     # Example YAML file content (as a string for illustration):
@@ -137,8 +134,13 @@ def test_read_structure_weather(tmp_path):
 
     # Create a Polars DataFrame with 6 temperature readings.
     # Two time stamps (e.g. 1000 and 2000 seconds) and three latitude values (e.g. 10.0, 20.0, 30.0).
+    t1 = "2025-05-13T07:00:00Z"
+    t2 = "2025-05-13T09:00:00Z"
+    t3 = "2025-05-13T8:00:00Z"
+    t4 = "2025-05-14T8:00:00Z"
+
     df = pl.DataFrame({
-        "timestamp": [1000, 1000, 1000, 2000, 2000, 2000],
+        "timestamp": [t1, t1, t1, t2, t2, t2],
         "latitude": [10.0, 20.0, 20.0, 10.0, 20.0, 20.0],
         "longitude": [10.0, 10.0, 20.0, 10.0, 10.0, 20.0],
         "temp": [280.0, 281.0, 282.0, 283.0, 284.0, 285.0]
@@ -161,15 +163,66 @@ def test_read_structure_weather(tmp_path):
     # Check the shape of the temperature variable.
     assert new_ds["temperature"].shape == (2, 3)
 
-    # Check that the "time" coordinate was updated to [1000, 2000]
-    np.testing.assert_array_equal(new_ds["time of year"].values, [1000, 2000])
+    # Check that the "time" coordinate, it is converted from explicit UTC ("...Z") to CET
+    # during forming the update DF and the converted back to UTC during actual update.
+    ref_vec = np.array([t1, t2], dtype='datetime64[h]')
+    np.testing.assert_array_equal(new_ds["time of year"].values, ref_vec)
+
     # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]
     np.testing.assert_array_equal(new_ds["latitude"].values, [20.0, 20.0, 10.0])
+    out_unit = zf.units.DateTimeUnit(tick='h', tz="UTC", dayfirst=False, yearfirst=True)
     for row in df.iter_rows(named=True):
-        time = row["timestamp"]
+
+        time = zf.units.create_quantity([row["timestamp"]], out_unit).magnitude
         lat = row["latitude"]
         lon = row["longitude"]
-        assert new_ds["temperature"].sel({"time of year":time, "lat_lon":hash((lat, lon))}) == row["temp"]
+        new_temp = new_ds["temperature"].sel({"time of year":time, "lat_lon":hash((lat, lon))})
+        ref_temp_K = row["temp"] + 273.15
+        assert  new_temp.values[0] == ref_temp_K
+
+    # Second update, test merging
+    df2 = pl.DataFrame({
+        "timestamp": [t4, t4, t4, t3, t3, t3],  #  t1 < t3 < t2 < t4
+        "latitude": [10.0, 15.0, 20.0, 10.0, 15.0, 20.0],   # new (lat=15, lon=10)
+        "longitude": [10.0, 10.0, 20.0, 10.0, 10.0, 20.0],
+        "temp": [380.0, 381.0, 382.0, 383.0, 384.0, 385.0]
+    })
+
+    # Update the dataset atomically using the Polars DataFrame.
+    updated_ds = tree.update(df2)
+    _check_ds_attrs_weather(updated_ds, structure)
+
+    # Now, re-read the entire Zarr storage from scratch.
+    new_tree = zf.Node.read_store(store)
+    new_ds = new_tree.dataset
+    _check_ds_attrs_weather(new_ds, structure)
+    print("Updated dataset:")
+    print(new_ds)
+
+   # --- Assertions ---
+    # We expect that the update function (via update_xarray_nd) will reshape the temperature data
+    # into a (time, lat) array, i.e. shape (2, 3), with coordinates "time" and "lat".
+    # Check the shape of the temperature variable.
+    assert new_ds["temperature"].shape == (2, 3)
+
+    # Check that the "time" coordinate was updated to [1000, 2000]
+
+    # check times are sorted
+    np.testing.assert_array_equal(new_ds["time of year"].values, [t1, t3, t2, t4])
+    # !! Wrong order, not sorted
+
+
+    # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]
+    np.testing.assert_array_equal(new_ds["latitude"].values, [10.0, 20.0, 20.0, 15.0])
+    np.testing.assert_array_equal(new_ds["longitude"].values, [10.0, 10.0, 20.0, 10.0])
+
+    # TODO, merged DF, test NaNs out of the update.
+    # merged_df = df.update(df2)
+    # for row in df.iter_rows(named=True):
+    #     time = row["timestamp"]
+    #     lat = row["latitude"]
+    #     lon = row["longitude"]
+    #     assert new_ds["temperature"].sel({"time of year":time, "lat_lon":hash((lat, lon))}) == row["temp"]
 
 
 def test_read_structure_tensors(tmp_path):
@@ -318,6 +371,9 @@ def test_pivot_nd():
     ])
 
     np.testing.assert_allclose(arr, expected_arr, equal_nan=True)
+
+
+
 
 
 
