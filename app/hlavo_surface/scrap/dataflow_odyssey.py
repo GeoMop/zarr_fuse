@@ -71,7 +71,7 @@ def login(driver):
     print(f"Logged in.")
 
 
-def fill_in_form(driver, date_interval, logger_group):
+def fill_in_form(driver, start_date, end_date, logger_group, logger_uid):
     """
     Fills in the date interval and selects the logger group from the dropdown.
     """
@@ -86,26 +86,38 @@ def fill_in_form(driver, date_interval, logger_group):
     #   < / select >
     wait = WebDriverWait(driver, timeout=10)
     location_dropdown = Select(wait.until(EC.presence_of_element_located((By.ID, "report_groups_dropdown"))))
-    # there is a delay until all Select options are ready
-    time.sleep(5)
-    wait.until(EC.presence_of_element_located((By.XPATH, f"//option[text()='{logger_group}']")))
-    # location_dropdown = Select(driver.find_element(By.ID, "report_groups_dropdown"))
-    location_dropdown.select_by_visible_text(logger_group)
-    time.sleep(0.5)
+    if location_dropdown.first_selected_option.text != logger_group:
+        # there is a delay until all Select options are ready
+        time.sleep(5)
+        wait.until(EC.presence_of_element_located((By.XPATH, f"//option[text()='{logger_group}']")))
+        # location_dropdown = Select(driver.find_element(By.ID, "report_groups_dropdown"))
+        location_dropdown.select_by_visible_text(logger_group)
+        time.sleep(0.5)
 
     # <input type="text" class="form-control hasDatepicker" id="report_from_date" placeholder="From" required="">
     # <input type="text" class="form-control hasDatepicker" id="report_to_date" placeholder="To" required="">
     date_from_input = driver.find_element(By.ID, "report_from_date")
     date_from_input.clear()
-    dt = datetime.strptime(date_interval['start_date'], '%Y-%m-%d').date()
-    dt_str = dt.strftime('%d-%m-%Y')
+    # dt = datetime.strptime(date_interval['start_date'], '%Y-%m-%d').date()
+    dt_str = start_date.strftime('%d-%m-%Y')
     date_from_input.send_keys(dt_str)
 
     date_to_input = driver.find_element(By.ID, "report_to_date")
     date_to_input.clear()
-    dt = datetime.strptime(date_interval['end_date'], '%Y-%m-%d').date()
-    dt_str = dt.strftime('%d-%m-%Y')
+    # dt = datetime.strptime(date_interval['end_date'], '%Y-%m-%d').date()
+    dt_str = end_date.strftime('%d-%m-%Y')
     date_to_input.send_keys(dt_str)
+
+    logger_dropdown = Select(driver.find_element(By.ID, "report_loggers_dropdown"))
+    time.sleep(1)
+    # Iterate over each option in the dropdown and find logger uid
+    for option in logger_dropdown.options:
+        if option.text.find(logger_uid) >= 0:
+            logger_dropdown.select_by_visible_text(option.text)
+            return
+    raise Exception(f"'{logger_uid}' in group '{logger_group}' not found in dropdown")
+
+
 
 
 def gather_logger_info(driver, logger_group, download_dir):
@@ -220,48 +232,29 @@ def merge_logger_info_groups(download_dir):
     merged_df.to_csv(download_dir / "logger_gps_list_all.csv", index=False)
 
 
-def submit_loggers(driver):
+def click_submit_button(driver):
     """
     Iterates through loggers in the dropdown, submits reports, and confirms success.
     """
-    logger_dropdown = Select(driver.find_element(By.ID, "report_loggers_dropdown"))
-    time.sleep(1)
-    logger_count = 0
 
-    # Iterate over each option in the dropdown
-    for option in logger_dropdown.options:
-        # Skip the "Select Logger" placeholder
-        if option.text == "Select Logger":
-            continue
+    # <input class="btn btn-primary" id="btn_report_submit" type="submit" value="Submit">
+    submit_btn = driver.find_element(By.ID, "btn_report_submit")
+    submit_btn.click()
+    # time.sleep(0.5)
 
-        logger_dropdown.select_by_visible_text(option.text)
-        time.sleep(0.5)
-
-        # <input class="btn btn-primary" id="btn_report_submit" type="submit" value="Submit">
-        submit_btn = driver.find_element(By.ID, "btn_report_submit")
-        submit_btn.click()
-        # time.sleep(0.5)
-
-        # wait for OK button
-        # <div class="jconfirm-box></div>
-        # <div class="jconfirm-title-c"><span class="jconfirm-icon-c"></span>
-        # <span class="jconfirm-title">Processing Data... Please wait.</span></div>
-        # <div class="jconfirm-content-pane" ...>
-        # <div class="jconfirm-content" id="jconfirm-box34841">Press the refresh button shortly.</div></div>
-        # <div class="jconfirm-buttons"><button type="button" class="btn btn-default">ok</button></div><div class="jconfirm-clear"></div></div>
-        # Wait for the message box to appear
-        wait = WebDriverWait(driver, timeout=10)
-        message_box = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "jconfirm-box")))
-        # Wait for the "OK" button inside the message box
-        ok_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='ok']")))
-        ok_button.click()
-
-        logger_count += 1
-        # for testing:
-        # if logger_count == 2:
-        #     break
-
-    return logger_count
+    # wait for OK button
+    # <div class="jconfirm-box></div>
+    # <div class="jconfirm-title-c"><span class="jconfirm-icon-c"></span>
+    # <span class="jconfirm-title">Processing Data... Please wait.</span></div>
+    # <div class="jconfirm-content-pane" ...>
+    # <div class="jconfirm-content" id="jconfirm-box34841">Press the refresh button shortly.</div></div>
+    # <div class="jconfirm-buttons"><button type="button" class="btn btn-default">ok</button></div><div class="jconfirm-clear"></div></div>
+    # Wait for the message box to appear
+    wait = WebDriverWait(driver, timeout=10)
+    message_box = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "jconfirm-box")))
+    # Wait for the "OK" button inside the message box
+    ok_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[text()='ok']")))
+    ok_button.click()
 
 
 def download_file(file_url, file_name, download_dir):
@@ -285,7 +278,7 @@ def download_file(file_url, file_name, download_dir):
         return False
 
 
-def download_reports(driver, download_dir, logger_count, current_dt):
+def download_reports(driver, download_dir, download_list, current_dt):
     """
     Iterates through table rows, retrieves file links, and downloads them.
     """
@@ -327,7 +320,7 @@ def download_reports(driver, download_dir, logger_count, current_dt):
             if time_diff < 2:
                 n_found_links += 1
 
-        if n_found_links < logger_count:
+        if n_found_links < len(download_list):
             refresh_btn = driver.find_element(By.ID, "btn_report_refresh")
             print(f"refresh link table {i}")
             refresh_btn.click()
@@ -344,15 +337,61 @@ def download_reports(driver, download_dir, logger_count, current_dt):
             res = download_file(file_url, f"{logger_name}.csv", download_dir)
             counter += 1
 
-            if not res or counter == logger_count:
+            if not res or counter == len(download_list):
                 break
         break
 
-    if n_found_links != logger_count:
+    if n_found_links != len(download_list):
         raise Exception("Not all submitted loggers found in the data reports link table.")
 
 
-def run_dataflow_extraction(download_dir, date_interval, logger_groups, flags):
+def run_dataflow_extraction(download_dir, download_list):
+    """
+    Runs the full extraction process from login to downloading reports.
+    """
+    try:
+        driver = create_driver(default_download_dir=download_dir)
+        wait = WebDriverWait(driver, timeout=10)
+        time.sleep(1)
+
+        # Navigate to the website, returns once loaded
+        driver.get('https://www.xpert.nz/home')
+
+        login(driver)
+
+        end_date = datetime.now(timezone.utc)
+        download_list = sorted(download_list, key=lambda x: (x[1], x[0]))
+
+        # wait for "Data reports" tab
+        tab = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'a[href="#reports"]')))
+        # tab = driver.find_element(By.CSS_SELECTOR, 'a[href="#reports"]')
+        print(f"Tab '{tab.text}' Click")
+        tab.click()
+
+        for logger_uid, logger_group, start_date in download_list:
+            print(f"DataFlow extraction for group '{logger_group}'")
+
+            fill_in_form(driver, start_date, end_date, logger_group, logger_uid)
+            time.sleep(0.5)
+            click_submit_button(driver)
+
+        # wait before refreshing the report links table
+        time.sleep(2)
+
+        # <input class="btn btn-success" id="btn_report_refresh" type="submit" value="Refresh">
+        refresh_btn = driver.find_element(By.ID, "btn_report_refresh")
+        print("refresh link table")
+        refresh_btn.click()
+
+        download_reports(driver, download_dir, download_list, end_date)
+
+    except Exception: traceback.print_exc()
+    finally:
+        print("DataFlow webpage extraction FINISHED")
+        driver.quit()  # Ensure the browser is closed after the script runs
+
+
+def run_dataflow_extraction_location(download_dir, logger_groups):
     """
     Runs the full extraction process from login to downloading reports.
     """
@@ -369,34 +408,12 @@ def run_dataflow_extraction(download_dir, date_interval, logger_groups, flags):
         for logger_group in logger_groups:
             print(f"DataFlow extraction for group '{logger_group}'")
 
-            if flags['location']:
-                # wait for "Map" tab
-                tab = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'a[href="#tab-1"]')))
-                tab.click()
-                print(f"Tab '{tab.text}' Click")
-                gather_logger_info(driver, logger_group, download_dir)
-                # continue
-
-            if flags['data_reports']:
-                # wait for "Data reports" tab
-                tab = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'a[href="#reports"]')))
-                # tab = driver.find_element(By.CSS_SELECTOR, 'a[href="#reports"]')
-                print(f"Tab '{tab.text}' Click")
-                tab.click()
-
-                fill_in_form(driver, date_interval, logger_group)
-                logger_count = submit_loggers(driver)
-                # logger_count = 4  # testing without submitting
-                # wait before refreshing the report links table
-                time.sleep(2)
-
-                # <input class="btn btn-success" id="btn_report_refresh" type="submit" value="Refresh">
-                refresh_btn = driver.find_element(By.ID, "btn_report_refresh")
-                print("refresh link table")
-                refresh_btn.click()
-
-                current_dt = datetime.now(tz=timezone.utc)
-                download_reports(driver, download_dir, logger_count, current_dt)
+            # wait for "Map" tab
+            tab = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'a[href="#tab-1"]')))
+            tab.click()
+            print(f"Tab '{tab.text}' Click")
+            gather_logger_info(driver, logger_group, download_dir)
+            # continue
 
         merge_logger_info_groups(download_dir)
 
@@ -452,6 +469,11 @@ def read_data(file, dt_column='DateTime', sep=';'):
     # Read each CSV file and append to the list
     df = pl.read_csv(file, separator=sep)
 
+    if df is None or dt_column not in df.columns or df.height == 0:
+        # dfs = [df for df in dfs if df is not None and df.height > 0]  # remove fully empty
+        # TODO: log
+        return None
+
     # Parse the datetime column
     parsed_series = parse_datetime_column(df[dt_column])
     df = df.with_columns(parsed_series)
@@ -481,6 +503,9 @@ def read_odyssey_data(download_dir, df_locs: pl.DataFrame):
         # column dateTtime is UTC time
         # it corresponds to column M2(logDateTime) =((M2/1000)/(24*60*60))+DATE(1970;1;1)
         df = read_data(file, dt_column='dateTime', sep=',')
+        if df is None:
+            # TODO: log
+            continue
         df = df.rename(mapping={"dateTime": f"date_time"})
         # save the full logger Uid
         df = df.rename(mapping={"loggerUid": f"fullLoggerUid"})
@@ -522,35 +547,62 @@ def location_df(attrs_dict):
         (pl.col(col_logger_id).is_not_null()) & (pl.col(col_logger_id) != "")
     )
 
-    df = df.drop(col for col in df.columns if col not in [col_logger_id, "latitude", "longitude"])
+    df = df.drop(col for col in df.columns if col not in [col_logger_id, "logger_group", "latitude", "longitude"])
 
     # Replace invalid strings with nulls and cast to Float64
     df = df.with_columns([
-        pl.col(col).cast(pl.Float64, strict=False) for col in df.columns if col != col_logger_id
+        pl.col(col).cast(pl.Float64, strict=False) for col in df.columns if col not in [col_logger_id, "logger_group"]
     ])
 
     # print(df)
     return df
 
 
+def determine_time_interval(schema, df_locs):
+    root_node = zarr_fuse.open_storage(schema, workdir=work_dir)
+    odyssey_node = root_node['odyssey']
+    ds = odyssey_node.dataset
+    dt = ds.date_time
+    pass
 
-# Main script only defines parameters
-if __name__ == '__main__':
+
+def main():
     schema = zarr_fuse.schema.deserialize(inputs.surface_schema_yaml)
     df_locs = location_df(schema['ATTRS'])
+
+    # determine_time_interval(schema, df_locs)
+    print(df_locs)
+    download_list = [
+        ("U01", "Uhelná lesík", datetime.fromisoformat("2025-01-01T00:00:00")),
+        ("U15", "Uhelná", datetime.fromisoformat("2025-03-01T00:00:00")),
+        ("U36", "Lab", datetime.fromisoformat("2025-05-16T12:00:00")),
+        ("U02", "Uhelná lesík", datetime.fromisoformat("2025-02-01T00:00:00")),
+    ]
+    # exit(0)
+    # TODO check logger_uids are in df_locs
 
     download_dir = work_dir / \
                    (datetime.now().strftime("%Y%m%dT%H%M%S") + "_dataflow_scrape")
     # download_dir.mkdir()
-    download_dir = work_dir / "20250506T211454_dataflow_scrape"
+    # download_dir = work_dir / "20250506T211454_dataflow_scrape"
+    download_dir = work_dir / "20250523T165201_dataflow_scrape"
 
+
+    # TODO: read all
     # logger_groups = ["Uhelná lesík", "Lab", "Uhelná"]
-    logger_groups = ["Uhelná lesík"]
-    date_interval = {'start_date': '2025-01-01', 'end_date': '2025-04-22'}
+    # logger_groups = ["Uhelná lesík"]
+    # date_interval = {'start_date': '2025-01-01', 'end_date': '2025-04-22'}
 
-    flags = {'location': False, 'data_reports': True}
+    # TODO:
+    # 1) read odyssey_node.dataset -> xarray dataset.coords.datetime => get max which will be new start date
+    # 2) determine max datetime for each logger
+    # 3) gather all logger uids for extraction
+    # 4) sort logger uids by group and determine needed groups
+    # 5) extract the selected loggers data
+
+    # flags = {'location': False, 'data_reports': True}
     # Run the extraction
-    # run_dataflow_extraction(download_dir, date_interval, logger_groups, flags)
+    # run_dataflow_extraction(download_dir, download_list)
 
     # read and transform CSV
     ods_df = read_odyssey_data(download_dir, df_locs)
@@ -559,3 +611,14 @@ if __name__ == '__main__':
     root_node = zarr_fuse.open_storage(schema, workdir=work_dir)
     odyssey_node = root_node['odyssey']
     odyssey_node.update(ods_df)
+
+    # TODO:
+    # install jupyter-lab on system or in own environment
+    #
+
+
+# Main script only defines parameters
+if __name__ == '__main__':
+    main()
+
+
