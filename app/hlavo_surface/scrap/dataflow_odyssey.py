@@ -433,7 +433,7 @@ def parse_datetime_column(column: pl.Series) -> pl.Series:
             # Format 3: Unix timestamp in milliseconds
             timestamp = int(value)
             # return datetime.fromtimestamp(timestamp / 1000)
-            return pl.Datetime("ms")
+            return pl.Datetime(time_unit="ms", time_zone="UTC")
         except (ValueError, OverflowError):
             pass
 
@@ -442,7 +442,7 @@ def parse_datetime_column(column: pl.Series) -> pl.Series:
 
     # Apply the function and return as Polars Series
     parsed = [detect_and_parse(v) for v in column]
-    return pl.Series(name=column.name, values=parsed).cast(pl.Datetime("ms"))
+    return pl.Series(name=column.name, values=parsed).cast(pl.Datetime(time_unit="ms", time_zone="UTC"))
 
 
 def read_data(file, dt_column='DateTime', sep=';'):
@@ -481,6 +481,7 @@ def read_odyssey_data(download_dir, df_locs: pl.DataFrame):
         # column dateTtime is UTC time
         # it corresponds to column M2(logDateTime) =((M2/1000)/(24*60*60))+DATE(1970;1;1)
         df = read_data(file, dt_column='dateTime', sep=',')
+        df = df.rename(mapping={"dateTime": f"date_time"})
         # save the full logger Uid
         df = df.rename(mapping={"loggerUid": f"fullLoggerUid"})
         # Add a new column with constant string
