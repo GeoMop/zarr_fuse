@@ -44,6 +44,7 @@ Contemplated features:
 
 - Documentation of raw data collection and merging process.
 - Reproducible publication on ZENODO under FAIR principles.
+- Metadata schemata: DublinCore, Data Cite, DCAT, DDI (TODO: review) 
 
 Expected usecases:
 - Continuous collection of weather data from yr.no forecast to form a consistent dataset of historical data.
