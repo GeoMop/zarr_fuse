@@ -393,7 +393,7 @@ class Node:
         assert old_schema.is_empty(), (f"Modifying node dataset schema is not supported."
                                   f"\nold:{old_schema}\nnew{new_schema} ")
         empty_ds = Node.empty_ds(new_schema)
-        self.write_ds(empty_ds)
+        self._init_empty_grup(empty_ds)
         return new_schema
 
 
@@ -482,18 +482,29 @@ class Node:
         """
         ds = pivot_nd(self.schema, polars_df, self.logger)
         written_ds, merged_coords = self.update_zarr_loop(ds)
-        # check unique coords
+        # check unique coordsregion="auto",
         dup_dict = check_unique_coords(written_ds)
         if  dup_dict:
             self.logger.error(dup_dict)
         return written_ds
+
+
+
+    def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode
+        rel_path = self.group_path  # + self.PATH_SEP + "dataset"
+        rel_path = rel_path.strip(self.PATH_SEP)
+
+        grp = zarr.open_group(self.store, path=rel_path, mode="w")
+        # set your dataset‐level attributes
+        grp.attrs.update(ds.attrs)
+        return ds
 
     def write_ds(self, ds, **kwargs):
         rel_path = self.group_path # + self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
         #path_store = zarr.open_group(self.store, mode=mode, path=rel_path)
         #ds.to_zarr(path_store,  **kwargs)
-        ds.to_zarr(self.store, group = rel_path, mode="a", consolidated=False, **kwargs)
+        ds.to_zarr(self.store, group = rel_path, consolidated=False, **kwargs)
         return ds
 
     """
@@ -569,45 +580,25 @@ class Node:
         # We create a dict to hold the extension subset for each dimension.
         if '__empty__' in ds_existing.attrs:
             del ds_existing.attrs['__empty__']
-            return self.write_ds(ds_update), {}
+            return self.write_ds(ds_update, mode="a"), {}
 
         ds_update, split_indices = interpolate_ds(
-            self.dataset,
             ds_update,
-            self.schema['COORDS'])
+            self.dataset,
+            self.schema.COORDS)
         last_written_ds = None
         ds_extend_dict = {}
         ds_overlap = ds_update.copy()
         dims_order = tuple(ds_update.dims.keys())
         for dim, idx in split_indices:
-            ds_extend_dict[dim] = ds_overlap[dim].isel({dim: slice(idx, None)})
+            ds_extend_dict[dim] = ds_overlap.isel({dim: slice(idx, None)})
             ds_overlap = ds_overlap.isel({dim: slice(0, idx)})
-            # if dim not in ds_existing.dims:
-            #     raise ValueError(f"Dimension '{dim}' not found in the existing store.")
-            # coord_schema = self.schema['COORDS'][dim]
-            # old_coords = ds_existing[dim].values
-            # new_coords = ds_overlap[dim].values
-            # if coord_schema.sorted:
-            #     idx, append_coords = self.overlap_sorted(old_coords, new_coords, coord_schema)
-            # else:
-            #     idx, append_coords = self.overlap_minimal(old_coords, new_coords, coord_schema)
-            # # min_new, max_new = np.min(new_coords), np.max(new_coords)
-            # # new_holes = [c for c in old_coords if c > min_new or c < max_new]
-            # # print(f"Update Zarr: {dim}, new_holes: {new_holes}")
-            # # min_old, max_old = np.min(old_coords), np.max(old_coords)
-            # # old_holes = [c for c in new_coords if c > min_old or c < max_old]
-            # # print(f"Update Zarr: {dim}, old_holes: {old_holes}")
-            #
-            # # Determine which coordinates in ds_current already exist.
-            # overlap_mask = np.isin(new_coords, old_coords)
-            # ds_extend_dict[dim] = ds_overlap.sel({dim: new_coords[~overlap_mask]})
-            # ds_overlap = ds_overlap.sel({dim: new_coords[overlap_mask]})
 
         # At this point, ds_overlap covers only the coordinates that already exist in the store
         # in every dimension in dims_order. Write these (overlapping) data using region="auto".
         update_overlap_size = np.prod(list(ds_overlap.sizes.values()))
         if update_overlap_size > 0:
-            last_written_ds = self.write_ds(ds_overlap, region="auto")
+            last_written_ds = self.write_ds(ds_overlap, mode="r+", region="auto")
 
         # --- Phase 2: Upward (process extension subsets in reverse order) ---
         # We also update a merged_coords dict from the store.
@@ -628,7 +619,7 @@ class Node:
             ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=np.nan)
 
             # Append the extension subset along the current dimension.
-            last_written_ds = self.write_ds(ds_ext_reindexed, append_dim=dim)
+            last_written_ds = self.write_ds(ds_ext_reindexed, mode="a", append_dim=dim)
 
             # Update merged coordinate for dim: concatenate the old coords with the new ones.
             new_coords_for_dim = dim_coord[dim].values

@@ -1,12 +1,26 @@
 from typing import Tuple, List, Dict
 import numpy as np
 import xarray as xr
+import attrs
 
 from .zarr_schema import Coord
 from . import units
 from .tools import adjust_grid
 
-def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray, sorted: bool)\
+
+@attrs.define(frozen=True)
+class PartialOverlapError(ValueError):
+    coord_name: str
+    idx_split: int
+    coord_len: int
+
+    def __str__(self) -> str:
+        # Build your message from the fields
+        return (f"The updating coord {self.coord_name} has"
+                f"overlap size [{self.idx_split}] < existing coord length [{self.coord_len}].")
+
+
+def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray, schema: Coord)\
     -> Tuple[np.ndarray, int]:
     """
     Return (idx_sort, idx_split)
@@ -18,6 +32,7 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray, sorted: bool)\
     For `sorted==False` the `new_values` in `old_values` comes first in their order in the `old_values`
      then other values from `new_values` are appended.
     """
+    sorted = schema.sorted
     if sorted:
         idx_sort = np.argsort(new_values)
         max_old = np.max(old_values)
@@ -31,13 +46,25 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray, sorted: bool)\
         ])
         idx_sort = np.argsort(keys)
         idx_split = np.sum(np.array(keys) < len(old_values))
+
         # overlap for unsorted must be either whole or none
         # future: sparse interpolation or fill updating DS by
         # existing DS values for coords within overlap range
+        have_part_overlap = (
+            idx_split > 0 and idx_split < len(old_values)
+        )
+        if have_part_overlap:
+            raise PartialOverlapError(
+                schema.name,
+                idx_split,
+                len(old_values),
+            )
+
         if idx_split > 0:
-            assert idx_split == len(old_values), "full overlap expected"
-            # assert np.all(np.array(keys[:idx_split]) < len(old_values))
-            assert np.all(new_values[idx_sort][:idx_split] == old_values)
+            # full overlap, verify that the values are the same
+            update_overlap = new_values[idx_sort][:idx_split]
+            assert np.all(update_overlap == old_values)
+
     return (idx_sort, idx_split)
 
 
@@ -62,12 +89,13 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
         old_part_min = new_sorted[:idx_split][0]
         old_range_min = np.searchsorted(old_values, old_part_min, side='left')
         old_part_max = new_sorted[:idx_split][-1]
-        assert np.max(old_values) <= old_part_max , f"{np.max(old_values)} > {old_part_max}"
         old_range_max = np.searchsorted(old_values, old_part_max, side='right')
         update_old_part = np.array(old_values[old_range_min:old_range_max])
 
         if old_part_max > np.max(old_values):
             extension_start -= 1  # include the first value out of old_values to the extension
+        assert extension_start > len(new_sorted) or np.max(old_values) < new_sorted[extension_start], f"First extension value {new_sorted[extension_start]} <= max old values: {np.max(old_values)}"
+
     else:
         if schema.step_limits is None:
             # no extension allowed
@@ -130,7 +158,7 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset, schema:Dict[s
         d: sort_by_coord(
             ds_update[d].values,
             ds_existing[d].values,
-            schema[d].sorted)
+            schema[d])
         for d in ds_update.dims
     }
 

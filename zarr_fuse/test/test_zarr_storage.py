@@ -1,4 +1,6 @@
 import shutil
+import time
+
 import numpy as np
 import numpy.testing as npt
 from pathlib import Path
@@ -6,6 +8,7 @@ import polars as pl
 import xarray as xr
 import pytest
 import zarr
+import time
 
 import zarr_fuse as zf
 
@@ -49,6 +52,8 @@ def aux_read_struc(fname):
 # Recursively update each node with its corresponding data.
 def _update_tree(node: zf.Node, df_map: dict):
     if node.group_path in df_map:
+        print(f"Updating node {node.group_path}.")
+        assert (Path(node.store.root) / node.group_path).exists()
         node.update(df_map[node.group_path])
     for key, child in node.items():
         _update_tree(child, df_map)
@@ -110,7 +115,7 @@ def _check_ds_attrs_weather(ds, schema_ds):
     # Check that the dataset has the expected attributes.
     assert "description" in ds.attrs
     assert "__structure__" in ds.attrs
-    for key, coord in schema_ds['COORDS'].items():
+    for key, coord in schema_ds.COORDS.items():
         assert key in ds.coords
         assert ds.coords[key].attrs['composed'] == coord.composed
         assert ds.coords[key].attrs['chunk_size'] == coord.chunk_size
@@ -123,13 +128,14 @@ def _check_ds_attrs_weather(ds, schema_ds):
 def test_read_structure_weather(tmp_path):
     # Example YAML file content (as a string for illustration):
     structure, store, tree = aux_read_struc("structure_weather.yaml")
-    assert len(structure['COORDS']) == 2
-    assert len(structure['VARS']) == 4
+    childs, ds_schema = structure
+    assert len(ds_schema.COORDS) == 2
+    assert len(ds_schema.VARS) == 4
     print("Coordinates:")
-    for coord in structure["COORDS"]:
+    for coord in ds_schema.COORDS:
         print(coord)
     print("\nQuantities:")
-    for var in structure["VARS"]:
+    for var in ds_schema.VARS:
         print(var)
 
     # Create a Polars DataFrame with 6 temperature readings.
@@ -148,12 +154,12 @@ def test_read_structure_weather(tmp_path):
 
     # Update the dataset atomically using the Polars DataFrame.
     updated_ds = tree.update(df)
-    _check_ds_attrs_weather(updated_ds, structure)
+    _check_ds_attrs_weather(updated_ds, ds_schema)
 
     # Now, re-read the entire Zarr storage from scratch.
     new_tree = zf.Node.read_store(store)
     new_ds = new_tree.dataset
-    _check_ds_attrs_weather(new_ds, structure)
+    _check_ds_attrs_weather(new_ds, ds_schema)
     print("Updated dataset:")
     print(new_ds)
 
@@ -183,19 +189,21 @@ def test_read_structure_weather(tmp_path):
     # Second update, test merging
     df2 = pl.DataFrame({
         "timestamp": [t4, t4, t4, t3, t3, t3],  #  t1 < t3 < t2 < t4
-        "latitude": [10.0, 15.0, 20.0, 10.0, 15.0, 20.0],   # new (lat=15, lon=10)
-        "longitude": [10.0, 10.0, 20.0, 10.0, 10.0, 20.0],
-        "temp": [380.0, 381.0, 382.0, 383.0, 384.0, 385.0]
+        "latitude": [20.0, 10.0, 20.0, 10.0, 20.0, 20.0],
+        "longitude": [10.0, 10.0, 20.0, 10.0, 20.0, 10.0],
+        "temp": [381.0, 380.0, 382.0, 383.0, 385.0, 384.0]
     })
 
     # Update the dataset atomically using the Polars DataFrame.
     updated_ds = tree.update(df2)
-    _check_ds_attrs_weather(updated_ds, structure)
+    # Time t3 is only used to interpolate to t2, not added to the dataset.
+    assert [*updated_ds.sizes.values()] == [1, 3]
+    _check_ds_attrs_weather(updated_ds, ds_schema)
 
     # Now, re-read the entire Zarr storage from scratch.
     new_tree = zf.Node.read_store(store)
     new_ds = new_tree.dataset
-    _check_ds_attrs_weather(new_ds, structure)
+    _check_ds_attrs_weather(new_ds, ds_schema)
     print("Updated dataset:")
     print(new_ds)
 
@@ -203,18 +211,22 @@ def test_read_structure_weather(tmp_path):
     # We expect that the update function (via update_xarray_nd) will reshape the temperature data
     # into a (time, lat) array, i.e. shape (2, 3), with coordinates "time" and "lat".
     # Check the shape of the temperature variable.
-    assert new_ds["temperature"].shape == (2, 3)
+    assert new_ds["temperature"].shape == (3, 3)
 
     # Check that the "time" coordinate was updated to [1000, 2000]
 
     # check times are sorted
-    np.testing.assert_array_equal(new_ds["time of year"].values, [t1, t3, t2, t4])
+    import pandas as pd
+
+    times_pd = pd.to_datetime([t1, t2, t4], utc=True)
+    ref_times = times_pd.values.astype("datetime64[ns]")
+    np.testing.assert_array_equal(new_ds["time of year"].values, ref_times)
     # !! Wrong order, not sorted
 
 
     # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]
-    np.testing.assert_array_equal(new_ds["latitude"].values, [10.0, 20.0, 20.0, 15.0])
-    np.testing.assert_array_equal(new_ds["longitude"].values, [10.0, 10.0, 20.0, 10.0])
+    np.testing.assert_array_equal(new_ds["latitude"].values, [20.0, 20.0, 10.0])
+    np.testing.assert_array_equal(new_ds["longitude"].values, [20.0, 10.0, 10.0])
 
     # TODO, merged DF, test NaNs out of the update.
     # merged_df = df.update(df2)
@@ -227,13 +239,14 @@ def test_read_structure_weather(tmp_path):
 
 def test_read_structure_tensors(tmp_path):
     structure, store, tree = aux_read_struc("structure_tensors.yaml")
-    assert len(structure['COORDS']) == 3
-    assert len(structure['VARS']) == 5
+    childs, ds_schema = structure
+    assert len(ds_schema.COORDS) == 3
+    assert len(ds_schema.VARS) == 5
     print("Coordinates:")
-    for coord in structure["COORDS"]:
+    for coord in ds_schema.COORDS:
         print(coord)
     print("\nQuantities:")
-    for var in structure["VARS"]:
+    for var in ds_schema.VARS:
         print(var)
 
 

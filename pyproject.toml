@@ -27,6 +27,7 @@ dependencies = [
     "attrs",
     "tzdata",
     "numpy",
+    "scipy",    # implicit dependency of xarray interpolation
     "polars",
     "pint",
     "pint-xarray",
