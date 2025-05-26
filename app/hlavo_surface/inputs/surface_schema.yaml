@@ -102,8 +102,6 @@ yr.no:
             coords: "lat_lon"
 
             
-            
-            
         latitude:
             unit: "deg"
             description: "Signed Earth longitude."
@@ -112,19 +110,27 @@ yr.no:
             # coords = <var's name is self coordinated variable> 
         
         date_time:
-            unit: "TimeStamp"
-            description: "Time coordinate"
-        
-    
+            unit: { tick: "h", tz: "UTC" }
+            description: "Time coordinate, UTC time zone, hour resolution"
+            source_unit: { tick: "h", tz: "UTC" }
+
+
     COORDS:
         date_time: # Defines coord from the variable of the same name. 
             chunk_size: 1024
+            merge: # configuration of merging existing and new coordinates and transfer (interpolation) of the data arrays
+                #allow_inserts: False  # This is currently only supported and default value.
+                #sorted: None  # Automatic, sort coord by itself for non-composed coordinates.
+                step_limits: [ 1, 1, "h" ]
+                # None - no limits add all new coordinates out of existing range.
+                # scalar - regular grid with this step size (use units to convert string values
+                # [min, max] - regular grid with this step size (TODO)
         
         lat_lon:
             # Secondary description valid for composed coordinates. 
             description: "Example of coordinate indexed uniquely by a tuple of values. The source columns are converted to the 1D list of tuples."
             composed: ["latitude", "longitude"]
-            chunk_size: 512
+            chunk_size: 64
         
     ATTRS:
         description:

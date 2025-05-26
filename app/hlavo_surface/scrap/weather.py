@@ -108,10 +108,10 @@ def update_meteo(node, scrapping_fn, df_locs: pl.DataFrame):
 
 def main():
     schema = zarr_fuse.schema.deserialize(inputs.surface_schema_yaml)
-    df_locs = location_df(schema['ATTRS'])
+    df_locs = location_df(schema.ds.ATTRS)
 
     root_node = zarr_fuse.open_storage(schema, workdir = work_dir)
-    update_meteo(root_node['yr.no'], yr_no.get_3day_forecast, df_locs)
+    update_meteo(   root_node['yr.no'], yr_no.get_3day_forecast, df_locs)
 
 if __name__ == '__main__':
     main()
