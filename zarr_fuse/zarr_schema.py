@@ -117,7 +117,6 @@ class Coord:
 
 
 Attrs = Dict[str, Any]
-NodeSchema = Tuple[Dict[str, 'NodeSchema'], 'DatasetSchema']
 
 attrs_field = attrs.field
 # Overcome the name conflict within DatasetSchema class.
@@ -169,6 +168,10 @@ class DatasetSchema:
         """
         return not self.ATTRS and not self.COORDS and not self.VARS
 
+@attrs.define
+class NodeSchema:
+    ds: DatasetSchema
+    groups: Dict[str, 'NodeSchema'] = attrs.field(factory=dict)
 
 
 def dict_deserialize(content: dict) -> NodeSchema:
@@ -194,7 +197,7 @@ def dict_deserialize(content: dict) -> NodeSchema:
     }
 
         # if isinstance(value, dict) else value
-    return (children, ds_schema)
+    return NodeSchema(ds_schema, children)
 
 def deserialize(source: Union[IO, str, bytes, Path]) -> NodeSchema:
     """
@@ -232,8 +235,7 @@ def deserialize(source: Union[IO, str, bytes, Path]) -> NodeSchema:
             raise TypeError("Provided source is not a supported type (IO, str, bytes, or Path)") from e
 
     raw_dict = yaml.safe_load(content)
-    return dict_deserialize(raw_dict)
-
+    return  dict_deserialize(raw_dict)
 
 def convert_value(obj: NodeSchema):
     """
@@ -245,12 +247,11 @@ def convert_value(obj: NodeSchema):
     - For basic types (int, float, str, bool, None), return the value as is.
     - Otherwise, return the string representation of obj.
     """
-    if isinstance(obj, tuple) and len(obj) == 2 and isinstance(obj[1], DatasetSchema):
-        children, ds_schema = obj
-        children_dict = convert_value(children)
+    if isinstance(obj, NodeSchema):
+        children_dict = convert_value(obj.groups)
         assert set(children_dict.keys()).isdisjoint(reserved_keys)
 
-        ds_dict = convert_value(ds_schema)
+        ds_dict = convert_value(obj.ds)
         children_dict.update(ds_dict)
         return children_dict
 
@@ -268,7 +269,7 @@ def convert_value(obj: NodeSchema):
     else:
         return obj
 
-def serialize(hierarchy: dict, path: Union[str, Path]=None) -> str:
+def serialize(node_schema: NodeSchema, path: Union[str, Path]=None) -> str:
     """
     Serialize a hierarchy of dictionaries (and lists/tuples) with leaf values that
     may be instances of attrs classes to a YAML string.
@@ -276,7 +277,7 @@ def serialize(hierarchy: dict, path: Union[str, Path]=None) -> str:
     The conversion is performed by the merged convert_value function which uses a
     custom value serializer for attrs.asdict.
     """
-    converted = convert_value(hierarchy)
+    converted = convert_value(node_schema)
     content = yaml.safe_dump(converted, sort_keys=False)
     if path is None:
         return content

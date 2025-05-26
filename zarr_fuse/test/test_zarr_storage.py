@@ -128,7 +128,7 @@ def _check_ds_attrs_weather(ds, schema_ds):
 def test_read_structure_weather(tmp_path):
     # Example YAML file content (as a string for illustration):
     structure, store, tree = aux_read_struc("structure_weather.yaml")
-    childs, ds_schema = structure
+    ds_schema = structure.ds
     assert len(ds_schema.COORDS) == 2
     assert len(ds_schema.VARS) == 4
     print("Coordinates:")
@@ -239,7 +239,7 @@ def test_read_structure_weather(tmp_path):
 
 def test_read_structure_tensors(tmp_path):
     structure, store, tree = aux_read_struc("structure_tensors.yaml")
-    childs, ds_schema = structure
+    ds_schema = structure.ds
     assert len(ds_schema.COORDS) == 3
     assert len(ds_schema.VARS) == 5
     print("Coordinates:")

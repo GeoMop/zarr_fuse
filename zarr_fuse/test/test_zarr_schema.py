@@ -12,45 +12,46 @@ This requires dask.
 """
 def aux_read_struc(tmp_dir, struc_yaml):
     struc_path = inputs_dir / struc_yaml
-    structure = schema.deserialize(struc_path)
-    assert isinstance(structure, tuple)
-    ch, ds = structure
-    assert isinstance(ch, dict)
-    assert isinstance(ds, schema.DatasetSchema)
-    stream = schema.serialize(structure)
+    node_schema = schema.deserialize(struc_path)
+    assert isinstance(node_schema, schema.NodeSchema)
+    assert isinstance(node_schema.groups, dict)
+    assert isinstance(node_schema.ds, schema.DatasetSchema)
+    stream = schema.serialize(node_schema)
     struc2 = schema.deserialize(stream)
-    assert schema.serialize(structure) == schema.serialize(struc2)
+    assert schema.serialize(node_schema) == schema.serialize(struc2)
 
     schema.serialize(struc2, path=tmp_dir / struc_yaml)
     struc3 = schema.deserialize(tmp_dir / struc_yaml)
-    assert schema.serialize(structure) == schema.serialize(struc3)
+    assert schema.serialize(node_schema) == schema.serialize(struc3)
 
-    return structure
+    return node_schema
 
 @pytest.mark.parametrize("struc_yaml",
         ["structure_weather.yaml",
          "structure_tensors.yaml",
          "structure_tree.yaml"])
 def test_schema_serialization(smart_tmp_path, struc_yaml):
-    struc = aux_read_struc(smart_tmp_path, struc_yaml)
+    node_schema = aux_read_struc(smart_tmp_path, struc_yaml)
     fn_name = f"check_{(inputs_dir/struc_yaml).stem}"
     check_fn = globals()[fn_name]
-    check_fn(struc)
+    check_fn(node_schema)
 
-def check_structure_weather(structure):
-    children, ds_schema = structure
+def check_structure_weather(node_schema):
+    ds_schema = node_schema.ds
     assert isinstance(ds_schema, schema.DatasetSchema), "Expected DatasetSchema instance"
     coords = ds_schema.COORDS
 
     # Check that COORDS is a dictionary with 2 entries.
     assert isinstance(coords, dict), "COORDS must be a dictionary"
-    assert len(coords) == 2, f"Expected 2 coordinate definitions, got {len(structure['COORDS'])}"
+    assert len(coords) == 2, \
+        f"Expected 2 coordinate definitions, got {len(ds_schema.COORDS)}"
 
     # Check that VARS is a dictionary and that only one primary variable remains.
     # In our processed structure, we expect that variables used only as coordinates
     # (e.g., "time of year", "latitude", "longitude") are removed and only "temperature" remains.
     assert isinstance(ds_schema.VARS, dict), "VARS must be a dictionary"
-    assert len(ds_schema.VARS) == 4, f"Expected 1 variable definition, got {len(structure['VARS'])}"
+    assert len(ds_schema.VARS) == 4, \
+        f"Expected 1 variable definition, got {len(ds_schema.VARS)}"
     assert "temperature" in ds_schema.VARS, "Expected 'temperature' variable in VARS"
 
     # Print coordinate definitions.
@@ -67,8 +68,9 @@ def check_structure_weather(structure):
         print(f"{var_name}: {var_details}")
 
 def check_structure_tensors(structure):
-    children, ds_schema = structure
-    assert isinstance(ds_schema, schema.DatasetSchema), "Expected DatasetSchema instance"
+    ds_schema = structure.ds
+    assert isinstance(ds_schema, schema.DatasetSchema), \
+        "Expected DatasetSchema instance"
 
     assert len(ds_schema.COORDS) == 3
     assert len(ds_schema.VARS) == 5
@@ -80,13 +82,14 @@ def check_structure_tensors(structure):
         print(var)
 
 def _check_node(struc, ref_node):
-    children, ds_schema = struc
+    ds_schema = struc.ds
     assert isinstance(ds_schema, schema.DatasetSchema), "Expected DatasetSchema instance"
 
     vars, coords = ref_node
     assert set(ds_schema.VARS.keys()) == set(vars)
     assert set(ds_schema.COORDS.keys()) == set(coords)
-    return children
+    return struc.groups
+
 def check_structure_tree(structure):
     ref_node = (["temperature", "time"], ["time"])
 

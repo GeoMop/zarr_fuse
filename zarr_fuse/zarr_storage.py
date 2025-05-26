@@ -12,7 +12,7 @@ from pathlib import Path
 from . import zarr_schema, units
 from .logger import get_logger
 from .interpolate import interpolate_ds
-from .zarr_schema import DatasetSchema
+from .zarr_schema import DatasetSchema, NodeSchema
 
 """
 tuple val coords:
@@ -101,7 +101,7 @@ def zarr_store_open(zarr_url, type='guess', **kwargs):
     storage = call_with_filtered_kwargs(*args, **kwargs)
     return storage
 
-def open_storage(schema=None, **kwargs):
+def open_storage(schema:zarr_schema.NodeSchema | Path, **kwargs):
     """
     Open existing or create a new ZARR storage according to given schema.
     Function arguments overrides respective schema 'ATTRS' values.
@@ -114,18 +114,20 @@ def open_storage(schema=None, **kwargs):
     'workdir' used for relative local urls.
     Return: root Node
     """
-    if isinstance(schema, dict):
-        schema_dict = schema
+    if isinstance(schema, NodeSchema):
+        node_schema = schema
     elif isinstance(schema, (str, Path)):
-        schema_dict = zarr_schema.deserialize(schema)
+        node_schema = zarr_schema.deserialize(schema)
+    else:
+        raise TypeError(f"Unsupported schema type: {type(schema)}. Expected NodeSchema or Path.")
 
-    store_attrs = schema['ATTRS'].copy()
+    store_attrs = node_schema.ds.ATTRS.copy()
     store_attrs.update(kwargs)
     zarr_url = store_attrs['store_url']
     type = store_attrs.get('store_type', 'guess')
     kwargs.update(store_attrs)
     storage = zarr_store_open(zarr_url, type=type, **kwargs)
-    return Node("", storage, new_schema = schema_dict)
+    return Node("", storage, new_schema = node_schema)
 
 class Node:
     """
@@ -287,7 +289,8 @@ class Node:
 
 
 
-    def __init__(self, name, store, parent=None, new_schema=None):
+    def __init__(self, name, store, parent=None,
+                 new_schema:zarr_schema.NodeSchema=None):
         """
         Parameters:
           name (str): The name of the node. For the root node, use an empty string ("").
@@ -345,19 +348,16 @@ class Node:
         if new_node_schema is None:
             # node in storage but not in schema
             # use ds_schema from the storage and empty children dict
-            schema_children = {}
-            new_ds_schema = self.schema
-        else:
-            schema_children, new_ds_schema = new_node_schema
+            new_node_schema = zarr_schema.NodeSchema(self.schema)
 
-        self._update_schema_ds(new_ds_schema)
+        self._update_schema_ds(new_node_schema.ds)
 
         child_node_names = set([key for key, _ in self._storage_group_paths()])
-        child_node_names.update(schema_children.keys())
+        child_node_names.update(new_node_schema.groups.keys())
 
         def make_child(key):
             try:
-                new_child_schema = schema_children[key]
+                new_child_schema = new_node_schema.groups[key]
             except KeyError:
                 #
                 self.logger.warning(f"Key {key} is missing in the new schema, keeping it.")
@@ -455,8 +455,7 @@ class Node:
         :return:
         """
         node_schema = zarr_schema.deserialize(self.dataset.attrs['__structure__'])
-        children, ds_schema = node_schema
-        return ds_schema
+        return node_schema.ds
 
 
     def export_schema(self):
@@ -589,7 +588,7 @@ class Node:
         last_written_ds = None
         ds_extend_dict = {}
         ds_overlap = ds_update.copy()
-        dims_order = tuple(ds_update.dims.keys())
+        dims_order = tuple(ds_update.coords.keys())
         for dim, idx in split_indices:
             ds_extend_dict[dim] = ds_overlap.isel({dim: slice(idx, None)})
             ds_overlap = ds_overlap.isel({dim: slice(0, idx)})

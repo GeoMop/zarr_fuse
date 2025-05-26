@@ -6,7 +6,13 @@ import dateutil
 import attrs
 import time
 
+
 ureg = pint.UnitRegistry()
+
+ureg.define('bool = []')
+ureg.define('boolean = bool')          # alias
+ureg.define('true  = 1 bool')         # allow parsing "true"
+ureg.define('false = 0 bool')
 
 
 # Map common timezone abbreviations to fixed-offset tzinfo
@@ -162,19 +168,10 @@ class DateTimeQuantity:
                 f"unit={self.units} tz_shift={self._unit.tz_shift}h>")
 
 
-def create_quantity(values, from_unit):
+def _create_dt_quantity(values, dt_unit):
     """
-    Create pint.Quantity for numeric or DateTimeQuantity for datetime strings.
+    Create a DateTimeQuantity from a numpy array of datetime64 values and a DateTimeUnit.
     """
-    arr = np.asarray(values)
-    try:
-        if arr.dtype.kind in ('U', 'S', 'O'):
-            arr = arr.astype(float)
-        return ureg.Quantity(arr, from_unit)
-    except Exception:
-        pass
-    assert isinstance(from_unit, DateTimeUnit), "from_unit must be 'str' or 'DateTimeUnit'"
-    dt_unit = from_unit
     parsed = []
     for val in values:
         dt = dateutil.parser.parse(str(val),
@@ -193,6 +190,19 @@ def create_quantity(values, from_unit):
         parsed.append(dt_naive)
     np_dates = np.array([np.datetime64(dt, dt_unit.tick) for dt in parsed])
     return DateTimeQuantity(np_dates, dt_unit)
+
+def create_quantity(values, from_unit):
+    """
+    Create pint.Quantity for numeric or DateTimeQuantity for datetime strings.
+    """
+    arr = np.asarray(values)
+    if isinstance(from_unit, DateTimeUnit):
+        return _create_dt_quantity(arr, from_unit)
+
+    if arr.dtype.kind in ('U', 'S', 'O'):
+        arr = arr.astype(float)
+
+    return ureg.Quantity(arr, from_unit)
 
 
 def step_unit(unit: str):
