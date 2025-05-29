@@ -3,8 +3,9 @@ ureg = UnitRegistry()
 set_application_registry(ureg)
 
 # Use of relative imports is recomenden  in __init__.py
-from .zarr_storage import Node, open_storage
 from . import zarr_schema as schema
+from . import units
+from .zarr_storage import Node, open_storage
 
 try:
     from . import plot

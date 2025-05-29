@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zarr_fuse"
-version = "0.1.0"
+version = "0.2.0"
 description = "Collecting and merging of scientific datasets from measurements and simulation sampling, further usable for creating various machine learning datasets."
 readme = "README.md"
 urls = { Homepage = "https://github.com/geomop/zarr_fuse" }
@@ -25,7 +25,9 @@ requires-python = ">=3.11" # at least due to zarr>=3.x
 dependencies = [
     "PyYAML",
     "attrs",
+    "tzdata",
     "numpy",
+    "scipy",    # implicit dependency of xarray interpolation
     "polars",
     "pint",
     "pint-xarray",

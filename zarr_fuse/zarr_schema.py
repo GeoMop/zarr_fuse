@@ -2,23 +2,41 @@ import yaml
 import attrs
 import numpy as np
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Union, IO
+from typing import Optional, List, Dict, Any, Union, IO, Tuple
+
+from . import units
 
 reserved_keys = set(['ATTRS', 'COORDS', 'VARS'])
 
 
+def _unit_converter(unit):
+    """
+    Convert unit to a string.
+    """
+    if unit is None:
+        return None
+    elif isinstance(unit, str):
+        return unit
+    elif isinstance(unit, dict):
+        return units.DateTimeUnit(**unit)
+    else:
+        raise TypeError(f"Unsupported unit type: {type(unit)}")
+
 @attrs.define
 class Variable:
     name: str
-    unit: Optional[str] = None
+    unit: Optional[str] = attrs.field(default='', converter=_unit_converter)    # dimensionless
     description: Optional[str] = None
     coords: Union[str, List[str]] = None
     df_col: Optional[str] = None
+    source_unit: Optional[str] = attrs.field(default=None, converter=_unit_converter)
 
     def __attrs_post_init__(self):
         """Set df_cols to [name] if not explicitly provided."""
         if self.df_col is None:
             self.df_col = self.name
+        if self.source_unit is None:
+            self.source_unit = self.unit
         if self.coords is None:
             self.coords = [self.name]
         if isinstance(self.coords, str):
@@ -29,52 +47,54 @@ class Variable:
         return dict(
             unit=self.unit,
             description=self.description,
-            df_col=self.df_col
+            df_col=self.df_col,
+            source_unit = self.source_unit
         )
 
-
-def _coord_values_converter(values):
-    if values is None:
-        return np.array([])
-    elif isinstance(values, int):
-        size = values
-        return np.arange(size)
-    else:
-        values = np.atleast_1d(values)
-        assert values.ndim == 1
-        return values
-
-@attrs.define
+@attrs.define(slots=False)
 class Coord:
     name: str
     description: Optional[str] = None
     composed: Dict[str, List[Any]] = None
     chunk_size: Optional[int] = 1024    # Explicit chunk size, 1024 default. Equal to 'len(values)' for fixed size coord.
-    values: Optional[np.ndarray]  = attrs.field(eq=attrs.cmp_using(eq=np.array_equal), default=None)             # Fixed size, given coord values.
+    step_limits: Optional[List[float]] = []    # [min_step, max_step, unit]
+    #values: Optional[np.ndarray]  = attrs.field(eq=attrs.cmp_using(eq=np.array_equal), default=None)             # Fixed size, given coord values.
 
     def __init__(self, **dict):
         if 'composed' not in dict or len(dict['composed']) == 0 or dict['composed'] is None:
             dict['composed'] = [dict['name']]
-        _values = dict.get('values', [])
-        if isinstance(_values, int):
-            _values = np.atleast_2d(np.arange(_values)).T
-        elif isinstance(_values, list):
-            if len(_values) == 0:
-                _values = np.empty( (0, len(dict['composed'])) )
-            else:
-                a = np.asarray(_values)
-                if a.ndim == 1:
-                    # Convert a 1D array to a column vector.
-                    _values= a[:, np.newaxis]
-                _values = np.atleast_2d(_values)
-
-        dict['values'] = _values
+        # _values = dict.get('values', [])
+        # if isinstance(_values, int):
+        #     _values = np.atleast_2d(np.arange(_values)).T
+        # elif isinstance(_values, list):
+        #     if len(_values) == 0:
+        #         _values = np.empty( (0, len(dict['composed'])) )
+        #     else:
+        #         a = np.asarray(_values)
+        #         if a.ndim == 1:
+        #             # Convert a 1D array to a column vector.
+        #             _values= a[:, np.newaxis]
+        #         _values = np.atleast_2d(_values)
+        #
+        # dict['values'] = _values
 
         self.name = dict['name']
         self.description = dict.get('description', None)
         self.composed = dict['composed']
-        self.values = dict['values']
+        #self.values = dict['values']
         self.chunk_size = dict.get('chunk_size', 1024)
+        self.step_limits = dict.get('step_limits', [])
+        if self.step_limits is not None and len(self.step_limits) > 0:
+            if len(self.step_limits) == 1:
+                self.step_limits = 2 * self.step_limits
+            if len(self.step_limits) == 2:
+                self.step_limits = [*self.step_limits, '']
+            assert len(self.step_limits) == 3, f"step_limits should be a list of 3 elements, got {self.step_limits}"
+            assert isinstance(self.step_limits[2], str)
+
+        self.sorted = not self.is_composed()
+        # May be explicit in the future. Namely, if we support interpolation of sparse coordinates.
+        self._variables = None # set in DatasetSchema.__init__
 
     @property
     def attrs(self):
@@ -87,57 +107,99 @@ class Coord:
     def is_composed(self):
         return len(self.composed) > 1
 
+    def step_unit(self):
+        """
+        Return the unit of the step_limits.
+        """
+        coord_unit = self._variables[self.name].unit
+        step_unit = units.step_unit(coord_unit)
+        return step_unit
+
+
 Attrs = Dict[str, Any]
-#ZarrNodeSchema = Dict[str, Union[Attrs, Dict[str, Variable], Dict[str, Coord], 'ZarrNodeSchema']]
+
+attrs_field = attrs.field
+# Overcome the name conflict within DatasetSchema class.
+@attrs.define
+class DatasetSchema:
+    ATTRS: Attrs = attrs_field(factory=dict)
+    COORDS: Dict[str, Coord] = attrs_field(factory=dict)
+    VARS: Dict[str, Variable] = attrs_field(factory=dict)
+
+
+    def __init__(self, attrs, vars, coords):
+        self.ATTRS = attrs
+        self.VARS = DatasetSchema.safe_instance(Variable, vars)
+        self.COORDS = DatasetSchema.safe_instance(Coord, coords)
+
+        # Add implicitely defined coords.
+        implicit_coords = [
+            coord
+            for var in self.VARS.values()
+            for coord in var.coords
+        ]
+        for coord in set(implicit_coords):
+            coord_obj = self.COORDS.setdefault(coord, Coord(name=coord))
+            if not coord_obj.is_composed():
+                self.VARS.setdefault(coord, Variable(coord))
+
+        # Link coords to variables
+        for coord in self.COORDS.values():
+            coord._variables = self.VARS
+
+    @staticmethod
+    def safe_instance(cls, kwargs_dict):
+        """
+        Create an instance of the given class with the provided keyword arguments.
+        If the class is not defined, return None.
+        """
+
+        def set_name(d, name):
+            assert isinstance(d, dict), f"Expected a dictionary, got: {d}"
+            d['name'] = name
+            return d
+
+        vars = {k: cls(**set_name(v, k)) for k, v in kwargs_dict.items()}
+        return vars
+
+    def is_empty(self):
+        """
+        Check if the schema is empty.
+        """
+        return not self.ATTRS and not self.COORDS and not self.VARS
 
 @attrs.define
-class ZarrNodeSchema:
-    attrs: Attrs
-    coords: Dict[str, Coord]
-    vars: Dict[str, Variable]
+class NodeSchema:
+    ds: DatasetSchema
+    groups: Dict[str, 'NodeSchema'] = attrs.field(factory=dict)
 
 
-def set_name(d, name):
-    assert isinstance(d, dict), f"Expected a dictionary, got: {d}"
-    d['name'] = name
-    return d
-
-def dict_deserialize(content: dict) -> dict:
+def dict_deserialize(content: dict) -> NodeSchema:
     """
-    Recursively deserializes a dictionary.
-    Processes special keys:
+    Recursively deserializes the schema = tree of node dictionaries.
+    Create instances of DatasetScheme from special keys:
       - ATTRS: kept as is
       - COORDS: converted into a list of Coord objects
       - VARS: converted into a list of Quantity objects
     Other keys are processed recursively.
+
+    TODO: report path to error key
     """
-    result = {}
-    #assert 'VARS' in content, ValueError("VARS key is required.")
-    #assert 'COORDS' in content, ValueError("COORDS key is required.")
-    result['ATTRS'] = content.get('ATTRS', {})
-    vars = content.get('VARS', {})
-    result['VARS'] = {k: Variable(**set_name(v, k)) for k, v in vars.items()}
-    coords = content.get('COORDS', {})
-    result['COORDS'] = {k: Coord(**set_name(c, k)) for k, c in coords.items()}
+    ds_schema = DatasetSchema(
+        attrs = content.pop('ATTRS', {}),
+        vars=content.pop('VARS', {}),
+        coords = content.pop('COORDS', {})
+    )
 
-    # Add implicitely defined coords.
-    implicit_coords = [
-        coord
-        for var in result.get('VARS', {}).values()
-        for coord in var.coords
-    ]
-    for coord in set(implicit_coords):
-        coord_obj = result['COORDS'].setdefault(coord, Coord(name=coord))
-        if not coord_obj.is_composed():
-            result['VARS'].setdefault(coord, Variable(coord))
+    children = {
+        key: dict_deserialize(value)
+        for key, value in content.items()
+    }
 
+        # if isinstance(value, dict) else value
+    return NodeSchema(ds_schema, children)
 
-    for key, value in content.items():
-        if key not in ['ATTRS', 'COORDS', 'VARS']:
-            result[key] = dict_deserialize(value) if isinstance(value, dict) else value
-    return result
-
-def deserialize(source: Union[IO, str, bytes, Path]) -> dict:
+def deserialize(source: Union[IO, str, bytes, Path]) -> NodeSchema:
     """
     Deserialize YAML from a file path, stream, or bytes containing YAML content.
 
@@ -173,10 +235,9 @@ def deserialize(source: Union[IO, str, bytes, Path]) -> dict:
             raise TypeError("Provided source is not a supported type (IO, str, bytes, or Path)") from e
 
     raw_dict = yaml.safe_load(content)
-    return dict_deserialize(raw_dict)
+    return  dict_deserialize(raw_dict)
 
-
-def convert_value(obj):
+def convert_value(obj: NodeSchema):
     """
     Recursively convert an object for YAML serialization.
 
@@ -186,8 +247,19 @@ def convert_value(obj):
     - For basic types (int, float, str, bool, None), return the value as is.
     - Otherwise, return the string representation of obj.
     """
+    if isinstance(obj, NodeSchema):
+        children_dict = convert_value(obj.groups)
+        assert set(children_dict.keys()).isdisjoint(reserved_keys)
+
+        ds_dict = convert_value(obj.ds)
+        children_dict.update(ds_dict)
+        return children_dict
+
     if attrs.has(obj):
-        return attrs.asdict(obj, value_serializer=lambda inst, field, value: convert_value(value))
+        # Serialize attrs instances, serialize values recursively.
+        return attrs.asdict(obj,
+                            value_serializer=
+                            lambda inst, field, value: convert_value(value))
     elif isinstance(obj, dict):
         return {k: convert_value(v) for k, v in obj.items()}
     elif hasattr(obj, 'dtype'):
@@ -197,7 +269,7 @@ def convert_value(obj):
     else:
         return obj
 
-def serialize(hierarchy: dict, path: Union[str, Path]=None) -> str:
+def serialize(node_schema: NodeSchema, path: Union[str, Path]=None) -> str:
     """
     Serialize a hierarchy of dictionaries (and lists/tuples) with leaf values that
     may be instances of attrs classes to a YAML string.
@@ -205,7 +277,7 @@ def serialize(hierarchy: dict, path: Union[str, Path]=None) -> str:
     The conversion is performed by the merged convert_value function which uses a
     custom value serializer for attrs.asdict.
     """
-    converted = convert_value(hierarchy)
+    converted = convert_value(node_schema)
     content = yaml.safe_dump(converted, sort_keys=False)
     if path is None:
         return content

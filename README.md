@@ -19,6 +19,10 @@ Near term future:
 - full support for remote (S3) storage, keys management, CESNET specialities
 - unify design of plotting classes
 
+Changes in SCHEMA:
+- move complete COORD spec into COORDS, Undrestand coords as extendet VARS
+
+
 Contemplated features:
 - move to TileDB backend with native support for checkpointing/versioning and sparse dimensions
   [ChatGPT research](https://chatgpt.com/share/68173f9f-3748-8004-ab29-4cedd87ce136)
@@ -40,6 +44,7 @@ Contemplated features:
 
 - Documentation of raw data collection and merging process.
 - Reproducible publication on ZENODO under FAIR principles.
+- Metadata schemata: DublinCore, Data Cite, DCAT, DDI (TODO: review) 
 
 Expected usecases:
 - Continuous collection of weather data from yr.no forecast to form a consistent dataset of historical data.

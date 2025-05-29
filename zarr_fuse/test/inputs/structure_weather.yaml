@@ -4,6 +4,7 @@ VARS:
       unit: "K"
       description: "Temperature in Kelvin"
       df_col: "temp"
+      source_unit: "degC"
       coords: ["time of year", "lat_lon"]
     
     longitude:
@@ -19,22 +20,33 @@ VARS:
       # coords = <var's name is self coordinated variable> 
  
     "time of year":
-      unit: "seconds"
+      unit: {tick: "h", tz: "UTC"}
       description: "Time coordinate"
       df_col: "timestamp"
+      source_unit: {tick: "s", tz: "CET"} 
  
  
 COORDS:
-    "time of year": # Defines coord from the variable of the same name. 
+    "time of year": # Defines coord from the variable of the same name.
+
+      sorted: None # Automatic, sort coord by itself.
       chunk_size: 1024
+      merge: # configuration of merging existing and new coordinates and transfer (interpolation) of the data arrays
+        #allow_inserts: False  # This is currently only supported and default value.
+        #sorted: None  # Automatic, sort coord by itself for non-composed coordinates.
+        step_limits: [1, 1, "h"]
+        # None - no limits add all new coordinates out of existing range.
+        # scalar - regular grid with this step size (use units to convert string values
+        # [min, max] - regular grid with this step size (TODO)
+
       
     "lat_lon":
       # Secondary description valid for composed coordinates. 
       description: "Example of coordinate indexed uniquely by a tuple of values. The source columns are converted to the 1D list of tuples."
       composed: ["latitude", "longitude"]
-      values: 
-        - [53.2, 42.4]
-        - [53.3, 42.5]
+      # Composed implies unsorted, no support for sparse data interpolation, right now.
+      # Interpolation currently is mainly a mean to eliminate insertion of new coords into range of old coords.
+      sorted: []  # Unsorted
       chunk_size: 512
 
 

@@ -32,7 +32,7 @@ CpuBuffer = zarr.core.buffer.cpu.Buffer
 from datetime import datetime, timezone
 
 
-def get_logger(store, name: str = None) -> logging.Logger:
+def get_logger(store, path, name: str = None) -> logging.Logger:
     """
     Create and return a logger that writes into the given Zarr store
     via StoreLogHandler.
@@ -49,7 +49,7 @@ def get_logger(store, name: str = None) -> logging.Logger:
     logging.Logger
         Configured logger instance.
     """
-    logger_name = name or f"zarr_logger_{id(store)}"
+    logger_name = name or f"zarr_logger_{id(store)}{path}"
     logger = logging.getLogger(logger_name)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
@@ -59,7 +59,7 @@ def get_logger(store, name: str = None) -> logging.Logger:
         logger.removeHandler(h)
 
     # Attach our StoreLogHandler
-    handler = StoreLogHandler(store)
+    handler = StoreLogHandler(store, path)
     logger.addHandler(handler)
 
     return logger
@@ -75,15 +75,15 @@ class StoreLogHandler(logging.Handler):
     that method will swap itself out for the full-read/write (_append_safe).
     """
 
-    def __init__(self, store, partial_write: bool = False):
+    def __init__(self, store, group_path, partial_write: bool = False):
         super().__init__()
         self.store = store
+        self.group_path = group_path
         self.prefix = "logs"
         self.setFormatter(logging.Formatter(
-            "%(asctime)s %(levelname)-5s %(message)s",
+            f"%(asctime)s %(levelname)-5s [{self.group_path}] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S"
         ))
-
         # start private asyncio loop in a thread
         self._append_fut = None
         self._buffer_prototype = zarr.core.buffer.core.default_buffer_prototype()

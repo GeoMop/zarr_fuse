@@ -31,7 +31,8 @@ def test_store_log_handler(tmp_path, url):
     zarr.open_group(store, mode='w')
 
     # create our handler
-    handler = StoreLogHandler(store)
+    node_path="/yr_no"
+    handler = StoreLogHandler(store, node_path)
 
     # minimal sanity on the handler
     assert handler.store is store
@@ -82,4 +83,4 @@ def test_store_log_handler(tmp_path, url):
         # starts with a timestamp
         assert timestamp_re.match(line)
         # ends with "LEVEL message"
-        assert line.endswith(f"{lvl} {msg}")
+        assert line.endswith(f"{lvl} [{node_path}] {msg}")
