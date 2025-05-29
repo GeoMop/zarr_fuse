@@ -69,7 +69,7 @@ odyssey:
 
         latitude:
             unit: "deg"
-            description: "Signed Earth longitude."
+            description: "Signed Earth latitude."
             coords: "lat_lon"
             # df_col = <var's name is default source data frame column>
             # coords = <var's name is self coordinated variable>
@@ -198,7 +198,7 @@ yr.no:
             
         latitude:
             unit: "deg"
-            description: "Signed Earth longitude."
+            description: "Signed Earth latitude."
             coords: "lat_lon"
             # df_col = <var's name is default source data frame column>
             # coords = <var's name is self coordinated variable> 
