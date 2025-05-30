@@ -568,7 +568,7 @@ def determine_time_interval(schema, df_locs):
 
 def main():
     schema = zarr_fuse.schema.deserialize(inputs.surface_schema_yaml)
-    df_locs = location_df(schema['ATTRS'])
+    df_locs = location_df(schema.ds.ATTRS)
 
     # determine_time_interval(schema, df_locs)
     print(df_locs)
@@ -607,6 +607,11 @@ def main():
     # read and transform CSV
     ods_df = read_odyssey_data(download_dir, df_locs)
     print(ods_df)
+
+    v = ods_df.select('latitude')
+    print('n_unique: ', v.n_unique())
+    print('min and max: ', v.min(), v.max())
+    print(v)
 
     root_node = zarr_fuse.open_storage(schema, workdir=work_dir)
     odyssey_node = root_node['odyssey']
