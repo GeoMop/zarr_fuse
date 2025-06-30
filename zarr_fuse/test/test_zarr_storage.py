@@ -9,6 +9,8 @@ import xarray as xr
 import pytest
 import zarr
 import time
+import fsspec
+from zarr.storage import FsspecStore
 
 import zarr_fuse as zf
 
@@ -35,8 +37,10 @@ def aux_read_struc(fname):
     store_path = (workdir / fname).with_suffix(".zarr")
 
     # Start with no existiong storage
-    shutil.rmtree(store_path, ignore_errors=True)
+    if store_path.exists():
+        shutil.rmtree(store_path)
     local_store = zarr.storage.LocalStore(store_path)
+    tree = zf.Node("", local_store, new_schema=schema)
 
     # memory_store = zarr.storage.MemoryStore()
 
@@ -44,10 +48,21 @@ def aux_read_struc(fname):
 
     # s3_fs = fsspec.filesystem('s3', key='YOUR_ACCESS_KEY', secret='YOUR_SECRET_KEY')
     # s3_store = zarr.FSStore('bucket-name/path/to/zarr', filesystem=s3_fs)
+    s3_url = f"s3://test-moc-awscli/{Path(fname).with_suffix('.zarr')}"
+    storage_options = {
+        "key": "",
+        "secret": "",
+        "client_kwargs": {
+            "endpoint_url": "https://s3.cl4.du.cesnet.cz",
+            "region_name": "du"
+        },
+        "config_kwargs": {"s3": {"addressing_style": "path"}}
+    }
 
-    tree = zf.Node("", local_store, new_schema=schema)
-    return schema, local_store, tree
-
+    fs = fsspec.filesystem("s3", **storage_options)
+    fs.put(str(store_path), f"test-moc-awscli/{Path(fname).with_suffix('.zarr')}", recursive=True)
+    s3_store = FsspecStore.from_url(s3_url, storage_options=storage_options, read_only=False)
+    return schema, s3_store, zf.Node("", s3_store, new_schema=schema) # You may need to re-instantiate the Node with the S3 store
 
 # Recursively update each node with its corresponding data.
 def _update_tree(node: zf.Node, df_map: dict):
@@ -384,9 +399,3 @@ def test_pivot_nd():
     ])
 
     np.testing.assert_allclose(arr, expected_arr, equal_nan=True)
-
-
-
-
-
-
