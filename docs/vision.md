@@ -55,6 +55,8 @@ and training neural network models.
     - priarly web application plotting
     - desiged with reusability in mind 
 
+    
+    
 ## Data as virtual N-dimensional array
 For their specificity, we conceptualy distinguish five types of cordinates (aaxes of the array).
 Ve assume that each indivudual number of the dataset has unique combination of these five coordinates.
@@ -94,6 +96,21 @@ Moreover these coordinates types are clearly independent
 - unit
 - possible comparison of same quantity in dfferent locations in common plot
 
+## Technical solution
+
+- use Kubernetes containers for ingress services, scalable for various ingress types and intensity
+- separate containers for input transformation and validation (postponed)
+  candidate tools: Pandera, GX, Pachyderm, Dagster
+- use xarrays + zarr + icechunk for the storage:
+  - merge of contribution dataframes
+  - read slices
+  - automatic down sampling
+  - house keeping
+- postprocessing (postponed, Pachyderm, Dagster)
+  - downsampling
+  - statistics
+  - offline analysis
+- 
 
 
 ## Relevant projects
@@ -144,3 +161,34 @@ Can be applied with GX or Pandera to transform and validate input dataframes or 
  That seems to be more flexible but also more coding than  GX.
  
 [**Frictionless**](https://frictionlessdata.io/) Small scale date, limited interoperability. Inferior to previous tools and thir combinations.
+
+
+### Vizualize
+
+Starting stack:
+Jupyter
+Voila
+HoloViz Panel’s GridStack / FastGridTemplate (figures as dynamic tiles)
+Bokeh 
+
+HLAVO:
+Map:
+- selection of nodes to plot in the map:
+    - weather station
+    - soil profile measurements
+    - wells
+    - simulation grid
+    - moisture measured interpolated
+    - moisture simulated
+
+Surface plot:    
+- selection of up to three points to plot from map
+- single point: time comparison of measure and predicted quantity
+- selection of quantities to plot
+- selection of depths to plot (in single figure)
+- time series correlation analysis (for two quantities)
+
+Well plot:
+- up to three well timelines
+- time series correlation analysis (for two quantities)
+- compare measurement and prediction

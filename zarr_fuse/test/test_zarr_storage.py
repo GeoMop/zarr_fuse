@@ -37,21 +37,21 @@ def aux_read_struc(fname):
     store_path = (workdir / fname).with_suffix(".zarr")
 
     # Start with no existiong storage
-    if store_path.exists():
-        shutil.rmtree(store_path)
-    local_store = zarr.storage.LocalStore(store_path)
-    tree = zf.Node("", local_store, new_schema=schema)
+    # if store_path.exists():
+    #     shutil.rmtree(store_path)
+    # local_store = zarr.storage.LocalStore(store_path)
+    # tree = zf.Node("", local_store, new_schema=schema)
 
     # memory_store = zarr.storage.MemoryStore()
 
     # zip_store = zarr.storage.ZipStore('path/to/archive.zip', mode='w')
-
+    bucket_name = "test-zarr-storage"
     # s3_fs = fsspec.filesystem('s3', key='YOUR_ACCESS_KEY', secret='YOUR_SECRET_KEY')
     # s3_store = zarr.FSStore('bucket-name/path/to/zarr', filesystem=s3_fs)
-    s3_url = f"s3://test-moc-awscli/{Path(fname).with_suffix('.zarr')}"
+    s3_url = f"s3://{bucket_name}/{Path(fname).with_suffix('.zarr')}"
     storage_options = {
-        "key": "",
-        "secret": "",
+        "key": "4UD5K2LCS5ZU8GHL5TJS",
+        "secret": "VztZ2COyVsgADEGbftd1Zt6XdtN6QXwOhSfEKT0Y",
         "client_kwargs": {
             "endpoint_url": "https://s3.cl4.du.cesnet.cz",
             "region_name": "du"
@@ -59,8 +59,8 @@ def aux_read_struc(fname):
         "config_kwargs": {"s3": {"addressing_style": "path"}}
     }
 
-    fs = fsspec.filesystem("s3", **storage_options)
-    fs.put(str(store_path), f"test-moc-awscli/{Path(fname).with_suffix('.zarr')}", recursive=True)
+    fs = fsspec.filesystem("s3", asynchronous=False, **storage_options)
+    fs.put(str(store_path), f"{bucket_name}/{Path(fname).with_suffix('.zarr')}", recursive=True)
     s3_store = FsspecStore.from_url(s3_url, storage_options=storage_options, read_only=False)
     return schema, s3_store, zf.Node("", s3_store, new_schema=schema) # You may need to re-instantiate the Node with the S3 store
 

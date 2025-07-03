@@ -37,6 +37,8 @@ dependencies = [
     # "filterpy",  # commented out dependency
     "seaborn",
     # "pftools[all]",  # commented out dependency
+    "s3fs",
+    "fsspec",
     "zarr",       # 3.x does not support write_empty_chunks
     "dask",       # for compatibility with xarray 0.18.2
     "xarray",     # 0.19.0 does not support zarr 2.x well
