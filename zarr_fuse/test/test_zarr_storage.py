@@ -384,9 +384,3 @@ def test_pivot_nd():
     ])
 
     np.testing.assert_allclose(arr, expected_arr, equal_nan=True)
-
-
-
-
-
-

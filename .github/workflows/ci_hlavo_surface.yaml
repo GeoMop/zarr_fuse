@@ -6,22 +6,21 @@ on:
     - cron: '45 9  * * *'   # 09:45 UTC
     - cron: '15 13 * * *'   # 13:15 UTC
     - cron: '45 20 * * *'   # 20:45 UTC
-    
-env:
-  DOCKER_USER: ${{secrets.DOCKER_HUB_FLOW123D_USERNAME}}
-  DOCKER_PASSWORD: ${{secrets.DOCKER_HUB_FLOW123D_TOKEN}}
-  environment: gnu
 
+env:
+  environment: gnu
 jobs:
   yr_no_scrap:
     runs-on: ubuntu-latest
-    name: Read and store latest forcast from yr.no API.
-      steps:
-        - name: Checkout
-          uses: actions/checkout@v4
-        - name: Install hlavo_surface environment.
-          run: |
-            bash app/hlavo_surface/setup_env
-        - name: Run scrapper
-          run: |
-            app/hlavo_surface/venv/bin/python3 -m hlavo_surface.scrap.weather 
+    name: Read and store latest forecast from yr.no API.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-ci-hlavo-surface
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install hlavo_surface environment.
+        run: |
+          bash app/hlavo_surface/setup_env
+      - name: Run scrapper
+        run: |
+          app/hlavo_surface/venv/bin/python3 -m hlavo_surface.scrap.weather
