@@ -11,7 +11,11 @@ requirements = [
     "ipykernel",
     "ipympl",
     "jupyter",
-    "voila"]
+    "voila",
+    # web DataFlow xpert.com scrapping
+    "python-dotenv",
+    "selenium",
+    "requests"]
 
 
 setup(
