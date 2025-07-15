@@ -1,19 +1,23 @@
-# Syntex of Zarr Fuse Scehma YAML file
+# Syntax of Zarr Fuse Schema YAML file
 
 ## Tree
-Schema is composed of a tree of dictionaries corresponding to Nodes/groups of the Zarr storage.
+The ZARR storage is a tree of nodes, each node holds a multidimensional dataset.
+ZARR storage schema follows this tree structure, it is composed of a tree of dictionaries corresponding 
+to nodes/groups of the Zarr storage.
 
 ## Node schema
-Dictionaries with reserved keys: [ATTRS, COORDS, VARS] define a dataset Node. These defines structure of 
-an xarray Dataset of the Node.  
+A Node Schema directory consists of keys for its child nodes and optional reserved keys: [ATTRS, COORDS, VARS] 
+defining structure of the node's dataset.
 
 
-**ATTRS** Dictionary of custom attributes not processed by zarr-fuse directly.
-**VARS** Variables of the Dataset
-**COORDS** Coordinates of the Dataset
+- **ATTRS** Dictionary of custom attributes not processed by zarr-fuse directly. Zarr-fuse could add its own attributes 
+
+- **VARS** Variables of the Dataset
+
+- **COORDS** Coordinates of the Dataset
 
 ## Example
-```aiignore
+```
 # Configuration of the ZARR-FUSE storage
 ATTRS:
     # storage URL, not processed automaticaly by the library to connect to storage
