@@ -94,6 +94,7 @@ Moreover these coordinates types are clearly independent
 - unit
 - possible comparison of same quantity in dfferent locations in common plot
 
+## [Plotting](./plotting.md)
 
 
 ## Relevant projects
