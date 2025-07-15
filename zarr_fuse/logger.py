@@ -25,6 +25,7 @@ import logging
 import threading
 import asyncio
 import sys
+import traceback
 from asyncio import wait_for
 
 import zarr
@@ -75,7 +76,7 @@ class StoreLogHandler(logging.Handler):
     that method will swap itself out for the full-read/write (_append_safe).
     """
 
-    def __init__(self, store, group_path, partial_write: bool = False):
+    def __init__(self, store, group_path):
         super().__init__()
         self.store = store
         self.group_path = group_path
@@ -84,20 +85,63 @@ class StoreLogHandler(logging.Handler):
             f"%(asctime)s %(levelname)-5s [{self.group_path}] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S"
         ))
-        # start private asyncio loop in a thread
-        self._append_fut = None
-        self._buffer_prototype = zarr.core.buffer.core.default_buffer_prototype()
-        self._loop = asyncio.new_event_loop()
-        threading.Thread(target=self._loop.run_forever, daemon=True).start()
-        self._schedule = lambda coro: asyncio.run_coroutine_threadsafe(coro, self._loop)
 
+        try:
+            asyncio.get_running_loop()
+            self._mode = "async"
+        except RuntimeError:
+            self._mode = "sync"
 
-        # choose initial append strategy
-        if isinstance(store, (zarr.storage.LocalStore,)):
-            assert store.supports_partial_writes, "Store does not support partial writes"
-            self._append = self._append_unsafe
+        self._mode = "sync"
+        if self._mode == "async":
+            # Initially, a completed future so the first message doesn't wait.
+            self._last_future = asyncio.get_event_loop().create_future()
+            self._last_future.set_result(None)
+            self._emit_fn = self._emit_async
         else:
-            self._append = self._append_safe
+            self._emit_fn = self._emit_sync
+
+
+        self._append = self._append_safe
+        self._buffer_prototype = zarr.core.buffer.core.default_buffer_prototype()
+
+    def emit(self, record):
+        raw = (self.format(record) + "\n").encode("utf-8")
+        buf = CpuBuffer.from_bytes(raw)
+        ts = datetime.fromtimestamp(record.created, tz=timezone.utc)
+        day = ts.strftime("%Y%m%d")
+        key = f"{self.prefix}/{day}.log"
+
+        wait = record.levelno in (logging.DEBUG, logging.ERROR)
+        if wait:
+            self._emit_sync(key, buf)
+        else:
+            self._emit_fn(key, buf)
+
+    def _emit_sync(self, key, buf):
+        # Always blocking; runs the append coroutine and waits for completion
+        asyncio.run(self._append(key, buf))
+
+    def _emit_async(self, key, buf):
+        loop = asyncio.get_running_loop()
+        fut = loop.create_task(self.chained_append(key, buf))
+        self._last_future = fut
+
+    def _report_logging_error(self, message):
+        print(f"[StoreLogHandler] {message}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+
+    async def chained_append(self, key, buf):
+        try:
+            await self._last_future
+        except Exception:
+            self._report_logging_error("Previous log write failed")
+        try:
+            await self._append(key, buf)
+        except Exception:
+            self._report_logging_error("Logging failed; see traceback below")
+
 
     async def _append_unsafe(self, key: str, buf: CpuBuffer):
         """
@@ -134,31 +178,13 @@ class StoreLogHandler(logging.Handler):
 
         await self.store.set(key, buf)
 
-    def wait_for_last_message(self):
-        if self._append_fut is None:
-            return
-        try:
-            self._append_fut.result()
-        except Exception:
-            # print full traceback for diagnostics
-            sys.excepthook(*sys.exc_info())
-
-    def _schedule_and_maybe_wait(self, key: str, buf: CpuBuffer, wait: bool):
-        # wait for previous message to complete
-        self.wait_for_last_message()
-        self._append_fut = self._schedule(self._append(key, buf))
-        if wait:
-            self.wait_for_last_message()
-
-    def emit(self, record):
-        raw = (self.format(record) + "\n").encode("utf-8")
-        buf = CpuBuffer.from_bytes(raw)
-        ts = datetime.fromtimestamp(record.created, tz=timezone.utc)
-        day = ts.strftime("%Y%m%d")
-        key = f"{self.prefix}/{day}.log"
-        wait = record.levelno in (logging.DEBUG, logging.ERROR)
-        self._schedule_and_maybe_wait(key, buf, wait)
 
     def close(self):
         super().close()
-        self._loop.call_soon_threadsafe(self._loop.stop)
+        last_fut = getattr(self, "_last_future", None)
+        if last_fut is not None and not last_fut.done():
+            try:
+                loop = asyncio.get_event_loop()
+                loop.run_until_complete(last_fut)
+            except Exception:
+                self._report_logging_error("Error while closing; see traceback below")

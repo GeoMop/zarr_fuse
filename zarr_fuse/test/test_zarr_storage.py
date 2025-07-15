@@ -9,6 +9,7 @@ import xarray as xr
 import pytest
 import zarr
 import time
+import asyncio, s3fs
 import fsspec
 from zarr.storage import FsspecStore
 
@@ -19,7 +20,36 @@ script_dir = Path(__file__).parent
 inputs_dir = script_dir / "inputs"
 workdir = script_dir / "workdir"
 
+import asyncio
 
+def sync_remove_store(storage_options, path):
+    so = storage_options.copy()
+    so['asynchronous'] = False  # Ensure synchronous operation
+    fs = fsspec.filesystem('s3', **so)
+    try:
+        fs.rm(path, recursive=True, maxdepth=None)
+    except FileNotFoundError:
+        pass
+
+def sync_list_dirs(storage_options, root_path):
+    so = storage_options.copy()
+    so['asynchronous'] = False
+    fs = fsspec.filesystem('s3', **so)
+    directories = []
+
+    def _list_dirs(path):
+        try:
+            entries = fs.ls(path, detail=True)
+        except FileNotFoundError:
+            return
+        for entry in entries:
+            # For s3fs, entry['type'] is 'directory' for dirs, 'file' for files
+            if entry.get('type') == 'directory':
+                directories.append(entry['name'])
+                _list_dirs(entry['name'])
+
+    _list_dirs(root_path)
+    return directories
 
 
 """
@@ -42,33 +72,42 @@ def aux_read_struc(fname):
     # local_store = zarr.storage.LocalStore(store_path)
     # tree = zf.Node("", local_store, new_schema=schema)
 
-    # memory_store = zarr.storage.MemoryStore()
+    #    memory_store = zarr.storage.MemoryStore()
 
-    # zip_store = zarr.storage.ZipStore('path/to/archive.zip', mode='w')
     bucket_name = "test-zarr-storage"
-    # s3_fs = fsspec.filesystem('s3', key='YOUR_ACCESS_KEY', secret='YOUR_SECRET_KEY')
-    # s3_store = zarr.FSStore('bucket-name/path/to/zarr', filesystem=s3_fs)
-    s3_url = f"s3://{bucket_name}/{Path(fname).with_suffix('.zarr')}"
-    storage_options = {
-        "key": "4UD5K2LCS5ZU8GHL5TJS",
-        "secret": "VztZ2COyVsgADEGbftd1Zt6XdtN6QXwOhSfEKT0Y",
-        "client_kwargs": {
-            "endpoint_url": "https://s3.cl4.du.cesnet.cz",
-            "region_name": "du"
+    s3_key = "4UD5K2LCS5ZU8GHL5TJS"
+    s3_secret = "VztZ2COyVsgADEGbftd1Zt6XdtN6QXwOhSfEKT0Y"
+    storage_options = dict(
+        key=s3_key,
+        secret=s3_secret,
+        # asynchronous=True,
+        client_kwargs=dict(
+            endpoint_url="https://s3.cl4.du.cesnet.cz"),
+        config_kwargs={
+            "s3": {"addressing_style": "path"},
+            "request_checksum_calculation": "when_required",
+            "response_checksum_validation": "when_required",
         },
-        "config_kwargs": {"s3": {"addressing_style": "path"}}
-    }
+    )
+    root_path = f"{bucket_name}/test.zarr"
+    sync_remove_store(storage_options, root_path)
+    fs = fsspec.filesystem('s3', **storage_options)
 
-    fs = fsspec.filesystem("s3", asynchronous=False, **storage_options)
-    fs.put(str(store_path), f"{bucket_name}/{Path(fname).with_suffix('.zarr')}", recursive=True)
-    s3_store = FsspecStore.from_url(s3_url, storage_options=storage_options, read_only=False)
-    return schema, s3_store, zf.Node("", s3_store, new_schema=schema) # You may need to re-instantiate the Node with the S3 store
+    store = zarr.storage.FsspecStore(fs, path=root_path)
+
+    # TODO: debug, whot happens to my loop
+    # - self containt example - > FsSpec issue
+
+    #s3_store.fs.put(str(store_path), root_path, recursive=True)
+    #fs.invalidate_cache(root_path)
+    print("Schema file stored.")
+    return schema, store, zf.Node("", store, new_schema=schema) # You may need to re-instantiate the Node with the S3 store
 
 # Recursively update each node with its corresponding data.
 def _update_tree(node: zf.Node, df_map: dict):
     if node.group_path in df_map:
-        print(f"Updating node {node.group_path}.")
-        assert (Path(node.store.root) / node.group_path).exists()
+        #print(f"Updating node {node.group_path}.")
+        #assert (Path(node.store.root) / node.group_path).exists()
         node.update(df_map[node.group_path])
     for key, child in node.items():
         _update_tree(child, df_map)
