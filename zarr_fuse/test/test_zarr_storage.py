@@ -81,10 +81,13 @@ def aux_read_struc(fname):
         key=s3_key,
         secret=s3_secret,
         # asynchronous=True,
+        listings_expiry_time=1,  # Expire listing cache after 1 second
+        max_paths=0,  # Do not cache directory listings
         client_kwargs=dict(
             endpoint_url="https://s3.cl4.du.cesnet.cz"),
         config_kwargs={
             "s3": {"addressing_style": "path"},
+            "retries": {"max_attempts": 5, "mode": "standard"},
             "request_checksum_calculation": "when_required",
             "response_checksum_validation": "when_required",
         },
@@ -143,6 +146,7 @@ def test_node_tree():
             collect_nodes(child, nodes_dict)
         return nodes_dict
 
+    zarr.consolidate_metadata(store)
     root_node = zf.Node.read_store(store)
     nodes = collect_nodes(root_node, {})
 
