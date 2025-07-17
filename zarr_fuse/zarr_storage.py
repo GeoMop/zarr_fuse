@@ -214,9 +214,8 @@ class Node:
         #attrs['composed'] = composed
 
         # simple coordinate
-        np_var = vars[name]
-        assert isinstance(np_var, np.ndarray)
-        assert len(np_var.shape) == 1
+        np_var = np.array(vars[name])
+        assert len(np_var.shape) == 1, f"Expecting coord '{name}' shape (N, ), obtain: {np_var.shape}"
 
         np_var = xr.Variable(
             dims=(name,),
@@ -244,6 +243,7 @@ class Node:
         coord_vars = {
             k: Node._coord_variable(k, c, vars)
             for k, c in coords.items()
+            if c.name in vars
         }
         return xr.Coordinates(coord_vars)
 
@@ -480,14 +480,21 @@ class Node:
            -
         """
         ds = pivot_nd(self.schema, polars_df, self.logger)
-        written_ds, merged_coords = self.update_zarr_loop(ds)
+        written_ds, merged_coords = self.merge_ds(ds)
         # check unique coordsregion="auto",
         dup_dict = check_unique_coords(written_ds)
         if  dup_dict:
             self.logger.error(dup_dict)
         return written_ds
 
-
+    def update_dense(self, vars):
+        ds = dataset_from_np(self.schema, vars)
+        written_ds, merged_coords = self.merge_ds(ds)
+        # check unique coordsregion="auto",
+        dup_dict = check_unique_coords(written_ds)
+        if dup_dict:
+            self.logger.error(dup_dict)
+        return written_ds
 
     def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode
         rel_path = self.group_path  # + self.PATH_SEP + "dataset"
@@ -515,9 +522,11 @@ class Node:
     """
 
 
-    def update_zarr_loop(self, ds_update: xr.Dataset) -> xr.Dataset:
+
+    def merge_ds(self, ds_update: xr.Dataset) -> xr.Dataset:
         """
-        Iteratively update/append ds_update into an existing Zarr store at zarr_path.
+        Merge xarray dataset `ds_update` into the node dataset in the zarr storage.
+        The `ds_update` must be subarray of the storage dataset.
 
         This function works in two phases:
 
@@ -818,6 +827,20 @@ def get_df_col(df, var:zarr_schema.Variable, logger: logging.Logger):
 
         # TODO: log missing column
 
+
+def dataset_from_np(schema: zarr_schema.DatasetSchema, vars: Dict[str, np.ndarray]) -> xr.Dataset:
+    """
+    Create an xarray.Dataset from a schema and a dictionary of NumPy arrays.
+    :return:
+    """
+    coords_dict = Node._create_coords(schema.COORDS, vars)
+    data_vars = {k: Node._variable(schema.VARS[k], var_np_array, coords_dict)
+                 for k, var_np_array in vars.items()
+                 if k not in coords_dict}
+    attrs = schema.ATTRS
+    attrs['__structure__'] = zarr_schema.serialize(schema)
+    ds_out = xr.Dataset(data_vars=data_vars, coords=coords_dict, attrs=attrs)
+    return ds_out
 
 def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     """

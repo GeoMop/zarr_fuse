@@ -125,7 +125,7 @@ def _check_ds_attrs_weather(ds, schema_ds):
                 assert sub_coord in ds.data_vars
                 assert sub_coord not in ds.coords
 
-def test_read_structure_weather(tmp_path):
+def test_update_weather(tmp_path):
     # Example YAML file content (as a string for illustration):
     structure, store, tree = aux_read_struc("structure_weather.yaml")
     ds_schema = structure.ds
@@ -237,7 +237,7 @@ def test_read_structure_weather(tmp_path):
     #     assert new_ds["temperature"].sel({"time of year":time, "lat_lon":hash((lat, lon))}) == row["temp"]
 
 
-def test_read_structure_tensors(tmp_path):
+def test_update_tensors(tmp_path):
     structure, store, tree = aux_read_struc("structure_tensors.yaml")
     ds_schema = structure.ds
     assert len(ds_schema.COORDS) == 3
@@ -389,4 +389,80 @@ def test_pivot_nd():
 
 
 
+def test_update_dense():
+    # Example YAML file content (as a string for illustration):
+    structure, store, tree = aux_read_struc("structure_transport.yaml")
+    node = tree["run_XYZ"]
 
+    ds_schema = node.schema
+    assert len(ds_schema.COORDS) == 5
+    assert len(ds_schema.VARS) == 8
+    print("Coordinates:")
+    for coord in ds_schema.COORDS:
+        print(coord)
+    print("\nQuantities:")
+    for var in ds_schema.VARS:
+        print(var)
+
+    qmc = np.arange(8, dtype=np.int64)
+    param_name = ["mesh_seed", "edz_seed", "source"]
+
+    int_to_bits = lambda x: ((x >> np.arange(2, -1, -1)) & 1).astype(bool)
+    A_sample = [int_to_bits(q) for q in qmc]
+    node.update_dense(dict(qmc=qmc, param_name=param_name, A_sample=A_sample))
+    # TODO:
+    # First write does just partial coords initialization
+    # Subsequent calls fail.
+
+    # iid 0, qmc 0
+    ## Parameters update
+    params_1 = np.random.rand(8, 3)
+    node.update_dense(dict(
+        iid=[0],
+        qmc=[0],
+        param_name=param_name,
+        param=params_1[0, None, None, :]
+    ))
+    ## Conc update
+    time = np.array([1000, 2000])
+    X = np.array([10.0, 20.0, 30.0])
+    conc_1 = np.random.rand(8, 2, 3)  # shape (time, X, qmc)
+    node.update_dense(dict(
+        iid=[0],
+        qmc=[0],
+        time=time,
+        X=X,
+        conc=conc_1[0, None, None, :, :]
+    ))
+
+    # idd 0, qmc 1
+    # update both
+    node.update_dense(dict(
+        iid=[0],
+        qmc=[1],
+        time=time,
+        X=X,
+        param= params_1[1, None, None, :],
+        conc=conc_1[1, None, None, :, :]
+    ))
+    # idd 0, qmc 2 .. 8
+    # update both
+    node.update_dense(dict(
+        iid=[0],
+        qmc=[2, 3, 4, 5, 6, 7],
+        time=time,
+        X=X,
+        param=params_1[2:, None, None, :],
+        conc=conc_1[2:, None, None, :, :]
+    ))
+
+    # Now, re-read the entire Zarr storage from scratch.
+    new_tree = zf.Node.read_store(store)
+    new_ds = new_tree["run_XYZ"].dataset
+
+    #np.testing.assert_array_equal(new_ds["time of year"].values, ref_times)
+    # !! Wrong order, not sorted
+
+    # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]
+    #np.testing.assert_array_equal(new_ds["latitude"].values, [20.0, 20.0, 10.0])
+    #np.testing.assert_array_equal(new_ds["longitude"].values, [20.0, 10.0, 10.0])
