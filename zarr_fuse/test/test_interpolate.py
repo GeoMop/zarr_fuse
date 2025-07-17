@@ -8,11 +8,13 @@ except ImportError:
 
 # ---- adjust this import to match your module path! ----
 from zarr_fuse.interpolate import interpolate_ds, sort_by_coord, interpolate_coord
+from zarr_fuse.zarr_schema import Coord
 #from ds_interpolate import sort_by_coord, interpolate_coord, interpolate_ds
 
 # a tiny dummy schema object in lieu of Coord
 class DummySchema:
-    def __init__(self, *, sorted, step_limits, unit=None, step_unit):
+    def __init__(self, *, sorted, step_limits=None, unit=None, step_unit=None):
+        self.name = "test_coord"
         self.sorted = sorted
         self.step_limits = step_limits
         self.unit = unit
@@ -24,11 +26,12 @@ class DummySchema:
 # -- low‐level tests for sort_by_coord & interpolate_coord --
 
 def test_sort_by_coord_sorted():
+    schema = DummySchema(sorted=True)
     old = np.array([0, 10, 20, 30])
     new_ref = np.array([15, 25, 30, 35, 40, 50])
     new = new_ref.copy()
     np.random.shuffle(new)
-    idx_sort, idx_split = sort_by_coord(new, old, sorted=True)
+    idx_sort, idx_split = sort_by_coord(new, old, schema)
     # should sort new ascending and find split where overlap ends
 
     sorted = new[idx_sort]
@@ -41,16 +44,17 @@ def test_sort_by_coord_sorted():
     new_ref = np.array([15, 25, 31, 35, 40, 50])
     new = new_ref.copy()
     np.random.shuffle(new)
-    idx_sort, idx_split = sort_by_coord(new, old, sorted=True)
+    idx_sort, idx_split = sort_by_coord(new, old, schema)
     # overlap with old max=30 => split at new index of 30 (right side)
     assert idx_split == 3
 
 
 def test_sort_by_coord_unsorted():
+    schema = DummySchema(sorted=False)
     # empty extension
     old = np.array([5, 15, 25])
     new = np.array([25, 5, 15])
-    idx_sort, idx_split = sort_by_coord(new, old, sorted=False)
+    idx_sort, idx_split = sort_by_coord(new, old, schema)
     # keys map 25->2,5->0,15->1 so sorting gives positions [1,2,0]
     assert np.all(old == new[idx_sort])
     # full overlap => split == len(old)
@@ -59,14 +63,14 @@ def test_sort_by_coord_unsorted():
     # non-empty extension, no overlap
     old = np.array([5, 15, 25])
     new = np.array([4, 30])
-    idx_sort, idx_split = sort_by_coord(new, old, sorted=False)
+    idx_sort, idx_split = sort_by_coord(new, old, schema)
     # keys map 25->2,5->0,15->1 so sorting gives positions [1,2,0]
     assert idx_split == 0
 
     # non-empty extension, full overlap
     old = np.array([5, 15, 25])
     new = np.array([25, 5, 15, 4, 30])
-    idx_sort, idx_split = sort_by_coord(new, old, sorted=False)
+    idx_sort, idx_split = sort_by_coord(new, old, schema)
     # keys map 25->2,5->0,15->1 so sorting gives positions [1,2,0]
     assert idx_split == len(old)
     assert np.all(old == new[idx_sort][:idx_split])
@@ -75,23 +79,23 @@ def test_sort_by_coord_unsorted():
     with pytest.raises(AssertionError) as excinfo:
         old = np.array([5, 15, 25])
         new = np.array([25, 5, 35])
-        sort_by_coord(new, old, sorted=False)
+        sort_by_coord(new, old, schema)
     excinfo.match(r"full overlap expected")
 
     with pytest.raises(AssertionError) as excinfo:
         old = np.array([5, 15, 25])
         new = np.array([6, 15, 20, 35])
-        sort_by_coord(new, old, sorted=False)
+        sort_by_coord(new, old, schema)
     excinfo.match(r"")
 
 def run_interp(new, step_limits, sort=True, old=[0,1,2], unit='', step_unit='hour'):
+    schema = DummySchema(sorted=sort, step_limits=step_limits, unit=unit, step_unit=step_unit)
+
     new = np.array(new)
     old = np.array(old)
-    idx_sorter = sort_by_coord(new, old, sorted=sort)
-    return interpolate_coord(
-        new, old, idx_sorter,
-        DummySchema(sorted=sort, step_limits=step_limits, unit=unit, step_unit=step_unit)
-    )
+    idx_sorter = sort_by_coord(new, old, schema)
+    return interpolate_coord( new, old, idx_sorter, schema)
+
 
 def test_interpolate_coord_sorted():
 
