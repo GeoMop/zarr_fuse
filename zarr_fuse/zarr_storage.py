@@ -215,7 +215,15 @@ class Node:
 
         # simple coordinate
         np_var = np.array(vars[name])
-        assert len(np_var.shape) == 1, f"Expecting coord '{name}' shape (N, ), obtain: {np_var.shape}"
+        if len(np_var.shape) > 1:
+            raise ValueError(f"Dimension {coord.name}: coords array is not 1D. Has shape: {np_var.shape}.")
+
+        unique, counts = np.unique(np.var, return_counts=True)
+        # Find values that appear more than once
+        repeated = unique[counts > 1]
+        # Check if array has any non-unique values
+        if repeated.size > 0:
+            raise ValueError(f"Dimension {coord.name}: coords array has non-unique values: {repeated}.")
 
         np_var = xr.Variable(
             dims=(name,),
