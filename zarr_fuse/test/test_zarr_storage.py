@@ -56,7 +56,7 @@ def sync_list_dirs(storage_options, root_path):
 This is an inital test of xarray, zarr functionality that we build on.
 This requires dask.
 """
-def aux_read_struc(fname):
+def aux_read_struc(fname, storage_type="local"):
     """
     Read a schema file from 'inputs_dir',
     :param fname:
@@ -64,47 +64,43 @@ def aux_read_struc(fname):
     """
     struc_path = inputs_dir / fname
     schema = zf.schema.deserialize(struc_path)
-    store_path = (workdir / fname).with_suffix(".zarr")
 
-    # Start with no existiong storage
-    # if store_path.exists():
-    #     shutil.rmtree(store_path)
-    # local_store = zarr.storage.LocalStore(store_path)
-    # tree = zf.Node("", local_store, new_schema=schema)
+    if storage_type == "s3":
+        bucket_name = "test-zarr-storage"
+        s3_key = "4UD5K2LCS5ZU8GHL5TJS"
+        s3_secret = "VztZ2COyVsgADEGbftd1Zt6XdtN6QXwOhSfEKT0Y"
+        storage_options = dict(
+            key=s3_key,
+            secret=s3_secret,
+            # asynchronous=True,
+            listings_expiry_time=1,  # Expire listing cache after 1 second
+            max_paths=0,  # Do not cache directory listings
+            client_kwargs=dict(
+                endpoint_url="https://s3.cl4.du.cesnet.cz",
+            ),
+            config_kwargs={
+                "s3": {"addressing_style": "path"},
+                "retries": {"max_attempts": 5, "mode": "standard"},
+                "request_checksum_calculation": "when_required",
+                "response_checksum_validation": "when_required",
+                "connect_timeout": 20,
+                "read_timeout": 60,
+            },
+        )
+        root_path = f"{bucket_name}/test.zarr"
+        sync_remove_store(storage_options, root_path)
+        fs = fsspec.filesystem('s3', **storage_options)
+        store = zarr.storage.FsspecStore(fs, path=root_path)
+    elif storage_type == "local":
+        store_path = (workdir / fname).with_suffix(".zarr")
+        if store_path.exists():
+            shutil.rmtree(store_path)
+        store = zarr.storage.LocalStore(store_path)
+    else:
+        raise ValueError(f"Unsupported storage_type: {storage_type}")
 
-    #    memory_store = zarr.storage.MemoryStore()
-
-    bucket_name = "test-zarr-storage"
-    s3_key = "4UD5K2LCS5ZU8GHL5TJS"
-    s3_secret = "VztZ2COyVsgADEGbftd1Zt6XdtN6QXwOhSfEKT0Y"
-    storage_options = dict(
-        key=s3_key,
-        secret=s3_secret,
-        # asynchronous=True,
-        listings_expiry_time=1,  # Expire listing cache after 1 second
-        max_paths=0,  # Do not cache directory listings
-        client_kwargs=dict(
-            endpoint_url="https://s3.cl4.du.cesnet.cz"),
-        config_kwargs={
-            "s3": {"addressing_style": "path"},
-            "retries": {"max_attempts": 5, "mode": "standard"},
-            "request_checksum_calculation": "when_required",
-            "response_checksum_validation": "when_required",
-        },
-    )
-    root_path = f"{bucket_name}/test.zarr"
-    sync_remove_store(storage_options, root_path)
-    fs = fsspec.filesystem('s3', **storage_options)
-
-    store = zarr.storage.FsspecStore(fs, path=root_path)
-
-    # TODO: debug, whot happens to my loop
-    # - self containt example - > FsSpec issue
-
-    #s3_store.fs.put(str(store_path), root_path, recursive=True)
-    #fs.invalidate_cache(root_path)
-    print("Schema file stored.")
-    return schema, store, zf.Node("", store, new_schema=schema) # You may need to re-instantiate the Node with the S3 store
+    node = zf.Node("", store, new_schema=schema)
+    return schema, store, node
 
 # Recursively update each node with its corresponding data.
 def _update_tree(node: zf.Node, df_map: dict):
@@ -118,7 +114,8 @@ def _update_tree(node: zf.Node, df_map: dict):
     assert len(node.dataset.coords) == 1
     assert len(node.dataset.data_vars) == 1
 
-def test_node_tree():
+@pytest.mark.parametrize("storage_type", ["local", "s3"])
+def test_node_tree(storage_type):
     """
     Test the tree structure of the Zarr storage.
     :return:
@@ -126,7 +123,7 @@ def test_node_tree():
     # Read the YAML file from the working directory.
     # The file "structure_tree.yaml" must exist in the current working directory.
     # Example YAML file content (as a string for illustration):
-    structure, store, tree = aux_read_struc("structure_tree.yaml")
+    structure, store, tree = aux_read_struc("structure_tree.yaml", storage_type=storage_type)
 
     # Create a mapping from node names to minimal Polars DataFrames.
     # Each node is updated with unique values.
@@ -183,9 +180,10 @@ def _check_ds_attrs_weather(ds, schema_ds):
                 assert sub_coord in ds.data_vars
                 assert sub_coord not in ds.coords
 
-def test_read_structure_weather(tmp_path):
+@pytest.mark.parametrize("storage_type", ["local", "s3"])
+def test_read_structure_weather(tmp_path, storage_type):
     # Example YAML file content (as a string for illustration):
-    structure, store, tree = aux_read_struc("structure_weather.yaml")
+    structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
     ds_schema = structure.ds
     assert len(ds_schema.COORDS) == 2
     assert len(ds_schema.VARS) == 4
