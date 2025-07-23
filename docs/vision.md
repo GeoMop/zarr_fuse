@@ -163,7 +163,8 @@ Can be applied with GX or Pandera to transform and validate input dataframes or 
 [**Frictionless**](https://frictionlessdata.io/) Small scale date, limited interoperability. Inferior to previous tools and thir combinations.
 
 
-### Vizualize
+## [Plotting](./plotting.md)
+### Brianstorming notes
 
 Starting stack:
 Jupyter
