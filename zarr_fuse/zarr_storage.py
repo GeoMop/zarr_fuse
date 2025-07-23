@@ -89,16 +89,24 @@ def zarr_store_open(zarr_url, type='guess', **kwargs):
         type = zarr_store_guess_type(zarr_url)
 
     if type == 'memory':
-        args = (zarr.storage.MemoryStore, dict())
+        storage = zarr.storage.MemoryStore(**kwargs)
     elif type == 'local':
         if not zarr_url.startswith('/') and not zarr_url.startswith('file://'):
             zarr_url = kwargs.get('workdir', Path()) / zarr_url
-        args = (zarr.storage.LocalStore, zarr_url)
+        storage = zarr.storage.LocalStore(zarr_url, **kwargs)
     elif type == 'remote':
-        args = (zarr.storage.FsspecStore, zarr_url)
+        storage_options = kwargs.pop('storage_options', {})
+        # Ensure we operate in synchronous mode to be compatible with standard Python code.
+        storage_options.setdefault('asynchronous', False)
+        storage = zarr.storage.FsspecStore.from_url(
+            zarr_url,
+            storage_options=storage_options
+        )
     elif type == 'zip':
-        args = (zarr.storage.ZipStore, zarr_url)
-    storage = call_with_filtered_kwargs(*args, **kwargs)
+        storage = zarr.storage.ZipStore(zarr_url, **kwargs)
+    else:
+        raise ValueError(f"Unsupported store type: {type}")
+
     return storage
 
 def open_storage(schema:zarr_schema.NodeSchema | Path, **kwargs):
