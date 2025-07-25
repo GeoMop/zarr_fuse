@@ -145,6 +145,20 @@ The S3 remote defined in your rclone.conf (here, [moje_s3]) will be available fo
 
 
 
+## CESNET S3
+
+### Members
+[Perun](https://perun.e-infra.cz) -> "Access management" on the left -> organisation VO_tul_scifuse -> Members
+
+- invite members
+- or users can apply for membership through [the form](https://perun.cesnet.cz/fed/registrar/?vo=VO_tul_scifuse)
+- membership is valid in 30 minutes after [approval](https://docs.du.cesnet.cz/en/docs/perun/user-approval) by the group administrator [
+
+Key management policy:
+- each user generates its own keys
+- each user only see his own keys
+- CESNET could attribute keys to users 
+
 ## Future improvements
 - test parallel writes and reads
 - linked storage nodes into xarray tree, e.g. different meteosites and moisture measurments in separate nodes, but allowing
