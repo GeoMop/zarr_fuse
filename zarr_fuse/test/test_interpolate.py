@@ -76,18 +76,13 @@ def test_sort_by_coord_unsorted():
     assert idx_split == len(old)
     assert np.all(old == new[idx_sort][:idx_split])
 
-    # failing assert for non-full overlap
-    #with pytest.raises(AssertionError) as excinfo:
+    # Test partial overlap
     old = np.array([5, 15, 25])
-    new = np.array([25, 5, 35])
-    sort_by_coord(new, old, schema)
-    #excinfo.match(r"full overlap expected")
+    new = np.array([25, 5, 6, 35])
+    idx_sort, idx_split = sort_by_coord(new, old, schema, dflt_logger)
+    assert idx_split == 2
+    assert np.all([5, 25, 6, 35] == new[idx_sort])
 
-    with pytest.raises(AssertionError) as excinfo:
-        old = np.array([5, 15, 25])
-        new = np.array([6, 15, 20, 35])
-        sort_by_coord(new, old, schema)
-    excinfo.match(r"Insert not allowed")
 
 def run_interp(old, new, step_limits, sort=True,  unit='', step_unit='hour'):
     schema = DummySchema(sorted=sort, step_limits=step_limits, unit=unit, step_unit=step_unit)
@@ -106,10 +101,9 @@ def test_interpolate_coord_sorted():
     np.allclose(merged, [1, 2])
 
     new = [1, 1.5, 2.1, 3, 10]
-    with pytest.raises(AssertionError) as excinfo:
-        merged, split = run_interp(old, new, step_limits=None)
-    excinfo.match(re.escape("Dimension test_coord: appending coordinates [ 3. 10.] "
-                            "while append forbidden (step_limits=None)."))
+    merged, split = run_interp(old, new, step_limits=None)
+    # apendend coordinates ignored. Non-fatal error.
+    assert np.allclose(merged, [1, 2])
 
     # sorted, step_limits - full extension
     merged, split = run_interp(old, new, step_limits=[])
@@ -168,10 +162,10 @@ def test_interpolate_coord_unsorted():
     assert split == 3
     np.allclose(merged, [0, 1, 2, 1.5, 10, 3])
 
-    new = [0, 1, 2, 10, 3]
-    with pytest.raises(AssertionError) as excinfo:
-        # unable to interpolate
-        merged, split = run_interp(old, new, sort=False, step_limits=[1, 2])
+    new = [1, 2, 10, 3]
+    # unable to interpolate
+    merged, split = run_interp(old, new, sort=False, step_limits=[1, 2])
+    np.allclose(merged, [1, 2,  10, 3])
 
 
 

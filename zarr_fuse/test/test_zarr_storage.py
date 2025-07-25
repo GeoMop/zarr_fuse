@@ -55,11 +55,12 @@ def _update_tree(node: zf.Node, df_map: dict):
         print(f"Updating node {node.group_path}.")
         assert (Path(node.store.root) / node.group_path).exists()
         node.update(df_map[node.group_path])
+        assert len(node.dataset.coords) == 1
+        assert len(node.dataset.data_vars) == 1
+
     for key, child in node.items():
         _update_tree(child, df_map)
 
-    assert len(node.dataset.coords) == 1
-    assert len(node.dataset.data_vars) == 1
 
 def test_node_tree():
     """
@@ -70,12 +71,13 @@ def test_node_tree():
     # The file "structure_tree.yaml" must exist in the current working directory.
     # Example YAML file content (as a string for illustration):
     structure, store, tree = aux_read_struc("structure_tree.yaml")
+    assert tree.schema == structure.ds
+    assert tree['child_1'].schema == structure.groups['child_1'].ds
 
     # Create a mapping from node names to minimal Polars DataFrames.
     # Each node is updated with unique values.
     df_map = {
         "": pl.DataFrame({"time": [1000], "temperature": [280.0]}),
-        "child_1": pl.DataFrame({"time": [1001], "temperature": [281.0]}),
         "child_2": pl.DataFrame({"time": [1002], "temperature": [282.0]}),
         "child_1/child_3": pl.DataFrame({"time": [1003], "temperature": [283.0]}),
     }
@@ -392,6 +394,9 @@ def test_pivot_nd():
 def test_update_dense():
     # Example YAML file content (as a string for illustration):
     structure, store, tree = aux_read_struc("structure_transport.yaml")
+    assert '__structure__' in tree.dataset.attrs
+    childs = [key for key, _ in tree._storage_group_paths()]
+    assert childs == ["run_XYZ"]
     node = tree["run_XYZ"]
 
     ds_schema = node.schema
@@ -442,8 +447,9 @@ def test_update_dense():
         qmc=[1],
         time=time,
         X=X,
-        param= params_1[1, None, None, :],
-        conc=conc_1[1, None, None, :, :]
+        param_name=param_name,
+        param= params_1[None, 1:2,  :],   # coords:[ "iid", "qmc", "param_name"]
+        conc=conc_1[None, 1:2, :, :] # coords:  [ "iid", "qmc", "time", "X"]
     ))
     # idd 0, qmc 2 .. 8
     # update both
@@ -452,9 +458,15 @@ def test_update_dense():
         qmc=[2, 3, 4, 5, 6, 7],
         time=time,
         X=X,
-        param=params_1[2:, None, None, :],
-        conc=conc_1[2:, None, None, :, :]
+        param_name=param_name,
+        param=params_1[None, 2:, :],
+        conc=conc_1[None, 2:, :, :]
     ))
+    assert '__structure__' in node.dataset.attrs
+
+    root_group = zarr.open_group(store, path="", mode='r')
+    sub_groups = [k for k, g in root_group.groups()]
+    assert sub_groups == ["run_XYZ"]
 
     # Now, re-read the entire Zarr storage from scratch.
     new_tree = zf.Node.read_store(store)

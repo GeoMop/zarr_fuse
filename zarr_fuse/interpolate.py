@@ -94,34 +94,40 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     3. for step_limit modify part after split index
     """
     idx_sort, idx_split = idx_sorter
-    extension_start = idx_split
+    #extension_start = idx_split
     new_sorted = new_values[idx_sort]
-    new_overlap = new_sorted[:idx_split]
-
+    #new_overlap = new_sorted[:idx_split]
+    if len(new_sorted) == 0:
+        return np.array([]), 0
 
     # Process overlap part
     if schema.sorted:
+        # Determine part of old_values that are covered by the range of new_values so
+        # the range of old_values we can potentialy interpolate to.
+        # new_values[0] <= old_values[i_min] and ald_values[i_max-1] <= new_values[-1]
+
         assert np.all(np.diff(new_sorted) >= 0)
-        old_part_min = new_sorted[:idx_split][0]
+        old_part_min = new_sorted[0]
         old_range_min = np.searchsorted(old_values, old_part_min, side='left')
-        old_part_max = new_sorted[:idx_split][-1]
+        old_part_max = new_sorted[-1]
         old_range_max = np.searchsorted(old_values, old_part_max, side='right')
         update_old_part = np.array(old_values[old_range_min:old_range_max])
 
-        if old_part_max > np.max(old_values):
-            extension_start -= 1  # include the first value out of old_values to the extension
-        assert extension_start > len(new_sorted) or np.max(old_values) < new_sorted[extension_start], f"First extension value {new_sorted[extension_start]} <= max old values: {np.max(old_values)}"
+        #if old_part_max > np.max(old_values):
+        #    extension_start -= 1  # include the first value out of old_values to the extension
+        #assert extension_start > len(new_sorted) or np.max(old_values) < new_sorted[extension_start], f"First extension value {new_sorted[extension_start]} <= max old values: {np.max(old_values)}"
 
     else:
         if schema.step_limits is None:
             # no extension allowed
-            assert np.all(new_sorted == old_values)
-            assert extension_start == len(new_sorted)
+            assert len(new_sorted[idx_split:]) == 0
         elif schema.step_limits == []:
-            # deafult case, add all new coords
-            assert extension_start == 0 or np.all(new_sorted[:extension_start] == old_values)
+            pass
+            # default case, add all new coords
+            #assert extension_start == 0 or np.all(new_sorted[:extension_start] == old_values)
         else:
-            assert False, r"Interpolation not supported for non-sorted coordinates (step_limits={schema.step_limits}\n)"
+            log.error(f"Ignoring unsupported interpolation for non-sorted coordinates (step_limits={schema.step_limits}\n)")
+            # Same as default case.
         update_old_part = new_sorted[:idx_split]
 
     # Phase 2: determine extension
@@ -130,14 +136,13 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     last_old = old_values[-1] if len(old_values) > 0 else new_values[idx_split]
     if schema.step_limits is None:
         # no extension allowed
-        #assert extension_start >= len(new_sorted) - 1
         if len(new_append) > 1:
             # Non-fatal error.
             log.error(f"Dimension {schema.name}: extension not allowed (step_limits=None). "
                       f"Appended coordinates ignored: {new_append[1:]}.")
         # one value in extension is allowed, but used only to interpolate
         update_new_part = np.array([], dtype=new_append.dtype)
-    elif schema.step_limits == []:
+    elif schema.step_limits == [] or not schema.sorted:
         # deafult case, add all new coords
         update_new_part = new_append
     else:
@@ -199,7 +204,7 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
         )
         for d in ds_update.dims
     ]
-    interp_coords = {d: c for d, (c, idx) in coords_new if schema[d].sorted}
+    interp_coords = {d: c for d, (c, idx) in coords_new if schema[d].sorted and len(c) > 0}
     split_indices = [(d, idx) for d, (c, idx) in coords_new]
 
     # Phase 3: interpolate ds_sorted to new coords
