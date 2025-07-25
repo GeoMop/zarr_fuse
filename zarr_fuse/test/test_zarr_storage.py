@@ -57,32 +57,23 @@ This is an inital test of xarray, zarr functionality that we build on.
 This requires dask.
 """
 def aux_read_struc(fname, storage_type="local"):
-    """
-    Read a schema file from 'inputs_dir',
-    :param fname:
-    :return:
-    """
     struc_path = inputs_dir / fname
     schema = zf.schema.deserialize(struc_path)
-
-    if storage_type == "s3":
+    def create_s3_store():
         bucket_name = "test-zarr-storage"
         s3_key = "4UD5K2LCS5ZU8GHL5TJS"
         s3_secret = "VztZ2COyVsgADEGbftd1Zt6XdtN6QXwOhSfEKT0Y"
         storage_options = dict(
             key=s3_key,
             secret=s3_secret,
-            # asynchronous=True,
-            listings_expiry_time=1,  # Expire listing cache after 1 second
-            max_paths=0,  # Do not cache directory listings
+            listings_expiry_time=1,
+            max_paths=0,
             client_kwargs=dict(
                 endpoint_url="https://s3.cl4.du.cesnet.cz",
             ),
             config_kwargs={
                 "s3": {"addressing_style": "path"},
                 "retries": {"max_attempts": 5, "mode": "standard"},
-                "request_checksum_calculation": "when_required",
-                "response_checksum_validation": "when_required",
                 "connect_timeout": 20,
                 "read_timeout": 60,
             },
@@ -90,15 +81,19 @@ def aux_read_struc(fname, storage_type="local"):
         root_path = f"{bucket_name}/test.zarr"
         sync_remove_store(storage_options, root_path)
         fs = fsspec.filesystem('s3', **storage_options)
-        store = zarr.storage.FsspecStore(fs, path=root_path)
-    elif storage_type == "local":
+        return zarr.storage.FsspecStore(fs, path=root_path)
+    def create_local_store():
         store_path = (workdir / fname).with_suffix(".zarr")
         if store_path.exists():
             shutil.rmtree(store_path)
-        store = zarr.storage.LocalStore(store_path)
-    else:
+        return zarr.storage.LocalStore(store_path)
+    store_creators = {
+        "s3": create_s3_store,
+        "local": create_local_store,
+    }
+    if storage_type not in store_creators:
         raise ValueError(f"Unsupported storage_type: {storage_type}")
-
+    store = store_creators[storage_type]()
     node = zf.Node("", store, new_schema=schema)
     return schema, store, node
 
