@@ -24,29 +24,29 @@ def test_create_quantity():
         # Parser tests with inline check_dt calls:
 
     check_dt(
-        cfg={'tick': tick, 'tz': '+00:00', 'dayfirst': False, 'yearfirst': False},
+        cfg=DateTimeUnit(tick, tz='+00:00', dayfirst=False, yearfirst=False),
         dates=['2021-12-31 23:00', '31 Dec 2021 23:00'],
         expected_val=expected
     )
     check_dt(
-        cfg={'tick': tick, 'tz': '+00:00', 'dayfirst': True, 'yearfirst': False},
+        cfg=DateTimeUnit(tick, tz='+00:00', dayfirst=True, yearfirst=False),
         dates=['31/12/2021 23:00', 'Dec 31 2021 23:00'],
         expected_val=expected
     )
     check_dt(
-        cfg={'tick': tick, 'tz': '+00:00', 'dayfirst': False, 'yearfirst': True},
+        cfg=DateTimeUnit(tick, tz='+00:00', dayfirst=False, yearfirst=True),
         dates=['21-12-31 23:00', '12/31/21 23:00'],
         expected_val=expected
     )
     # Timezone variations mapping to same UTC
     check_dt(
-        cfg={'tick': tick, 'tz': '+00:00', 'dayfirst': False, 'yearfirst': True},
+        cfg=DateTimeUnit(tick, tz='+00:00', dayfirst=False, yearfirst=True),
         dates=['22/01/01 00:00 CET', '21/12/31 23:00', '21/12/31T23:00Z', '22/01/01 02:00+03:00'],
         expected_val=expected
     )
     # Vary tick and tz
     check_dt(
-        cfg={'tick': 'm', 'tz': '+02:00', 'dayfirst': False, 'yearfirst': False},
+        cfg=DateTimeUnit('m', tz='+02:00', dayfirst=False, yearfirst=False),
         dates=['2021-12-31 19:00 UTC', '31 Dec 2021 19:00 UTC'],
         expected_val=np.array(['2021-12-31T21:00', '2021-12-31T21:00'], dtype='datetime64[m]')
     )
@@ -57,8 +57,7 @@ def test_create_quantity():
     dates_base = ['2021-12-31 21:00', '31 Dec 2021 21:00']
     qd_m = create_quantity(
         dates_base,
-        {'tick': tick, 'tz': '+00:00',
-         'dayfirst': False, 'yearfirst': False}
+        DateTimeUnit(tick, tz='+00:00', dayfirst=False, yearfirst=False)
     ).to(target)
     expected_m = np.array(['2021-12-31T23:00', '2021-12-31T23:00'], dtype='datetime64[m]')
     assert np.array_equal(qd_m.magnitude, expected_m)
