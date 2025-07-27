@@ -38,7 +38,8 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
 
     # Uniqueness should be tested when coordinate is formed in _coord_variable.
     # Both pivot_nd and dataset_from_np use that function to form coordinates.
-    assert np.unique(new_values).size == new_values.size, f"New coordinates must be unique, got {new_values}"
+    # We assert here just for code consistency.
+    assert np.unique(new_values).size == new_values.size, f"Code consistency error. New coordinates must be unique, got {new_values}"
 
     sorted = schema.sorted
     if sorted:
@@ -58,24 +59,6 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
         idx_sort = np.argsort(keys)
         idx_split = np.sum(np.array(keys) < len(old_values))
 
-        # overlap for unsorted must be either whole or none
-        # future: sparse interpolation or fill updating DS by
-        # existing DS values for coords within overlap range
-        # have_part_overlap = (
-        #     idx_split > 0 and idx_split < len(old_values)
-        # )
-        # if have_part_overlap:
-        #     raise PartialOverlapError(
-        #         schema.name,
-        #         idx_split,
-        #         len(old_values),
-        #     )
-        #
-        # if idx_split > 0:
-        #     # full overlap, verify that the values are the same
-        #     update_overlap = new_values[idx_sort][:idx_split]
-        #     assert np.all(update_overlap == old_values)
-
     return (idx_sort, idx_split)
 
 
@@ -94,9 +77,7 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     3. for step_limit modify part after split index
     """
     idx_sort, idx_split = idx_sorter
-    #extension_start = idx_split
     new_sorted = new_values[idx_sort]
-    #new_overlap = new_sorted[:idx_split]
     if len(new_sorted) == 0:
         return np.array([]), 0
 
@@ -113,21 +94,16 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
         old_range_max = np.searchsorted(old_values, old_part_max, side='right')
         update_old_part = np.array(old_values[old_range_min:old_range_max])
 
-        #if old_part_max > np.max(old_values):
-        #    extension_start -= 1  # include the first value out of old_values to the extension
-        #assert extension_start > len(new_sorted) or np.max(old_values) < new_sorted[extension_start], f"First extension value {new_sorted[extension_start]} <= max old values: {np.max(old_values)}"
-
     else:
         if schema.step_limits is None:
             # no extension allowed
             assert len(new_sorted[idx_split:]) == 0
         elif schema.step_limits == []:
-            pass
             # default case, add all new coords
-            #assert extension_start == 0 or np.all(new_sorted[:extension_start] == old_values)
+            pass
         else:
-            log.error(f"Ignoring unsupported interpolation for non-sorted coordinates (step_limits={schema.step_limits}\n)")
             # Same as default case.
+            log.error(f"Ignoring unsupported interpolation for non-sorted coordinates (step_limits={schema.step_limits}\n)")
         update_old_part = new_sorted[:idx_split]
 
     # Phase 2: determine extension

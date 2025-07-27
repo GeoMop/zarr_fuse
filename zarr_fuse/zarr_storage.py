@@ -209,13 +209,6 @@ class Node:
 
     @staticmethod
     def _coord_variable(name: str, coord: zarr_schema.Coord, var) -> xr.Variable:
-        # if coord.composed is None:
-        #     composed = (name,)
-        # else:
-        #     composed = coord.composed
-        # attrs = coord.attrs.copy()
-        # #attrs['composed'] = composed
-
         # simple coordinate
         np_var = np.array(var)
         if len(np_var.shape) > 1:
@@ -534,8 +527,6 @@ class Node:
         written_ds = self.write_ds(ds, mode="r+", region="auto")
         assert '__structure__' in written_ds.attrs
         return written_ds
-        # set your dataset‐level attributes
-        #return ds
 
     def write_ds(self, ds, **kwargs):
         rel_path = self.group_path # + self.PATH_SEP + "dataset"
@@ -544,9 +535,9 @@ class Node:
         #ds.to_zarr(path_store,  **kwargs)
         ds.to_zarr(self.store, group = rel_path, consolidated=False, **kwargs)
 
-        written_ds = xr.open_zarr(self.store, group=rel_path)
-        assert '__structure__' in ds.attrs
-        assert '__structure__' in written_ds.attrs
+        # written_ds = xr.open_zarr(self.store, group=rel_path)
+        # assert '__structure__' in ds.attrs
+        # assert '__structure__' in written_ds.attrs
         return ds
 
     """
