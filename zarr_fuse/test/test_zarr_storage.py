@@ -110,11 +110,7 @@ def _update_tree(node: zf.Node, df_map: dict):
     for key, child in node.items():
         _update_tree(child, df_map)
 
-    for key, child in node.items():
-        _update_tree(child, df_map)
 
-    assert tree.schema == structure.ds
-    assert tree['child_1'].schema == structure.groups['child_1'].ds
 
 def _create_test_data():
     """Create standardized test data for all nodes."""
@@ -191,6 +187,8 @@ def test_node_tree(storage_type):
     
     t0 = time.time()
     structure, store, tree = aux_read_struc("structure_tree.yaml", storage_type=storage_type)
+    assert tree.schema == structure.ds
+    assert tree['child_1'].schema == structure.groups['child_1'].ds
     print(f"[TIMING] aux_read_struc: {time.time() - t0:.2f}s")
     
     t1 = time.time()
