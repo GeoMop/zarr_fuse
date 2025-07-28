@@ -1,6 +1,6 @@
 VARS:
     temperature:
-      coords: time
+        coords: time
 COORDS:
     # TODO: allow None values for coord keywords ?
     time: {}
@@ -8,7 +8,7 @@ COORDS:
 child_1:
     VARS:
         temperature:
-          coords: time
+            coords: time
     COORDS:
         time: {}
 
