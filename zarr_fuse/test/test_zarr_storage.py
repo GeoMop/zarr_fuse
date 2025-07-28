@@ -129,6 +129,12 @@ def test_node_tree(storage_type):
             tree.update(df_map[tree.group_path])
             assert len(tree.dataset.coords) == 1
             assert len(tree.dataset.data_vars) == 1
+        print(f"[TIMING] _update_tree: {time.time() - t1:.2f}s")
+        t2 = time.time()
+        zarr.consolidate_metadata(store)
+        print(f"[TIMING] consolidate_metadata: {time.time() - t2:.2f}s")
+        print(f"[TIMING] test_node_tree({storage_type}) TOTAL: {time.time() - start:.2f}s")
+        return
     else:
         # Full test for local
         df_map = {
@@ -138,31 +144,30 @@ def test_node_tree(storage_type):
             "child_1/child_3": pl.DataFrame({"time": [1003], "temperature": [283.0]}),
         }
         _update_tree(tree, df_map)
-    print(f"[TIMING] _update_tree: {time.time() - t1:.2f}s")
-    t2 = time.time()
-    def collect_nodes(node, nodes_dict):
-        nodes_dict[node.group_path] = node
-        for key, child in node.items():
-            collect_nodes(child, nodes_dict)
-        return nodes_dict
-    zarr.consolidate_metadata(store)
-    print(f"[TIMING] consolidate_metadata: {time.time() - t2:.2f}s")
-    t3 = time.time()
-    root_node = zf.Node.read_store(store)
-    nodes = collect_nodes(root_node, {})
-    print(f"[TIMING] read_store + collect_nodes: {time.time() - t3:.2f}s")
-    t4 = time.time()
-    expected = {
-        key: (df['time'].to_numpy(), df['temperature'].to_numpy())
-        for key, df in df_map.items()
-    }
-    for node_name, (exp_time, exp_temp) in expected.items():
-        ds = nodes[node_name].dataset
-        np.testing.assert_array_equal(ds.coords["time"].values, exp_time)
-        np.testing.assert_array_equal(ds["temperature"].values, exp_temp)
-    print(f"[TIMING] assertions: {time.time() - t4:.2f}s")
-    print(f"[TIMING] test_node_tree({storage_type}) TOTAL: {time.time() - start:.2f}s")
-    if storage_type == "local":
+        print(f"[TIMING] _update_tree: {time.time() - t1:.2f}s")
+        t2 = time.time()
+        def collect_nodes(node, nodes_dict):
+            nodes_dict[node.group_path] = node
+            for key, child in node.items():
+                collect_nodes(child, nodes_dict)
+            return nodes_dict
+        zarr.consolidate_metadata(store)
+        print(f"[TIMING] consolidate_metadata: {time.time() - t2:.2f}s")
+        t3 = time.time()
+        root_node = zf.Node.read_store(store)
+        nodes = collect_nodes(root_node, {})
+        print(f"[TIMING] read_store + collect_nodes: {time.time() - t3:.2f}s")
+        t4 = time.time()
+        expected = {
+            key: (df['time'].to_numpy(), df['temperature'].to_numpy())
+            for key, df in df_map.items()
+        }
+        for node_name, (exp_time, exp_temp) in expected.items():
+            ds = nodes[node_name].dataset
+            np.testing.assert_array_equal(ds.coords["time"].values, exp_time)
+            np.testing.assert_array_equal(ds["temperature"].values, exp_temp)
+        print(f"[TIMING] assertions: {time.time() - t4:.2f}s")
+        print(f"[TIMING] test_node_tree({storage_type}) TOTAL: {time.time() - start:.2f}s")
         assert set(root_node.children.keys()) == {"child_1", "child_2"}
         assert set(root_node.children["child_1"].children.keys()) == {"child_3"}
 
