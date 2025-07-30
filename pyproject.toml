@@ -22,7 +22,14 @@ classifiers = [
     "Programming Language :: Python :: 3"
 ]
 requires-python = ">=3.11" # at least due to zarr>=3.x
+# With new aiobotocore version 2.23.x we get the error:
+#[WARNING] S3 test failed completely: [Errno 22] An error occurred (MissingContentLength) when calling the PutObject operation: Unknown
+#[INFO] Skipping S3 test due to environment issues
+#SKIPPED (S3 test skipped due to environment issues: [Errno 22] An error occurred (MissingContentLength) when calling the PutObje...)
+# See issue: https://github.com/GeoMop/zarr_fuse/issues/14
+
 dependencies = [
+    "aiobotocore==2.13.3",
     "PyYAML",
     "attrs",
     "tzdata",
