@@ -52,6 +52,8 @@ def loop_issue_fsspec_async():
     # # loop = asyncio.get_event_loop()
     try:
         loop.run_until_complete(fs._rm(root_path, recursive=True, maxdepth=None))
+    except FileNotFoundError:
+        pass  # Ignore if the S3 path does not exist
     finally:
         loop.close()
 
@@ -76,7 +78,10 @@ def loop_issue_s3fs_sync():
     )
     fs = s3fs.S3FileSystem(**storage_options)
 
-    fs._rm(root_path, recursive=True, maxdepth=None)
+    try:
+        fs._rm(root_path, recursive=True, maxdepth=None)
+    except FileNotFoundError:
+        pass  # Ignore if the S3 path does not exist
     # loop = asyncio.new_event_loop()
     # loop = asyncio.get_event_loop()
     # try:
