@@ -20,12 +20,13 @@ def loop_issue_fsspec_sync():
         client_kwargs=dict(endpoint_url=endpoint_url),
         config_kwargs={
             "s3": {"addressing_style": "path"},
-            "request_checksum_calculation": "when_required",
-            "response_checksum_validation": "when_required",
         },
     )
     fs = fsspec.filesystem('s3', **storage_options)
-    fs.rm(root_path, recursive=True, maxdepth=None)
+    try:
+        fs.rm(root_path, recursive=True, maxdepth=None)
+    except FileNotFoundError:
+        pass  # Ignore if the S3 path does not exist
 
 
 def loop_issue_fsspec_async():
@@ -42,8 +43,6 @@ def loop_issue_fsspec_async():
         client_kwargs=dict(endpoint_url=endpoint_url),
         config_kwargs={
             "s3": {"addressing_style": "path"},
-            "request_checksum_calculation": "when_required",
-            "response_checksum_validation": "when_required",
         },
     )
     loop = asyncio.new_event_loop()
@@ -72,8 +71,6 @@ def loop_issue_s3fs_sync():
         client_kwargs=dict(endpoint_url=endpoint_url),
         config_kwargs={
             "s3": {"addressing_style": "path"},
-            "request_checksum_calculation": "when_required",
-            "response_checksum_validation": "when_required",
         },
     )
     fs = s3fs.S3FileSystem(**storage_options)
@@ -102,8 +99,6 @@ def main():
             endpoint_url="https://s3.cl4.du.cesnet.cz"),
         config_kwargs={
             "s3": {"addressing_style": "path"},
-            "request_checksum_calculation": "when_required",
-            "response_checksum_validation": "when_required",
         },
     )
 
