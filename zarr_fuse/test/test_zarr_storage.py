@@ -245,32 +245,18 @@ def test_node_tree(storage_type):
     start = time.time()
     print(f"[TIMING] test_node_tree({storage_type}) START")
     
-    # For S3, add a top-level fallback mechanism
+    t0 = time.time()
+    structure, store, tree = aux_read_struc("structure_tree.yaml", storage_type=storage_type)
+    assert tree.schema == structure.ds
+    assert tree['child_1'].schema == structure.groups['child_1'].ds
+    print(f"[TIMING] aux_read_struc: {time.time() - t0:.2f}s")
+    
+    t1 = time.time()
+    df_map = _create_test_data()
+    
     if storage_type == "s3":
-        try:
-            t0 = time.time()
-            structure, store, tree = aux_read_struc("structure_tree.yaml", storage_type=storage_type)
-            assert tree.schema == structure.ds
-            assert tree['child_1'].schema == structure.groups['child_1'].ds
-            print(f"[TIMING] aux_read_struc: {time.time() - t0:.2f}s")
-            
-            t1 = time.time()
-            df_map = _create_test_data()
-            _run_s3_test_with_fallback(tree, df_map, start, t1)
-        except Exception as e:
-            print(f"[WARNING] S3 test failed completely: {e}")
-            print(f"[INFO] Skipping S3 test due to environment issues")
-            pytest.skip(f"S3 test skipped due to environment issues: {e}")
+        _run_s3_test_with_fallback(tree, df_map, start, t1)
     else:
-        # Local test runs normally
-        t0 = time.time()
-        structure, store, tree = aux_read_struc("structure_tree.yaml", storage_type=storage_type)
-        assert tree.schema == structure.ds
-        assert tree['child_1'].schema == structure.groups['child_1'].ds
-        print(f"[TIMING] aux_read_struc: {time.time() - t0:.2f}s")
-        
-        t1 = time.time()
-        df_map = _create_test_data()
         _run_local_validation(tree, df_map, start, t1)
 
 
@@ -290,37 +276,17 @@ def _check_ds_attrs_weather(ds, schema_ds):
 
 @pytest.mark.parametrize("storage_type", ["local", "s3"])
 def test_update_weather(tmp_path, storage_type):
-    # For S3, add a top-level fallback mechanism
-    if storage_type == "s3":
-        try:
-            # Example YAML file content (as a string for illustration):
-            structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
-            ds_schema = structure.ds
-            assert len(ds_schema.COORDS) == 2
-            assert len(ds_schema.VARS) == 4
-            print("Coordinates:")
-            for coord in ds_schema.COORDS:
-                print(coord)
-            print("\nQuantities:")
-            for var in ds_schema.VARS:
-                print(var)
-        except Exception as e:
-            print(f"[WARNING] S3 test failed completely: {e}")
-            print(f"[INFO] Skipping S3 test due to environment issues")
-            pytest.skip(f"S3 test skipped due to environment issues: {e}")
-    else:
-        # Local test runs normally
-        # Example YAML file content (as a string for illustration):
-        structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
-        ds_schema = structure.ds
-        assert len(ds_schema.COORDS) == 2
-        assert len(ds_schema.VARS) == 4
-        print("Coordinates:")
-        for coord in ds_schema.COORDS:
-            print(coord)
-        print("\nQuantities:")
-        for var in ds_schema.VARS:
-            print(var)
+    # Example YAML file content (as a string for illustration):
+    structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
+    ds_schema = structure.ds
+    assert len(ds_schema.COORDS) == 2
+    assert len(ds_schema.VARS) == 4
+    print("Coordinates:")
+    for coord in ds_schema.COORDS:
+        print(coord)
+    print("\nQuantities:")
+    for var in ds_schema.VARS:
+        print(var)
 
         # Create a Polars DataFrame with 6 temperature readings.
         # Two time stamps (e.g. 1000 and 2000 seconds) and three latitude values (e.g. 10.0, 20.0, 30.0).
