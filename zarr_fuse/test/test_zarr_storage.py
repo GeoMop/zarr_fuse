@@ -66,13 +66,13 @@ def aux_read_struc(fname, storage_type="local"):
         
         # Try multiple configurations to handle different s3fs versions
         configs_to_try = [
-            # Configuration 1: Minimal config
+            # Configuration 1: Minimal config with async support
             dict(
                 key=s3_key,
                 secret=s3_secret,
                 listings_expiry_time=1,
                 max_paths=0,
-                asynchronous=False,
+                asynchronous=True,  # Fixed: Enable async mode
                 client_kwargs=dict(
                     endpoint_url="https://s3.cl4.du.cesnet.cz",
                 ),
@@ -83,13 +83,13 @@ def aux_read_struc(fname, storage_type="local"):
                     read_timeout=60,
                 ),
             ),
-            # Configuration 2: With checksum disabled
+            # Configuration 2: With checksum disabled and async support
             dict(
                 key=s3_key,
                 secret=s3_secret,
                 listings_expiry_time=1,
                 max_paths=0,
-                asynchronous=False,
+                asynchronous=True,  # Fixed: Enable async mode
                 client_kwargs=dict(
                     endpoint_url="https://s3.cl4.du.cesnet.cz",
                 ),
@@ -104,13 +104,13 @@ def aux_read_struc(fname, storage_type="local"):
                     read_timeout=60,
                 ),
             ),
-            # Configuration 3: Force Content-Length
+            # Configuration 3: Force Content-Length with async support
             dict(
             key=s3_key,
             secret=s3_secret,
                 listings_expiry_time=1,
                 max_paths=0,
-                asynchronous=False,
+                asynchronous=True,  # Fixed: Enable async mode
             client_kwargs=dict(
                 endpoint_url="https://s3.cl4.du.cesnet.cz",
             ),
@@ -298,6 +298,39 @@ def test_update_weather(tmp_path, storage_type):
             
             # Recreate tree after store cleanup
             structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
+        elif storage_type == "s3":
+            # Clean S3 store and recreate tree for each variable
+            bucket_name = "test-zarr-storage"
+            root_path = f"{bucket_name}/test.zarr"
+            
+            # Use the same storage options as in aux_read_struc
+            s3_key = "4UD5K2LCS5ZU8GHL5TJS"
+            s3_secret = "VztZ2COyVsgADEGbftd1Zt6XdtN6QXwOhSfEKT0Y"
+            storage_options = dict(
+                key=s3_key,
+                secret=s3_secret,
+                listings_expiry_time=1,
+                max_paths=0,
+                asynchronous=True,
+                client_kwargs=dict(
+                    endpoint_url="https://s3.cl4.du.cesnet.cz",
+                ),
+                config_kwargs=dict(
+                    s3=dict(
+                        addressing_style="path",
+                        payload_signing_enabled=False,
+                    ),
+                    retries=dict(max_attempts=5, mode="standard"),
+                    connect_timeout=20,
+                    read_timeout=60,
+                ),
+            )
+            
+            # Clean S3 store
+            sync_remove_store(storage_options, root_path)
+            
+            # Recreate tree after store cleanup
+            structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
 
         # Create a Polars DataFrame with 6 temperature readings.
         # Two time stamps (e.g. 1000 and 2000 seconds) and three latitude values (e.g. 10.0, 20.0, 30.0).
@@ -344,6 +377,7 @@ def test_update_weather(tmp_path, storage_type):
             lat = row["latitude"]
             lon = row["longitude"]
             new_temp = new_ds["temperature"].sel({"time of year":time, "lat_lon":hash((lat, lon))})
+
             ref_temp_K = row["temp"] + 273.15
             assert  new_temp.values[0] == ref_temp_K
 
@@ -387,14 +421,6 @@ def test_update_weather(tmp_path, storage_type):
         # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]
         np.testing.assert_array_equal(new_ds["latitude"].values, [20.0, 20.0, 10.0])
         np.testing.assert_array_equal(new_ds["longitude"].values, [20.0, 10.0, 10.0])
-
-        # TODO, merged DF, test NaNs out of the update.
-        # merged_df = df.update(df2)
-        # for row in df.iter_rows(named=True):
-        #     time = row["timestamp"]
-        #     lat = row["latitude"]
-        #     lon = row["longitude"]
-        #     assert new_ds["temperature"].sel({"time of year":time, "lat_lon":hash((lat, lon))}) == row["temp"]
 
 
 def test_update_tensors(tmp_path):
