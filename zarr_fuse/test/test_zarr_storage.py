@@ -77,7 +77,10 @@ def aux_read_struc(fname, storage_type="local"):
                     endpoint_url="https://s3.cl4.du.cesnet.cz",
                 ),
                 config_kwargs=dict(
-                    s3=dict(addressing_style="path"),
+                    s3=dict(
+                        addressing_style="path",
+                        payload_signing_enabled=False,  # Added this line
+                    ),
                     retries=dict(max_attempts=5, mode="standard"),
                     connect_timeout=20,
                     read_timeout=60,
@@ -98,6 +101,7 @@ def aux_read_struc(fname, storage_type="local"):
                         addressing_style="path",
                         request_checksum_calculation="disabled",
                         response_checksum_validation="disabled",
+                        payload_signing_enabled=False,  # Added this line
                     ),
                     retries=dict(max_attempts=5, mode="standard"),
                     connect_timeout=20,
@@ -136,6 +140,15 @@ def aux_read_struc(fname, storage_type="local"):
                 sync_remove_store(storage_options, root_path)
                 fs = fsspec.filesystem('s3', **storage_options)
                 store = zarr.storage.FsspecStore(fs, path=root_path)
+                
+                # Ensure Zarr group metadata is created
+                try:
+                    # Try to create the root group if it doesn't exist
+                    zarr.group(store=store, overwrite=True)
+                except Exception:
+                    # If group already exists, that's fine
+                    pass
+                
                 print(f"[DEBUG] S3 configuration {i+1} succeeded")
                 return store
             except Exception as e:
