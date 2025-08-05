@@ -287,6 +287,17 @@ def test_update_weather(tmp_path, storage_type):
     print("\nQuantities:")
     for var in ds_schema.VARS:
         print(var)
+        
+        # Clean store and recreate tree for each variable (to ensure clean state)
+        if storage_type == "local":
+            import shutil
+            workdir = Path(__file__).parent / "workdir"
+            store_path = (workdir / "structure_weather.yaml").with_suffix(".zarr")
+            if store_path.exists():
+                shutil.rmtree(store_path)
+            
+            # Recreate tree after store cleanup
+            structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
 
         # Create a Polars DataFrame with 6 temperature readings.
         # Two time stamps (e.g. 1000 and 2000 seconds) and three latitude values (e.g. 10.0, 20.0, 30.0).
