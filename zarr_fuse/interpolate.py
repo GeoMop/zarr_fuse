@@ -1,3 +1,5 @@
+import logging
+dflt_logger = logging.getLogger(__name__)
 from typing import Tuple, List, Dict
 import numpy as np
 import xarray as xr
@@ -20,7 +22,8 @@ class PartialOverlapError(ValueError):
                 f"overlap size [{self.idx_split}] < existing coord length [{self.coord_len}].")
 
 
-def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray, schema: Coord)\
+def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
+                  schema: Coord, log:logging.Logger)\
     -> Tuple[np.ndarray, int]:
     """
     Return (idx_sort, idx_split)
@@ -32,12 +35,21 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray, schema: Coord)\
     For `sorted==False` the `new_values` in `old_values` comes first in their order in the `old_values`
      then other values from `new_values` are appended.
     """
+
+    # Uniqueness should be tested when coordinate is formed in _coord_variable.
+    # Both pivot_nd and dataset_from_np use that function to form coordinates.
+    # We assert here just for code consistency.
+    assert np.unique(new_values).size == new_values.size, f"Code consistency error. New coordinates must be unique, got {new_values}"
+
     sorted = schema.sorted
     if sorted:
         idx_sort = np.argsort(new_values)
-        max_old = np.max(old_values)
         new_sorted = new_values[idx_sort]
-        idx_split = np.searchsorted(new_sorted, max_old, side='left') + 1
+        if len(old_values) > 0:
+            max_old = np.max(old_values)
+            idx_split = np.searchsorted(new_sorted, max_old, side='right')
+        else:
+            idx_split = 0
     else:
         pos_in_old = {v: i for i, v in enumerate(old_values)}
         keys = np.array([
@@ -47,29 +59,12 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray, schema: Coord)\
         idx_sort = np.argsort(keys)
         idx_split = np.sum(np.array(keys) < len(old_values))
 
-        # overlap for unsorted must be either whole or none
-        # future: sparse interpolation or fill updating DS by
-        # existing DS values for coords within overlap range
-        have_part_overlap = (
-            idx_split > 0 and idx_split < len(old_values)
-        )
-        if have_part_overlap:
-            raise PartialOverlapError(
-                schema.name,
-                idx_split,
-                len(old_values),
-            )
-
-        if idx_split > 0:
-            # full overlap, verify that the values are the same
-            update_overlap = new_values[idx_sort][:idx_split]
-            assert np.all(update_overlap == old_values)
-
     return (idx_sort, idx_split)
 
 
 def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
-                      idx_sorter:np.ndarray, schema: Coord) -> Tuple[np.ndarray, int]:
+                      idx_sorter:np.ndarray,
+                      schema: Coord, log:logging.Logger) -> Tuple[np.ndarray, int]:
     """
     Interpolate new coordinates to existing coordinates.
     :param dim_name: name of the coordinate dimension
@@ -82,56 +77,67 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     3. for step_limit modify part after split index
     """
     idx_sort, idx_split = idx_sorter
-    extension_start = idx_split
     new_sorted = new_values[idx_sort]
+    if len(new_sorted) == 0:
+        return np.array([]), 0
+
+    # Process overlap part
     if schema.sorted:
+        # Determine part of old_values that are covered by the range of new_values so
+        # the range of old_values we can potentialy interpolate to.
+        # new_values[0] <= old_values[i_min] and ald_values[i_max-1] <= new_values[-1]
+
         assert np.all(np.diff(new_sorted) >= 0)
-        old_part_min = new_sorted[:idx_split][0]
+        old_part_min = new_sorted[0]
         old_range_min = np.searchsorted(old_values, old_part_min, side='left')
-        old_part_max = new_sorted[:idx_split][-1]
+        old_part_max = new_sorted[-1]
         old_range_max = np.searchsorted(old_values, old_part_max, side='right')
         update_old_part = np.array(old_values[old_range_min:old_range_max])
-
-        if old_part_max > np.max(old_values):
-            extension_start -= 1  # include the first value out of old_values to the extension
-        assert extension_start > len(new_sorted) or np.max(old_values) < new_sorted[extension_start], f"First extension value {new_sorted[extension_start]} <= max old values: {np.max(old_values)}"
 
     else:
         if schema.step_limits is None:
             # no extension allowed
-            assert np.all(new_sorted == old_values)
-            assert extension_start == len(new_sorted)
+            assert len(new_sorted[idx_split:]) == 0
         elif schema.step_limits == []:
-            # deafult case, add all new coords
-            assert extension_start == 0 or np.all(new_sorted[:extension_start] == old_values)
+            # default case, add all new coords
+            pass
         else:
-            assert False, r"Interpolation not supported for non-sorted coordinates (step_limits={schema.step_limits}\n)"
+            # Same as default case.
+            log.error(f"Ignoring unsupported interpolation for non-sorted coordinates (step_limits={schema.step_limits}\n)")
         update_old_part = new_sorted[:idx_split]
 
     # Phase 2: determine extension
 
+    new_append = new_sorted[idx_split:]
+    last_old = old_values[-1] if len(old_values) > 0 else new_values[idx_split]
     if schema.step_limits is None:
         # no extension allowed
-        assert extension_start >= len(new_sorted) - 1
+        if len(new_append) > 1:
+            # Non-fatal error.
+            log.error(f"Dimension {schema.name}: extension not allowed (step_limits=None). "
+                      f"Appended coordinates ignored: {new_append[1:]}.")
         # one value in extension is allowed, but used only to interpolate
-        update_new_part = []
-    elif schema.step_limits == []:
+        update_new_part = np.array([], dtype=new_append.dtype)
+    elif schema.step_limits == [] or not schema.sorted:
         # deafult case, add all new coords
-        update_new_part = new_sorted[extension_start:]
+        update_new_part = new_append
     else:
+        # Constrained coordinates step.
+        # Construct adjusted coordinates grid.
         min_step, max_step, unit = schema.step_limits
         step_range = np.array([min_step, max_step])
         step_range = units.create_quantity(step_range, unit)
         coord_unit = schema.step_unit()
         step_range = step_range.to(coord_unit).magnitude
 
-        last_old = old_values[-1]
-        if last_old < new_sorted[extension_start]:
-            extension_part = np.concatenate([
-                np.array([last_old]),
-                new_sorted[extension_start:]])
+        if last_old < new_append[0]:
+            extension_part = np.concatenate(
+                [np.array([last_old]),new_append]
+            )
         else:
-            extension_part = new_sorted[extension_start:]
+            assert False, f"Old maximum {last_old} must be less than new append part first value {new_append}"
+            extension_part = new_append
+
         update_new_part = adjust_grid(extension_part, step_range)[1:]
 
     idx_split = len(update_old_part)
@@ -139,7 +145,8 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     return merged_coord_values, idx_split
 
 
-def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset, schema:Dict[str, Coord]) \
+def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
+                   schema:Dict[str, Coord], log: logging.Logger = dflt_logger) \
         -> Tuple[xr.Dataset, Dict[str, int]]:
     """
     Interpolate ds_update to existing coords.
@@ -158,7 +165,7 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset, schema:Dict[s
         d: sort_by_coord(
             ds_update[d].values,
             ds_existing[d].values,
-            schema[d])
+            schema[d], log)
         for d in ds_update.dims
     }
 
@@ -169,11 +176,11 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset, schema:Dict[s
              ds_update[d].values,
              ds_existing[d].values,
              dim_idx_sort[d],
-             schema[d])
+             schema[d], log)
         )
         for d in ds_update.dims
     ]
-    interp_coords = {d: c for d, (c, idx) in coords_new if schema[d].sorted}
+    interp_coords = {d: c for d, (c, idx) in coords_new if schema[d].sorted and len(c) > 0}
     split_indices = [(d, idx) for d, (c, idx) in coords_new]
 
     # Phase 3: interpolate ds_sorted to new coords

@@ -56,6 +56,7 @@ class Coord:
     name: str
     description: Optional[str] = None
     composed: Dict[str, List[Any]] = None
+    sorted: bool = True
     chunk_size: Optional[int] = 1024    # Explicit chunk size, 1024 default. Equal to 'len(values)' for fixed size coord.
     step_limits: Optional[List[float]] = []    # [min_step, max_step, unit]
     #values: Optional[np.ndarray]  = attrs.field(eq=attrs.cmp_using(eq=np.array_equal), default=None)             # Fixed size, given coord values.
@@ -92,12 +93,17 @@ class Coord:
             assert len(self.step_limits) == 3, f"step_limits should be a list of 3 elements, got {self.step_limits}"
             assert isinstance(self.step_limits[2], str)
 
-        self.sorted = not self.is_composed()
+        self.sorted = dict.get('sorted', not self.is_composed())
         # May be explicit in the future. Namely, if we support interpolation of sparse coordinates.
         self._variables = None # set in DatasetSchema.__init__
 
     @property
     def attrs(self):
+        """
+        Coordinate attributes set as attribute of rthe esulting Dataset variable.
+        Does not affect serialization.
+        :return: dict of exported attributes
+        """
         return dict(
             composed=self.composed,
             description=f"\n\n{self.description}",

@@ -66,7 +66,7 @@ dev = [
     # Have to repeat 'apps' and 'plotting' here
     # TODO: find a way to avoid this repetition
     # possibly PDM (Python Development Master or stick with basic setup.py
-   "pytest",
+    "pytest",
     # Include dependencies from plotting
     "matplotlib",
     "plotly",

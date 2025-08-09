@@ -1,18 +1,21 @@
 import pytest
 import numpy as np
 import xarray as xr
+import re
 try:
     import matplotlib.pyplot as plt
 except ImportError:
     pass
 
 # ---- adjust this import to match your module path! ----
-from zarr_fuse.interpolate import interpolate_ds, sort_by_coord, interpolate_coord
+from zarr_fuse.interpolate import interpolate_ds, sort_by_coord, interpolate_coord, dflt_logger
+from zarr_fuse.zarr_schema import Coord
 #from ds_interpolate import sort_by_coord, interpolate_coord, interpolate_ds
 
 # a tiny dummy schema object in lieu of Coord
 class DummySchema:
-    def __init__(self, *, sorted, step_limits, unit=None, step_unit):
+    def __init__(self, *, sorted, step_limits=None, unit=None, step_unit=None):
+        self.name = "test_coord"
         self.sorted = sorted
         self.step_limits = step_limits
         self.unit = unit
@@ -24,11 +27,12 @@ class DummySchema:
 # -- low‐level tests for sort_by_coord & interpolate_coord --
 
 def test_sort_by_coord_sorted():
+    schema = DummySchema(sorted=True)
     old = np.array([0, 10, 20, 30])
     new_ref = np.array([15, 25, 30, 35, 40, 50])
     new = new_ref.copy()
     np.random.shuffle(new)
-    idx_sort, idx_split = sort_by_coord(new, old, sorted=True)
+    idx_sort, idx_split = sort_by_coord(new, old, schema, dflt_logger)
     # should sort new ascending and find split where overlap ends
 
     sorted = new[idx_sort]
@@ -41,16 +45,17 @@ def test_sort_by_coord_sorted():
     new_ref = np.array([15, 25, 31, 35, 40, 50])
     new = new_ref.copy()
     np.random.shuffle(new)
-    idx_sort, idx_split = sort_by_coord(new, old, sorted=True)
+    idx_sort, idx_split = sort_by_coord(new, old, schema, dflt_logger)
     # overlap with old max=30 => split at new index of 30 (right side)
-    assert idx_split == 3
+    assert idx_split == 2
 
 
 def test_sort_by_coord_unsorted():
+    schema = DummySchema(sorted=False)
     # empty extension
     old = np.array([5, 15, 25])
     new = np.array([25, 5, 15])
-    idx_sort, idx_split = sort_by_coord(new, old, sorted=False)
+    idx_sort, idx_split = sort_by_coord(new, old, schema, dflt_logger)
     # keys map 25->2,5->0,15->1 so sorting gives positions [1,2,0]
     assert np.all(old == new[idx_sort])
     # full overlap => split == len(old)
@@ -59,70 +64,66 @@ def test_sort_by_coord_unsorted():
     # non-empty extension, no overlap
     old = np.array([5, 15, 25])
     new = np.array([4, 30])
-    idx_sort, idx_split = sort_by_coord(new, old, sorted=False)
+    idx_sort, idx_split = sort_by_coord(new, old, schema, dflt_logger)
     # keys map 25->2,5->0,15->1 so sorting gives positions [1,2,0]
     assert idx_split == 0
 
     # non-empty extension, full overlap
     old = np.array([5, 15, 25])
     new = np.array([25, 5, 15, 4, 30])
-    idx_sort, idx_split = sort_by_coord(new, old, sorted=False)
+    idx_sort, idx_split = sort_by_coord(new, old, schema, dflt_logger)
     # keys map 25->2,5->0,15->1 so sorting gives positions [1,2,0]
     assert idx_split == len(old)
     assert np.all(old == new[idx_sort][:idx_split])
 
-    # failing assert for non-full overlap
-    with pytest.raises(AssertionError) as excinfo:
-        old = np.array([5, 15, 25])
-        new = np.array([25, 5, 35])
-        sort_by_coord(new, old, sorted=False)
-    excinfo.match(r"full overlap expected")
+    # Test partial overlap
+    old = np.array([5, 15, 25])
+    new = np.array([25, 5, 6, 35])
+    idx_sort, idx_split = sort_by_coord(new, old, schema, dflt_logger)
+    assert idx_split == 2
+    assert np.all([5, 25, 6, 35] == new[idx_sort])
 
-    with pytest.raises(AssertionError) as excinfo:
-        old = np.array([5, 15, 25])
-        new = np.array([6, 15, 20, 35])
-        sort_by_coord(new, old, sorted=False)
-    excinfo.match(r"")
 
-def run_interp(new, step_limits, sort=True, old=[0,1,2], unit='', step_unit='hour'):
+def run_interp(old, new, step_limits, sort=True,  unit='', step_unit='hour'):
+    schema = DummySchema(sorted=sort, step_limits=step_limits, unit=unit, step_unit=step_unit)
+
     new = np.array(new)
     old = np.array(old)
-    idx_sorter = sort_by_coord(new, old, sorted=sort)
-    return interpolate_coord(
-        new, old, idx_sorter,
-        DummySchema(sorted=sort, step_limits=step_limits, unit=unit, step_unit=step_unit)
-    )
+    idx_sorter = sort_by_coord(new, old, schema, dflt_logger)
+    return interpolate_coord( new, old, idx_sorter, schema, dflt_logger)
+
 
 def test_interpolate_coord_sorted():
-
+    old = [0, 1, 2]
     # sorted, step_limits - no extension
-    merged, split = run_interp([1, 1.5, 2.1], step_limits=None)
+    merged, split = run_interp(old, [1, 1.5, 2.1], step_limits=None)
     assert split == 2
     np.allclose(merged, [1, 2])
 
     new = [1, 1.5, 2.1, 3, 10]
-    with pytest.raises(AssertionError) as excinfo:
-        merged, split = run_interp(new, step_limits=None)
+    merged, split = run_interp(old, new, step_limits=None)
+    # apendend coordinates ignored. Non-fatal error.
+    assert np.allclose(merged, [1, 2])
 
     # sorted, step_limits - full extension
-    merged, split = run_interp(new, step_limits=[])
+    merged, split = run_interp(old, new, step_limits=[])
     assert split == 2
     np.allclose(merged, [1, 2, 2.1, 3, 10])
 
     new = [1, 1.5, 2, 3, 10]
-    merged, split = run_interp(new, step_limits=[])
+    merged, split = run_interp(old, new, step_limits=[])
     assert split == 2
     np.allclose(merged, [1, 2, 3, 10])
 
     # sorted, step_limits - unexact step limits
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
-    merged, split = run_interp(new,
+    merged, split = run_interp(old, new,
                     step_limits=[72, 126, 'minutes']) # 1.2 h, 2.1 h
     assert split == 2
     np.allclose(merged, [1, 2, 4, 5.75, 7.5, 8.75,  10])
 
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
-    merged, split = run_interp(new,
+    merged, split = run_interp(old, new,
                     step_limits=[150, 150, 'minutes']) # 2.5 h
     assert split == 2
     np.allclose(merged, [1, 2, 3.5 + 1/3.0, 5 + 2/3.0, 7.5,  10])
@@ -130,40 +131,41 @@ def test_interpolate_coord_sorted():
 
 
 def test_interpolate_coord_unsorted():
+    old = [0, 1, 2]
     # sorted, step_limits - no extension
-    merged, split = run_interp([0, 1, 2], sort=False, step_limits=None)
+    merged, split = run_interp(old, [0, 1, 2], sort=False, step_limits=None)
     assert split == 3
     np.allclose(merged, [0, 1, 2])
 
     with pytest.raises(AssertionError) as excinfo:
         # unable to interpolate
-        merged, split = run_interp([1, 1.5, 2.1], sort=False, step_limits=None)
+        merged, split = run_interp(old, [1, 1.5, 2.1], sort=False, step_limits=None)
 
-    with pytest.raises(AssertionError) as excinfo:
-        # only able to update all coords
-        merged, split = run_interp([1, 2], sort=False, step_limits=None)
+    #with pytest.raises(AssertionError) as excinfo:
+    ## only able to update all coords
+    merged, split = run_interp(old, [1, 2], sort=False, step_limits=None)
 
     # sorted, step_limits - full extension, full overlap
     new = [0, 1, 2, 10, 3]
-    merged, split = run_interp(new, sort=False, step_limits=[])
+    merged, split = run_interp(old, new, sort=False, step_limits=[])
     assert split == 3
     np.allclose(merged, [0, 1, 2, 10, 3])
 
     new = [10, 3]   # no overlap
-    merged, split = run_interp(new, sort=False, step_limits=[])
+    merged, split = run_interp(old, new, sort=False, step_limits=[])
     assert split == 0
     np.allclose(merged, [10, 3])
 
     new = [0, 1, 1.5, 2, 3, 10]
     # unable to interpolate, add all new values
-    merged, split = run_interp(new, sort=False, step_limits=[])
+    merged, split = run_interp(old, new, sort=False, step_limits=[])
     assert split == 3
     np.allclose(merged, [0, 1, 2, 1.5, 10, 3])
 
-    new = [0, 1, 2, 10, 3]
-    with pytest.raises(AssertionError) as excinfo:
-        # unable to interpolate
-        merged, split = run_interp(new, sort=False, step_limits=[1, 2])
+    new = [1, 2, 10, 3]
+    # unable to interpolate
+    merged, split = run_interp(old, new, sort=False, step_limits=[1, 2])
+    np.allclose(merged, [1, 2,  10, 3])
 
 
 
