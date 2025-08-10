@@ -31,7 +31,7 @@ RUN pip install --upgrade pip setuptools wheel \
 WORKDIR /ingress-server
 
 COPY app/databuk/ingress_server/pyproject.toml /ingress-server/pyproject.toml
-COPY app/databuk/ingress_server/src/ /ingress-server/src/
+COPY app/databuk/ingress_server/src/ /ingress-server/
 
 RUN pip install --no-cache-dir /ingress-server \
     && pip install --no-cache-dir gunicorn
