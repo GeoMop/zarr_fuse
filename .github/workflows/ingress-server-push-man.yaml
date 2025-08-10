@@ -15,9 +15,6 @@ jobs:
     container:
       image: quay.io/buildah/stable:v1.35.4
       options: --privileged
-    defaults:
-      run:
-        working-directory: app/databuk/ingress_server
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-containerize"
       cancel-in-progress: true
