@@ -23,7 +23,7 @@ spec:
           imagePullPolicy: Always
           ports:
             - name: {{ .Values.service.internalPort.name | quote }}
-              containerPort: {{ .Values.service.internalPort.port | int }}
+              containerPort: {{ .Values.service.internalPort.number | int }}
           env:
             - name: S3_ACCESS_KEY
               value: {{ .Values.deployment.secrets.s3.accessKey | quote }}

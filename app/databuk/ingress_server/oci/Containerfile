@@ -40,5 +40,4 @@ USER ingress
 WORKDIR /ingress-server
 EXPOSE 8000
 
-# Gunicorn: 1 worker (kvůli přísným quotám), 2 vlákna, logy na stdout/stderr
 CMD ["gunicorn", "--workers", "1", "--threads", "2", "--timeout", "60", "--graceful-timeout", "30", "--preload", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-", "src.main:create_app()"]

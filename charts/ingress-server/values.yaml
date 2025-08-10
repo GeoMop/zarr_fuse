@@ -7,17 +7,17 @@ deployment:
   replicaCount: 1
   secrets:
     s3:
-      accessKey: "PCK68E0FK61J9O3XE4XS"
-      secretKey: "n9AguicnrXTgEOvzlGnpZFdqVEbA0kD6FYS6OKvp"
+      accessKey: ""
+      secretKey: ""
 
 service:
   name: ingress-server-service
   type: ClusterIP
   externalPort:
-    port: 80
+    number: 80
     name: http
   internalPort:
-    port: 8000
+    number: 8000
     name: http
 
 ingress:
@@ -29,11 +29,17 @@ ingress:
         - path: /
           pathType: Prefix # ImplementationSpecific
   tls:
-    - secretName: zarr-fuse-ingress-server.dyn.cloud.e-infra.cz
+    - secretName: zarr-fuse-ingress-server-dyn-cloud-e-infra-cz-tls
       hosts:
-        - zarr-fuse-ingress-server-dyn-cloud-e-infra-cz-tls
+        - zarr-fuse-ingress-server.dyn.cloud.e-infra.cz
 
-resources: {}
+resources:
+  requests:
+    cpu: 500m
+    memory: 2048Mi
+  limits:
+    cpu: 1000m
+    memory: 4096Mi
 
 securityContext:
   pod:

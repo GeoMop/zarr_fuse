@@ -8,5 +8,5 @@ spec:
     app: ingress-server
   ports:
     - name: {{ .Values.service.externalPort.name | quote }}
-      port: {{ .Values.service.externalPort.port | int }}
+      port: {{ .Values.service.externalPort.number | int }}
       targetPort: {{ .Values.service.internalPort.name | quote }}

@@ -19,7 +19,7 @@ spec:
               service:
                 name: {{ $.Values.service.name | quote }}
                 port:
-                  name: {{ $.Values.service.externalPort.name | quote }}
+                  number: {{ $.Values.service.externalPort.number | int }}
           {{- end }}
     {{- end }}
   {{- with .Values.ingress.tls }}
