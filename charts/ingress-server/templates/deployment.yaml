@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "zarrfuse.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "zarrfuse.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.app.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "zarrfuse.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    spec:
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
+      containers:
+        - name: {{ include "zarrfuse.name" . }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          env:
+            - name: S3_ACCESS_KEY
+              value: "{{ .Values.app.secrets.s3.accessKey }}"
+            - name: S3_SECRET_KEY
+              value: "{{ .Values.app.secrets.s3.secretKey }}"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http

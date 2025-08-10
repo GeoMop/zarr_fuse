@@ -1,0 +1,46 @@
+image:
+  repository: zarr-fuse-ingress
+  tag: "latest"
+
+app:
+  replicaCount: 1
+  secrets:
+    s3:
+      accessKey: ""
+      secretKey: ""
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: zarr-fuse-ingress-server.dyn.cloud.e-infra.cz
+      paths:
+        - path: /
+          pathType: Prefix # ImplementationSpecific
+  tls:
+    - secretName: zarr-fuse-ingress-server.dyn.cloud.e-infra.cz
+      hosts:
+        - zarr-fuse-ingress-server-dyn-cloud-e-infra-cz-tls
+
+resources: {}
+#  requests:
+#    cpu: 50m
+#    memory: 128Mi
+#  limits:
+#    cpu: 500m
+#    memory: 512Mi
+
+# Security: container runs as non-root user 11233 (matches your Dockerfile)
+securityContext:
+  pod:
+    runAsNonRoot: true
+    runAsUser: 11233
+    runAsGroup: 11233
+    fsGroup: 11233
+  container:
+    runAsNonRoot: true
+    runAsUser: 11233

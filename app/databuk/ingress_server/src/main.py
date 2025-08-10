@@ -14,28 +14,40 @@ load_dotenv()
 
 CONFIG_PATH = Path(__file__).parent / "endpoints_config.yaml"
 
-def get_store(bucket_name, file_name):
+def get_schema_attributes(schema_path):
+    with open(schema_path, "r", encoding="utf-8") as f:
+        schema_dict = yaml.safe_load(f)
+
+    try:
+        s3_url = schema_dict["ATTRS"]["s3_url"]
+        store_path = schema_dict["ATTRS"]["store_path"]
+    except KeyError as e:
+        raise ValueError(f"Missing key in schema: {e}")
+
+    return s3_url, store_path
+
+def get_store(schema_path):
+    s3_url, store_path = get_schema_attributes(schema_path)
     key = os.getenv("S3_ACCESS_KEY")
     secret = os.getenv("S3_SECRET_KEY")
-    endpoint = os.getenv("S3_ENDPOINT")
 
-    if not all([key, secret, endpoint]):
-        raise ValueError("S3 credentials or endpoint not set in environment variables.")
+    # TODO: do better validation
+    if not all([key, secret, s3_url, store_path]):
+        raise ValueError("S3 credentials and paths not set in environment variables.")
 
     storage_options = dict(
         key=key,
         secret=secret,
         asynchronous=False,
-        client_kwargs={"endpoint_url": endpoint},
+        client_kwargs={"endpoint_url": s3_url},
         config_kwargs={"s3": {"addressing_style": "path"}}
     )
 
-    path = f"{bucket_name}/{file_name}"
     fs = fsspec.filesystem("s3", **storage_options)
-    return zarr.storage.FsspecStore(fs, path=path)
+    return zarr.storage.FsspecStore(fs, path=store_path)
 
-def get_tree(bucket, filename, schema_path):
-    store = get_store(bucket, filename)
+def get_tree(schema_path):
+    store = get_store(schema_path)
     schema = zf.schema.deserialize(Path(schema_path))
 
     try:
@@ -44,19 +56,25 @@ def get_tree(bucket, filename, schema_path):
         # fallback to create if missing
         return zf.Node("", store, new_schema=schema)
 
+def get_file_data(file):
+    if file.filename.endswith('.csv'):
+        return pl.read_csv(io.BytesIO(file.read()))
+    elif file.filename.endswith('.json'):
+        return pl.read_json(io.BytesIO(file.read()))
+    else:
+        raise ValueError("Unsupported file type. Only CSV and JSON are allowed.")
+
 def create_upload_endpoint(app, name, endpoint_url, schema_path):
     def make_upload_node(endpoint_name):
         def upload_node(node_path=""):
-            bucket = request.form.get("bucket") # take from endpoint_config.yaml
-            filename = request.form.get("filename") # take from endpoint_config.yaml
             file = request.files.get("file")
-            if not bucket or not filename or not file:
-                return jsonify({"error": "Missing 'bucket', 'filename', or file"}), 400
+            if not file:
+                return jsonify({"error": "No file provided"}), 400
 
             try:
-                df = pl.read_csv(io.BytesIO(file.read()))
-                tree = get_tree(bucket, filename, schema_path)
-                if name in ["tree", "sensors", "weather"]:
+                df = get_file_data(file)
+                tree = get_tree(schema_path)
+                if name in ["tree", "sensor", "weather"]:
                     tree.update(df)
                 else:
                     node = tree[node_path]
@@ -65,7 +83,7 @@ def create_upload_endpoint(app, name, endpoint_url, schema_path):
                 return jsonify({
                     "error": f"Update failed: {e}",
                     "trace": traceback.format_exc()
-                }), 500
+                }), 400
 
             return jsonify({"status": f"Updated {node_path or '/'} successfully"})
 

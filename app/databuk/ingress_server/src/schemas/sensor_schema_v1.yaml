@@ -29,6 +29,6 @@ COORDS:
   tn_voigt_3d:
     values: 6
 ATTRS:
-  description: Sensors scheme
+  description: sensor schema
   s3_url: https://s3.cl4.du.cesnet.cz
   store_path: test-moc/test.zarr # bucket + filename
