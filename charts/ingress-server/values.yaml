@@ -33,13 +33,7 @@ ingress:
       hosts:
         - zarr-fuse-ingress-server.dyn.cloud.e-infra.cz
 
-resources:
-  requests:
-    cpu: 500m
-    memory: 2048Mi
-  limits:
-    cpu: 1000m
-    memory: 4096Mi
+resources: {}
 
 securityContext:
   pod:
