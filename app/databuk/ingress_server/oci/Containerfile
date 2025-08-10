@@ -15,31 +15,26 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-# non-root user
+# Non-root user
 RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server ingress
 
-# --- Install zarr_fuse from repo root ---
+# --- Install zarr_fuse (z kořene repa) ---
 WORKDIR /opt/zarr_fuse_src
-
 COPY pyproject.toml README.md /opt/zarr_fuse_src/
 COPY zarr_fuse/ /opt/zarr_fuse_src/zarr_fuse/
-
 RUN pip install --upgrade pip setuptools wheel \
-    && pip install -e /opt/zarr_fuse_src
+ && pip install --no-cache-dir /opt/zarr_fuse_src
 
 # --- Install ingress server ---
 WORKDIR /ingress-server
-
 COPY app/databuk/ingress_server/pyproject.toml /ingress-server/pyproject.toml
 COPY app/databuk/ingress_server/src/ /ingress-server/src/
-
-RUN pip install -e /ingress-server \
-    && pip install gunicorn
+RUN pip install --no-cache-dir /ingress-server \
+ && pip install --no-cache-dir gunicorn
 
 USER ingress
 WORKDIR /ingress-server
 EXPOSE 8000
 
-# run via gunicorn, bind na 0.0.0.0
-# používá factory funkci create_app() ze src/main.py
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:8000", "src.main:create_app()"]
+# Gunicorn: 1 worker (kvůli přísným quotám), 2 vlákna, logy na stdout/stderr
+CMD ["gunicorn", "--workers", "1", "--threads", "2", "--timeout", "60", "--graceful-timeout", "30", "--preload", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-", "src.main:create_app()"]
