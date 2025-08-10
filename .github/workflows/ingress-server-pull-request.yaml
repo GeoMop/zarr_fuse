@@ -1,0 +1,8 @@
+name: Ingress server - pull request
+on:
+  pull_request:
+    branches:
+      - main
+jobs:
+  build:
+    uses: ./.github/workflows/ingress-server-reusable-workflow.yaml

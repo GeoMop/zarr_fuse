@@ -1,0 +1,96 @@
+name: Ingress server - reusable workflow
+on:
+  workflow_call:
+    inputs:
+      push-container:
+        description: Whether to push the container image
+        required: false
+        type: boolean
+        default: false
+      deploy-helm-chart:
+        description: Whether to deploy the Helm chart
+        required: false
+        type: boolean
+        default: false
+      tag:
+        description: The tag to use for the container image
+        required: false
+        type: string
+        default: latest
+env:
+  namespace: ingress-server
+  repository: mocstepan/zarr-fuse-ingress-server
+  registry: docker.io
+jobs:
+  containerize:
+    name: Containerize ingress server
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/buildah/stable:v1.35.4
+      options: --privileged
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-containerize"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Login to registry
+        if: ${{ inputs.push-container }}
+        run: buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ env.registry }}
+      - name: Build container file
+        run: buildah build -t ${{ env.registry }}/${{ env.repository }}:${{ inputs.tag }} -f app/databuk/ingress_server/oci/Containerfile .
+      - name: Push container image
+        if: ${{ inputs.push-container }}
+        run: |
+          buildah push ${{ env.registry }}/${{ env.repository}}:${{ inputs.tag }} docker://${{ env.registry }}/${{ env.repository }}:${{ inputs.tag }}
+          buildah logout ${{ env.registry }}
+  lint-helm-chart:
+    name: Lint ingress server Helm chart
+    runs-on: ubuntu-latest
+    container:
+      image: alpine/k8s:1.29.14
+    needs:
+      - containerize
+    defaults:
+      run:
+        working-directory: charts
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-lint-helm-chart"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Lint helm chart
+        run: helm lint ingress-server --strict > /dev/null
+  deploy-helm-chart:
+    name: Deploy ingress server to e-infra rancher
+    runs-on: ubuntu-latest
+    if: ${{ inputs.deploy-helm-chart }}
+    container:
+      image: alpine/k8s:1.29.14
+    needs:
+      - lint-helm-chart
+    env:
+      KUBECONFIG: ./kubeconfig.yaml
+    defaults:
+      run:
+        working-directory: charts
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-deploy-helm-chart"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Decode kubeconfig
+        run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
+      - name: Ensure that the namespace exists
+        run: kubectl create namespace --dry-run=client -o yaml '${{ env.namespace }}' | kubectl apply -f -
+      - name: Set context
+        run: kubectl config set-context --current --namespace="${{ env.namespace }}"
+      - name: Deploy app
+        run: |
+          helm upgrade ingress-server ingress-server \
+          --install --atomic --timeout 10m --namespace "${{ env.namespace }}" \
+          --set image.tag="${{ inputs.tag }}" \
+          --set app.secrets.s3.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
+          --set app.secrets.s3.secretKey="${{ secrets.S3_SECRET_KEY }}"
