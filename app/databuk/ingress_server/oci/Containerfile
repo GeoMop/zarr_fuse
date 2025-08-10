@@ -17,15 +17,24 @@ ENV PIP_NO_CACHE_DIR=1
 
 RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server ingress
 
+# --- Install zarr_fuse ---
+WORKDIR /opt/zarr_fuse_src
+
+COPY pyproject.toml README.md /opt/zarr_fuse_src/
+COPY zarr_fuse/ /opt/zarr_fuse_src/zarr_fuse/
+
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install -e /opt/zarr_fuse_src
+
+# --- Install and prepare ingress server ---
 WORKDIR /ingress-server
 
-WORKDIR /ingress-server
-COPY --chown=ingress:ingress pyproject.toml ./
-COPY --chown=ingress:ingress src/ ./src
+COPY app/databuk/ingress_server/pyproject.toml /ingress-server/pyproject.toml
+COPY app/databuk/ingress_server/src/ /ingress-server/src/
 
-RUN pip install --upgrade pip setuptools wheel && pip install .
+RUN pip install -e /ingress-server
 
 USER ingress
-
+WORKDIR /ingress-server
 EXPOSE 8000
 CMD ["python", "src/main.py"]

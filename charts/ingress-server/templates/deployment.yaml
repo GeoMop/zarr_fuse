@@ -1,16 +1,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: zarr-fuse-ingress-server
+  name: ingress-server
 spec:
   replicas: {{ .Values.deployment.replicaCount }}
   selector:
     matchLabels:
-      app: zarr-fuse-ingress-server
+      app: ingress-server
   template:
     metadata:
       labels:
-        app: zarr-fuse-ingress-server
+        app: ingress-server
     spec:
       securityContext:
         {{- toYaml .Values.securityContext.pod | nindent 8 }}

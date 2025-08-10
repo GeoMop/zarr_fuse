@@ -1,13 +1,11 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name:
+  name: ingress-server
   annotations:
     kubernetes.io/tls-acme: "true"
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
-  selector:
-    app: zarr-fuse-ingress-server
   ingressClassName: {{ .Values.ingress.className | quote }}
   rules:
     {{- range .Values.ingress.hosts }}

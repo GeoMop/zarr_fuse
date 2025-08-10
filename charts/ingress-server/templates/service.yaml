@@ -5,7 +5,7 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   selector:
-    app: zarr-fuse-ingress-server
+    app: ingress-server
   ports:
     - name: {{ .Values.service.externalPort.name | quote }}
       port: {{ .Values.service.externalPort.port | int }}

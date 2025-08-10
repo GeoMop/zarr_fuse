@@ -27,7 +27,7 @@ jobs:
       - name: Containerize app
         run: |
           buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ env.registry }}
-          buildah build -t ${{ env.registry }}/${{ env.repository }}:latest -f oci/Containerfile .
+          buildah build -t ${{ env.registry }}/${{ env.repository }}:latest -f app/databuk/ingress_server/oci/Containerfile .
           buildah push ${{ env.registry }}/${{ env.repository}}:latest docker://${{ env.registry }}/${{ env.repository }}:latest
           buildah logout ${{ env.registry }}
   deploy:

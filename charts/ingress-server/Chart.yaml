@@ -1,5 +1,5 @@
 apiVersion: v2
-name: zarr-fuse-ingress-server
+name: ingress-server
 description: Backend-only Flask ingress to upload CSV/JSON into an S3-backed Zarr store
 type: application
 version: 0.1.0

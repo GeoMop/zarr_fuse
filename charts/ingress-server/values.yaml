@@ -3,12 +3,12 @@ image:
   tag: "latest"
 
 deployment:
-  name: zarr-fuse-ingress-server
+  name: ingress-server
   replicaCount: 1
   secrets:
     s3:
-      accessKey: ""
-      secretKey: ""
+      accessKey: "PCK68E0FK61J9O3XE4XS"
+      secretKey: "n9AguicnrXTgEOvzlGnpZFdqVEbA0kD6FYS6OKvp"
 
 service:
   name: ingress-server-service
@@ -41,13 +41,21 @@ resources:
     cpu: 1000m
     memory: 4096Mi
 
-# Security: container runs as non-root user 11233 (matches your Dockerfile)
 securityContext:
   pod:
+    fsGroup: 11233
     runAsNonRoot: true
     runAsUser: 11233
     runAsGroup: 11233
-    fsGroup: 11233
+    seccompProfile:
+      type: RuntimeDefault
   container:
+    capabilities:
+      drop:
+        - ALL
+    allowPrivilegeEscalation: false
+    privileged: false
     runAsNonRoot: true
+    readOnlyRootFilesystem: true
     runAsUser: 11233
+    runAsGroup: 11233
