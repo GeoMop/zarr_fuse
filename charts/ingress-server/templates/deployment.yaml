@@ -32,20 +32,20 @@ spec:
               port: http
             periodSeconds: 5
             successThreshold: 1
-            failureThreshold: 36
+            failureThreshold: 72
           livenessProbe:
             httpGet:
               path: /
               port: http
             periodSeconds: 30
             successThreshold: 1
-            failureThreshold: 2
+            failureThreshold: 10
           readinessProbe:
             httpGet:
               path: /
               port: http
             periodSeconds: 30
             successThreshold: 1
-            failureThreshold: 2
+            failureThreshold: 10
           securityContext:
             {{- toYaml .Values.securityContext.container | nindent 12 }}
