@@ -2,7 +2,8 @@ image:
   repository: mocstepan/zarr-fuse-ingress-server
   tag: "latest"
 
-app:
+deployment:
+  name: zarr-fuse-ingress-server
   replicaCount: 1
   secrets:
     s3:
@@ -10,8 +11,14 @@ app:
       secretKey: ""
 
 service:
+  name: ingress-server-service
   type: ClusterIP
-  port: 8000
+  externalPort:
+    port: 80
+    name: http
+  internalPort:
+    port: 8000
+    name: http
 
 ingress:
   className: "nginx"

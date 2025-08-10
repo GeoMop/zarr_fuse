@@ -1,14 +1,13 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "zarrfuse.fullname" . }}
-  labels:
-    app.kubernetes.io/name: {{ include "zarrfuse.name" . }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
+  name:
   annotations:
     kubernetes.io/tls-acme: "true"
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
+  selector:
+    app: zarr-fuse-ingress-server
   ingressClassName: {{ .Values.ingress.className | quote }}
   rules:
     {{- range .Values.ingress.hosts }}
@@ -20,9 +19,9 @@ spec:
             pathType: {{ .pathType | quote }}
             backend:
               service:
-                name: {{ include "zarrfuse.fullname" $ }}
+                name: {{ $.Values.service.name | quote }}
                 port:
-                  number: {{ $.Values.service.port }}
+                  name: {{ $.Values.service.externalPort.name | quote }}
           {{- end }}
     {{- end }}
   {{- with .Values.ingress.tls }}
