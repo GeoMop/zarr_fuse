@@ -20,17 +20,21 @@ RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server 
 
 # --- Install zarr_fuse (z kořene repa) ---
 WORKDIR /opt/zarr_fuse_src
+
 COPY pyproject.toml README.md /opt/zarr_fuse_src/
 COPY zarr_fuse/ /opt/zarr_fuse_src/zarr_fuse/
+
 RUN pip install --upgrade pip setuptools wheel \
- && pip install --no-cache-dir /opt/zarr_fuse_src
+    && pip install --no-cache-dir /opt/zarr_fuse_src
 
 # --- Install ingress server ---
 WORKDIR /ingress-server
+
 COPY app/databuk/ingress_server/pyproject.toml /ingress-server/pyproject.toml
 COPY app/databuk/ingress_server/src/ /ingress-server/src/
+
 RUN pip install --no-cache-dir /ingress-server \
- && pip install --no-cache-dir gunicorn
+    && pip install --no-cache-dir gunicorn
 
 USER ingress
 WORKDIR /ingress-server

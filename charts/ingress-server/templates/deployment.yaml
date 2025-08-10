@@ -14,6 +14,9 @@ spec:
     spec:
       securityContext:
         {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      volumes:
+        - name: ingress-server-tmp
+          emptyDir: {}
       containers:
         - name: ingress-server
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -26,23 +29,26 @@ spec:
               value: {{ .Values.deployment.secrets.s3.accessKey | quote }}
             - name: S3_SECRET_KEY
               value: {{ .Values.deployment.secrets.s3.secretKey | quote }}
+          volumeMounts:
+            - name: ingress-server-tmp
+              mountPath: /tmp
           startupProbe:
             httpGet:
-              path: /
+              path: /health
               port: http
             periodSeconds: 5
             successThreshold: 1
             failureThreshold: 72
           livenessProbe:
             httpGet:
-              path: /
+              path: /health
               port: http
             periodSeconds: 30
             successThreshold: 1
             failureThreshold: 10
           readinessProbe:
             httpGet:
-              path: /
+              path: /health
               port: http
             periodSeconds: 30
             successThreshold: 1

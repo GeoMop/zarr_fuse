@@ -93,8 +93,15 @@ def create_upload_endpoint(app, name, endpoint_url, schema_path):
     app.route(f"{endpoint_url}", methods=["POST"])(make_upload_node(name))
     app.route(f"{endpoint_url}/<path:node_path>", methods=["POST"])(make_upload_node(name + "_sub"))
 
+def register_health_endpoint(app):
+    @app.route("/health", methods=["GET"])
+    def health():
+        return jsonify({"status": "ok"}), 200
+
 def create_app():
     app = Flask(__name__)
+    register_health_endpoint(app)
+
     with open(CONFIG_PATH, "r") as f:
         config = yaml.safe_load(f)
 
