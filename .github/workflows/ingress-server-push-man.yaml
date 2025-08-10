@@ -27,8 +27,8 @@ jobs:
       - name: Containerize app
         run: |
           buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ env.registry }}
-          buildah build -t ${{ env.registry }}/${{ env.repository }}:${{ github.ref_name }} -f oci/Containerfile .
-          buildah push ${{ env.registry }}/${{ env.repository}}:${{ github.ref_name }} docker://${{ env.registry }}/${{ env.repository }}:${{ github.ref_name }}
+          buildah build -t ${{ env.registry }}/${{ env.repository }}:latest -f oci/Containerfile .
+          buildah push ${{ env.registry }}/${{ env.repository}}:latest docker://${{ env.registry }}/${{ env.repository }}:latest
           buildah logout ${{ env.registry }}
   deploy:
     name: Deploy app to e-infra rancher
