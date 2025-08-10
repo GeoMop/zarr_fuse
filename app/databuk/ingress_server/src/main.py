@@ -108,7 +108,7 @@ def create_app():
     for endpoint in config.get("endpoints", []):
         name = endpoint["name"]
         endpoint_url = endpoint["endpoint"]
-        schema_path = endpoint["schema_path"]
+        schema_path = (Path(__file__).parent / endpoint["schema_path"]).resolve()
         create_upload_endpoint(app, name, endpoint_url, schema_path)
 
     return app

@@ -7,5 +7,5 @@ csv_data = """time,temperature
 """
 files = {"file": ("data.csv", io.BytesIO(csv_data.encode("utf-8")))}
 
-response = requests.post(url, files=files, verify="ca.crt")
+response = requests.post(url, files=files)
 print(response.status_code, response.text)
