@@ -1,5 +1,5 @@
 image:
-  repository: zarr-fuse-ingress
+  repository: mocstepan/zarr-fuse-ingress-server
   tag: "latest"
 
 app:
@@ -26,13 +26,13 @@ ingress:
       hosts:
         - zarr-fuse-ingress-server-dyn-cloud-e-infra-cz-tls
 
-resources: {}
-#  requests:
-#    cpu: 50m
-#    memory: 128Mi
-#  limits:
-#    cpu: 500m
-#    memory: 512Mi
+resources:
+  requests:
+    cpu: 500m
+    memory: 2048Mi
+  limits:
+    cpu: 1000m
+    memory: 4096Mi
 
 # Security: container runs as non-root user 11233 (matches your Dockerfile)
 securityContext:

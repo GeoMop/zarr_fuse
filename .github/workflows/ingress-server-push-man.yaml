@@ -1,6 +1,6 @@
 name: Push main - ingress server
 on:
-  push:
+  pull_request:
     branches:
       - main
 env:
@@ -50,16 +50,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Wait for deployment approval
-        uses: trstringer/manual-approval@v1
-        with:
-          secret: ${{ github.token }}
-          approvers: "${{ env.approvers }}"
-          minimum-approvals: 1
-          issue-title: "Production deployment approval: '${{ github.ref_name }}'"
-          issue-body: "Waiting for manual approval to deploy '${{ github.ref_name }}' to production. Comment 'deploy' to approve. Comment 'cancel' to cancel."
-          additional-approved-words: "deploy"
-          additional-denied-words: "cancel"
+      #- name: Wait for deployment approval
+      #  uses: trstringer/manual-approval@v1
+      #  with:
+      #    secret: ${{ github.token }}
+      #    approvers: "${{ env.approvers }}"
+      #    minimum-approvals: 1
+      #    issue-title: "Production deployment approval: '${{ github.ref_name }}'"
+      #    issue-body: "Waiting for manual approval to deploy '${{ github.ref_name }}' to production. Comment 'deploy' to approve. Comment 'cancel' to cancel."
+      #    additional-approved-words: "deploy"
+      #    additional-denied-words: "cancel"
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
       - name: Ensure that the namespace exists
@@ -71,5 +71,5 @@ jobs:
           helm upgrade ingress-server ingress-server \
           --install --atomic --timeout 10m --namespace "${{ env.namespace }}" \
           --set image.tag="latest"
-          --set app.sercrets.s3.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
-          --set app.sercrets.s3.secretKey="${{ secrets.S3_SECRET_KEY }}" \
+          --set app.secrets.s3.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
+          --set app.secrets.s3.secretKey="${{ secrets.S3_SECRET_KEY }}" \
