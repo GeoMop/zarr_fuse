@@ -1,7 +1,7 @@
 ATTRS:
   description: Tree schema
   s3_url: https://s3.cl4.du.cesnet.cz
-  store_path: test-moc/test.zarr # bucket + filename
+  store_path: test-moc/tree.zarr # bucket + filename
 VARS:
   temperature:
     coords: time

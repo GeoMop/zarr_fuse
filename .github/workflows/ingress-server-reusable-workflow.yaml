@@ -22,6 +22,23 @@ env:
   repository: mocstepan/zarr-fuse-ingress-server
   registry: docker.io
 jobs:
+  # TODO: build before containerize
+  # build-python:
+  #   name: Build wheels & constraints
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Install build tooling
+  #       run: pip install -U pip build
+  #     - name: Build zarr_fuse wheel
+  #       run: python -m build --wheel -o dist .
+  #     - name: Upload dist artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: python-dist
+  #         path: dist/*
+
   containerize:
     name: Containerize ingress server
     runs-on: ubuntu-latest

@@ -20,7 +20,7 @@ spec:
       containers:
         - name: ingress-server
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - name: {{ .Values.service.internalPort.name | quote }}
               containerPort: {{ .Values.service.internalPort.number | int }}
