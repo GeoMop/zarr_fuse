@@ -30,7 +30,8 @@ dependencies = [
     "python-dotenv",
     "polars",
     "zarr",
-    "fsspec"
+    "fsspec",
+    "s3fs"
 ]
 
 [tool.setuptools.packages.find]
