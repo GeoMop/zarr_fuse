@@ -9,6 +9,7 @@ jobs:
     with:
       push-container: true
       deploy-helm-chart: true
-      tag: ${{ github.head_ref }}
-      namespace: ingress-server-${{ github.head_ref }}
+      tag: devel
+      namespace: ingress-server-devel
+      helm-extra-args: "--values .github/values/pr-values.yaml"
     secrets: inherit

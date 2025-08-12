@@ -1,0 +1,10 @@
+ingress:
+  hosts:
+    - host: zarr-fuse-ingress-server-devel.dyn.cloud.e-infra.cz
+      paths:
+        - path: /
+          pathType: Prefix # ImplementationSpecific
+  tls:
+    - secretName: zarr-fuse-ingress-server-devel-dyn-cloud-e-infra-cz-tls
+      hosts:
+        - zarr-fuse-ingress-server-devel.dyn.cloud.e-infra.cz

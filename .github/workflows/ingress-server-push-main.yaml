@@ -32,4 +32,5 @@ jobs:
       deploy-helm-chart: true
       tag: latest
       namespace: ingress-server-latest
+      helm-extra-args: "--values .github/values/main-values.yaml"
     secrets: inherit
