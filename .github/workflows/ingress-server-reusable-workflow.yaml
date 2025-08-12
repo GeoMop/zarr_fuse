@@ -48,7 +48,7 @@ jobs:
         run: |
           buildah build -t ${{ env.registry }}/${{ env.repository }}:${{ inputs.tag }} \
           --build-arg APP_VERSION="${{ inputs.tag }}" \
-          -f app/databuk/ingress_server/oci/Containerfile .
+          -f oci/Containerfile .
       - name: Push container image
         if: ${{ inputs.push-container }}
         run: |
