@@ -36,56 +36,6 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 │  └─ pyproject.toml              # Project metadata & dependencies
 ```
 
-> **Note:** In some repositories the Dockerfile path is `app/databuk/ingress_server/oci/Dockerfile`. Adjust commands accordingly.
-
----
-
-## Build (Docker/OCI)
-
-Run **from the repository root**, so that `zarr_fuse` and ingress server sources are included in the build.
-
-```bash
-docker build -t zarr-fuse-ingress \
-  -f app/databuk/ingress_server/oci/Dockerfile .
-```
-
-If your Dockerfile is under `ingress_server/oci/Dockerfile`, use:
-
-```bash
-docker build -t zarr-fuse-ingress \
-  -f ingress_server/oci/Dockerfile .
-```
-
----
-
-## Run (Docker, local)
-
-The image runs with **gunicorn** on port **8000**, as user **ingress** (UID `11233`).
-
-```bash
-docker run --rm -p 8000:8000 \
-  --env-file app/databuk/ingress_server/src/.env \
-  zarr-fuse-ingress
-```
-
-### Mounting schemas/config without rebuild
-
-The container already includes `schemas/` and `endpoints_config.yaml` from the build context.
-If you want to override them without rebuilding, mount them as read-only volumes:
-
-```bash
--v $(pwd)/app/databuk/ingress_server/src/schemas:/ingress-server/src/schemas:ro \
--v $(pwd)/app/databuk/ingress_server/src/endpoints_config.yaml:/ingress-server/src/endpoints_config.yaml:ro
-```
-
-### Gunicorn defaults
-
-- 1 worker
-- 2 threads
-- 60s timeout
-- preload enabled
-- logs sent to stdout/stderr
-
 ---
 
 ## Configuration
@@ -148,6 +98,38 @@ pip install .
 # Run the server
 cd src
 python main.py
+```
+
+---
+
+## Build (Docker/OCI)
+
+```bash
+docker build -t zarr-fuse-ingress \
+  -t zarr-fuse-ingress
+  -f oci/Containerfile .
+```
+
+---
+
+## Run (Docker, local)
+
+The image runs with **waitress** on port **8000**, as user **ingress** (UID `11233`).
+
+```bash
+docker run --rm -p 8000:8000 \
+  --env-file src/.env \
+  zarr-fuse-ingress:latest
+```
+
+### Mounting schemas/config without rebuild
+
+The container already includes `schemas/` and `endpoints_config.yaml` from the build context.
+If you want to override them without rebuilding, mount them as read-only volumes:
+
+```bash
+-v $(pwd)/src/schemas:/ingress-server/schemas:ro \
+-v $(pwd)/src/endpoints_config.yaml:/ingress-server/endpoints_config.yaml:ro
 ```
 
 ---

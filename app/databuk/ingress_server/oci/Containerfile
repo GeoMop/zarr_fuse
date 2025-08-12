@@ -1,4 +1,4 @@
-FROM docker.io/library/python:3.11-slim
+FROM docker.io/library/python:3.11-slim-bullseye
 
 ARG APP_VERSION="devel"
 
@@ -19,8 +19,12 @@ ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
 
 RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server ingress
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --upgrade pip setuptools wheel
-RUN pip install --no-cache-dir "git+https://github.com/geomop/zarr_fuse.git@main"
+RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@main"
 
 # --- Install ingress server ---
 WORKDIR /ingress-server
