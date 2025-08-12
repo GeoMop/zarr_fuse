@@ -11,5 +11,5 @@ jobs:
       deploy-helm-chart: true
       tag: devel
       namespace: ingress-server-devel
-      helm-extra-args: "--values .github/values/pr-values.yaml"
+      helm-extra-args: "--values ingress-server/values/pr-values.yaml"
     secrets: inherit
