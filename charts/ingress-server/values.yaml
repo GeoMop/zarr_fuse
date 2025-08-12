@@ -1,5 +1,5 @@
 image:
-  repository: mocstepan/zarr-fuse-ingress-server
+  repository: docker.io/mocstepan/zarr-fuse-ingress-server
   tag: "latest"
 
 deployment:
@@ -9,6 +9,8 @@ deployment:
     s3:
       accessKey: ""
       secretKey: ""
+    basicAuth:
+      usersJson: "{}"
 
 service:
   name: ingress-server-service

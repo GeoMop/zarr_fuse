@@ -11,7 +11,7 @@ LABEL org.opencontainers.image.url="https://github.com/geomop/zarr_fuse"
 LABEL org.opencontainers.image.authors="Geomop / Stepan Moc <stepan.mocik@gmail.com>"
 LABEL maintainer="Geomop / Stepan Moc <stepan.mocik@gmail.com>"
 
-ENV PYTHONPATH=/ingress-server
+#ENV PYTHONPATH=/ingress-server
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
@@ -19,28 +19,21 @@ ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
 
 RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server ingress
-
-# --- Install zarr_fuse (from repo root) ---
-WORKDIR /opt/zarr_fuse_src
-
-COPY --chown=ingress:ingress pyproject.toml README.md /opt/zarr_fuse_src/
-COPY --chown=ingress:ingress zarr_fuse/ /opt/zarr_fuse_src/zarr_fuse/
-
-RUN pip install --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir /opt/zarr_fuse_src
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir "git+https://github.com/geomop/zarr_fuse.git@main"
 
 # --- Install ingress server ---
 WORKDIR /ingress-server
 
-COPY --chown=ingress:ingress app/databuk/ingress_server/pyproject.toml /ingress-server/pyproject.toml
-COPY --chown=ingress:ingress app/databuk/ingress_server/src/ /ingress-server/
+COPY --chown=ingress:ingress pyproject.toml /ingress-server/pyproject.toml
+COPY --chown=ingress:ingress src/ /ingress-server/
 
 # install dependencies declared in ingress_server/pyproject.toml
 RUN pip install --no-cache-dir /ingress-server \
     && pip install --no-cache-dir waitress
 
 # Ensure ownership (in case some layers were created as root)
-RUN chown -R ingress:ingress /ingress-server /opt/zarr_fuse_src
+RUN chown -R ingress:ingress /ingress-server
 
 USER ingress
 WORKDIR /ingress-server

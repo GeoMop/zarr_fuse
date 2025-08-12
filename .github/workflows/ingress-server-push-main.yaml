@@ -1,7 +1,6 @@
 name: Ingress server - push main
 on:
-  # TODO: change to push
-  pull_request:
+  push:
     branches:
       - main
 jobs:
@@ -31,5 +30,6 @@ jobs:
     with:
       push-container: true
       deploy-helm-chart: true
-      tag: latest # TODO: implement versioning strategy
+      tag: latest
+      namespace: ingress-server-latest
     secrets: inherit

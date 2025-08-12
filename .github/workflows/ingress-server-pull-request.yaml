@@ -2,7 +2,12 @@ name: Ingress server - pull request
 on:
   pull_request:
     branches:
-      - main
+      - "*"
 jobs:
   build:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    with:
+      push-container: true
+      deploy-helm-chart: true
+      tag: ${{ github.head_ref }}
+      namespace: ingress-server-${{ github.head_ref }}

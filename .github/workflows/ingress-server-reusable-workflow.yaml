@@ -16,35 +16,25 @@ on:
         description: The tag to use for the container image
         required: false
         type: string
-        default: latest
+        default: devel
+      namespace:
+        description: The Kubernetes namespace to use
+        required: false
+        type: string
+        default: ingress-server-devel
 env:
-  namespace: ingress-server
   repository: mocstepan/zarr-fuse-ingress-server
   registry: docker.io
 jobs:
-  # TODO: build before containerize
-  # build-python:
-  #   name: Build wheels & constraints
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
-  #     - name: Install build tooling
-  #       run: pip install -U pip build
-  #     - name: Build zarr_fuse wheel
-  #       run: python -m build --wheel -o dist .
-  #     - name: Upload dist artifacts
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: python-dist
-  #         path: dist/*
-
   containerize:
     name: Containerize ingress server
     runs-on: ubuntu-latest
     container:
       image: quay.io/buildah/stable:v1.35.4
       options: --privileged
+    defaults:
+      run:
+        working-directory: app/databuk/ingress_server
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-containerize"
       cancel-in-progress: true
@@ -55,7 +45,10 @@ jobs:
         if: ${{ inputs.push-container }}
         run: buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ env.registry }}
       - name: Build container file
-        run: buildah build -t ${{ env.registry }}/${{ env.repository }}:${{ inputs.tag }} -f app/databuk/ingress_server/oci/Containerfile .
+        run: |
+          buildah build -t ${{ env.registry }}/${{ env.repository }}:${{ inputs.tag }} \
+          --build-arg APP_VERSION="${{ inputs.tag }}" \
+          -f app/databuk/ingress_server/oci/Containerfile .
       - name: Push container image
         if: ${{ inputs.push-container }}
         run: |
@@ -101,13 +94,14 @@ jobs:
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
       - name: Ensure that the namespace exists
-        run: kubectl create namespace --dry-run=client -o yaml '${{ env.namespace }}' | kubectl apply -f -
+        run: kubectl create namespace --dry-run=client -o yaml '${{ inputs.namespace }}' | kubectl apply -f -
       - name: Set context
-        run: kubectl config set-context --current --namespace="${{ env.namespace }}"
+        run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
       - name: Deploy app
         run: |
           helm upgrade ingress-server ingress-server \
-          --install --atomic --timeout 10m --namespace "${{ env.namespace }}" \
+          --install --atomic --timeout 10m --namespace "${{ inputs.namespace }}" --create-namespace \
           --set image.tag="${{ inputs.tag }}" \
           --set deployment.secrets.s3.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
-          --set deployment.secrets.s3.secretKey="${{ secrets.S3_SECRET_KEY }}"
+          --set deployment.secrets.s3.secretKey="${{ secrets.S3_SECRET_KEY }}" \
+          --set deployment.secrets.basicAuth.usersJson="${{ secrets.BASIC_AUTH_USERS_JSON }}"

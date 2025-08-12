@@ -1,15 +1,21 @@
-# ZarrFuse Ingress (Backend Only)
+# ZarrFuse Ingress – Backend & Docker/OCI
 
-Backend-only Flask service that accepts CSV/JSON uploads and merges them into an S3-backed Zarr store using `zarr-fuse`.
+Backend-only Flask service running in a container with **gunicorn**.
+The image contains both the `zarr_fuse` library and the ingress server code.
+The service accepts CSV/JSON uploads and merges them into an S3-backed Zarr store using `zarr-fuse`.
 There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
+
+---
 
 ## Overview
 
 - **Purpose:** Ingest tabular data (CSV/JSON) and merge it into a Zarr dataset on S3.
 - **Where to write:** S3 endpoint and path are defined in the *schema* (`ATTRS.s3_url`, `ATTRS.store_path`).
 - **How endpoints are defined:** via `endpoints_config.yaml`.
-- **Auth:** S3 credentials via environment variables. HTTP auth is not implemented by default (see notes).
+- **Auth:** Basic HTTP authentication (Flask-HTTPAuth) is enabled; credentials via environment variables. S3 credentials also come from environment.
 - **Swagger/OpenAPI:** Generated dynamically from `endpoints_config.yaml` using `tools/gen_swagger.py`.
+
+---
 
 ## Repository Layout
 
@@ -30,6 +36,56 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 │  └─ pyproject.toml              # Project metadata & dependencies
 ```
 
+> **Note:** In some repositories the Dockerfile path is `app/databuk/ingress_server/oci/Dockerfile`. Adjust commands accordingly.
+
+---
+
+## Build (Docker/OCI)
+
+Run **from the repository root**, so that `zarr_fuse` and ingress server sources are included in the build.
+
+```bash
+docker build -t zarr-fuse-ingress \
+  -f app/databuk/ingress_server/oci/Dockerfile .
+```
+
+If your Dockerfile is under `ingress_server/oci/Dockerfile`, use:
+
+```bash
+docker build -t zarr-fuse-ingress \
+  -f ingress_server/oci/Dockerfile .
+```
+
+---
+
+## Run (Docker, local)
+
+The image runs with **gunicorn** on port **8000**, as user **ingress** (UID `11233`).
+
+```bash
+docker run --rm -p 8000:8000 \
+  --env-file app/databuk/ingress_server/src/.env \
+  zarr-fuse-ingress
+```
+
+### Mounting schemas/config without rebuild
+
+The container already includes `schemas/` and `endpoints_config.yaml` from the build context.
+If you want to override them without rebuilding, mount them as read-only volumes:
+
+```bash
+-v $(pwd)/app/databuk/ingress_server/src/schemas:/ingress-server/src/schemas:ro \
+-v $(pwd)/app/databuk/ingress_server/src/endpoints_config.yaml:/ingress-server/src/endpoints_config.yaml:ro
+```
+
+### Gunicorn defaults
+
+- 1 worker
+- 2 threads
+- 60s timeout
+- preload enabled
+- logs sent to stdout/stderr
+
 ---
 
 ## Configuration
@@ -40,11 +96,14 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 # Required
 S3_ACCESS_KEY=YOUR_ACCESS_KEY
 S3_SECRET_KEY=YOUR_SECRET_KEY
+
+# Required for HTTP Basic Auth
+USER_JSON={"alice":"password"}
 ```
 
 The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.
 
-### 2) Endpoints (src/endpoints_config.yaml)
+### 2) Endpoints (`src/endpoints_config.yaml`)
 
 ```yaml
 endpoints:
@@ -79,9 +138,7 @@ ATTRS:
 
 ---
 
-## Running
-
-### Local
+## Running Locally (without Docker)
 
 ```bash
 # Install latest pip & dependencies
@@ -89,10 +146,13 @@ pip install -U pip
 pip install .
 
 # Run the server
-python src/main.py
+cd src
+python main.py
 ```
 
-### Generate Swagger
+---
+
+## Generate Swagger
 
 ```bash
 python tools/gen_swagger.py
@@ -106,34 +166,45 @@ python tools/gen_swagger.py
 - Base URL: `http://localhost:8000`
 - Content-Type: `multipart/form-data`
 - Form field: `file` (CSV or JSON)
+- Authentication: HTTP Basic Auth (`HTTP_USER` / `HTTP_PASS` from environment)
 
 ### Endpoints
 
 - `POST /api/v1/{name}`
 - `POST /api/v1/{name}/{node_path}`
 
-Where `{name}` is one of the configured names (`tree`, `weather`, `sensor`) and `{node_path}` is a Zarr node path like `level1/level2`.
+Where `{name}` is one of the configured names (`tree`, `weather`, `sensor`)
+and `{node_path}` is a Zarr node path like `level1/level2`.
 
 ---
 
 ## Examples
 
-### Upload to **tree** (root)
+### Upload to **tree**
+
 ```bash
 curl -X POST http://localhost:8000/api/v1/tree \
-  -F "file=@data/example.csv"
+   -H "Content-Type: text/csv" \
+   -u test:test \
+   -d @src/test_data/tree/default.csv
 ```
 
-### Upload to **weather** (specific node)
+### Upload to **weather**
+
 ```bash
-curl -X POST http://localhost:8000/api/v1/weather/measurements/daily \
-  -F "file=@data/weather_daily.csv"
+curl -X POST http://localhost:8000/api/v1/weather \
+   -H "Content-Type: text/csv" \
+   -u test:test \
+   -d @src/test_data/weather/default.csv
 ```
 
-### Upload to **sensor** (specific node)
+### Upload to **sensor**
+
 ```bash
-curl -X POST http://localhost:8000/api/v1/sensor/stations/bedrichov \
-  -F "file=@data/bedrichov.json"
+curl -X POST http://localhost:8000/api/v1/sensor \
+   -H "Content-Type: text/csv" \
+   -u test:test \
+   -d @src/test_data/sensor/default.csv
 ```
 
 ---
@@ -148,13 +219,3 @@ curl -X POST http://localhost:8000/api/v1/sensor/stations/bedrichov \
     "trace": "Stack trace"
   }
   ```
-
----
-
-## Notes
-
-- **Auth:** HTTP authentication not enabled by default; add `Flask-HTTPAuth` if needed.
-- **Permissions:** S3 user must have read/write permissions to `store_path`.
-- **File Types:** Only CSV and JSON supported by default.
-- **Schema Ownership:** Each endpoint points to its own schema.
-- **Swagger/OpenAPI:** Run `python tools/gen_swagger.py` after changing `endpoints_config.yaml` to regenerate `docs/swagger.yaml`.

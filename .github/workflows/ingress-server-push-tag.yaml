@@ -1,0 +1,30 @@
+name: Ingress server - push main
+on:
+  push:
+    tags:
+      - ingress-server/*.*.*
+jobs:
+  get-version:
+    name: Get version from tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Get version from tag
+        id: get-version
+        run: |
+          version=$(echo "${{ github.ref_name }}" | cut -d'/' -f2)
+          echo "version=$version" >> $GITHUB_ENV
+  build-and-deploy:
+    uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    needs:
+      - get-version
+    if: needs.get-version.outputs.version != ''
+    with:
+      push-container: true
+      deploy-helm-chart: true
+      tag: ${{ needs.get-version.outputs.version }}
+      namespace: ingress-server
+    secrets: inherit
