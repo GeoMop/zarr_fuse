@@ -11,3 +11,4 @@ jobs:
       deploy-helm-chart: true
       tag: ${{ github.head_ref }}
       namespace: ingress-server-${{ github.head_ref }}
+    secrets: inherit
