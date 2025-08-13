@@ -64,98 +64,48 @@ def aux_read_struc(fname, storage_type="local"):
         s3_key = "4UD5K2LCS5ZU8GHL5TJS"
         s3_secret = "VztZ2COyVsgADEGbftd1Zt6XdtN6QXwOhSfEKT0Y"
         
-        # Try multiple configurations to handle different s3fs versions
-        configs_to_try = [
-            # Configuration 1: Minimal config with async support
-            dict(
-                key=s3_key,
-                secret=s3_secret,
-                listings_expiry_time=1,
-                max_paths=0,
-                asynchronous=True,  # Fixed: Enable async mode
-                client_kwargs=dict(
-                    endpoint_url="https://s3.cl4.du.cesnet.cz",
-                ),
-                config_kwargs=dict(
-                    s3=dict(
-                        addressing_style="path",
-                        payload_signing_enabled=False,  # Added this line
-                    ),
-                    retries=dict(max_attempts=5, mode="standard"),
-                    connect_timeout=20,
-                    read_timeout=60,
-                ),
-            ),
-            # Configuration 2: With checksum disabled and async support
-            dict(
-                key=s3_key,
-                secret=s3_secret,
-                listings_expiry_time=1,
-                max_paths=0,
-                asynchronous=True,  # Fixed: Enable async mode
-                client_kwargs=dict(
-                    endpoint_url="https://s3.cl4.du.cesnet.cz",
-                ),
-                config_kwargs=dict(
-                    s3=dict(
-                        addressing_style="path",
-                        request_checksum_calculation="disabled",
-                        response_checksum_validation="disabled",
-                        payload_signing_enabled=False,  # Added this line
-                    ),
-                    retries=dict(max_attempts=5, mode="standard"),
-                    connect_timeout=20,
-                    read_timeout=60,
-                ),
-            ),
-            # Configuration 3: Force Content-Length with async support
-            dict(
-            key=s3_key,
-            secret=s3_secret,
-                listings_expiry_time=1,
-                max_paths=0,
-                asynchronous=True,  # Fixed: Enable async mode
-            client_kwargs=dict(
-                endpoint_url="https://s3.cl4.du.cesnet.cz",
-            ),
-                config_kwargs=dict(
-                    s3=dict(
-                        addressing_style="path",
-                        request_checksum_calculation="disabled",
-                        response_checksum_validation="disabled",
-                        payload_signing_enabled=False,
-                    ),
-                    retries=dict(max_attempts=5, mode="standard"),
-                    connect_timeout=20,
-                    read_timeout=60,
-                ),
-            ),
-        ]
+        # Base configuration with common settings
+        base_config = {
+            "key": s3_key,
+            "secret": s3_secret,
+            "listings_expiry_time": 1,
+            "max_paths": 0,
+            "asynchronous": True,  # Fixed: Enable async mode
+            "client_kwargs": {
+                "endpoint_url": "https://s3.cl4.du.cesnet.cz",
+            },
+            "config_kwargs": {
+                "s3": {
+                    "addressing_style": "path",
+                    "payload_signing_enabled": False,  # Added this line
+                },
+                "retries": {"max_attempts": 5, "mode": "standard"},
+                "connect_timeout": 20,
+                "read_timeout": 60,
+            }
+        }
         
         root_path = f"{bucket_name}/test.zarr"
         
-        for i, storage_options in enumerate(configs_to_try):
+        # Doğrudan base_config kullan
+        try:
+            print(f"[DEBUG] Creating S3 store")
+            sync_remove_store(base_config, root_path)
+            fs = fsspec.filesystem('s3', **base_config)
+            store = zarr.storage.FsspecStore(fs, path=root_path)
+            
+            # Ensure Zarr group metadata is created
             try:
-                print(f"[DEBUG] Trying S3 configuration {i+1}")
-                sync_remove_store(storage_options, root_path)
-                fs = fsspec.filesystem('s3', **storage_options)
-                store = zarr.storage.FsspecStore(fs, path=root_path)
-                
-                # Ensure Zarr group metadata is created
-                try:
-                    # Try to create the root group if it doesn't exist
-                    zarr.group(store=store, overwrite=True)
-                except Exception:
-                    # If group already exists, that's fine
-                    pass
-                
-                print(f"[DEBUG] S3 configuration {i+1} succeeded")
-                return store
-            except Exception as e:
-                print(f"[DEBUG] S3 configuration {i+1} failed: {e}")
-                if i == len(configs_to_try) - 1:  # Last attempt
-                    raise e
-                continue
+                zarr.group(store=store, overwrite=True)
+            except Exception:
+                # If group already exists, that's fine
+                pass
+            
+            print(f"[DEBUG] S3 store created successfully")
+            return store
+        except Exception as e:
+            print(f"[DEBUG] S3 store creation failed: {e}")
+            raise e
     def create_local_store():
         store_path = (workdir / fname).with_suffix(".zarr")
         if store_path.exists():
@@ -204,22 +154,7 @@ def _run_full_test(tree, df_map, start_time, t1):
     print(f"[TIMING] test_node_tree TOTAL: {time.time() - start_time:.2f}s")
 
 
-def _run_s3_test_with_fallback(tree, df_map, start_time, t1):
-    """Run S3 test with fallback to root-only if child nodes fail."""
-    try:
-        _run_full_test(tree, df_map, start_time, t1)
-    except Exception as e:
-        print(f"[WARNING] Child node test failed: {e}")
-        print(f"[INFO] Falling back to root-only test for S3")
-        df_map_root_only = {"": df_map[""]}
-        tree.update(df_map_root_only[""])
-        assert len(tree.dataset.coords) == 1
-        assert len(tree.dataset.data_vars) == 1
-        print(f"[TIMING] _update_tree (fallback): {time.time() - t1:.2f}s")
-        t2 = time.time()
-        zarr.consolidate_metadata(tree.store)
-        print(f"[TIMING] consolidate_metadata: {time.time() - t2:.2f}s")
-        print(f"[TIMING] test_node_tree TOTAL: {time.time() - start_time:.2f}s")
+
 
 
 def _run_local_validation(tree, df_map, start_time, t1):
@@ -268,7 +203,7 @@ def test_node_tree(storage_type):
     df_map = _create_test_data()
     
     if storage_type == "s3":
-        _run_s3_test_with_fallback(tree, df_map, start, t1)
+        _run_full_test(tree, df_map, start, t1)  # Doğrudan full test!
     else:
         _run_local_validation(tree, df_map, start, t1)
 
