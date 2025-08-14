@@ -1,5 +1,6 @@
 import shutil
 import time
+import os
 
 import numpy as np
 import numpy.testing as npt
@@ -59,8 +60,10 @@ This requires dask.
 def aux_read_struc(fname, storage_type="local"):
     struc_path = inputs_dir / fname
     schema = zf.schema.deserialize(struc_path)
+
     def create_s3_store():
-        bucket_name = "test-zarr-storage"
+        tox_env_name = os.environ.get("TOX_ENV_NAME", "local")
+        bucket_name = f"test-zarr-storage/{tox_env_name}" # !! underscores not allowed in group names.
         s3_key = "4UD5K2LCS5ZU8GHL5TJS"
         s3_secret = "VztZ2COyVsgADEGbftd1Zt6XdtN6QXwOhSfEKT0Y"
         
