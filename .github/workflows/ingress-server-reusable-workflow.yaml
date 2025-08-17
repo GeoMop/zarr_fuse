@@ -16,12 +16,12 @@ on:
         description: The tag to use for the container image
         required: false
         type: string
-        default: devel
+        default: latest
       namespace:
         description: The Kubernetes namespace to use
         required: false
         type: string
-        default: ingress-server-devel
+        default: ingress-server-latest
       helm-extra-args:
         description: Extra arguments to pass to the Helm command
         required: false
@@ -99,13 +99,13 @@ jobs:
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
       - name: Ensure that the namespace exists
-        run: kubectl create namespace --dry-run=client -o yaml '${{ inputs.namespace }}' | kubectl apply -f -
+        run: kubectl create namespace --dry-run=client -o yaml "${{ inputs.namespace }}"
       - name: Set context
         run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
       - name: Deploy app
         run: |
           helm upgrade ingress-server ingress-server \
-          --install --atomic --timeout 10m --namespace "${{ inputs.namespace }}" --create-namespace \
+          --install --atomic --timeout 10m --namespace "${{ inputs.namespace }}" \
           --set image.tag="${{ inputs.tag }}" \
           --set deployment.secrets.s3.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
           --set deployment.secrets.s3.secretKey="${{ secrets.S3_SECRET_KEY }}" \

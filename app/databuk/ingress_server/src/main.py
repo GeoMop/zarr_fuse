@@ -25,7 +25,6 @@ APP = Flask(__name__)
 # ---------- AUTH ----------
 @AUTH.verify_password
 def verify_password(username, password):
-    # use check password hash
     if username in USERS and USERS[username] == password:
         return username
     return None
@@ -105,7 +104,7 @@ def upload_node(schema_path, node_path=""):
     data = request.data
 
     if not data:
-        return jsonify({"error": "No file provided"}), 400
+        return jsonify({"error": "No data provided"}), 400
     if not content_type:
         return jsonify({"error": "No content type provided"}), 400
 
@@ -152,7 +151,6 @@ def health():
 
 # ---------- APP FACTORY ----------
 def create_app():
-
     with open(CONFIG_PATH, "r") as f:
         config = yaml.safe_load(f)
 

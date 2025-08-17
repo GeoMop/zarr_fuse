@@ -30,7 +30,7 @@ spec:
             - name: S3_SECRET_KEY
               value: {{ .Values.deployment.secrets.s3.secretKey | quote }}
             - name: USERS_JSON
-              value: {{ .Values.deployment.secrets.basicAuth.usersJson | quote }}
+              value: {{ .Values.deployment.secrets.basicAuth.usersJson | toJson | quote }}
           volumeMounts:
             - name: ingress-server-tmp
               mountPath: /tmp

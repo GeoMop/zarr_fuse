@@ -16,7 +16,7 @@ jobs:
         id: get-version
         run: |
           version=$(echo "${{ github.ref_name }}" | cut -d'/' -f2)
-          echo "version=$version" >> $GITHUB_ENV
+          echo "version=$version" >> $GITHUB_OUTPUT
   build-and-deploy:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     needs:

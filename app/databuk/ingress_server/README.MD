@@ -32,7 +32,6 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 │  │  └─ gen_swagger.py           # Swagger generator script
 │  ├─ oci/
 │  │  ├─ Dockerfile               # Container build
-│  │  └─ README.md                # Docker/OCI usage instructions
 │  └─ pyproject.toml              # Project metadata & dependencies
 ```
 

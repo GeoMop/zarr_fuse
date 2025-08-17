@@ -8,7 +8,7 @@ jobs:
     name: Get changed file
     runs-on: ubuntu-latest
     outputs:
-      any-changed: ${{ steps.helm-changed.outputs.any_changed }}
+      any-changed: ${{ steps.changed.outputs.any_changed }}
     concurrency:
       group: ${{ github.head_ref }}-${{ github.ref_name }}-get-changed-files
       cancel-in-progress: true
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Check if Ingress Server files or Helm Charts were changed
-        id: helm-changed
+        id: changed
         uses: tj-actions/changed-files@v45
         with:
           files: |
