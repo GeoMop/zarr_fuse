@@ -36,4 +36,4 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["zarr_fuse", "zarr_fuse.*"]
+include = ["ingress_server", "ingress_server.*"]

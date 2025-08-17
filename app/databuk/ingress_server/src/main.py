@@ -87,10 +87,10 @@ def _normalize_content_type(value: str | None) -> str:
     return value.split(";", 1)[0].strip().lower()
 
 def _get_file_data(data, content_type):
-    type = _normalize_content_type(content_type)
-    if type == "text/csv":
+    normalized_type = _normalize_content_type(content_type)
+    if normalized_type == "text/csv":
         return pl.read_csv(io.BytesIO(data))
-    elif type == "application/json":
+    elif normalized_type == "application/json":
         return pl.read_json(io.BytesIO(data))
     else:
         raise ValueError("Unsupported content type. Use application/json or text/csv.")
