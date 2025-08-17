@@ -1,6 +1,6 @@
 name: Ingress server - push main
 on:
-  push:
+  pull_request:
     branches:
       - main
 jobs:

@@ -7,9 +7,6 @@ jobs:
   build:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     with:
-      push-container: true
-      deploy-helm-chart: true
-      tag: devel
-      namespace: ingress-server-devel
-      helm-extra-args: "--values ingress-server/values/pr-values.yaml"
+      push-container: false
+      deploy-helm-chart: false
     secrets: inherit

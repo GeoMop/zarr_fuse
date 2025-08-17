@@ -10,7 +10,6 @@ LABEL org.opencontainers.image.source="https://github.com/geomop/zarr_fuse"
 LABEL org.opencontainers.image.url="https://github.com/geomop/zarr_fuse"
 LABEL org.opencontainers.image.authors="Geomop / Stepan Moc <stepan.mocik@gmail.com>"
 LABEL maintainer="Geomop / Stepan Moc <stepan.mocik@gmail.com>"
-
 #ENV PYTHONPATH=/ingress-server
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -19,9 +18,7 @@ ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
 
 RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server ingress
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends git
 
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@main"
