@@ -47,7 +47,7 @@ S3_ACCESS_KEY=YOUR_ACCESS_KEY
 S3_SECRET_KEY=YOUR_SECRET_KEY
 
 # Required for HTTP Basic Auth
-USER_JSON={"alice":"password"}
+USERS_JSON={"alice":"password"}
 ```
 
 The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.

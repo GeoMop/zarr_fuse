@@ -57,7 +57,7 @@ jobs:
       - name: Push container image
         if: ${{ inputs.push-container }}
         run: |
-          buildah push ${{ env.registry }}/${{ env.repository}}:${{ inputs.tag }} docker://${{ env.registry }}/${{ env.repository }}:${{ inputs.tag }}
+          buildah push ${{ env.registry }}/${{ env.repository }}:${{ inputs.tag }} docker://${{ env.registry }}/${{ env.repository }}:${{ inputs.tag }}
           buildah logout ${{ env.registry }}
   lint-helm-chart:
     name: Lint ingress server Helm chart

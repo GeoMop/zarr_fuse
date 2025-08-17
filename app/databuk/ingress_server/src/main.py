@@ -1,4 +1,3 @@
-from email import header
 import io
 import yaml
 import os
