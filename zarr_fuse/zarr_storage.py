@@ -1,4 +1,5 @@
 import inspect
+import logging
 import re
 from typing import List, Callable, Dict, Optional, Set, Tuple, Union, Any
 import polars as pl
@@ -6,10 +7,12 @@ import xarray as xr
 import numpy as np
 import zarr
 from pathlib import Path
-from collections import defaultdict
 
-from . import zarr_schema
-from .logger import StoreLogHandler
+
+from . import zarr_schema, units
+from .logger import get_logger
+from .interpolate import interpolate_ds
+from .zarr_schema import DatasetSchema, NodeSchema
 
 """
 tuple val coords:
@@ -98,7 +101,7 @@ def zarr_store_open(zarr_url, type='guess', **kwargs):
     storage = call_with_filtered_kwargs(*args, **kwargs)
     return storage
 
-def open_storage(schema=None, **kwargs):
+def open_storage(schema:zarr_schema.NodeSchema | Path, **kwargs):
     """
     Open existing or create a new ZARR storage according to given schema.
     Function arguments overrides respective schema 'ATTRS' values.
@@ -111,18 +114,20 @@ def open_storage(schema=None, **kwargs):
     'workdir' used for relative local urls.
     Return: root Node
     """
-    if isinstance(schema, dict):
-        schema_dict = schema
+    if isinstance(schema, NodeSchema):
+        node_schema = schema
     elif isinstance(schema, (str, Path)):
-        schema_dict = zarr_schema.deserialize(schema)
+        node_schema = zarr_schema.deserialize(schema)
+    else:
+        raise TypeError(f"Unsupported schema type: {type(schema)}. Expected NodeSchema or Path.")
 
-    store_attrs = schema['ATTRS'].copy()
+    store_attrs = node_schema.ds.ATTRS.copy()
     store_attrs.update(kwargs)
     zarr_url = store_attrs['store_url']
     type = store_attrs.get('store_type', 'guess')
     kwargs.update(store_attrs)
     storage = zarr_store_open(zarr_url, type=type, **kwargs)
-    return Node("", storage, new_schema = schema_dict)
+    return Node("", storage, new_schema = node_schema)
 
 class Node:
     """
@@ -190,33 +195,36 @@ class Node:
         coord_names = set(coords_dict.keys())
         for coord in var.coords:
             assert coord in coord_names, f"Variable {var.name} has unknown coordinate {coord}."
-        shape = tuple(0 for coord in var.coords)
-        xr_var = xr.Variable(
-                 dims=list(var.coords),  # Default dimension named after the coordinate key.
-                 data=data,
-                 attrs=var.attrs
-             )
+        #shape = tuple(0 for coord in var.coords)
+        try:
+            xr_var = xr.Variable(
+                     dims=list(var.coords),  # Default dimension named after the coordinate key.
+                     data=data,
+                     attrs=var.attrs
+                 )
+        except ValueError as e:
+            raise ValueError(f"Variable '{var.name}' has incompatible shape {data.shape} for coordinates {var.coords}.") from e
         return xr_var
 
 
     @staticmethod
-    def _coord_variable(name: str, coord: zarr_schema.Coord, vars) -> xr.Variable:
-        if coord.composed is None:
-            composed = (name,)
-        else:
-            composed = coord.composed
-        attrs = coord.attrs.copy()
-        #attrs['composed'] = composed
-
+    def _coord_variable(name: str, coord: zarr_schema.Coord, var) -> xr.Variable:
         # simple coordinate
-        np_var = vars[name]
-        assert isinstance(np_var, np.ndarray)
-        assert len(np_var.shape) == 1
+        np_var = np.array(var)
+        if len(np_var.shape) > 1:
+            raise ValueError(f"Dimension {coord.name}: coords array is not 1D. Has shape: {np_var.shape}.")
+
+        unique, counts = np.unique(np.var, return_counts=True)
+        # Find values that appear more than once
+        repeated = unique[counts > 1]
+        # Check if array has any non-unique values
+        if repeated.size > 0:
+            raise ValueError(f"Dimension {coord.name}: coords array has non-unique values: {repeated}.")
 
         np_var = xr.Variable(
             dims=(name,),
             data=np_var,
-            attrs=coord.attrs
+            attrs=coord.attrs.copy()
         )
         return np_var
 
@@ -237,13 +245,13 @@ class Node:
             Coordinates: An xarray Coordinates object built from the provided variables.
         """
         coord_vars = {
-            k: Node._coord_variable(k, c, vars)
-            for k, c in coords.items()
+            name: Node._coord_variable(name, coord_schema, vars.get(name, []))
+            for name, coord_schema in coords.items()
         }
         return xr.Coordinates(coord_vars)
 
     @staticmethod
-    def empty_ds(schema) -> xr.Dataset:
+    def empty_ds(schema: DatasetSchema) -> xr.Dataset:
         """
         Create an *empty* Zarr storage for multiple indices given by index_col.
         - first index is dynamic, e.g. time, new times are appended by update function
@@ -273,7 +281,7 @@ class Node:
             '__structure__': zarr_schema.serialize(schema),
             '__empty__': True
         }
-        attrs.update(schema['ATTRS'])
+        attrs.update(schema.ATTRS)
         ds = xr.Dataset(
             data_vars=variables,
             coords=coords_obj,
@@ -284,7 +292,8 @@ class Node:
 
 
 
-    def __init__(self, name, store, parent=None, new_schema=None):
+    def __init__(self, name, store, parent=None,
+                 new_schema:zarr_schema.NodeSchema=None):
         """
         Parameters:
           name (str): The name of the node. For the root node, use an empty string ("").
@@ -297,9 +306,11 @@ class Node:
 
         # Setup logger
         zarr_root_dict = zarr.open_group(store).store
-        self.logger = StoreLogHandler(zarr_root_dict)
+        self.logger = get_logger(zarr_root_dict, self.group_path)
 
         self.children = self._make_consistent(new_schema)
+        # This calls self._update_schema_ds() implicitely.
+
         # TODO: separate class to represent child nodes dict
         # it must be a separate class with overwritten setitem method to
         # maintain consistency between node tree and zarr storage.
@@ -324,7 +335,7 @@ class Node:
     #     self.children[name] = node
     #     return node
 
-    def _make_consistent(self, new_schema:zarr_schema.ZarrNodeSchema) -> 'Node':
+    def _make_consistent(self, new_node_schema:zarr_schema.NodeSchema) -> Dict[str, 'Node']:
         """
         - merge given new_schema
         - recreate self.children from the storage
@@ -336,33 +347,36 @@ class Node:
 
         return children dict
         """
-        if new_schema is None:
-            new_schema_ds = self.schema
-            new_schema = defaultdict(lambda:None)
-        else:
-            new_schema_ds = {k: v for k, v in new_schema.items() if k in zarr_schema.reserved_keys}
 
-        self._update_schema_ds(new_schema_ds)
+        if new_node_schema is None:
+            # node in storage but not in schema
+            # use ds_schema from the storage and empty new children dict
+            new_node_schema = zarr_schema.NodeSchema(self.schema)
 
-        child_names = [key for key, _ in self._storage_group_paths()]
-        child_names.extend([key for key in new_schema.keys() if key not in child_names and key not in zarr_schema.reserved_keys])
+        self._update_schema_ds(new_node_schema.ds)
+
+        child_node_names = set([key for key, _ in self._storage_group_paths()])
+        child_node_names.update(new_node_schema.groups.keys())
 
         def make_child(key):
             try:
-                new_child_schema = new_schema[key]
+                new_child_schema = new_node_schema.groups[key]
             except KeyError:
+                #
                 self.logger.warning(f"Key {key} is missing in the new schema, keeping it.")
                 new_child_schema = None
+
+            # Here we do indirect recursion of _make_consistent.
             return Node(key, self.store, parent=self, new_schema=new_child_schema)
 
         # Process existing child Nodes
         childern = {
             key: make_child(key)
-            for key in child_names
+            for key in child_node_names
         }
         return childern
 
-    def _update_schema_ds(self, new_schema):
+    def _update_schema_ds(self, new_schema:zarr_schema.DatasetSchema) -> zarr_schema.DatasetSchema:
         """
         Update DS according to new schema.
         :param new_schema:
@@ -376,15 +390,19 @@ class Node:
         try:
             old_schema = self.schema
         except KeyError:
-            old_schema = {}
-        if new_schema == old_schema:
-            return old_schema
-        assert old_schema == {}, (f"Modifying node dataset schema is not supported."
-                                  f"\nold:{old_schema}\nnew{new_schema} ")
-        empty_ds = Node.empty_ds(new_schema)
-        self.write_ds(empty_ds)
-        return new_schema
+            old_schema = zarr_schema.DatasetSchema({}, {}, {})
 
+        if old_schema.is_empty():
+            # Initialize new dataset.
+            empty_ds = Node.empty_ds(new_schema)
+            self._init_empty_grup(empty_ds)
+            assert self.schema == new_schema
+            return new_schema
+        else:
+            # Preserve dataset schema.
+            assert new_schema == old_schema, (f"Modifying node dataset schema is not supported."
+                                      f"\nold:{old_schema}\nnew{new_schema} ")
+            return old_schema
 
     def items(self):
         return self.children.items()
@@ -436,21 +454,23 @@ class Node:
         return ds
 
     @property
-    def schema(self):
+    def schema(self) -> zarr_schema.DatasetSchema:
         """
         Return dictionary with node dataset schema.
         I.e. dictionary with keys 'COORDS', 'VARS', 'ATTRS'.
         Original schema tree is spread over the storage groups represented by Nodes.
         :return:
         """
-        return zarr_schema.deserialize(self.dataset.attrs['__structure__'])
+        node_schema = zarr_schema.deserialize(self.dataset.attrs['__structure__'])
+        return node_schema.ds
+
 
     def export_schema(self):
         """
         Return schema of whole storage under 'self' Node.
         :return:
         """
-
+        pass
 
     def update(self, polars_df):
         """
@@ -466,12 +486,46 @@ class Node:
            - pivot_nd for DF -> DS conversion, should be a method that uses coords and df_cols
            -
         """
-        ds = pivot_nd(self.schema, polars_df)
-        written_ds, merged_coords = self.update_zarr_loop(ds)
-        # check unique coords
+        ds = pivot_nd(self.schema, polars_df, self.logger)
+        written_ds, merged_coords = self.merge_ds(ds)
+        # check unique coordsregion="auto",
         dup_dict = check_unique_coords(written_ds)
         if  dup_dict:
             self.logger.error(dup_dict)
+        return written_ds
+
+    def update_dense(self, vars):
+        # TODO:
+        # Allow automatic adding of coordinates only for coordinates with values
+        # provided as part of schema.
+        # for coord_name, _ in self.schema.COORDS.items():
+        #     if coord_name not in vars:
+        #         # Assume update over full span of coordinates that are not
+        #         # explicitely in the vars dict.
+        #         vars[coord_name] = self.dataset[coord_name].values()
+
+        ds = dataset_from_np(self.schema, vars)
+        written_ds, merged_coords = self.merge_ds(ds)
+        # check unique coordsregion="auto",
+        dup_dict = check_unique_coords(written_ds)
+        if dup_dict:
+            self.logger.error(dup_dict)
+        return written_ds
+
+    def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode
+        rel_path = self.group_path  # + self.PATH_SEP + "dataset"
+        rel_path = rel_path.strip(self.PATH_SEP)
+
+        # Create the group if it does not exist.
+        grp = zarr.open_group(self.store, path=rel_path, mode="a")
+
+        # ds.to_zarr does not write the attrs, either because of mode != "w" or
+        # due to non-consolidated metadata.
+        # Temporary workaround until we use consolidated metadata:
+        # works as long as we do not allow to modify dataset schema
+        grp.attrs.update(ds.attrs)
+        written_ds = self.write_ds(ds, mode="r+", region="auto")
+        assert '__structure__' in written_ds.attrs
         return written_ds
 
     def write_ds(self, ds, **kwargs):
@@ -479,12 +533,27 @@ class Node:
         rel_path = rel_path.strip(self.PATH_SEP)
         #path_store = zarr.open_group(self.store, mode=mode, path=rel_path)
         #ds.to_zarr(path_store,  **kwargs)
-        ds.to_zarr(self.store, group = rel_path, mode="a", consolidated=False, **kwargs)
+        ds.to_zarr(self.store, group = rel_path, consolidated=False, **kwargs)
+
+        # written_ds = xr.open_zarr(self.store, group=rel_path)
+        # assert '__structure__' in ds.attrs
+        # assert '__structure__' in written_ds.attrs
         return ds
 
-    def update_zarr_loop(self, ds_update: xr.Dataset) -> xr.Dataset:
+    """
+     For the updating DF we define "overlap" slice:
+     For sorted coord:  current_coords > new_coords.min() 
+     For unsorted coords: current_coord_idx > index_of( argmin( current_coords _intersect_ new_coords))
+     However new_coords could undergo e.g. projection to existing coords.
+     How to unify the procedure?
+    """
+
+
+
+    def merge_ds(self, ds_update: xr.Dataset) -> xr.Dataset:
         """
-        Iteratively update/append ds_update into an existing Zarr store at zarr_path.
+        Merge xarray dataset `ds_update` into the node dataset in the zarr storage.
+        The `ds_update` must be subarray of the storage dataset.
 
         This function works in two phases:
 
@@ -504,6 +573,16 @@ class Node:
                 • Append that reindexed subset along the current dimension.
                 • Update the merged coordinate for that dimension.
 
+        Modular updating mechanism:
+        - interpolate step: interpolate updating DF coords to existing coords
+          (postponed), regularize or constrain coord step etc.
+          each coord interpolates independently, according to their order in the var list
+          Coord interpolator is a (sparse) matrix mapping values in updating coords to existing coords.
+        - appendable: True (default) / False [ Set to False to disallow new coord values after first update (creation)]
+          Only for check purposes, no effect on resulting values.
+        - sorted: [list of vars to sort by], [] do not sort, None (default) (automatic, sort by itself for scalar coords, unsorted for composed)
+          Sorted coords imply merge of the values leading to larger overlap/overwrite region.
+
         Parameters
         ----------
         zarr_path : str
@@ -515,40 +594,46 @@ class Node:
 
         Returns: (updated DataSet after write, merged_coords)
         Are merged_coords still necessary?
+
+        New procedure:
+        1. interpolate ds_new, using ds_existing coords (replaces Phase 1)
+            a) each coord detemine overlap range (indices)
+            b) detemine extended coords (no insertions) variants: None, all new, limited step, fixed step
+        2. interpolate overlap, write it.
+
+           However interpolation of whole ds_new should rather be done as we possibly change the new coords as well.
+
+           interpolate variables to sorted coords (interpolation of unsorted but sparse coords possible in future
+               Due to nans this could be problematic without having also existing data.
+               The interpolation takes place only in the overlaping part, that is intersection of overlaps in all dimensions.
+
+        3. write extended / interpolated parts (Phase 2)
         """
         ds_existing = self.dataset
 
         # --- Phase 1: Dive (split by dimension) ---
         # We create a dict to hold the extension subset for each dimension.
         if '__empty__' in ds_existing.attrs:
-            return self.write_ds(ds_update), {}
+            del ds_existing.attrs['__empty__']
+            return self.write_ds(ds_update, mode="a"), {}
 
+        ds_update, split_indices = interpolate_ds(
+            ds_update,
+            self.dataset,
+            self.schema.COORDS)
         last_written_ds = None
         ds_extend_dict = {}
         ds_overlap = ds_update.copy()
-        dims_order = tuple(ds_update.dims.keys())
-        for dim in dims_order:
-            if dim not in ds_existing.dims:
-                raise ValueError(f"Dimension '{dim}' not found in the existing store.")
-            old_coords = ds_existing[dim].values
-            new_coords = ds_overlap[dim].values
-            min_new, max_new = np.min(new_coords), np.max(new_coords)
-            new_holes = [c for c in old_coords if c > min_new or c < max_new]
-            print(f"Update Zarr: {dim}, new_holes: {new_holes}")
-            min_old, max_old = np.min(old_coords), np.max(old_coords)
-            old_holes = [c for c in new_coords if c > min_old or c < max_old]
-            print(f"Update Zarr: {dim}, old_holes: {old_holes}")
-
-            # Determine which coordinates in ds_current already exist.
-            overlap_mask = np.isin(new_coords, old_coords)
-            ds_extend_dict[dim] = ds_overlap.sel({dim: new_coords[~overlap_mask]})
-            ds_overlap = ds_overlap.sel({dim: new_coords[overlap_mask]})
+        dims_order = tuple(ds_update.coords.keys())
+        for dim, idx in split_indices:
+            ds_extend_dict[dim] = ds_overlap.isel({dim: slice(idx, None)})
+            ds_overlap = ds_overlap.isel({dim: slice(0, idx)})
 
         # At this point, ds_overlap covers only the coordinates that already exist in the store
         # in every dimension in dims_order. Write these (overlapping) data using region="auto".
         update_overlap_size = np.prod(list(ds_overlap.sizes.values()))
         if update_overlap_size > 0:
-            last_written_ds = self.write_ds(ds_overlap, region="auto")
+            last_written_ds = self.write_ds(ds_overlap, mode="r+", region="auto")
 
         # --- Phase 2: Upward (process extension subsets in reverse order) ---
         # We also update a merged_coords dict from the store.
@@ -556,6 +641,8 @@ class Node:
 
         # Loop upward in reverse order over dims_order.
         for dim in reversed(dims_order):
+            ## merged = ds1.combine_first(ds2).sortby("dim")
+
             dim_coord = ds_extend_dict[dim]
             if dim_coord is None or dim_coord.sizes.get(dim, 0) == 0:
                 continue  # No new coordinates along this dimension.
@@ -567,7 +654,7 @@ class Node:
             ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=np.nan)
 
             # Append the extension subset along the current dimension.
-            last_written_ds = self.write_ds(ds_ext_reindexed, append_dim=dim)
+            last_written_ds = self.write_ds(ds_ext_reindexed, mode="a", append_dim=dim)
 
             # Update merged coordinate for dim: concatenate the old coords with the new ones.
             new_coords_for_dim = dim_coord[dim].values
@@ -576,6 +663,23 @@ class Node:
         assert last_written_ds is not None, "No data was written to the dataset."
         return last_written_ds, merged_coords
 
+    """
+    Good, now how to extend the code to two and more dimensions?
+I need something like:
+
+split_dict = {}
+dim_order = list(ds_zarr.coords.keys())
+for dim in dim_order:
+    n, merged_new_coords = merge_coords(dim, new_ds.coords[dim])
+    l_overlap = len(ds_zar.coords[dim]) - N
+    split_dict[dim] = (n,     l_overlap, merged_new_coords)
+ 
+dim = dim_order[0]
+` pad ds_zarr by Nans over [0:N] in 'dim', adding len(new_coords) - l_overlap for each d > dim'
+N, L, coords = slpit_dir[dim]
+ds_zarr_tail = ds_zarr.isel({dim: slice(N, None)}).copy()
+ds_update.combine_first(ds_zarr_tail).sortby(dim)
+    """
 
     # def read_df(self, var_name, *args, **kwargs):
     #     """
@@ -732,16 +836,40 @@ def eliminate_dims_if_equal(arr: np.ndarray, dims_to_check: List[bool]) -> np.nd
             arr = np.take(arr, 0, axis=axis)
     return arr
 
-def get_df_col(df, col_name):
+def get_df_col(df, var:zarr_schema.Variable, logger: logging.Logger):
     try:
-        return df[col_name].to_numpy()
+        col_series = df[var.df_col].to_numpy()
     except pl.exceptions.ColumnNotFoundError:
+        logger.error(f"Source column '{var.df_col}' not found in the input DataFrame:\n{df.head()}")
         return np.full(df.shape[0], np.nan)
+    try:
+        source_quantity_arr = units.create_quantity(col_series, from_unit=var.source_unit)
+    except ValueError as e:
+        logger.error(f"Failed to parse values of column '{var.df_col}' with\n"
+                     f"unit/format specification:{var.source_unit}\n"
+                     f"values:\n{df.head()}")
+        return np.full(df.shape[0], np.nan)
+    q_new = source_quantity_arr.to(var.unit)
+    return q_new.magnitude
+
         # TODO: log missing column
-        #raise ValueError(f"Column '{col_name}' not found in the DataFrame.\n Valid columns: {df.columns}")
 
 
-def pivot_nd(structure:zarr_schema.ZarrNodeSchema, df: pl.DataFrame, fill_value=np.nan):
+def dataset_from_np(schema: zarr_schema.DatasetSchema, vars: Dict[str, np.ndarray]) -> xr.Dataset:
+    """
+    Create an xarray.Dataset from a schema and a dictionary of NumPy arrays.
+    :return:
+    """
+    coords_dict = Node._create_coords(schema.COORDS, vars)
+    data_vars = {k: Node._variable(schema.VARS[k], var_np_array, coords_dict)
+                 for k, var_np_array in vars.items()
+                 if k not in coords_dict}
+    attrs = schema.ATTRS
+    attrs['__structure__'] = zarr_schema.serialize(schema)
+    ds_out = xr.Dataset(data_vars=data_vars, coords=coords_dict, attrs=attrs)
+    return ds_out
+
+def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     """
     Pivot a Polars DataFrame with columns for each dimension in self.dataset.dims
     and one value column (per variable) into an N-dim xarray.Dataset.
@@ -761,11 +889,11 @@ def pivot_nd(structure:zarr_schema.ZarrNodeSchema, df: pl.DataFrame, fill_value=
     """
     # 1. DF -> dict of 1d arrays,
     data_vars = {
-        k: get_df_col(df, var.df_col)
-        for k, var in structure['VARS'].items()
+        k: get_df_col(df, var, logger)
+        for k, var in schema.VARS.items()
     }
     # 2. apply hash of tuple coords, input Dict: ds_name : [df_cols]
-    for k, c in structure['COORDS'].items():
+    for k, c in schema.COORDS.items():
         if (c.composed is not None) and (len(c.composed) > 1):
             # hash tuple coords
             tuple_list = zip( *(data_vars[c] for c in c.composed) )
@@ -775,7 +903,7 @@ def pivot_nd(structure:zarr_schema.ZarrNodeSchema, df: pl.DataFrame, fill_value=
     # 3. Extract coords
     idx_list = []
     coords_dict = {}
-    dims = list(structure['COORDS'].keys())
+    dims = list(schema.COORDS.keys())
     # Loop over each dimension in the original dataset.
     for d in dims:
         # Get the name(s) of the column(s) in df corresponding to this dimension.
@@ -793,7 +921,7 @@ def pivot_nd(structure:zarr_schema.ZarrNodeSchema, df: pl.DataFrame, fill_value=
     idx_arr = np.vstack(idx_list)
     # Compute flat indices for the N-dim output array.
     flat_idx = np.ravel_multi_index(idx_arr, dims=coord_sizes)
-    coords_dict = Node._create_coords(structure['COORDS'], coords_dict)
+    coords_dict = Node._create_coords(schema.COORDS, coords_dict)
 
     # 4. form variables
     # Helper: for a given variable, build the pivoted array.
@@ -802,7 +930,7 @@ def pivot_nd(structure:zarr_schema.ZarrNodeSchema, df: pl.DataFrame, fill_value=
         # Choose a dtype based on the column (floating or object)
         dtype = column_vals.dtype if np.issubdtype(column_vals.dtype, np.floating) else object
         # Create an empty output array with fill_value.
-        result = np.full(coord_sizes, fill_value, dtype=dtype)
+        result = np.full(coord_sizes, np.nan, dtype=dtype)
         # Fill in the values; if duplicate keys occur, later values win.
         result.flat[flat_idx] = column_vals
         # eliminate inappropriate coordinates
@@ -814,12 +942,12 @@ def pivot_nd(structure:zarr_schema.ZarrNodeSchema, df: pl.DataFrame, fill_value=
     # 4. form arrays (remaining vars)
     # Create DataArrays for each variable using the dims specified in self.dataset.
     data_vars = {k: form_var_array(var)
-                 for k, var in structure['VARS'].items()
+                 for k, var in schema.VARS.items()
                  if k not in coords_dict}
 
     # Build and return the xarray.Dataset with the computed coordinates.
-    attrs = structure['ATTRS']
-    attrs['__structure__'] = zarr_schema.serialize(structure)
+    attrs = schema.ATTRS
+    attrs['__structure__'] = zarr_schema.serialize(schema)
     ds_out = xr.Dataset(data_vars=data_vars, coords=coords_dict, attrs=attrs)
     return ds_out
 
