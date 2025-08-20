@@ -85,12 +85,15 @@ def aux_read_struc(fname, storage_type="local"):
                 "retries": {"max_attempts": 5, "mode": "standard"},
                 "connect_timeout": 20,
                 "read_timeout": 60,
+                # NEW: Set checksum policies to when_required
+                "request_checksum_calculation": "when_required",
+                "response_checksum_validation": "when_required",
             }
         }
         
         root_path = f"{bucket_name}/test.zarr"
         
-        # Doğrudan base_config kullan
+        # Use base_config directly
         try:
             print(f"[DEBUG] Creating S3 store")
             sync_remove_store(base_config, root_path)
@@ -206,7 +209,7 @@ def test_node_tree(storage_type):
     df_map = _create_test_data()
     
     if storage_type == "s3":
-        _run_full_test(tree, df_map, start, t1)  # Doğrudan full test!
+        _run_full_test(tree, df_map, start, t1)  # Direct full test!
     else:
         _run_local_validation(tree, df_map, start, t1)
 
@@ -274,6 +277,8 @@ def test_update_weather(tmp_path, storage_type):
                     retries=dict(max_attempts=5, mode="standard"),
                     connect_timeout=20,
                     read_timeout=60,
+                    request_checksum_calculation="when_required",
+                    response_checksum_validation="when_required",
                 ),
             )
             
