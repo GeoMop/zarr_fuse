@@ -1,6 +1,7 @@
 import shutil
 import time
 import os
+from dotenv import load_dotenv
 
 import numpy as np
 import numpy.testing as npt
@@ -16,6 +17,8 @@ from zarr.storage import FsspecStore
 
 import zarr_fuse as zf
 
+# Load environment variables from .env file
+load_dotenv()
 
 script_dir = Path(__file__).parent
 inputs_dir = script_dir / "inputs"
@@ -61,71 +64,23 @@ def aux_read_struc(fname, storage_type="local"):
     struc_path = inputs_dir / fname
     schema = zf.schema.deserialize(struc_path)
 
-    def create_s3_store():
-        tox_env_name = os.environ.get("TOX_ENV_NAME", "local")
-        bucket_name = f"test-zarr-storage/{tox_env_name}" # !! underscores not allowed in group names.
-        s3_key = "4UD5K2LCS5ZU8GHL5TJS"
-        s3_secret = "VztZ2COyVsgADEGbftd1Zt6XdtN6QXwOhSfEKT0Y"
-        
-        # Base configuration with common settings
-        base_config = {
-            "key": s3_key,
-            "secret": s3_secret,
-            "listings_expiry_time": 1,
-            "max_paths": 0,
-            "asynchronous": True,  # Fixed: Enable async mode
-            "client_kwargs": {
-                "endpoint_url": "https://s3.cl4.du.cesnet.cz",
-            },
-            "config_kwargs": {
-                "s3": {
-                    "addressing_style": "path",
-                    "payload_signing_enabled": False,  # Added this line
-                },
-                "retries": {"max_attempts": 5, "mode": "standard"},
-                "connect_timeout": 20,
-                "read_timeout": 60,
-                # NEW: Set checksum policies to when_required
-                "request_checksum_calculation": "when_required",
-                "response_checksum_validation": "when_required",
-            }
-        }
-        
-        root_path = f"{bucket_name}/test.zarr"
-        
-        # Use base_config directly
-        try:
-            print(f"[DEBUG] Creating S3 store")
-            sync_remove_store(base_config, root_path)
-            fs = fsspec.filesystem('s3', **base_config)
-            store = zarr.storage.FsspecStore(fs, path=root_path)
-            
-            # Ensure Zarr group metadata is created
-            try:
-                zarr.group(store=store, overwrite=True)
-            except Exception:
-                # If group already exists, that's fine
-                pass
-            
-            print(f"[DEBUG] S3 store created successfully")
-            return store
-        except Exception as e:
-            print(f"[DEBUG] S3 store creation failed: {e}")
-            raise e
-    def create_local_store():
+    if storage_type == "s3":
+        # Use open_storage with S3 schema - UNIQUE PATH!
+        import time
+        unique_id = int(time.time() * 1000)  # milliseconds
+        bucket_name = os.getenv('S3_BUCKET_NAME')
+        schema.ds.ATTRS['store_url'] = f"s3://{bucket_name}/test-{unique_id}.zarr"
+        schema.ds.ATTRS['store_type'] = 's3'
+        node = zf.open_storage(schema)
+        return schema, node.store, node
+    else:
+        # Local storage logic
         store_path = (workdir / fname).with_suffix(".zarr")
         if store_path.exists():
             shutil.rmtree(store_path)
-        return zarr.storage.LocalStore(store_path)
-    store_creators = {
-        "s3": create_s3_store,
-        "local": create_local_store,
-    }
-    if storage_type not in store_creators:
-        raise ValueError(f"Unsupported storage_type: {storage_type}")
-    store = store_creators[storage_type]()
-    node = zf.Node("", store, new_schema=schema)
-    return schema, store, node
+        store = zarr.storage.LocalStore(store_path)
+        node = zf.Node("", store, new_schema=schema)
+        return schema, store, node
 
 # Recursively update each node with its corresponding data.
 def _update_tree(node: zf.Node, df_map: dict):
@@ -253,39 +208,8 @@ def test_update_weather(tmp_path, storage_type):
             # Recreate tree after store cleanup
             structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
         elif storage_type == "s3":
-            # Clean S3 store and recreate tree for each variable
-            bucket_name = "test-zarr-storage"
-            root_path = f"{bucket_name}/test.zarr"
-            
-            # Use the same storage options as in aux_read_struc
-            s3_key = "4UD5K2LCS5ZU8GHL5TJS"
-            s3_secret = "VztZ2COyVsgADEGbftd1Zt6XdtN6QXwOhSfEKT0Y"
-            storage_options = dict(
-                key=s3_key,
-                secret=s3_secret,
-                listings_expiry_time=1,
-                max_paths=0,
-                asynchronous=True,
-                client_kwargs=dict(
-                    endpoint_url="https://s3.cl4.du.cesnet.cz",
-                ),
-                config_kwargs=dict(
-                    s3=dict(
-                        addressing_style="path",
-                        payload_signing_enabled=False,
-                    ),
-                    retries=dict(max_attempts=5, mode="standard"),
-                    connect_timeout=20,
-                    read_timeout=60,
-                    request_checksum_calculation="when_required",
-                    response_checksum_validation="when_required",
-                ),
-            )
-            
-            # Clean S3 store
-            sync_remove_store(storage_options, root_path)
-            
-            # Recreate tree after store cleanup
+            # No cleanup needed - each test uses unique S3 path
+            # Recreate tree for clean state
             structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
 
         # Create a Polars DataFrame with 6 temperature readings.

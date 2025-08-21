@@ -105,25 +105,25 @@ def zarr_store_open(zarr_url, type='guess', **kwargs):
             'key': os.getenv('S3_ACCESS_KEY'),
             'secret': os.getenv('S3_SECRET_KEY'),
             'endpoint_url': os.getenv('S3_ENDPOINT_URL'),
-            'addressing_style': os.getenv('S3_ADDRESSING_STYLE'),
             'listings_expiry_time': 1,
             'max_paths': 0,
             'asynchronous': True,
-            'client_kwargs': {
-                'config_kwargs': {
-                    's3': {
-                        'payload_signing_enabled': False,
-                    },
-                    'retries': {'max_attempts': 5, 'mode': 'standard'},
-                    'connect_timeout': 20,
-                    'read_timeout': 60,
-                    'request_checksum_calculation': 'when_required',
-                    'response_checksum_validation': 'when_required',
-                }
+            'config_kwargs': {
+                's3': {
+                    'payload_signing_enabled': False,
+                    'addressing_style': os.getenv('S3_ADDRESSING_STYLE'),
+                },
+                'retries': {'max_attempts': 5, 'mode': 'standard'},
+                'connect_timeout': 20,
+                'read_timeout': 60,
+                'request_checksum_calculation': 'when_required',
+                'response_checksum_validation': 'when_required',
             }
         }
         fs = fsspec.filesystem('s3', **s3_options)
-        return zarr.storage.FsspecStore(fs, path=zarr_url)
+        # Remove s3:// scheme from path for FsspecStore
+        clean_path = zarr_url.replace('s3://', '') if zarr_url.startswith('s3://') else zarr_url
+        return zarr.storage.FsspecStore(fs, path=clean_path)
     elif type == 'zip':
         args = (zarr.storage.ZipStore, zarr_url)
     storage = call_with_filtered_kwargs(*args, **kwargs)
