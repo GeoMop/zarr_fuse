@@ -1,11 +1,13 @@
 import inspect
 import logging
 import re
+import os
 from typing import List, Callable, Dict, Optional, Set, Tuple, Union, Any
 import polars as pl
 import xarray as xr
 import numpy as np
 import zarr
+import fsspec
 from pathlib import Path
 
 
@@ -40,8 +42,11 @@ def zarr_store_guess_type(zarr_url:Union[str, Path] = ""):
     if zarr_url.endswith(".zip"):
         return 'zip'
 
-    if re.match(r'^[a-zA-Z0-9_]+://', zarr_url):
-        return 'remote'
+    # Check for S3 URLs first
+    if re.match(r'^s3://', zarr_url):
+        return 's3'
+
+    # Otherwise, assume it's a local directory path.
 
     # Otherwise, assume it's a local directory path.
     # Optionally, you might want to expand user (~) or environment variables here.
@@ -94,8 +99,31 @@ def zarr_store_open(zarr_url, type='guess', **kwargs):
         if not zarr_url.startswith('/') and not zarr_url.startswith('file://'):
             zarr_url = kwargs.get('workdir', Path()) / zarr_url
         args = (zarr.storage.LocalStore, zarr_url)
-    elif type == 'remote':
-        args = (zarr.storage.FsspecStore, zarr_url)
+    elif type == 's3':
+        # Create S3 filesystem with environment variables
+        s3_options = {
+            'key': os.getenv('S3_ACCESS_KEY'),
+            'secret': os.getenv('S3_SECRET_KEY'),
+            'endpoint_url': os.getenv('S3_ENDPOINT_URL'),
+            'addressing_style': os.getenv('S3_ADDRESSING_STYLE'),
+            'listings_expiry_time': 1,
+            'max_paths': 0,
+            'asynchronous': True,
+            'client_kwargs': {
+                'config_kwargs': {
+                    's3': {
+                        'payload_signing_enabled': False,
+                    },
+                    'retries': {'max_attempts': 5, 'mode': 'standard'},
+                    'connect_timeout': 20,
+                    'read_timeout': 60,
+                    'request_checksum_calculation': 'when_required',
+                    'response_checksum_validation': 'when_required',
+                }
+            }
+        }
+        fs = fsspec.filesystem('s3', **s3_options)
+        return zarr.storage.FsspecStore(fs, path=zarr_url)
     elif type == 'zip':
         args = (zarr.storage.ZipStore, zarr_url)
     storage = call_with_filtered_kwargs(*args, **kwargs)
