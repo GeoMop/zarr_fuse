@@ -1,0 +1,16 @@
+# "Temporary" dependencies for developing, 
+# for final dependencies use pyproject.toml
+
+pytest
+
+pandas
+polars
+
+seaborn
+matplotlib
+requests
+requests_cache
+ipykernel
+ipympl
+jupyter
+voila
