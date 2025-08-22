@@ -118,6 +118,10 @@ bukov:
             description: "Real depth of the measurement in the borehole."
             coords: "borehole"
 
+        borehole:
+            description: "Official borehole name within Bukov II laboratory."
+            unit: "str"
+
 
         # Coordinates ####################################
         date_time:
@@ -125,15 +129,16 @@ bukov:
             unit: { tick: "h", tz: "UTC" }
             source_unit: { tick: "h", tz: "UTC" }
 
-        borehole:
-            description: "Official borehole name within Bukov II laboratory."
-            unit: "str"
 
         depth:
             description: "Nominal depth of the measurement in the borehole."
             unit: "m"
             coords: "borehole"  # This is a composed coordinate, so it is not sorted.
 
+        station:    # 
+            description: "Measuring station label"
+            unit: "str"
+        
 
     COORDS:
         date_time: # Defines coord from the variable of the same name.
@@ -146,11 +151,14 @@ bukov:
                 # scalar - regular grid with this step size (use units to convert string values
                 # [min, max] - regular grid with this step size (TODO)
 
-        borehole:
+        station:
             # Secondary description valid for composed coordinates.
             chunk_size: 1
             sorted: False
             # values: []
+
+        depth:
+            chunk_size: 1
 
 
 
