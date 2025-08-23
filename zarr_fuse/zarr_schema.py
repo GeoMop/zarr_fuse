@@ -8,6 +8,38 @@ from . import units
 
 reserved_keys = set(['ATTRS', 'COORDS', 'VARS'])
 
+@attrs.define(frozen=True)
+class SchemaAddress:
+    """
+    Represents a single value in the schema file.
+    """
+    file: str
+    addr: List[str]
+
+    def __str__(self) -> str:
+        file_repr =  self.file if self.file else "<SCHEMA STREAM>"
+        return f"{file_repr}:{'/'.join(self.addr)}"
+
+class _SchemaIssueMixin:
+    """
+    Mixin that holds message and its origin address for both
+    the Exception and the Warning classes.
+    """
+    def __init__(self, message: str, address: SchemaAddress):
+        self.message = message
+        self.address = address
+
+    def __str__(self) -> str:
+        return f"{self.message}  (at {self.address})"  # uses SchemaAddress.__str__
+
+
+class SchemaError(_SchemaIssueMixin, Exception):
+    """Raise when the config problem should be fatal."""
+    pass
+
+class SchemaWarning(_SchemaIssueMixin, UserWarning):
+    """Emit when the problem should be non-fatal."""
+    pass
 
 def _unit_converter(unit):
     """

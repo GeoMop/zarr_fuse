@@ -1,10 +1,46 @@
 import pytest
+import warnings
 from pathlib import Path
 
 script_dir = Path(__file__).parent
 inputs_dir = script_dir / "inputs"
 
 from zarr_fuse import schema
+
+
+def test_schemaaddress():
+    a = schema.SchemaAddress(file="cfg.yaml", addr=["root", "section", "key"])
+    assert str(a) == "cfg.yaml:root/section/key"
+
+    b = schema.SchemaAddress(file="", addr=["only"])
+    assert str(b) == "<SCHEMA STREAM>:only"
+
+
+def test_schemaerror():
+    assert issubclass(schema.SchemaError, Exception)
+
+    err = schema.SchemaError("boom", schema.SchemaAddress(file="f.yaml", addr=["x", "y"]))
+    s = str(err)
+    assert "boom" in s
+    assert "(at f.yaml:x/y)" in s
+
+
+def test_schemawarning():
+    assert issubclass(schema.SchemaWarning, UserWarning)
+    assert issubclass(schema.SchemaWarning, Warning)
+
+    warn_obj = schema.SchemaWarning("heads up", schema.SchemaAddress(file="f.yaml", addr=["x"]))
+    # __str__ should work
+    s = str(warn_obj)
+    assert "heads up" in s and "f.yaml:x" in s
+
+    # Emitting via warnings.warn should capture our custom warning
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        warnings.warn(warn_obj)
+        msgs = [w.message for w in rec]
+        assert any(isinstance(m, schema.SchemaWarning) for m in msgs)
+
 
 """
 This is an inital test of xarray, zarr functionality that we build on.

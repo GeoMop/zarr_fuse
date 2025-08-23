@@ -1,5 +1,10 @@
 import inspect
+import warnings
 import logging
+# Route warnings through logging
+logging.captureWarnings(True)
+
+
 import re
 import os
 from typing import List, Callable, Dict, Optional, Set, Tuple, Union, Any
@@ -89,7 +94,15 @@ def call_with_filtered_kwargs(func, *args, **kwargs):
     return func(*args, **valid_kwargs)
 
 
-def zarr_store_open(zarr_url, type='guess', **kwargs):
+def _zarr_store_open(store_options: Dict[str, Any]) -> zarr.storage.StoreLike:
+    """
+    Open a Zarr store based on the provided URL and options
+    :param zarr_url:
+    :param type:
+    :param kwargs:
+    :return:
+    """
+    store_url = store_options['STORE_URL'] # The only mandatory parameter
     if type == 'guess':
         type = zarr_store_guess_type(zarr_url)
 
@@ -129,17 +142,40 @@ def zarr_store_open(zarr_url, type='guess', **kwargs):
     storage = call_with_filtered_kwargs(*args, **kwargs)
     return storage
 
-def open_storage(schema:zarr_schema.NodeSchema | Path, **kwargs):
+def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Dict[str, Any]:
     """
-    Open existing or create a new ZARR storage according to given schema.
-    Function arguments overrides respective schema 'ATTRS' values.
-    The schema can be either a dictionary or a path to a YAML file.
+    Prepare options for ZarrFuse:
+    - get kwargs
+    - overwrite by schema ATTRS is provided
+    - overwrite by evironment variables
+    """
+    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS'}
+    secret_attrs = {'S3_ACCESS_KEY', 'S3_SECRET_KEY'}
+    interpreted_attrs = interpreted_attrs.union(secret_attrs)
+    options = {key:kwargs[key] for key in interpreted_attrs if key in kwargs}
 
+    if schema is not None:
+        schema_options = {key:schema.ds.ATTRS[key] for key in interpreted_attrs if key in schema.ds.ATTRS}
+        # Warning for leaking secrets
+        for key in secret_attrs:
+            value = schema_options.get(key, None)
+            if value:
+                logging.warning(f"Possible secrete leak in schema: {schema.node_ref()} ATTR {key}.")
+
+    e_key = lambda key: f"ZF_{key}"  # Environment variable key prefix
+    env_options = {os.environ[e_key(key)] for key in interpreted_attrs if e_key(key) in os.environ}
+    options.update(env_options)
+    return options
+
+def open_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
+    """
+    Open existing or create a new ZARR store according to given schema.
     'schema': Could be schema dict or YAML string or Path object to YAML file.
               Could be None just for opening and existing storage.
 
-    kwargs processed:
-    'workdir' used for relative local urls.
+    Kwargs are overwritten by schema 'ATTRS' values, which are
+    overwritten by the environment variables named 'ZF_<ATTR_NAME>'.
+
     Return: root Node
     """
     if isinstance(schema, NodeSchema):
@@ -149,12 +185,9 @@ def open_storage(schema:zarr_schema.NodeSchema | Path, **kwargs):
     else:
         raise TypeError(f"Unsupported schema type: {type(schema)}. Expected NodeSchema or Path.")
 
-    store_attrs = node_schema.ds.ATTRS.copy()
-    store_attrs.update(kwargs)
-    zarr_url = store_attrs['store_url']
-    type = store_attrs.get('store_type', 'guess')
-    kwargs.update(store_attrs)
-    storage = zarr_store_open(zarr_url, type=type, **kwargs)
+    options = _zarr_fuse_options(node_schema, **kwargs)
+
+    store = _zarr_store_open(options)
     return Node("", storage, new_schema = node_schema)
 
 class Node:

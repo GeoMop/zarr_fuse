@@ -3,6 +3,7 @@ import time
 import os
 from dotenv import load_dotenv
 
+
 import numpy as np
 import numpy.testing as npt
 from pathlib import Path
@@ -17,6 +18,8 @@ from zarr.storage import FsspecStore
 
 import zarr_fuse as zf
 
+
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -24,7 +27,11 @@ script_dir = Path(__file__).parent
 inputs_dir = script_dir / "inputs"
 workdir = script_dir / "workdir"
 
-import asyncio
+
+def test_open_store():
+
+    # test of secure keys warning
+    with pytest.warns(UserWarning, match="S3 credentials are not set"):
 
 def sync_remove_store(storage_options, path):
     so = storage_options.copy()
@@ -66,12 +73,13 @@ def aux_read_struc(fname, storage_type="local"):
 
     if storage_type == "s3":
         # Use open_storage with S3 schema - UNIQUE PATH!
-        import time
-        unique_id = int(time.time() * 1000)  # milliseconds
-        bucket_name = os.getenv('S3_BUCKET_NAME')
-        schema.ds.ATTRS['store_url'] = f"s3://{bucket_name}/test-{unique_id}.zarr"
-        schema.ds.ATTRS['store_type'] = 's3'
-        node = zf.open_storage(schema)
+        tox_env_name = os.environ.get("TOX_ENV_NAME", "local")
+        #
+        schema.ds.ATTRS['STORE_URL'] = f"s3://test-zarr-storage/{tox_env_name}/{Path(fname).with_suffix(".zarr")}"
+        schema.ds.ATTRS['S3_ENDPOINT_URL'] = "https://s3.cl4.du.cesnet.cz"
+        #schema.ds.ATTRS['store_type'] = 's3'
+        # TODO: pass as supplementary kwargs
+        node = zf.open_store(schema)
         return schema, node.store, node
     else:
         # Local storage logic
