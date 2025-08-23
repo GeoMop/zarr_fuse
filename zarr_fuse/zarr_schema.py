@@ -29,7 +29,7 @@ class SchemaAddress:
 
     def dive(self, key: Union[str, int]) -> "SchemaAddress":
         """Return a new SchemaAddress with an extra path component."""
-        return SchemaAddress([*self.addr, key], self.file,)
+        return SchemaAddress([*self.addr, key], self.file)
 
 
 class _SchemaIssueMixin:
@@ -171,10 +171,16 @@ class Coord(AddressMixin):
                 self.step_limits = 2 * self.step_limits
             if len(self.step_limits) == 2:
                 self.step_limits = [*self.step_limits, ""]
-            assert (
-                len(self.step_limits) == 3
-            ), f"step_limits should be a list of 3 elements, got {self.step_limits}"
-            assert isinstance(self.step_limits[2], str)
+            if len(self.step_limits) != 3:
+                self.error(
+                    f"step_limits should be a list of 3 elements, got {self.step_limits}",
+                    subkeys=["step_limits"],
+                )
+            if not isinstance(self.step_limits[2], str):
+                self.error(
+                    "step_limits unit (3rd element) must be a string",
+                    subkeys=["step_limits", 2],
+                )
 
         self.sorted = dict.get('sorted', not self.is_composed())
         # May be explicit in the future. Namely, if we support interpolation of sparse coordinates.
@@ -234,6 +240,7 @@ class DatasetSchema(AddressMixin):
                     Variable(name=coord, _address=self._address.dive("VARS").dive(coord)),
                 )
 
+        # Link coords to variables
         for coord in self.COORDS.values():
             coord._variables = self.VARS
 
@@ -242,14 +249,18 @@ class DatasetSchema(AddressMixin):
         Create mapping of name -> instance for the given class with the provided keyword arguments.
         Ensures that each instance receives its origin SchemaAddress based on self._address.
         """
-        def set_name_and_address(d: Dict[str, Any], name: str) -> Dict[str, Any]:
-            assert isinstance(d, dict), f"Expected a dictionary, got: {d}"
-            d = dict(d)  # copy to avoid mutating caller's dict
-            d["name"] = name
-            d["_address"] = self._address.dive(section_key).dive(name)
-            return d
-
-        return {k: cls(**set_name_and_address(v, k)) for k, v in kwargs_dict.items()}
+        out: Dict[str, Any] = {}
+        for name, d in kwargs_dict.items():
+            if not isinstance(d, dict):
+                self.error(
+                    f"Expected a dictionary for {section_key}.{name}, got: {type(d).__name__}",
+                    subkeys=[section_key, name],
+                )
+            data = dict(d)
+            data["name"] = name
+            data["_address"] = self._address.dive(section_key).dive(name)
+            out[name] = cls(**data)
+        return out
 
     def is_empty(self):
         return not self.ATTRS and not self.COORDS and not self.VARS
