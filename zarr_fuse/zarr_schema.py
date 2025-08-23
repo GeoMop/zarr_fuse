@@ -1,24 +1,36 @@
 import yaml
 import attrs
 import numpy as np
+import warnings
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Union, IO, Tuple
+from typing import Optional, List, Dict, Any, Union, IO
 
 from . import units
 
-reserved_keys = set(['ATTRS', 'COORDS', 'VARS'])
+reserved_keys = set(["ATTRS", "COORDS", "VARS"])
+
 
 @attrs.define(frozen=True)
 class SchemaAddress:
     """
     Represents a single value in the schema file.
+    Holds the source file name (or empty string for an anonymous stream)
+    and a list of path components locating the value within the YAML tree.
+
+    Path components are stored as provided (str or int) and converted to
+    strings only when rendering.
     """
-    file: str
-    addr: List[str]
+    addr: List[Union[str, int]]
+    file: str = None
 
     def __str__(self) -> str:
-        file_repr =  self.file if self.file else "<SCHEMA STREAM>"
-        return f"{file_repr}:{'/'.join(self.addr)}"
+        file_repr = self.file if self.file else "<SCHEMA STREAM>"
+        return f"{file_repr}:{'/'.join(map(str, self.addr))}"
+
+    def dive(self, key: Union[str, int]) -> "SchemaAddress":
+        """Return a new SchemaAddress with an extra path component."""
+        return SchemaAddress([*self.addr, key], self.file,)
+
 
 class _SchemaIssueMixin:
     """
@@ -30,21 +42,51 @@ class _SchemaIssueMixin:
         self.address = address
 
     def __str__(self) -> str:
-        return f"{self.message}  (at {self.address})"  # uses SchemaAddress.__str__
+        return f"{self.message}  (at {self.address})"
 
 
 class SchemaError(_SchemaIssueMixin, Exception):
     """Raise when the config problem should be fatal."""
     pass
 
+
 class SchemaWarning(_SchemaIssueMixin, UserWarning):
     """Emit when the problem should be non-fatal."""
     pass
 
+
+class AddressMixin:
+    """
+    Mixin for schema objects that keeps their source SchemaAddress and
+    provides convenience helpers to raise errors / emit warnings bound
+    to that address.
+
+    The helpers accept an optional list of `subkeys` to append to the
+    stored address. This is useful when the message refers to a nested
+    attribute/key (e.g., a field inside ATTRS/VARS/COORDS).
+    """
+    _address: SchemaAddress  # subclasses provide this via attrs field
+
+    def _extend_address(self, subkeys: List[Union[str, int]] = []) -> SchemaAddress:
+        addr = self._address
+        for k in subkeys:
+            addr = addr.dive(k)
+        return addr
+
+    def error(self, message: str, subkeys: Optional[List[Union[str, int]]] = None) -> None:
+        raise SchemaError(message, self._extend_address(subkeys))
+
+    def warn(self, message: str, subkeys: Optional[List[Union[str, int]]] = None, *, stacklevel: int = 2) -> None:
+        warnings.warn(
+            SchemaWarning(message, self._extend_address(subkeys)),
+            stacklevel=stacklevel,
+        )
+
+
+# ----------------------- Converters & core classes ----------------------- #
+
 def _unit_converter(unit):
-    """
-    Convert unit to a string.
-    """
+    """Convert unit to a string or a units.DateTimeUnit object."""
     if unit is None:
         return None
     elif isinstance(unit, str):
@@ -54,10 +96,13 @@ def _unit_converter(unit):
     else:
         raise TypeError(f"Unsupported unit type: {type(unit)}")
 
+
 @attrs.define
-class Variable:
+class Variable(AddressMixin):
+    _address: SchemaAddress = attrs.field(alias="_address", repr=False)
+    # To prevent stripping underscore done by attrs by default.
     name: str
-    unit: Optional[str] = attrs.field(default='', converter=_unit_converter)    # dimensionless
+    unit: Optional[str] = attrs.field(default="", converter=_unit_converter)  # dimensionless
     description: Optional[str] = None
     coords: Union[str, List[str]] = None
     df_col: Optional[str] = None
@@ -80,11 +125,13 @@ class Variable:
             unit=self.unit,
             description=self.description,
             df_col=self.df_col,
-            source_unit = self.source_unit
+            source_unit=self.source_unit,
         )
 
+
 @attrs.define(slots=False)
-class Coord:
+class Coord(AddressMixin):
+    _address: SchemaAddress = attrs.field(alias="_address", repr=False)
     name: str
     description: Optional[str] = None
     composed: Dict[str, List[Any]] = None
@@ -94,8 +141,6 @@ class Coord:
     #values: Optional[np.ndarray]  = attrs.field(eq=attrs.cmp_using(eq=np.array_equal), default=None)             # Fixed size, given coord values.
 
     def __init__(self, **dict):
-        if 'composed' not in dict or len(dict['composed']) == 0 or dict['composed'] is None:
-            dict['composed'] = [dict['name']]
         # _values = dict.get('values', [])
         # if isinstance(_values, int):
         #     _values = np.atleast_2d(np.arange(_values)).T
@@ -110,19 +155,25 @@ class Coord:
         #         _values = np.atleast_2d(_values)
         #
         # dict['values'] = _values
+        self._address = dict.get("_address")
+        assert self._address is not None
 
-        self.name = dict['name']
-        self.description = dict.get('description', None)
-        self.composed = dict['composed']
-        #self.values = dict['values']
-        self.chunk_size = dict.get('chunk_size', 1024)
-        self.step_limits = dict.get('step_limits', [])
+        if "composed" not in dict or len(dict["composed"]) == 0 or dict["composed"] is None:
+            dict["composed"] = [dict["name"]]
+
+        self.name = dict["name"]
+        self.description = dict.get("description", None)
+        self.composed = dict["composed"]
+        self.chunk_size = dict.get("chunk_size", 1024)
+        self.step_limits = dict.get("step_limits", [])
         if self.step_limits is not None and len(self.step_limits) > 0:
             if len(self.step_limits) == 1:
                 self.step_limits = 2 * self.step_limits
             if len(self.step_limits) == 2:
-                self.step_limits = [*self.step_limits, '']
-            assert len(self.step_limits) == 3, f"step_limits should be a list of 3 elements, got {self.step_limits}"
+                self.step_limits = [*self.step_limits, ""]
+            assert (
+                len(self.step_limits) == 3
+            ), f"step_limits should be a list of 3 elements, got {self.step_limits}"
             assert isinstance(self.step_limits[2], str)
 
         self.sorted = dict.get('sorted', not self.is_composed())
@@ -155,64 +206,65 @@ class Coord:
 
 
 Attrs = Dict[str, Any]
-
 attrs_field = attrs.field
 # Overcome the name conflict within DatasetSchema class.
+
 @attrs.define
-class DatasetSchema:
+class DatasetSchema(AddressMixin):
+    _address: SchemaAddress = attrs.field(alias="_address", repr=False)
     ATTRS: Attrs = attrs_field(factory=dict)
     COORDS: Dict[str, Coord] = attrs_field(factory=dict)
     VARS: Dict[str, Variable] = attrs_field(factory=dict)
 
-
-    def __init__(self, attrs, vars, coords):
+    def __init__(self, _address: SchemaAddress, attrs: Attrs, vars: Dict[str, Any], coords: Dict[str, Any]):
+        self._address = _address
         self.ATTRS = attrs
-        self.VARS = DatasetSchema.safe_instance(Variable, vars)
-        self.COORDS = DatasetSchema.safe_instance(Coord, coords)
+        self.VARS = self.safe_instance(Variable, vars, section_key="VARS")
+        self.COORDS = self.safe_instance(Coord, coords, section_key="COORDS")
 
-        # Add implicitely defined coords.
-        implicit_coords = [
-            coord
-            for var in self.VARS.values()
-            for coord in var.coords
-        ]
+        # Add implicitly defined coords.
+        implicit_coords = [coord for var in self.VARS.values() for coord in var.coords]
         for coord in set(implicit_coords):
-            coord_obj = self.COORDS.setdefault(coord, Coord(name=coord))
+            coord_obj = self.COORDS.setdefault(
+                coord, Coord(name=coord, _address=self._address.dive("COORDS").dive(coord))
+            )
             if not coord_obj.is_composed():
-                self.VARS.setdefault(coord, Variable(coord))
+                self.VARS.setdefault(
+                    coord,
+                    Variable(name=coord, _address=self._address.dive("VARS").dive(coord)),
+                )
 
-        # Link coords to variables
         for coord in self.COORDS.values():
             coord._variables = self.VARS
 
-    @staticmethod
-    def safe_instance(cls, kwargs_dict):
+    def safe_instance(self, cls, kwargs_dict: Dict[str, Any], section_key: str):
         """
-        Create an instance of the given class with the provided keyword arguments.
-        If the class is not defined, return None.
+        Create mapping of name -> instance for the given class with the provided keyword arguments.
+        Ensures that each instance receives its origin SchemaAddress based on self._address.
         """
-
-        def set_name(d, name):
+        def set_name_and_address(d: Dict[str, Any], name: str) -> Dict[str, Any]:
             assert isinstance(d, dict), f"Expected a dictionary, got: {d}"
-            d['name'] = name
+            d = dict(d)  # copy to avoid mutating caller's dict
+            d["name"] = name
+            d["_address"] = self._address.dive(section_key).dive(name)
             return d
 
-        vars = {k: cls(**set_name(v, k)) for k, v in kwargs_dict.items()}
-        return vars
+        return {k: cls(**set_name_and_address(v, k)) for k, v in kwargs_dict.items()}
 
     def is_empty(self):
-        """
-        Check if the schema is empty.
-        """
         return not self.ATTRS and not self.COORDS and not self.VARS
 
+
 @attrs.define
-class NodeSchema:
+class NodeSchema(AddressMixin):
+    _address: SchemaAddress = attrs.field(alias="_address", repr=False)
     ds: DatasetSchema
-    groups: Dict[str, 'NodeSchema'] = attrs.field(factory=dict)
+    groups: Dict[str, "NodeSchema"] = attrs.field(factory=dict)
 
 
-def dict_deserialize(content: dict) -> NodeSchema:
+# ----------------------- (De)serialization helpers ----------------------- #
+
+def dict_deserialize(content: dict, address: SchemaAddress) -> NodeSchema:
     """
     Recursively deserializes the schema = tree of node dictionaries.
     Create instances of DatasetScheme from special keys:
@@ -224,18 +276,19 @@ def dict_deserialize(content: dict) -> NodeSchema:
     TODO: report path to error key
     """
     ds_schema = DatasetSchema(
+        _address=address,
         attrs = content.pop('ATTRS', {}),
         vars=content.pop('VARS', {}),
         coords = content.pop('COORDS', {})
     )
 
     children = {
-        key: dict_deserialize(value)
+        key: dict_deserialize(value, address.dive(key))
         for key, value in content.items()
     }
 
-        # if isinstance(value, dict) else value
-    return NodeSchema(ds_schema, children)
+    return NodeSchema(_address=address, ds=ds_schema, groups=children)
+
 
 def deserialize(source: Union[IO, str, bytes, Path]) -> NodeSchema:
     """
@@ -254,9 +307,10 @@ def deserialize(source: Union[IO, str, bytes, Path]) -> NodeSchema:
       ValueError if a string is provided that does not correspond to an existing file.
       TypeError for unsupported types.
     """
-
+    file_name = None
     if isinstance(source, Path):
         # Try to open the source as a file path.
+        file_name = str(source)
         with Path(source).open("r", encoding="utf-8") as file:
             content = file.read()
     elif isinstance(source, str):
@@ -272,8 +326,10 @@ def deserialize(source: Union[IO, str, bytes, Path]) -> NodeSchema:
         except Exception as e:
             raise TypeError("Provided source is not a supported type (IO, str, bytes, or Path)") from e
 
-    raw_dict = yaml.safe_load(content)
-    return  dict_deserialize(raw_dict)
+    raw_dict = yaml.safe_load(content) or {}
+    root_address = SchemaAddress(addr=[], file=file_name)
+    return dict_deserialize(raw_dict, root_address)
+
 
 def convert_value(obj: NodeSchema):
     """
@@ -295,12 +351,14 @@ def convert_value(obj: NodeSchema):
 
     if attrs.has(obj):
         # Serialize attrs instances, serialize values recursively.
-        return attrs.asdict(obj,
-                            value_serializer=
-                            lambda inst, field, value: convert_value(value))
+        return attrs.asdict(
+            obj,
+            value_serializer=lambda inst, field, value: convert_value(value),
+            filter=lambda attribute, value: attribute.name != "_address",
+        )
     elif isinstance(obj, dict):
         return {k: convert_value(v) for k, v in obj.items()}
-    elif hasattr(obj, 'dtype'):
+    elif hasattr(obj, "dtype"):
         return obj.tolist()
     elif isinstance(obj, (list, tuple)):
         return [convert_value(item) for item in obj]
@@ -323,4 +381,3 @@ def serialize(node_schema: NodeSchema, path: Union[str, Path]=None) -> str:
         with Path(path).open("w", encoding="utf-8") as file:
             file.write(content)
     return content
-
