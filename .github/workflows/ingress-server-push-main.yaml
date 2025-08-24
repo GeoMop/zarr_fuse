@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 jobs:
   get-changed-files:
     name: Get changed file
@@ -26,11 +27,13 @@ jobs:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     needs:
       - get-changed-files
-    if: needs.get-changed-files.outputs.any-changed == 'true'
+    if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
     with:
       push-container: true
       deploy-helm-chart: true
       tag: latest
-      namespace: ingress-server-latest
-      helm-extra-args: "--values ingress-server/values/main-values.yaml"
+      namespace: ingress-server
+      release-name: ingress-server
+      basic-auth-enabled: true
+      production: true
     secrets: inherit

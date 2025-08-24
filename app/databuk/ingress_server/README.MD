@@ -47,7 +47,7 @@ S3_ACCESS_KEY=YOUR_ACCESS_KEY
 S3_SECRET_KEY=YOUR_SECRET_KEY
 
 # Required for HTTP Basic Auth
-USERS_JSON={"alice":"password"}
+BASIC_AUTH_USERS_JSON={"alice":"password"}
 ```
 
 The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.
@@ -161,13 +161,17 @@ and `{node_path}` is a Zarr node path like `level1/level2`.
 
 ## Examples
 
+### Python example:
+
+You can also use python exmplae in `tools/request_test.py`
+
 ### Upload to **tree**
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/tree \
    -H "Content-Type: text/csv" \
    -u test:test \
-   -d @src/test_data/tree/default.csv
+   --data-binary @src/test_data/tree/default.csv
 ```
 
 ### Upload to **weather**

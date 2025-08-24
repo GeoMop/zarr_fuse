@@ -1,28 +1,25 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: ingress-server
+  name: {{ .Values.app.name }}
+  {{- if .Values.ingress.annotations }}
   annotations:
-    kubernetes.io/tls-acme: "true"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    {{ .Values.ingress.annotations | toYaml | nindent 4 }}
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
   rules:
-    {{- range .Values.ingress.hosts }}
-    - host: {{ .host | quote }}
+    - host: zarr-fuse-{{ .Values.app.name }}.dyn.cloud.e-infra.cz
       http:
         paths:
-          {{- range .paths }}
-          - path: {{ .path | quote }}
-            pathType: {{ .pathType | quote }}
+          - path: /
+            pathType: Prefix
             backend:
               service:
-                name: {{ $.Values.service.name | quote }}
+                name: "{{ $.Values.app.name }}-service"
                 port:
                   number: {{ $.Values.service.externalPort.number | int }}
-          {{- end }}
-    {{- end }}
-  {{- with .Values.ingress.tls }}
   tls:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    - secretName: zarr-fuse-{{ .Values.app.name }}-dyn-cloud-e-infra-cz-tls
+      hosts:
+        - zarr-fuse-{{ .Values.app.name }}.dyn.cloud.e-infra.cz

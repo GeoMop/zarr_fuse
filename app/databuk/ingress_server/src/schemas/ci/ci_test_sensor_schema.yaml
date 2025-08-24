@@ -1,0 +1,34 @@
+ATTRS:
+  description: sensor schema
+  s3_url: https://s3.cl4.du.cesnet.cz
+  store_path: test-zarr-storage/ci-sensor.zarr # bucket + filename
+VARS:
+  time:
+    unit: TimeStamp[CET]
+    description: Time coordinate
+    df_col: timestamp
+  elements:
+    unit: ""
+    description: Mesh element index
+    df_col: element
+  pressure:
+    unit: m
+    description: Pressure head field
+    df_col: pressure
+    coords:
+      - time
+      - elements
+  conductivity_tn:
+    unit: m/s
+    description: Hydraulic conductivity tensor.
+    coords:
+      - time
+      - elements
+      - tn_voigt_3d
+COORDS:
+  time:
+    chunk_size: 256
+  elements:
+    chunk_size: 512
+  tn_voigt_3d:
+    values: 6

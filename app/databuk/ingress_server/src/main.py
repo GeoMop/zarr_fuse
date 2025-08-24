@@ -15,19 +15,22 @@ from flask_httpauth import HTTPBasicAuth
 
 # ---------- BOOTSTRAPPING ----------
 load_dotenv()
-CONFIG_PATH = Path(__file__).parent / "endpoints_config.yaml"
-USERS = json.loads(os.getenv("USERS_JSON", "{}"))
-AUTH = HTTPBasicAuth()
 APP = Flask(__name__)
 
+# ---------- AUTH BOOTSTRAPPING ----------
+AUTH = HTTPBasicAuth()
+USERS = json.loads(os.getenv("USERS_JSON", "{}"))
+AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() == "true"
 
 # ---------- AUTH ----------
 @AUTH.verify_password
 def verify_password(username, password):
+    if not AUTH_ENABLED:
+        return username
+
     if username in USERS and USERS[username] == password:
         return username
     return None
-
 
 # ---------- S3 HELPERS ----------
 def _get_schema_attributes(schema_path):
@@ -150,7 +153,13 @@ def health():
 
 # ---------- APP FACTORY ----------
 def create_app():
-    with open(CONFIG_PATH, "r") as f:
+    config_path = Path(__file__).parent
+    if os.getenv("PRODUCTION", "false").lower() == "true":
+        config_path /= "prod_endpoints_config.yaml"
+    else:
+        config_path /= "ci_test_endpoints_config.yaml"
+
+    with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
     for endpoint in config.get("endpoints", []):

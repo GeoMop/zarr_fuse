@@ -1,3 +1,6 @@
+# ---------------------------
+# ---- DONT USE FOR NOW -----
+# ---------------------------
 name: Ingress server - push main
 on:
   push:
@@ -27,4 +30,5 @@ jobs:
       deploy-helm-chart: true
       tag: ${{ needs.get-version.outputs.version }}
       namespace: ingress-server
+      release-name: ingress-server
     secrets: inherit

@@ -1,16 +1,18 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ingress-server
+  name: {{ .Values.app.name }}
 spec:
   replicas: {{ .Values.deployment.replicaCount }}
+  strategy:
+    type: RollingUpdate
   selector:
     matchLabels:
-      app: ingress-server
+      app: {{ .Values.app.name }}
   template:
     metadata:
       labels:
-        app: ingress-server
+        app: {{ .Values.app.name }}
     spec:
       securityContext:
         {{- toYaml .Values.securityContext.pod | nindent 8 }}
@@ -18,19 +20,27 @@ spec:
         - name: ingress-server-tmp
           emptyDir: {}
       containers:
-        - name: ingress-server
+        - name: {{ .Values.app.name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: IfNotPresent
           ports:
             - name: {{ .Values.service.internalPort.name | quote }}
               containerPort: {{ .Values.service.internalPort.number | int }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
           env:
             - name: S3_ACCESS_KEY
-              value: {{ .Values.deployment.secrets.s3.accessKey | quote }}
+              value: {{ required "S3_ACCESS_KEY needs to be set" .Values.deployment.secrets.s3.accessKey | quote }}
             - name: S3_SECRET_KEY
-              value: {{ .Values.deployment.secrets.s3.secretKey | quote }}
-            - name: USERS_JSON
-              value: {{ .Values.deployment.secrets.basicAuth.usersJson | toJson | quote }}
+              value: {{ required "S3_SECRET_KEY needs to be set" .Values.deployment.secrets.s3.secretKey | quote }}
+            - name: BASIC_AUTH_USERS_JSON
+              value: {{ required "BASIC_AUTH_USERS_JSON needs to be set" .Values.deployment.secrets.basicAuth.usersJson | quote }}
+            - name: AUTH_ENABLED
+              value: {{ .Values.deployment.secrets.basicAuth.enabled }}
+            - name: PRODUCTION
+              value: {{ .Values.deployment.production }}
           volumeMounts:
             - name: ingress-server-tmp
               mountPath: /tmp
@@ -55,5 +65,3 @@ spec:
             periodSeconds: 30
             successThreshold: 1
             failureThreshold: 10
-          securityContext:
-            {{- toYaml .Values.securityContext.container | nindent 12 }}
