@@ -25,11 +25,6 @@ on:
         description: The Helm release name to use
         required: true
         type: string
-      basic-auth-enabled:
-        description: Whether to enable basic authentication
-        required: false
-        type: boolean
-        default: true
       production:
         description: Whether the environment is production
         required: false
@@ -76,7 +71,7 @@ jobs:
       - containerize
     defaults:
       run:
-        working-directory: charts
+        working-directory: charts/ingress-server
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-lint-helm-chart"
       cancel-in-progress: true
@@ -84,9 +79,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Lint helm chart
-        run: helm lint ingress-server --strict > /dev/null
+        run: helm lint --values values/minimal-required-values.yaml --strict > /dev/null
       - name: Template helm chart
-        run: helm template ingress-server > /dev/null
+        run: helm template ingress-server . --values values/minimal-required-values.yaml > /dev/null
   deploy-helm-chart:
     name: Deploy ingress server to e-infra rancher
     runs-on: ubuntu-latest
@@ -120,6 +115,5 @@ jobs:
           --set deployment.secrets.s3.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
           --set deployment.secrets.s3.secretKey="${{ secrets.S3_SECRET_KEY }}" \
           --set deployment.secrets.basicAuth.usersJson='${{ secrets.BASIC_AUTH_USERS_JSON }}' \
-          --set deployment.secrets.basicAuth.enabled="${{ inputs.basic-auth-enabled }}" \
           --set deployment.production="${{ inputs.production }}" \
           --set app.name="${{ inputs.release-name }}"

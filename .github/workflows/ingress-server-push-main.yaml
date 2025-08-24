@@ -34,6 +34,5 @@ jobs:
       tag: latest
       namespace: ingress-server
       release-name: ingress-server
-      basic-auth-enabled: true
       production: true
     secrets: inherit

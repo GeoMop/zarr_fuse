@@ -1,0 +1,8 @@
+deployment:
+  secrets:
+    s3:
+      accessKey: "s3-access-key"
+      secretKey: "s3-secret-key"
+    basicAuth:
+      enabled: true
+      usersJson: "{}"

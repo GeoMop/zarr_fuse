@@ -36,7 +36,7 @@ deployment:
       # -- JSON string of users for basic auth
       # -- Example: '{"user1": "password1", "user2": "password2"}'
       # -- Replaced during deploy
-      usersJson: "{}"
+      usersJson: ""
 
 # -- Service configuration
 # @default -- ~

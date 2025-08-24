@@ -25,7 +25,7 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 │  ├─ src/
 │  │  ├─ main.py                  # Flask backend server
 │  │  ├─ endpoints_config.yaml    # List of API endpoints and their schema paths
-│  │  └─ schemas/                 # Schema files (define S3 target + variables)
+│  │  └─ schemas/                 # Schema files (prod/ci_test)
 │  ├─ docs/
 │  │  └─ swagger.yaml             # Generated OpenAPI spec
 │  ├─ tools/
@@ -48,6 +48,10 @@ S3_SECRET_KEY=YOUR_SECRET_KEY
 
 # Required for HTTP Basic Auth
 BASIC_AUTH_USERS_JSON={"alice":"password"}
+AUTH_ENABLED=true
+
+# Production environment, if true than prod_endpoints_config.yaml will be used
+PRODUCTION=false
 ```
 
 The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.

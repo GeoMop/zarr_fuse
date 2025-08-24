@@ -19,7 +19,7 @@ APP = Flask(__name__)
 
 # ---------- AUTH BOOTSTRAPPING ----------
 AUTH = HTTPBasicAuth()
-USERS = json.loads(os.getenv("USERS_JSON", "{}"))
+USERS = json.loads(os.getenv("BASIC_AUTH_USERS_JSON", "{}"))
 AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() == "true"
 
 # ---------- AUTH ----------
