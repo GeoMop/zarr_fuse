@@ -1,7 +1,7 @@
 ATTRS:
   description: sensor schema
   s3_url: https://s3.cl4.du.cesnet.cz
-  store_path: test-zarr-storage/ci-sensor.zarr # bucket + filename
+  store_path: test-moc/ci-sensor.zarr # bucket + filename
 VARS:
   time:
     unit: TimeStamp[CET]
