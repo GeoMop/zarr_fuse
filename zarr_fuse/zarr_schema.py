@@ -21,7 +21,7 @@ class SchemaAddress:
     strings only when rendering.
     """
     addr: List[Union[str, int]]
-    file: str = None
+    file: str = attrs.field(default=None, eq=False)
 
     def __str__(self) -> str:
         file_repr = self.file if self.file else "<SCHEMA STREAM>"
@@ -30,7 +30,6 @@ class SchemaAddress:
     def dive(self, key: Union[str, int]) -> "SchemaAddress":
         """Return a new SchemaAddress with an extra path component."""
         return SchemaAddress([*self.addr, key], self.file)
-
 
 class _SchemaIssueMixin:
     """
@@ -99,7 +98,7 @@ def _unit_converter(unit):
 
 @attrs.define
 class Variable(AddressMixin):
-    _address: SchemaAddress = attrs.field(alias="_address", repr=False)
+    _address: SchemaAddress = attrs.field(alias="_address", repr=False, eq=False)
     # To prevent stripping underscore done by attrs by default.
     name: str
     unit: Optional[str] = attrs.field(default="", converter=_unit_converter)  # dimensionless
@@ -131,7 +130,7 @@ class Variable(AddressMixin):
 
 @attrs.define(slots=False)
 class Coord(AddressMixin):
-    _address: SchemaAddress = attrs.field(alias="_address", repr=False)
+    _address: SchemaAddress = attrs.field(alias="_address", repr=False, eq=False)
     name: str
     description: Optional[str] = None
     composed: Dict[str, List[Any]] = None
@@ -217,7 +216,7 @@ attrs_field = attrs.field
 
 @attrs.define
 class DatasetSchema(AddressMixin):
-    _address: SchemaAddress = attrs.field(alias="_address", repr=False)
+    _address: SchemaAddress = attrs.field(alias="_address", repr=False, eq=False)
     ATTRS: Attrs = attrs_field(factory=dict)
     COORDS: Dict[str, Coord] = attrs_field(factory=dict)
     VARS: Dict[str, Variable] = attrs_field(factory=dict)
@@ -268,7 +267,7 @@ class DatasetSchema(AddressMixin):
 
 @attrs.define
 class NodeSchema(AddressMixin):
-    _address: SchemaAddress = attrs.field(alias="_address", repr=False)
+    _address: SchemaAddress = attrs.field(alias="_address", repr=False, eq=False)
     ds: DatasetSchema
     groups: Dict[str, "NodeSchema"] = attrs.field(factory=dict)
 
@@ -301,7 +300,7 @@ def dict_deserialize(content: dict, address: SchemaAddress) -> NodeSchema:
     return NodeSchema(_address=address, ds=ds_schema, groups=children)
 
 
-def deserialize(source: Union[IO, str, bytes, Path]) -> NodeSchema:
+def deserialize(source: Union[IO, str, bytes, Path], source_description=None) -> NodeSchema:
     """
     Deserialize YAML from a file path, stream, or bytes containing YAML content.
 
@@ -311,6 +310,7 @@ def deserialize(source: Union[IO, str, bytes, Path]) -> NodeSchema:
         - If bytes, it is treated as YAML content (decoded as UTF-8).
         - Otherwise, it is assumed to be a file-like stream.
 
+    source_description: Used for address as a 'file_name' in case of string or YAML source
     Returns:
       A dictionary resulting from parsing the YAML and processing it with dict_deserialize().
 
@@ -318,7 +318,7 @@ def deserialize(source: Union[IO, str, bytes, Path]) -> NodeSchema:
       ValueError if a string is provided that does not correspond to an existing file.
       TypeError for unsupported types.
     """
-    file_name = None
+    file_name = source_description
     if isinstance(source, Path):
         # Try to open the source as a file path.
         file_name = str(source)

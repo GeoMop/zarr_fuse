@@ -1,5 +1,6 @@
 import numpy as np
-from zarr_fuse.tools import adjust_grid
+import copy
+from zarr_fuse.tools import adjust_grid, recursive_update
 
 
 def plot_adjust_grid_transitions(grids):
@@ -55,3 +56,47 @@ def test_adjust_grid():
         plot_adjust_grid_transitions(grids)
     except ImportError:
         pass
+
+
+
+def test_recursive_update():
+    # --- Basic merge ---
+    a = {"x": 1, "y": {"a": 10, "b": 20}, "z": {"nested": {"k": "old"}}}
+    b = {"y": {"b": 99, "c": 30}, "z": {"nested": {"new": "val"}}, "w": 42}
+
+    out = recursive_update(a, b)
+    assert a["y"] == {"a": 10, "b": 99, "c": 30}
+    assert a["z"] == {"nested": {"k": "old", "new": "val"}}
+    assert a["w"] == 42
+    assert a["x"] == 1
+    assert out is a
+
+    # --- Overwrite when types differ ---
+    a = {"k": {"sub": 1}, "m": 5}
+    b = {"k": 7, "m": {"x": 1}}
+    recursive_update(a, b)
+    assert a["k"] == 7
+    assert a["m"] == {"x": 1}
+
+    # --- In-place behavior ---
+    a = {"outer": {"inner": {"v": 1}}}
+    b = {"outer": {"inner": {"w": 2}}}
+    inner_before = a["outer"]["inner"]
+    recursive_update(a, b)
+    assert a["outer"]["inner"] is inner_before
+    assert a["outer"]["inner"] == {"v": 1, "w": 2}
+
+    # --- Empty updates ---
+    a = {"x": 1, "y": {"z": 2}}
+    a_before = copy.deepcopy(a)
+    recursive_update(a, {})
+    assert a == a_before
+    d = {}
+    recursive_update(d, {"n": {"m": 3}})
+    assert d == {"n": {"m": 3}}
+
+    # --- Deep merge ---
+    a = {"a": {"b": {"c": 1, "d": 2}}}
+    b = {"a": {"b": {"d": 999, "e": 3}}}
+    recursive_update(a, b)
+    assert a == {"a": {"b": {"c": 1, "d": 999, "e": 3}}}

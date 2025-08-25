@@ -27,3 +27,18 @@ def adjust_grid(x:np.ndarray, step_range:np.array) -> np.ndarray:
         out.append(xi)
         last = xi
     return np.array(out)
+
+
+def recursive_update(d, u):
+    """
+    Recursively update dictionary `d` with values from dictionary `u`.
+
+    If both d[k] and u[k] are dicts, merge them recursively.
+    Otherwise, overwrite d[k] with u[k].
+    """
+    for k, v in u.items():
+        if isinstance(v, dict) and isinstance(d.get(k), dict):
+            recursive_update(d[k], v)
+        else:
+            d[k] = v
+    return d

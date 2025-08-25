@@ -1,6 +1,9 @@
 import inspect
 import warnings
 import logging
+
+import json
+
 # Route warnings through logging
 logging.captureWarnings(True)
 
@@ -20,7 +23,7 @@ from . import zarr_schema, units
 from .logger import get_logger
 from .interpolate import interpolate_ds
 from .zarr_schema import DatasetSchema, NodeSchema
-
+from .tools import recursive_update
 """
 tuple val coords:
 - source cols as quantities
@@ -33,29 +36,6 @@ tuple val coords:
 - pivot_nd - hash source cols
 - future read - hash source cols
 """
-
-def zarr_store_guess_type(zarr_url:Union[str, Path] = ""):
-    """
-    Guess and return an appropriate zarr store constructor based on the given storage path or URL.
-    """
-    # If no URL or empty string provided, default to an in-memory store.
-    if zarr_url == "":
-        return 'memory'
-
-    # Check if the path ends with a .zip extension
-    # EXPERIMENTAL
-    if zarr_url.endswith(".zip"):
-        return 'zip'
-
-    # Check for S3 URLs first
-    if re.match(r'^s3://', zarr_url):
-        return 's3'
-
-    # Otherwise, assume it's a local directory path.
-
-    # Otherwise, assume it's a local directory path.
-    # Optionally, you might want to expand user (~) or environment variables here.
-    return 'local'
 
 
 def call_with_filtered_kwargs(func, *args, **kwargs):
@@ -94,6 +74,53 @@ def call_with_filtered_kwargs(func, *args, **kwargs):
     return func(*args, **valid_kwargs)
 
 
+class ZFOptionError(Exception):
+    pass
+
+def _get_option(store_options, key, **kwargs):
+    try:
+        return store_options[key]
+    except KeyError:
+        pass
+
+    try:
+        return kwargs['default']
+    except KeyError:
+        pass
+
+    raise ZFOptionError(f"Missing mandatory option '{key}'.")
+
+
+
+
+
+def _s3_options(store_options):
+    store_url = _get_option(store_options, 'STORE_URL') # The only mandatory parameter
+    # Check for S3 URLs first
+    # Create S3 filesystem with environment variables
+    s3_options = {
+        'key': _get_option(store_options, 'S3_ACCESS_KEY'),
+        'secret': _get_option(store_options, 'S3_SECRET_KEY'),
+        'endpoint_url': _get_option(store_options, 'S3_ENDPOINT_URL'),
+        'listings_expiry_time': 1,
+        'max_paths': 0,
+        'asynchronous': False,
+        'config_kwargs': {
+            #'s3': {
+            #    'payload_signing_enabled': False,
+            #    'addressing_style': os.getenv('S3_ADDRESSING_STYLE'),
+            #},
+            #'retries': {'max_attempts': 5, 'mode': 'standard'},
+            #'connect_timeout': 20,
+            #'read_timeout': 60,
+            'request_checksum_calculation': 'when_required',
+            'response_checksum_validation': 'when_required',
+        }
+    }
+    custom_options_json = _get_option(store_options, 'S3_OPTIONS', default='{}')
+    custom_options = json.safe_load(custom_options_json)
+    return recursive_update(s3_options, custom_options)
+
 def _zarr_store_open(store_options: Dict[str, Any]) -> zarr.storage.StoreLike:
     """
     Open a Zarr store based on the provided URL and options
@@ -102,45 +129,18 @@ def _zarr_store_open(store_options: Dict[str, Any]) -> zarr.storage.StoreLike:
     :param kwargs:
     :return:
     """
-    store_url = store_options['STORE_URL'] # The only mandatory parameter
-    if type == 'guess':
-        type = zarr_store_guess_type(zarr_url)
-
-    if type == 'memory':
-        args = (zarr.storage.MemoryStore, dict())
-    elif type == 'local':
-        if not zarr_url.startswith('/') and not zarr_url.startswith('file://'):
-            zarr_url = kwargs.get('workdir', Path()) / zarr_url
-        args = (zarr.storage.LocalStore, zarr_url)
-    elif type == 's3':
-        # Create S3 filesystem with environment variables
-        s3_options = {
-            'key': os.getenv('S3_ACCESS_KEY'),
-            'secret': os.getenv('S3_SECRET_KEY'),
-            'endpoint_url': os.getenv('S3_ENDPOINT_URL'),
-            'listings_expiry_time': 1,
-            'max_paths': 0,
-            'asynchronous': True,
-            'config_kwargs': {
-                's3': {
-                    'payload_signing_enabled': False,
-                    'addressing_style': os.getenv('S3_ADDRESSING_STYLE'),
-                },
-                'retries': {'max_attempts': 5, 'mode': 'standard'},
-                'connect_timeout': 20,
-                'read_timeout': 60,
-                'request_checksum_calculation': 'when_required',
-                'response_checksum_validation': 'when_required',
-            }
-        }
-        fs = fsspec.filesystem('s3', **s3_options)
+    store_url = store_options['STORE_URL']  # The only mandatory parameter
+    if re.match(r'^s3://', store_url):
+        s3_opts = _s3_options(store_options)
+        fs = fsspec.filesystem('s3', **s3_opts)
         # Remove s3:// scheme from path for FsspecStore
-        clean_path = zarr_url.replace('s3://', '') if zarr_url.startswith('s3://') else zarr_url
+        clean_path = store_url.replace('s3://', '')
         return zarr.storage.FsspecStore(fs, path=clean_path)
-    elif type == 'zip':
-        args = (zarr.storage.ZipStore, zarr_url)
-    storage = call_with_filtered_kwargs(*args, **kwargs)
-    return storage
+    elif re.match(r'^zip://', store_url):
+        return zarr.storage.ZipStore(store_url)
+    else:
+        return zarr.storage.LocalStore(store_url)
+
 
 def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Dict[str, Any]:
     """
@@ -158,12 +158,12 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
         schema_options = {key:schema.ds.ATTRS[key] for key in interpreted_attrs if key in schema.ds.ATTRS}
         # Warning for leaking secrets
         for key in secret_attrs:
-            value = schema_options.get(key, None)
-            if value:
-                logging.warning(f"Possible secrete leak in schema: {schema.node_ref()} ATTR {key}.")
+            if key in schema_options:
+                schema.ds.warn(f"Possible secrete leak in schema.", subkeys=['ATTRS', 'key'])
+        options.update(schema_options)
 
     e_key = lambda key: f"ZF_{key}"  # Environment variable key prefix
-    env_options = {os.environ[e_key(key)] for key in interpreted_attrs if e_key(key) in os.environ}
+    env_options = {key:os.environ[e_key(key)] for key in interpreted_attrs if e_key(key) in os.environ}
     options.update(env_options)
     return options
 
@@ -187,8 +187,12 @@ def open_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
 
     options = _zarr_fuse_options(node_schema, **kwargs)
 
-    store = _zarr_store_open(options)
-    return Node("", storage, new_schema = node_schema)
+    try:
+        store = _zarr_store_open(options)
+    except ZFOptionError as e:
+        raise ZFOptionError(f"{str(e)}. Opening store for schema {schema}.")
+
+    return Node("", store, new_schema = node_schema)
 
 class Node:
     """
@@ -412,7 +416,11 @@ class Node:
         if new_node_schema is None:
             # node in storage but not in schema
             # use ds_schema from the storage and empty new children dict
-            new_node_schema = zarr_schema.NodeSchema(self.schema)
+            null_address = zarr_schema.SchemaAddress([], file=None)
+            new_node_schema = zarr_schema.NodeSchema(
+                null_address,
+                self.schema,
+                {})  # empty groups
 
         self._update_schema_ds(new_node_schema.ds)
 
@@ -451,7 +459,8 @@ class Node:
         try:
             old_schema = self.schema
         except KeyError:
-            old_schema = zarr_schema.DatasetSchema({}, {}, {})
+            null_address = zarr_schema.SchemaAddress([], file=None)
+            old_schema = zarr_schema.DatasetSchema(null_address, {}, {}, {})
 
         if old_schema.is_empty():
             # Initialize new dataset.
@@ -517,12 +526,15 @@ class Node:
     @property
     def schema(self) -> zarr_schema.DatasetSchema:
         """
-        Return dictionary with node dataset schema.
+        Return node dataset schema.
         I.e. dictionary with keys 'COORDS', 'VARS', 'ATTRS'.
         Original schema tree is spread over the storage groups represented by Nodes.
         :return:
         """
-        node_schema = zarr_schema.deserialize(self.dataset.attrs['__structure__'])
+        node_schema = zarr_schema.deserialize(
+            self.dataset.attrs['__structure__'],
+            source_description='<storage schema>'
+        )
         return node_schema.ds
 
 
