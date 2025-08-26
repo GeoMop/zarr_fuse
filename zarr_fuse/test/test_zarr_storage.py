@@ -147,7 +147,8 @@ def aux_read_struc(fname, storage_type="local"):
     if storage_type == "s3":
         # Use open_storage with S3 schema - UNIQUE PATH!
         tox_env_name = os.environ.get("TOX_ENV_NAME", "local")
-        store_url = f"s3://test-zarr-storage/{tox_env_name}/{Path(fname).with_suffix(".zarr")}"
+        store_name = Path(fname).with_suffix(".zarr")
+        store_url = f"s3://test-zarr-storage/{tox_env_name}/{store_name}"
         kwargs['STORE_URL'] = str(store_url)
     else:
 
