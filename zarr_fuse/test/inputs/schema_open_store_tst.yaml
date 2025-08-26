@@ -1,0 +1,10 @@
+VARS:
+    temperature:
+      coords: time
+
+COORDS:
+    time: {}
+
+ATTRS:
+  WORKDIR: "./workdir"
+  S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
