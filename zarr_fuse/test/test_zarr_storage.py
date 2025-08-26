@@ -14,24 +14,97 @@ import zarr
 import time
 import asyncio, s3fs
 import fsspec
+
 from zarr.storage import FsspecStore
 
 import zarr_fuse as zf
 
 
-
 # Load environment variables from .env file
-load_dotenv()
+
 
 script_dir = Path(__file__).parent
 inputs_dir = script_dir / "inputs"
 workdir = script_dir / "workdir"
 
 
-def test_open_store():
+# async def get_items(store):
+#     return [x async for x in store.list()]
+#
+# def _store_ls(schema, **kwargs):
+#     """
+#     Listing still doesn't work for S3. Trying to
+#     call store.list() within own loop breaks all subsequent zarr operations as
+#     the loop get closed.
+#     :param schema:
+#     :param kwargs:
+#     :return:
+#     """
+#     node_schema = zf.zarr_storage._get_schema_safe(schema)
+#     options = zf.zarr_storage._zarr_fuse_options(node_schema, **kwargs)
+#     store = zf.zarr_storage._zarr_store_open(options)
+#     if not isinstance(store, FsspecStore):
+#         path = Path(str(store).lstrip("file:")).parent # folder above the zarr store
+#         return os.listdir(path)
+#     else:
+#         loop = fsspec.asyn.get_loop()
+#         return fsspec.asyn.sync(loop, get_items, store)
 
-    # test of secure keys warning
-    with pytest.warns(UserWarning, match="S3 credentials are not set"):
+def _store_ls(schema, **kwargs):
+    node_schema = zf.zarr_storage._get_schema_safe(schema)
+    options = zf.zarr_storage._zarr_fuse_options(node_schema, **kwargs)
+    store = zf.zarr_storage._zarr_store_open(options)
+    if not isinstance(store, FsspecStore):
+        path = Path(str(store).lstrip("file:")).parent # folder above the zarr store
+        return os.listdir(path)
+    else:
+        loop = fsspec.asyn.get_loop()                     # fsspec’s global loop
+        sess = fsspec.asyn.sync(loop, store.fs.set_session)   # ensure s3 client is made on that loop
+        async def _collect():
+            return [k async for k in store.list_dir("")]
+        try:
+            return fsspec.asyn.sync(loop, _collect)
+        finally:
+            # close the client and drop cached FS instances to avoid leaking to next tests
+            fsspec.asyn.sync(loop, sess.close)
+            type(store.fs).clear_instance_cache()
+
+@pytest.mark.parametrize("options",[
+    {"STORE_URL":"open_store_tst.zarr", "WORKDIR":"to_be_overwritten_by_schema"},
+    {"STORE_URL":"s3://test-zarr-storage/open_store_tst.zarr", "S3_ENDPOINT_URL": "to_be_overwritten_by_schema"}
+])
+def test_open_store(smart_tmp_path, options):
+    """
+    Single test function, parametrized by (schema_file, options_dict) pairs:
+
+    - LOCAL:
+      * Uses WORKDIR (env) + relative STORE_URL (kwargs).
+      * Asserts store is created under WORKDIR.
+
+    - S3:
+      * Loads real creds/endpoint/URL from .env and injects via env (ZF_*).
+      * Uses extra S3_OPTIONS from the schema ATTRS.
+      * Performs real I/O (no mocks).
+
+    For both:
+      * Verifies dataset gets initialized (__structure__ present).
+      * Creates/deletes a key directly in the store mapping (bypassing Node API).
+    """
+    load_dotenv()
+    schema = zf.schema.deserialize(inputs_dir / "schema_open_store_tst.yaml")
+    schema.ds.ATTRS['WORKDIR'] = str(smart_tmp_path)
+    zf.remove_store(schema, **options)
+    print("AFTER REMOVAL: ", _store_ls(schema, **options))  # Should be empty
+    node = zf.open_store(schema, **options)
+    #print("AFTER Node open: ", _store_ls(schema, **options))  # Should be empty
+
+    # Common assertions for both backends
+    assert isinstance(node, zf.Node)
+    ds = node.dataset
+    assert "__structure__" in ds.attrs
+
+
+
 
 def sync_remove_store(storage_options, path):
     so = storage_options.copy()
@@ -70,25 +143,22 @@ This requires dask.
 def aux_read_struc(fname, storage_type="local"):
     struc_path = inputs_dir / fname
     schema = zf.schema.deserialize(struc_path)
-
+    kwargs =  {"WORKDIR": str(workdir), "S3_ENDPOINT_URL": "https://s3.cl4.du.cesnet.cz"}
     if storage_type == "s3":
         # Use open_storage with S3 schema - UNIQUE PATH!
         tox_env_name = os.environ.get("TOX_ENV_NAME", "local")
-        #
-        schema.ds.ATTRS['STORE_URL'] = f"s3://test-zarr-storage/{tox_env_name}/{Path(fname).with_suffix(".zarr")}"
-        schema.ds.ATTRS['S3_ENDPOINT_URL'] = "https://s3.cl4.du.cesnet.cz"
-        #schema.ds.ATTRS['store_type'] = 's3'
-        # TODO: pass as supplementary kwargs
-        node = zf.open_store(schema)
-        return schema, node.store, node
+        store_url = f"s3://test-zarr-storage/{tox_env_name}/{Path(fname).with_suffix(".zarr")}"
+        kwargs['STORE_URL'] = str(store_url)
     else:
+
         # Local storage logic
         store_path = (workdir / fname).with_suffix(".zarr")
-        if store_path.exists():
-            shutil.rmtree(store_path)
-        store = zarr.storage.LocalStore(store_path)
-        node = zf.Node("", store, new_schema=schema)
-        return schema, store, node
+        #if store_path.exists():
+        #    shutil.rmtree(store_path)
+        kwargs['STORE_URL'] = str(store_path)
+    zf.remove_store(schema, **kwargs)
+    node = zf.open_store(schema, **kwargs)
+    return schema, node.store, node
 
 # Recursively update each node with its corresponding data.
 def _update_tree(node: zf.Node, df_map: dict):

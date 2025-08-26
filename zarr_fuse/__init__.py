@@ -5,7 +5,7 @@ set_application_registry(ureg)
 # Use of relative imports is recomenden  in __init__.py
 from . import zarr_schema as schema
 from . import units
-from .zarr_storage import Node, open_store
+from .zarr_storage import Node, open_store, remove_store
 
 try:
     from . import plot

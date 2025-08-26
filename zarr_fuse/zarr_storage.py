@@ -16,6 +16,7 @@ import xarray as xr
 import numpy as np
 import zarr
 import fsspec
+import asyncio
 from pathlib import Path
 
 
@@ -118,7 +119,7 @@ def _s3_options(store_options):
         }
     }
     custom_options_json = _get_option(store_options, 'S3_OPTIONS', default='{}')
-    custom_options = json.safe_load(custom_options_json)
+    custom_options = json.loads(custom_options_json)
     return recursive_update(s3_options, custom_options)
 
 def _zarr_store_open(store_options: Dict[str, Any]) -> zarr.storage.StoreLike:
@@ -139,7 +140,10 @@ def _zarr_store_open(store_options: Dict[str, Any]) -> zarr.storage.StoreLike:
     elif re.match(r'^zip://', store_url):
         return zarr.storage.ZipStore(store_url)
     else:
-        return zarr.storage.LocalStore(store_url)
+        path = Path(store_url)
+        if not path.is_absolute():
+            path = store_options.get('WORKDIR', ".") / path
+        return zarr.storage.LocalStore(path)
 
 
 def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Dict[str, Any]:
@@ -149,7 +153,7 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
     - overwrite by schema ATTRS is provided
     - overwrite by evironment variables
     """
-    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS'}
+    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS', 'WORKDIR'}
     secret_attrs = {'S3_ACCESS_KEY', 'S3_SECRET_KEY'}
     interpreted_attrs = interpreted_attrs.union(secret_attrs)
     options = {key:kwargs[key] for key in interpreted_attrs if key in kwargs}
@@ -167,6 +171,69 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
     options.update(env_options)
     return options
 
+def _get_schema_safe(schema):
+    if isinstance(schema, NodeSchema):
+        node_schema = schema
+    elif isinstance(schema, (str, Path)):
+        node_schema = zarr_schema.deserialize(schema)
+    else:
+        raise TypeError(f"Unsupported schema type: {type(schema)}. Expected NodeSchema or Path.")
+    return node_schema
+
+
+def _wipe_store(store):
+
+    # For fsspec-style filesystems
+    try:
+        fs = store.fs
+        # fs.rm(path, recursive=True) recursively deletes files and directories
+        #fs.rm(root, recursive=True)
+    except AttributeError:
+        # Fallback to using os if fs is a local filesystem that lacks rm
+        import os
+        import shutil
+        root = store.root
+        # If root is nested, attempt to fully delete the directory
+        if os.path.isdir(root):
+            shutil.rmtree(root)
+        elif os.path.exists(root):
+            os.remove(root)
+        return
+
+    root = store.path  # Relative path inside the filesystem
+    # Remove any trailing slash for consistency
+    root = root.rstrip('/')
+
+    # Ensure a client/session exists for sync wrappers (s3fs provides connect(); harmless if not present)
+    try:
+        fs.connect(refresh=False)  # sync twin of set_session()
+    except Exception:
+        pass
+
+    # For asynchronous filesystems like AsyncS3FileSystem,
+    # the fs.rm returned a coroutine; we need to run it on fsspec's loop
+    loop = fsspec.asyn.get_loop()
+    session = fsspec.asyn.sync(loop, fs.set_session, refresh=True)
+    try:
+        fsspec.asyn.sync(loop, fs._rm, root, recursive=True)
+    except FileNotFoundError:
+        pass
+    finally:
+        fsspec.asyn.sync(loop, session.close)
+        type(fs).clear_instance_cache()
+
+def remove_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
+    node_schema = _get_schema_safe(schema)
+    options = _zarr_fuse_options(node_schema, **kwargs)
+    try:
+        store = _zarr_store_open(options)
+    except ZFOptionError as e:
+        raise ZFOptionError(f"{str(e)}. Opening store for schema {schema}.")
+
+    _wipe_store(store)
+    #store.delete_dir("")
+
+
 def open_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
     """
     Open existing or create a new ZARR store according to given schema.
@@ -178,13 +245,7 @@ def open_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
 
     Return: root Node
     """
-    if isinstance(schema, NodeSchema):
-        node_schema = schema
-    elif isinstance(schema, (str, Path)):
-        node_schema = zarr_schema.deserialize(schema)
-    else:
-        raise TypeError(f"Unsupported schema type: {type(schema)}. Expected NodeSchema or Path.")
-
+    node_schema = _get_schema_safe(schema)
     options = _zarr_fuse_options(node_schema, **kwargs)
 
     try:
