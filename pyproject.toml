@@ -22,7 +22,21 @@ classifiers = [
     "Programming Language :: Python :: 3"
 ]
 requires-python = ">=3.11" # at least due to zarr>=3.x
+# With new aiobotocore version 2.18.0+ we get the error:
+#[WARNING] S3 test failed completely: [Errno 22] An error occurred (MissingContentLength) when calling the PutObject operation: Unknown
+#[INFO] Skipping S3 test due to environment issues
+#SKIPPED (S3 test skipped due to environment issues: [Errno 22] An error occurred (MissingContentLength) when calling the PutObje...)
+# See issue: https://github.com/GeoMop/zarr_fuse/issues/14
+
+# SOLUTION: Set checksum policies to "when_required" in S3 configuration:
+# - request_checksum_calculation="when_required"
+# - response_checksum_validation="when_required"
+# This prevents botocore from using chunked+trailer requests that cause MissingContentLength
+
+
 dependencies = [
+    # "aiobotocore<=2.17.0",  # Fixed MissingContentLength issue with checksum policies
+    "aiobotocore>=2.18.0",    # Latest version with proper S3 support
     "PyYAML",
     "attrs",
     "tzdata",
@@ -37,9 +51,12 @@ dependencies = [
     # "filterpy",  # commented out dependency
     "seaborn",
     # "pftools[all]",  # commented out dependency
+    "s3fs",     # boto3 restriction => s3fs==0.4.2
+    "fsspec",   # boto3 restriction => fsspec==2025.5.1
     "zarr",       # 3.x does not support write_empty_chunks
     "dask",       # for compatibility with xarray 0.18.2
     "xarray",     # 0.19.0 does not support zarr 2.x well
+    "python-dotenv",  # for loading environment variables from .env files
 ]
 
 [project.optional-dependencies]

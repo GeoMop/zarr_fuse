@@ -1,3 +1,5 @@
+zarr_fuse/test/.env
+cesnet_s3_keys.json
 .idea
 **/workdir
 **/*.zarr

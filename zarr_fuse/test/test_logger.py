@@ -12,21 +12,20 @@ from zarr.core.buffer.core import default_buffer_prototype
 import asyncio
 
 from zarr_fuse.logger import StoreLogHandler  # adjust to your import path
-from zarr_fuse.zarr_storage import zarr_store_open
+from zarr_fuse.zarr_storage import _zarr_store_open
 
 script_dir = Path(__file__).parent
 inputs_dir = script_dir / "inputs"
 workdir = script_dir / "workdir"
 
-@pytest.mark.parametrize("url", [
-    "",  # plain in‐memory dict
-    "log_store.zarr",     # on‐disk DirectoryStore
+@pytest.mark.parametrize("store_options", [
+    {'STORE_URL':str(workdir/"log_store.zarr")},     # on‐disk DirectoryStore
 ])
-def test_store_log_handler(tmp_path, url):
+def test_store_log_handler(tmp_path, store_options):
 
 
     # ─── build the store based on our “url” ─────────────────────────────
-    store = zarr_store_open(url)
+    store = _zarr_store_open(store_options)
     # cleanup
     zarr.open_group(store, mode='w')
 
