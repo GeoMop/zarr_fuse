@@ -179,3 +179,17 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+
+# Dashboard
+app/databuk/dashboard/node_modules/
+app/databuk/dashboard/dist/
+app/databuk/dashboard/.vite/
+app/databuk/dashboard/.eslintcache
+app/databuk/dashboard/.env
+app/databuk/dashboard/.env..local
+app/databuk/dashboard/npm-debug.log*
+app/databuk/dashboard/yarn-error.log*
+app/databuk/dashboard/pnpm-debug.log*
+app/databuk/dashboard/.DS_Store
+app/databuk/dashboard/Thumbs.db
