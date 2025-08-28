@@ -18,9 +18,9 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: "{{ $.Values.app.name }}-service"
+                name: {{ .Values.app.name }}
                 port:
-                  number: {{ $.Values.service.externalPort.number | int }}
+                  number: {{ .Values.service.externalPort.number | int }}
   tls:
     - secretName: zarr-fuse-{{ .Values.app.name }}-dyn-cloud-e-infra-cz-tls
       hosts:
