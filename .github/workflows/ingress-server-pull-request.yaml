@@ -33,10 +33,10 @@ jobs:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     with:
       push-container: true
-      deploy-helm-chart: false
+      deploy-helm-chart: true
       tag: generate
-      namespace: ingress-server-devel
-      release-name: ingress-server-devel
+      namespace: ingress-server-latest
+      release-name: ingress-server-latest
       production: false
     secrets: inherit
 
