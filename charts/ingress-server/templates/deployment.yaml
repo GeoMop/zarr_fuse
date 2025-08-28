@@ -40,7 +40,7 @@ spec:
             - name: S3_SECRET_KEY
               value: {{ required "S3_SECRET_KEY needs to be set" .Values.deployment.secrets.s3.secretKey | quote }}
             - name: BASIC_AUTH_USERS_JSON
-              value: {{ required "BASIC_AUTH_USERS_JSON needs to be set" .Values.deployment.secrets.basicAuth.usersJson | quote }}
+              value: {{ required "BASIC_AUTH_USERS_JSON needs to be set" .Values.deployment.secrets.basicAuth.usersJson | toJson | quote }}
             - name: AUTH_ENABLED
               value: {{ .Values.deployment.secrets.basicAuth.enabled | toString | quote }}
             - name: PRODUCTION
