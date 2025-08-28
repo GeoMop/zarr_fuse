@@ -21,6 +21,9 @@ spec:
       volumes:
         - name: ingress-server-tmp
           emptyDir: {}
+        - name: ingress-server-queue
+          persistentVolumeClaim:
+            claimName: "{{ .Values.app.name }}-queue-pvc"
       containers:
         - name: {{ .Values.app.name }}
           image: "{{ .Values.registry.host }}/{{ .Values.image.name }}:{{ .Values.image.tag }}"
@@ -45,9 +48,13 @@ spec:
               value: {{ .Values.deployment.secrets.basicAuth.enabled | toString | quote }}
             - name: PRODUCTION
               value: {{ .Values.deployment.production | toString | quote }}
+            - name: QUEUE_DIR
+              value: {{ .Values.deployment.queue.path | quote }}
           volumeMounts:
             - name: ingress-server-tmp
               mountPath: /tmp
+            - name: ingress-server-queue
+              mountPath: {{ .Values.deployment.queue.path | quote }}
           startupProbe:
             httpGet:
               path: /health

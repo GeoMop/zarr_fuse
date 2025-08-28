@@ -24,6 +24,10 @@ deployment:
   production: false
   # -- Number of replicas
   replicaCount: 1
+  # -- Queue configuration
+  queue:
+    # -- Path to the queue directory
+    path: /var/data/queue
   # -- Deployment secrets
   secrets:
     # -- S3 credentials
@@ -43,6 +47,14 @@ deployment:
       # -- Example: '{"user1": "password1", "user2": "password2"}'
       # -- Replaced during deploy
       usersJson: ""
+
+persistence:
+  enabled: true
+  storageClass: ""
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  size: 4Gi
 
 # -- Service configuration
 # @default -- ~

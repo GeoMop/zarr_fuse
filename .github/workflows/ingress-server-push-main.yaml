@@ -27,7 +27,7 @@ jobs:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     needs:
       - get-changed-files
-    if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
+    if: always() && github.event_name == 'push' || needs.get-changed-files.outputs.any-changed == 'true'
     with:
       push-container: true
       deploy-helm-chart: true

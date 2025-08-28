@@ -1,6 +1,6 @@
 endpoints:
-  - name: ci_sensors
-    endpoint: /api/v1/ci-sensors
+  - name: ci_sensor
+    endpoint: /api/v1/ci-sensor
     schema_path: schemas/ci/ci_sensor_schema.yaml
   - name: ci_tree
     endpoint: /api/v1/ci-tree

@@ -28,10 +28,7 @@ dependencies = [
     "flask",
     "Flask-HTTPAuth",
     "python-dotenv",
-    "polars",
-    "zarr",
-    "fsspec",
-    "s3fs"
+    "polars"
 ]
 
 [tool.setuptools.packages.find]
