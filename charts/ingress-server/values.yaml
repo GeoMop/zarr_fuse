@@ -1,8 +1,13 @@
+# -- Registry details
+# @default -- ~
+registry:
+  # -- Host of the registry
+  host: docker.io
 # -- Image details
 # @default -- ~
 image:
   # -- Repository of the image
-  repository: docker.io/mocstepan/zarr-fuse-ingress-server
+  name: jbrezmorf/zarr-fuse-ingress-server
   # -- Tag of the image
   tag: "latest"
 

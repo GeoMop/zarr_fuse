@@ -45,6 +45,7 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 # Required
 S3_ACCESS_KEY=YOUR_ACCESS_KEY
 S3_SECRET_KEY=YOUR_SECRET_KEY
+S3_ENDPOINT_URL=S3_ENDPOINT_URL
 
 # Required for HTTP Basic Auth
 BASIC_AUTH_USERS_JSON={"alice":"password"}
