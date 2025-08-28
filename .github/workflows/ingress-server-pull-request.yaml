@@ -3,7 +3,7 @@
 # ---------------------------------------------
 name: Ingress server - pull request
 on:
-  pull_request:
+  push:
     branches:
       - "*"
 jobs:
@@ -34,9 +34,10 @@ jobs:
     with:
       push-container: true
       deploy-helm-chart: false
-      tag: devel
+      tag: generate
       namespace: ingress-server-devel
       release-name: ingress-server-devel
+      production: false
     secrets: inherit
 
   #check-bucket:

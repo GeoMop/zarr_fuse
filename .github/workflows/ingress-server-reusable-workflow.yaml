@@ -16,7 +16,7 @@ on:
         description: The tag to use for the container image
         required: false
         type: string
-        default: latest
+        default: generate
       namespace:
         description: The Kubernetes namespace to use
         required: true
@@ -31,15 +31,36 @@ on:
         type: boolean
         default: false
 env:
-  repository: mocstepan/zarr-fuse-ingress-server
+  repository: jbrezmorf/zarr-fuse-ingress-serve
   registry: docker.io
 jobs:
+  get-version-tag:
+    name: Get version tag
+    runs-on: ubuntu-latest
+    outputs:
+      version-tag: ${{ steps.get_version_tag.outputs.version-tag }}
+    concurrency:
+      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-version-tag
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Get version tag
+        id: get_version_tag
+        run: |
+          if [[ ${{ inputs.tag }} == "generate" ]]; then
+            echo "version-tag=ci-$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+          else
+            echo "version-tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          fi
   containerize:
     name: Containerize ingress server
     runs-on: ubuntu-latest
     container:
       image: quay.io/buildah/stable:v1.35.4
       options: --privileged
+    needs:
+      - get-version-tag
     defaults:
       run:
         working-directory: app/databuk/ingress_server
@@ -54,13 +75,13 @@ jobs:
         run: buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ env.registry }}
       - name: Build container file
         run: |
-          buildah build -t ${{ env.registry }}/${{ env.repository }}:${{ inputs.tag }} \
-          --build-arg APP_VERSION="${{ inputs.tag }}" \
+          buildah build -t ${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }} \
+          --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}" \
           -f oci/Containerfile .
       - name: Push container image
         if: ${{ inputs.push-container }}
         run: |
-          buildah push ${{ env.registry }}/${{ env.repository }}:${{ inputs.tag }} docker://${{ env.registry }}/${{ env.repository }}:${{ inputs.tag }}
+          buildah push ${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }} docker://${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }}
           buildah logout ${{ env.registry }}
   lint-helm-chart:
     name: Lint ingress server Helm chart
@@ -90,6 +111,7 @@ jobs:
       image: alpine/k8s:1.29.14
     needs:
       - lint-helm-chart
+      - get-version-tag
     env:
       KUBECONFIG: ./kubeconfig.yaml
     defaults:
@@ -111,7 +133,7 @@ jobs:
         run: |
           helm upgrade ${{ inputs.release-name }} ingress-server \
           --install --atomic --timeout 10m --namespace "${{ inputs.namespace }}" \
-          --set image.tag="${{ inputs.tag }}" \
+          --set image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
           --set deployment.secrets.s3.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
           --set deployment.secrets.s3.secretKey="${{ secrets.S3_SECRET_KEY }}" \
           --set deployment.secrets.basicAuth.usersJson='${{ secrets.BASIC_AUTH_USERS_JSON }}' \

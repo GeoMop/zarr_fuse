@@ -31,7 +31,7 @@ jobs:
     with:
       push-container: true
       deploy-helm-chart: true
-      tag: latest
+      tag: generate
       namespace: ingress-server
       release-name: ingress-server
       production: true

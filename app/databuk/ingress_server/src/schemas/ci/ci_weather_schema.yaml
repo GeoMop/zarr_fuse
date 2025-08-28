@@ -1,7 +1,7 @@
 ATTRS:
   description: Weather schema
   s3_url: https://s3.cl4.du.cesnet.cz
-  store_path: test-zarr-storage/ci-weather.zarr # bucket + filename
+  store_path: app-databuk-test/ci-weather.zarr # bucket + filename
 VARS:
   temperature:
     unit: K
