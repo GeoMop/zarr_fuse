@@ -2,6 +2,8 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ .Values.app.name }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.app.name }}
   {{- if .Values.ingress.annotations }}
   annotations:
     {{ .Values.ingress.annotations | toYaml | nindent 4 }}

@@ -66,14 +66,8 @@ def _get_store(schema_path):
         key=key,
         secret=secret,
         asynchronous=False,
-        client_kwargs={
-            "endpoint_url": s3_url
-        },
-        config_kwargs={
-            "s3": {
-                "addressing_style": "path"
-            }
-        }
+        client_kwargs={"endpoint_url": s3_url},
+        config_kwargs={"s3": {"addressing_style": "path"}}
     )
 
     fs = fsspec.filesystem("s3", **storage_options)

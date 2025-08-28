@@ -2,17 +2,19 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Values.app.name }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.app.name }}
 spec:
   replicas: {{ .Values.deployment.replicaCount }}
   strategy:
     type: RollingUpdate
   selector:
     matchLabels:
-      app: {{ .Values.app.name }}
+      app.kubernetes.io/name: {{ .Values.app.name }}
   template:
     metadata:
       labels:
-        app: {{ .Values.app.name }}
+        app.kubernetes.io/name: {{ .Values.app.name }}
     spec:
       securityContext:
         {{- toYaml .Values.securityContext.pod | nindent 8 }}
