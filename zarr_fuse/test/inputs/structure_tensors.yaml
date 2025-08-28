@@ -6,7 +6,7 @@ VARS:
     elements:
         unit: Index
         description: "Mesh element index"
-        df_col: "element"       
+        df_col: "element"
     pressure:
         unit: "m"
         description: "Pressure head field"
@@ -15,7 +15,7 @@ VARS:
     conductivity_tn:
         unit: "m/s"
         description: "Hydraulic conductivity tensor."
-        coords: ["time", "elements", "tn_voigt_3d"]        
+        coords: ["time", "elements", "tn_voigt_3d"]
 COORDS:
     time:
         chunk_size: 256

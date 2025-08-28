@@ -1,0 +1,137 @@
+# -- Registry details
+# @default -- ~
+registry:
+  # -- Host of the registry
+  host: docker.io
+# -- Image details
+# @default -- ~
+image:
+  # -- Repository of the image
+  name: jbrezmorf/zarr-fuse-ingress-server
+  # -- Tag of the image
+  tag: "latest"
+
+# -- Application details
+# @default -- ~
+app:
+  # -- Name of the application
+  name: ingress-server
+
+# -- Deployment configuration
+# @default -- ~
+deployment:
+  # -- If is production
+  production: false
+  # -- Number of replicas
+  replicaCount: 1
+  # -- Queue configuration
+  queue:
+    # -- Path to the queue directory
+    path: /var/data/queue
+  # -- Deployment secrets
+  secrets:
+    # -- S3 credentials
+    s3:
+      endpointUrl: ""
+      # -- S3 access key
+      # -- Replaced during deploy
+      accessKey: ""
+      # -- S3 secret key
+      # -- Replaced during deploy
+      secretKey: ""
+    # -- Basic authentication configuration
+    basicAuth:
+      # -- Enable or disable basic auth
+      enabled: true
+      # -- JSON string of users for basic auth
+      # -- Example: '{"user1": "password1", "user2": "password2"}'
+      # -- Replaced during deploy
+      usersJson: ""
+
+persistence:
+  enabled: true
+  storageClass: ""
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteOnce
+  size: 4Gi
+
+# -- Service configuration
+# @default -- ~
+service:
+  # -- Type of Kubernetes service
+  type: ClusterIP
+  # -- External port configuration
+  externalPort:
+    # -- External port number
+    number: 80
+    # -- External port name
+    name: http
+  # -- Internal port configuration
+  internalPort:
+    # -- Internal port number
+    number: 8000
+    # -- Internal port name
+    name: http
+
+# -- Ingress configuration
+# @default -- ~
+ingress:
+  # -- Ingress class name
+  className: "nginx"
+  # -- Ingress annotations
+  annotations:
+    kubernetes.io/tls-acme: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+# -- Resource requests and limits
+# @default -- ~
+resources:
+  # -- Resource requests
+  requests:
+    # -- CPU request
+    cpu: 125m
+    # -- Memory request
+    memory: 128Mi
+  # -- Resource limits
+  limits:
+    # -- CPU limit
+    cpu: 250m
+    # -- Memory limit
+    memory: 256Mi
+
+# -- Security context configuration
+# @default -- ~
+securityContext:
+  # -- Pod security context
+  pod:
+    # -- File system group
+    fsGroup: 11233
+    # -- Run as non-root user
+    runAsNonRoot: true
+    # -- User ID to run as
+    runAsUser: 11233
+    # -- Group ID to run as
+    runAsGroup: 11233
+    # -- Seccomp profile type
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container security context
+  container:
+    # -- Container capabilities
+    capabilities:
+      # -- Drop all capabilities
+      drop:
+        - ALL
+    # -- Allow privilege escalation
+    allowPrivilegeEscalation: false
+    # -- Run container as privileged
+    privileged: false
+    # -- Run container as non-root
+    runAsNonRoot: true
+    # -- Read-only root filesystem
+    readOnlyRootFilesystem: true
+    # -- User ID to run as
+    runAsUser: 11233
+    # -- Group ID to run as
+    runAsGroup: 11233

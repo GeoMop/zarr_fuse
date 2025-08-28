@@ -1,0 +1,64 @@
+# ---------------------------------------------
+# ---- CHART DEPLOY IS TEMPORARY DISABLED -----
+# ---------------------------------------------
+name: Ingress server - pull request
+on:
+  pull_request:
+    branches:
+      - "*"
+jobs:
+  get-changed-files:
+    name: Get changed file
+    runs-on: ubuntu-latest
+    outputs:
+      any-changed: ${{ steps.changed.outputs.any_changed }}
+    concurrency:
+      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-changed-files
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Check if Ingress Server files or Helm Charts were changed
+        id: changed
+        uses: tj-actions/changed-files@v45
+        with:
+          files: |
+            charts/ingress-server/**
+            app/databuk/ingress_server/**
+  build:
+    name: Build and deploy ingress server
+    needs:
+      - get-changed-files
+    if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
+    uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    with:
+      push-container: true
+      deploy-helm-chart: false
+      tag: generate
+      namespace: ingress-server-development
+      release-name: ingress-server-development
+      production: false
+    secrets: inherit
+
+  #check-bucket:
+  #  steps:
+  #    - name: Check S3 bucket
+  #      run: |
+  #        aws s3 ls s3://testing/tree-ci.zarr
+#
+  #test-ingress-server:
+  #  name: Test ingress server
+  #  runs-on: ubuntu-latest
+  #  container:
+  #    image: docker.io/library/python:3.11-slim
+  #  needs:
+  #    - build
+  #  defaults:
+  #    run:
+  #      working-directory: app/databuk/ingress_server/tools
+  #  concurrency:
+  #    group: "${{ github.workflow }}-${{ github.ref }}-test-ingress-server"
+  #    cancel-in-progress: true
+  #  steps:
+  #    - name: Checkout
+  #      uses: actions/checkout@v4

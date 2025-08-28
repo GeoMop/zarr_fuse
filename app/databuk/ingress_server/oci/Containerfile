@@ -1,0 +1,41 @@
+FROM docker.io/library/python:3.11-slim-bullseye
+
+ARG APP_VERSION="devel"
+
+LABEL org.opencontainers.image.title="ZarrFuse Ingress (Backend-only)"
+LABEL org.opencontainers.image.description="Flask service for CSV/JSON ingestion into an S3-backed Zarr store (no UI)."
+LABEL org.opencontainers.image.version="${APP_VERSION}"
+LABEL org.opencontainers.image.licenses="BSD-3-Clause"
+LABEL org.opencontainers.image.source="https://github.com/geomop/zarr_fuse"
+LABEL org.opencontainers.image.url="https://github.com/geomop/zarr_fuse"
+LABEL org.opencontainers.image.authors="Geomop / Stepan Moc <stepan.mocik@gmail.com>"
+LABEL maintainer="Geomop / Stepan Moc <stepan.mocik@gmail.com>"
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+
+RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server ingress
+RUN apt-get update && apt-get install -y --no-install-recommends git
+
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@main"
+
+# --- Install ingress server ---
+WORKDIR /ingress-server
+
+COPY --chown=ingress:ingress pyproject.toml /ingress-server/pyproject.toml
+COPY --chown=ingress:ingress src/ /ingress-server/
+
+RUN pip install --no-cache-dir /ingress-server \
+    && pip install --no-cache-dir waitress
+
+RUN chown -R ingress:ingress /ingress-server
+
+USER ingress
+WORKDIR /ingress-server
+EXPOSE 8000
+
+CMD ["waitress-serve", "--host", "0.0.0.0", "--port", "8000", "--call", "main:create_app"]

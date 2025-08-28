@@ -1,0 +1,60 @@
+openapi: 3.0.3
+info:
+  title: ZarrFuse Ingress API
+  version: 0.2.0
+  description: Backend-only service to ingest CSV/JSON and merge into an S3-backed
+    Zarr store.
+servers:
+- url: http://localhost:8000
+paths:
+  /api/v1/weather: &id001
+    post:
+      summary: Upload data to the root node of the Zarr tree
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Successful update
+        '400':
+          description: Validation or processing error
+  /api/v1/weather/{node_path}: &id002
+    post:
+      summary: Upload data to a specific node path in the Zarr tree
+      parameters:
+      - in: path
+        name: node_path
+        required: true
+        schema:
+          type: string
+        description: Zarr node path, e.g. a/b/c
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Successful update
+        '400':
+          description: Validation or processing error
+  /api/v1/sensor: *id001
+  /api/v1/sensor/{node_path}: *id002
+  /api/v1/tree: *id001
+  /api/v1/tree/{node_path}: *id002
