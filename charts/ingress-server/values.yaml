@@ -23,6 +23,7 @@ deployment:
   secrets:
     # -- S3 credentials
     s3:
+      endpointUrl: ""
       # -- S3 access key
       # -- Replaced during deploy
       accessKey: ""

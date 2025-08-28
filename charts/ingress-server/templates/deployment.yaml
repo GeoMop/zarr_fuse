@@ -31,6 +31,8 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext.container | nindent 12 }}
           env:
+            - name: S3_ENDPOINT_URL
+              value: {{ required "S3_ENDPOINT_URL needs to be set" .Values.deployment.secrets.s3.endpointUrl | quote }}
             - name: S3_ACCESS_KEY
               value: {{ required "S3_ACCESS_KEY needs to be set" .Values.deployment.secrets.s3.accessKey | quote }}
             - name: S3_SECRET_KEY
@@ -38,9 +40,9 @@ spec:
             - name: BASIC_AUTH_USERS_JSON
               value: {{ required "BASIC_AUTH_USERS_JSON needs to be set" .Values.deployment.secrets.basicAuth.usersJson | quote }}
             - name: AUTH_ENABLED
-              value: {{ .Values.deployment.secrets.basicAuth.enabled }}
+              value: {{ .Values.deployment.secrets.basicAuth.enabled | toString | quote }}
             - name: PRODUCTION
-              value: {{ .Values.deployment.production }}
+              value: {{ .Values.deployment.production | toString | quote }}
           volumeMounts:
             - name: ingress-server-tmp
               mountPath: /tmp
