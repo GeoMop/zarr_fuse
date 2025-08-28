@@ -100,7 +100,6 @@ def _get_root(schema_path: Path):
         "S3_ACCESS_KEY": s3_key,
         "S3_SECRET_KEY": s3_sec,
         "S3_OPTIONS": json.dumps({
-            "asynchronous": True,
             "config_kwargs": {"s3": {"addressing_style": "path"}}
         }),
     }
