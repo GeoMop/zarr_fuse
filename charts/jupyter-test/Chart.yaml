@@ -1,0 +1,19 @@
+apiVersion: v2
+type: application
+name: jupyter-test
+description: A Helm chart for deploying Jupyter Notebook with Voila
+version: 0.1.0
+appVersion: "0.0.0"
+home: https://github.com/GeoMop/zarr_fuse # temp url
+sources:
+  - https://github.com/GeoMop/zarr_fuse
+keywords:
+  - jupyter notebook
+  - voila
+maintainers:
+  - name: MocStepan
+    email: stepan.mocik@gmail.com
+    url: https://github.com/MocStepan
+  - name: jbrezmorf
+    email: jbrezmorf@gmail.com
+    url: https://github.com/jbrezmorf
