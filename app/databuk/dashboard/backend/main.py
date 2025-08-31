@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 # Use absolute imports
 from core.config import settings
-from routers import tree
+from routers import tree, weather
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -13,6 +13,7 @@ async def lifespan(app: FastAPI):
     print(f"🚀 Starting {settings.PROJECT_NAME} v{settings.VERSION}")
     print(f"📁 Test stores directory: {settings.TEST_STORES_DIR}")
     print(f"🌳 Structure tree store: {settings.STRUCTURE_TREE_STORE}")
+    print(f"🌤️ Structure weather store: {settings.STRUCTURE_WEATHER_STORE}")
     
     yield
     
@@ -38,6 +39,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(tree.router, prefix=settings.API_V1_STR)
+app.include_router(weather.router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():

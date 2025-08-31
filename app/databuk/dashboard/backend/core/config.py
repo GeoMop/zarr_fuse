@@ -13,6 +13,7 @@ class Settings:
     
     # Zarr store paths
     STRUCTURE_TREE_STORE = TEST_STORES_DIR / "structure_tree.zarr"
+    STRUCTURE_WEATHER_STORE = TEST_STORES_DIR / "structure_weather.zarr"
     
     # API settings
     API_V1_STR: str = "/api"
@@ -34,6 +35,8 @@ class Settings:
         """Get the full path to a Zarr store by name."""
         if store_name == "structure_tree":
             return cls.STRUCTURE_TREE_STORE
+        elif store_name == "structure_weather":
+            return cls.STRUCTURE_WEATHER_STORE
         # Add more stores here as needed
         return None
 

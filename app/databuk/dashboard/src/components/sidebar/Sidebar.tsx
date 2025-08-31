@@ -1,7 +1,9 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight, X, Database, BarChart3, Globe, Loader2, AlertCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X, Database, BarChart3, Globe, Loader2, AlertCircle, Cloud } from 'lucide-react';
 
 import { TreeView } from './TreeView';
+import WeatherView from './WeatherView';
+import { useWeather } from './hooks/useWeather';
 import type { SidebarProps } from './types/sidebar';
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -13,6 +15,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   error,
   onFileClick
 }) => {
+  const { weatherData, loading: weatherLoading, error: weatherError } = useWeather();
   return (
     <aside className={`h-screen flex flex-col transition-all duration-300 bg-white border-r border-gray-200 shadow-lg ${
       isCollapsed ? 'w-20' : 'w-[420px]'
@@ -80,6 +83,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <span className="text-blue-600">structure_tree.zarr</span>
                 </div>
                 <div className="flex items-center gap-2">
+                  <span className="text-blue-600">structure_weather.zarr</span>
+                </div>
+                <div className="flex items-center gap-2">
                   <span className="inline-block w-2 h-2 bg-green-500 rounded-full"></span>
                   <span>Active</span>
                 </div>
@@ -87,7 +93,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <span>Updated 2 hours ago</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span>{treeData.length} nodes available</span>
+                  <span>{treeData.length} tree nodes, {weatherData.length} weather variables</span>
                 </div>
               </div>
             </div>
@@ -116,7 +122,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <div className="flex items-center gap-3 text-red-600">
                     <AlertCircle className="w-6 h-6" />
                     <div className="text-center">
-                      <p className="font-medium">Failed to load data</p>
+                      <p className="font-medium">Failed to load tree data</p>
                       <p className="text-sm text-red-500">{error}</p>
                     </div>
                   </div>
@@ -125,7 +131,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex items-center justify-center py-8">
                   <div className="text-center text-gray-500">
                     <Globe className="w-8 h-8 mx-auto mb-2" />
-                    <p>No data sources available</p>
+                    <p>No tree data available</p>
                   </div>
                 </div>
               ) : (
@@ -133,6 +139,44 @@ const Sidebar: React.FC<SidebarProps> = ({
                   nodes={treeData} 
                   isCollapsed={isCollapsed} 
                   onFileClick={onFileClick}
+                />
+              )}
+            </div>
+
+            {/* Weather View with Loading/Error States */}
+            <div className="p-4">
+              {weatherLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="flex items-center gap-3 text-blue-600">
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                    <span className="text-lg">Loading weather data...</span>
+                  </div>
+                </div>
+              ) : weatherError ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="flex items-center gap-3 text-red-600">
+                    <AlertCircle className="w-6 h-6" />
+                    <div className="text-center">
+                      <p className="font-medium">Failed to load weather data</p>
+                      <p className="text-sm text-red-500">{weatherError}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : weatherData.length === 0 ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="text-center text-gray-500">
+                    <Cloud className="w-8 h-8 mx-auto mb-2" />
+                    <p>No weather data available</p>
+                  </div>
+                </div>
+              ) : (
+                <WeatherView 
+                  variables={weatherData} 
+                  isCollapsed={isCollapsed}
+                  onVariableClick={(variable) => {
+                    console.log('Weather variable clicked:', variable);
+                    // TODO: Handle weather variable click
+                  }}
                 />
               )}
             </div>
@@ -180,6 +224,28 @@ const Sidebar: React.FC<SidebarProps> = ({
                   nodes={treeData} 
                   isCollapsed={isCollapsed}
                   onFileClick={onFileClick}
+                />
+              )}
+            </div>
+
+            {/* Weather Icons - Show loading or data */}
+            <div className="p-3">
+              {weatherLoading ? (
+                <div className="flex justify-center">
+                  <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                </div>
+              ) : weatherError ? (
+                <div className="flex justify-center">
+                  <AlertCircle className="w-5 h-5 text-red-600" />
+                </div>
+              ) : (
+                <WeatherView 
+                  variables={weatherData} 
+                  isCollapsed={isCollapsed}
+                  onVariableClick={(variable) => {
+                    console.log('Weather variable clicked:', variable);
+                    // TODO: Handle weather variable click
+                  }}
                 />
               )}
             </div>
