@@ -4,10 +4,16 @@ import type { TreeViewProps } from './types/sidebar';
 
 interface TreeViewPropsExtended extends TreeViewProps {
   isCollapsed?: boolean;
+  onFileClick?: (filePath: string, fileName: string) => void;
 }
 
-export const TreeView: React.FC<TreeViewPropsExtended> = ({ nodes, level = 0, isCollapsed = false }) => {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(['1']));
+export const TreeView: React.FC<TreeViewPropsExtended> = ({ 
+  nodes, 
+  level = 0, 
+  isCollapsed = false,
+  onFileClick 
+}) => {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(['1'])); // '1' is the ID of 'Sources'
 
   const toggleNode = (id: string) => {
     const newExpanded = new Set(expanded);
@@ -19,15 +25,23 @@ export const TreeView: React.FC<TreeViewPropsExtended> = ({ nodes, level = 0, is
     setExpanded(newExpanded);
   };
 
+  const handleNodeClick = (node: any) => {
+    if (node.type === 'folder') {
+      toggleNode(node.id);
+    } else if (node.type === 'file' && onFileClick) {
+      onFileClick(node.path, node.name);
+    }
+  };
+
   if (isCollapsed) {
     return (
       <div className="space-y-3">
         {nodes.map((node) => (
           <div key={node.id} className="flex justify-center">
             <div className={`p-3 rounded-xl transition-all duration-200 cursor-pointer transform hover:scale-110 hover:shadow-md ${
-              node.type === 'folder' 
+              node.type === 'folder'
                 ? expanded.has(node.id)
-                  ? 'bg-blue-100 text-blue-600 shadow-sm' 
+                  ? 'bg-blue-100 text-blue-600 shadow-sm'
                   : 'bg-gray-100 text-gray-600 hover:bg-blue-100 hover:text-blue-600 hover:shadow-md'
                 : 'bg-gray-100 text-gray-500 hover:bg-blue-50 hover:text-blue-500'
             }`}>
@@ -56,7 +70,7 @@ export const TreeView: React.FC<TreeViewPropsExtended> = ({ nodes, level = 0, is
           <div
             className={"group flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer transition-all duration-200 hover:bg-blue-50 hover:text-blue-700 hover:shadow-sm transform hover:scale-[1.02]"}
             style={{ paddingLeft: indentPaddingLeftPx }}
-            onClick={() => node.type === 'folder' && toggleNode(node.id)}
+            onClick={() => handleNodeClick(node)}
           >
             {/* Expand/Collapse arrow for folders; spacer for files to keep alignment */}
             {node.type === 'folder' ? (
@@ -68,14 +82,14 @@ export const TreeView: React.FC<TreeViewPropsExtended> = ({ nodes, level = 0, is
                 )}
               </div>
             ) : (
-              <div className="w-5 h-5" />
+              <div className="w-5 h-5" /> // Spacer for file nodes
             )}
-            
+
             {/* Icon - made larger and more prominent */}
             <div className={`p-2.5 rounded-xl transition-all duration-200 shadow-sm ${
-              node.type === 'folder' 
+              node.type === 'folder'
                 ? expanded.has(node.id)
-                  ? 'bg-blue-100 text-blue-600 shadow-md' 
+                  ? 'bg-blue-100 text-blue-600 shadow-md'
                   : 'bg-gray-100 text-gray-600 group-hover:bg-blue-100 group-hover:text-blue-600 group-hover:shadow-md'
                 : 'bg-gray-100 text-gray-500 group-hover:bg-blue-50 group-hover:text-blue-500'
             }`}>
@@ -89,14 +103,14 @@ export const TreeView: React.FC<TreeViewPropsExtended> = ({ nodes, level = 0, is
                 <FileText className="w-5 h-5" />
               )}
             </div>
-            
+
             {/* Node name - made larger and more readable */}
             <span className={`text-base font-medium truncate flex-1 min-w-0 ${
               node.type === 'folder' ? 'text-gray-800' : 'text-gray-700'
             }`}>
               {node.name}
             </span>
-            
+
             {/* Count badge for folders */}
             {node.type === 'folder' && node.children && (
               <span className="ml-auto text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full font-medium flex-shrink-0 shadow-sm">
@@ -104,10 +118,15 @@ export const TreeView: React.FC<TreeViewPropsExtended> = ({ nodes, level = 0, is
               </span>
             )}
           </div>
-          
+
           {/* Children */}
           {node.type === 'folder' && expanded.has(node.id) && node.children && (
-            <TreeView nodes={node.children} level={level + 1} isCollapsed={isCollapsed} />
+            <TreeView 
+              nodes={node.children} 
+              level={level + 1} 
+              isCollapsed={isCollapsed}
+              onFileClick={onFileClick}
+            />
           )}
         </div>
       ))}
