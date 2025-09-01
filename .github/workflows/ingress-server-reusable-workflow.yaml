@@ -92,7 +92,7 @@ jobs:
       - containerize
     defaults:
       run:
-        working-directory: charts/ingress-server
+        working-directory: app/databuk/ingress_server/charts/ingress-server
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-lint-helm-chart"
       cancel-in-progress: true
@@ -116,7 +116,7 @@ jobs:
       KUBECONFIG: ./kubeconfig.yaml
     defaults:
       run:
-        working-directory: charts
+        working-directory: app/databuk/ingress_server/charts
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-deploy-helm-chart"
       cancel-in-progress: true
