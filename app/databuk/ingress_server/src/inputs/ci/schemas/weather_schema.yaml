@@ -1,7 +1,7 @@
 ATTRS:
   description: Weather schema
   S3_ENDPOINT_URL: https://s3.cl4.du.cesnet.cz
-  STORE_URL: s3://app-databuk-test/ci-weather.zarr # bucket + filename
+  STORE_URL: s3://app-databuk-test-service/ci-weather.zarr # bucket + filename
 VARS:
   temperature:
     unit: K
