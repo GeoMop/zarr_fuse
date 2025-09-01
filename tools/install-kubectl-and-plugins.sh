@@ -14,6 +14,15 @@
 
 set -euo pipefail
 
+# ---------------------
+# ----- Functions -----
+# ---------------------
+usage() {
+  echo "Usage: $0 <distro>"
+  echo "  distro - debian, redhat or suse"
+  exit 1
+}
+
 add_kubernetes_repo() {
   {
     echo "[kubernetes]"
@@ -96,6 +105,9 @@ install_krew() {
   echo "Please restart your shell or run 'source $profile' to use krew, after the installation."
 }
 
+# ----------------
+# ----- Main -----
+# ----------------
 distro=$1
 
 if [ -z "$distro" ]; then
