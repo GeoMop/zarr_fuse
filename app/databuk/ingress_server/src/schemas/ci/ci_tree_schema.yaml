@@ -1,7 +1,7 @@
 ATTRS:
   description: Tree schema
   S3_ENDPOINT_URL: https://s3.cl4.du.cesnet.cz
-  STORE_URL: s3://app-databuk-test/ci-tree.zarr # bucket + filename
+  STORE_URL: s3://app-databuk-test-service/ci-tree.zarr # bucket + filename
 VARS:
   temperature:
     coords: time
