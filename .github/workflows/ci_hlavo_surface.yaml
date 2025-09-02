@@ -1,4 +1,6 @@
 on:
+  push:
+  workflow_dispatch:
   schedule:
     # yr.no short term world updates: 01:00, 09:30, 13:00, 20:30
     # every 6 h starting at 00:15 UTC → 00:15, 06:15, 12:15, 18:15
