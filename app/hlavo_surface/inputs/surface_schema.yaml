@@ -1,6 +1,7 @@
 # Configuration of the ZARR-FUSE storage
 ATTRS:
-    STORE_URL: "s3://surface.zarr"
+    # for the bucket name see the store_create.sh script.
+    STORE_URL: "s3://hlavo-release/surface.zarr"
     S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
     location_file: &loc_file odyssey_locations.csv
     grid_min: [50.840000, 14.850000]    # unit deg

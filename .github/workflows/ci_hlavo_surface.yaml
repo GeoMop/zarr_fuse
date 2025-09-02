@@ -23,11 +23,16 @@ jobs:
       - name: Install hlavo_surface environment.
         run: |
           bash app/hlavo_surface/setup_env
-      - name: Write .env from one multiline secret
+      - name: Inject dotenv secret into environment
+        # Expected secret format:
+        # ZF_S3_ACCESS_KEY=<access key>
+        # ZF_S3_SECRET_KEY=<secret key>
         shell: bash
         run: |
-            # Preserve newlines exactly
-            printf "%s" "${{ secrets.ZF_TEST_DOTENV }}" > zarr_fuse/test/.env
+            # load each line of the multiline secret into env
+            while IFS= read -r line; do
+            echo "$line" >> $GITHUB_ENV
+            done <<< "${{ secrets.ZF_TEST_DOTENV }}"
 
       - name: Run scrapper
         run: |
