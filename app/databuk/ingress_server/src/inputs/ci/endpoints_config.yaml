@@ -1,10 +1,10 @@
 endpoints:
   - name: ci_sensor
     endpoint: /api/v1/ci-sensor
-    schema_path: schemas/ci/ci_sensor_schema.yaml
+    schema_path: schemas/sensor_schema.yaml
   - name: ci_tree
     endpoint: /api/v1/ci-tree
-    schema_path: schemas/ci/ci_tree_schema.yaml
+    schema_path: schemas/tree_schema.yaml
   - name: ci_weather
     endpoint: /api/v1/ci-weather
-    schema_path: schemas/ci/ci_weather_schema.yaml
+    schema_path: schemas/weather_schema.yaml

@@ -63,23 +63,6 @@ def _new_msg_path(suffix: str = ".json") -> Path:
 
 
 # ---------- S3 HELPERS ----------
-def _load_schema_dict(schema_path: str | Path) -> dict:
-    with open(schema_path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-def _get_schema_attributes(schema_path):
-    schema_dict = _load_schema_dict(schema_path)
-    attrs = schema_dict.get("ATTRS", {}) if isinstance(schema_dict, dict) else {}
-
-    store_url = attrs.get("STORE_URL")
-    s3_endpoint = attrs.get("S3_ENDPOINT_URL")
-    if s3_endpoint is None:
-        raise ValueError("S3 URL must be provided")
-    if store_url is None:
-        raise ValueError("Store path must be provided")
-
-    return s3_endpoint, store_url
-
 def _get_env_vars():
     s3_key = os.getenv("S3_ACCESS_KEY")
     s3_sec = os.getenv("S3_SECRET_KEY")
@@ -91,12 +74,9 @@ def _get_env_vars():
     return s3_key, s3_sec
 
 def _get_root(schema_path: Path):
-    s3_ep, store_url = _get_schema_attributes(schema_path)
     s3_key, s3_sec = _get_env_vars()
 
     opts = {
-        "STORE_URL": store_url,
-        "S3_ENDPOINT_URL": s3_ep,
         "S3_ACCESS_KEY": s3_key,
         "S3_SECRET_KEY": s3_sec,
         "S3_OPTIONS": json.dumps({
@@ -191,11 +171,13 @@ def health():
 
 # ---------- APP FACTORY ----------
 def create_app():
-    config_path = Path(__file__).parent
+    path_prefix = Path(__file__).parent
     if os.getenv("PRODUCTION", "false").lower() == "true":
-        config_path /= "prod_endpoints_config.yaml"
+        path_prefix /= "inputs/prod"
     else:
-        config_path /= "ci_test_endpoints_config.yaml"
+        path_prefix /= "inputs/ci"
+
+    config_path = path_prefix / "endpoints_config.yaml"
 
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
@@ -203,7 +185,7 @@ def create_app():
     for endpoint in config.get("endpoints", []):
         endpoint_name = endpoint["name"]
         endpoint_url = endpoint["endpoint"]
-        schema_path = endpoint["schema_path"]
+        schema_path = path_prefix / endpoint["schema_path"]
         create_upload_endpoint(endpoint_name, endpoint_url, schema_path)
 
     return APP
