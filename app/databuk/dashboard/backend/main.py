@@ -1,10 +1,24 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from pathlib import Path
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file in root directory
+env_path = Path("C:/Users/fatih/Documents/GitHub/zarr_fuse/.env")
+load_dotenv(env_path)
+
+# Debug: Check if environment variables are loaded
+print(f"🔍 Environment variables loaded:")
+print(f"   S3_ACCESS_KEY: {'✅ Found' if os.getenv('S3_ACCESS_KEY') else '❌ Not found'}")
+print(f"   S3_SECRET_KEY: {'✅ Found' if os.getenv('S3_SECRET_KEY') else '❌ Not found'}")
+print(f"   S3_BUCKET_NAME: {'✅ Found' if os.getenv('S3_BUCKET_NAME') else '❌ Not found'}")
+print(f"   .env path: {env_path}")
 
 # Use absolute imports
 from core.config import settings
-from routers import tree, weather
+from routers import config, s3
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -12,8 +26,6 @@ async def lifespan(app: FastAPI):
     # Startup
     print(f"🚀 Starting {settings.PROJECT_NAME} v{settings.VERSION}")
     print(f"📁 Test stores directory: {settings.TEST_STORES_DIR}")
-    print(f"🌳 Structure tree store: {settings.STRUCTURE_TREE_STORE}")
-    print(f"🌤️ Structure weather store: {settings.STRUCTURE_WEATHER_STORE}")
     
     yield
     
@@ -24,7 +36,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="API for exploring Zarr stores and building tree structures",
+    description="API for exploring Zarr stores",
     lifespan=lifespan
 )
 
@@ -38,8 +50,8 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(tree.router, prefix=settings.API_V1_STR)
-app.include_router(weather.router, prefix=settings.API_V1_STR)
+app.include_router(config.router, prefix=settings.API_V1_STR)
+app.include_router(s3.router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():

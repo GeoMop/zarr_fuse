@@ -1,256 +1,326 @@
-import React from 'react';
-import { ChevronLeft, ChevronRight, X, Database, BarChart3, Globe, Loader2, AlertCircle, Cloud } from 'lucide-react';
-
-import { TreeView } from './TreeView';
-import WeatherView from './WeatherView';
-import { useWeather } from './hooks/useWeather';
+import React, { useState, useEffect, useCallback } from 'react';
+import { X, Database, BarChart3, AlertCircle, Clock, RefreshCw, Folder, FileText, ChevronRight, ChevronDown } from 'lucide-react';
 import type { SidebarProps } from './types/sidebar';
 
+// Types for S3 data
+interface S3Store {
+  name: string;
+  path: string;
+  type: string;
+  structure?: any;
+  error?: string;
+}
+
+interface S3Structure {
+  status: string;
+  bucket_name: string;
+  total_stores: number;
+  stores: S3Store[];
+}
+
+interface S3Response {
+  status: string;
+  structure: S3Structure;
+}
+
 const Sidebar: React.FC<SidebarProps> = ({ 
-  isCollapsed, 
-  onToggle, 
-  onClose, 
-  treeData, 
-  loading, 
-  error,
-  onFileClick
+  onClose,
+  configData,
+  configLoading,
+  configError,
+  onNodeClick
 }) => {
-  const { weatherData, loading: weatherLoading, error: weatherError } = useWeather();
+  // Get current timestamp for "Updated" display
+  const currentTime = new Date().toLocaleString();
+  
+  // S3 data state
+  const [s3Data, setS3Data] = useState<S3Response | null>(null);
+  const [s3Loading, setS3Loading] = useState(false);
+  const [s3Error, setS3Error] = useState<string | null>(null);
+
+  // Reload/progress state
+  const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
+  const [progress, setProgress] = useState<number>(0);
+
+  // Tree expand/collapse state (paths of expanded groups)
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set(['root']));
+  const toggleExpand = useCallback((path: string) => {
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  }, []);
+
+  const reloadIntervalSec = configData?.endpoint?.Reload_interval ?? 60;
+
+  // Fetch S3 data (refactored to component scope)
+  const fetchS3Data = useCallback(async () => {
+    setS3Loading(true);
+    setS3Error(null);
+    try {
+      const response = await fetch('http://localhost:8000/api/s3/structure');
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data: S3Response = await response.json();
+      setS3Data(data);
+    } catch (error) {
+      setS3Error(error instanceof Error ? error.message : 'Failed to fetch S3 data');
+    } finally {
+      setS3Loading(false);
+      setLastFetchAt(Date.now());
+      setProgress(0);
+    }
+  }, []);
+
+  // Initial fetch on mount
+  useEffect(() => {
+    fetchS3Data();
+  }, [fetchS3Data]);
+
+  // Progress timer tied to Reload_interval; auto-refetch when completes
+  useEffect(() => {
+    if (!lastFetchAt) return;
+    let cancelled = false;
+    const tickMs = 1000;
+    const totalMs = Math.max(1, reloadIntervalSec) * 1000;
+
+    const intervalId = setInterval(() => {
+      if (cancelled) return;
+      const elapsed = Date.now() - lastFetchAt;
+      const pct = Math.min(100, (elapsed / totalMs) * 100);
+      setProgress(pct);
+      if (elapsed >= totalMs) {
+        // Auto refetch and reset timer
+        fetchS3Data();
+      }
+    }, tickMs);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [lastFetchAt, reloadIntervalSec, fetchS3Data]);
+
+  // Render tree structure recursively
+  const renderTreeItem = (item: any, level: number = 0, parentPath: string = '', storeName: string = '') => {
+    const indent = level * 16;
+    const itemPath = parentPath ? `${parentPath}/${item.name}` : item.name;
+    
+    console.log('Rendering item:', item); // Debug log
+    
+    if (item.type === 'group') {
+      const groupsOnly = (item.children || []).filter((c: any) => c.type === 'group');
+      const isExpanded = expandedPaths.has(itemPath);
+      return (
+        <div key={itemPath} style={{ marginLeft: indent }}>
+          <div 
+            className="flex items-center gap-3 py-2 hover:bg-gray-100 rounded px-2 cursor-pointer"
+            onClick={() => onNodeClick?.(storeName, itemPath)}
+          >
+            {groupsOnly.length > 0 ? (
+              <button
+                className="p-0.5 rounded bg-transparent hover:bg-gray-200"
+                onClick={(e) => { e.stopPropagation(); toggleExpand(itemPath); }}
+                aria-label={isExpanded ? 'Collapse' : 'Expand'}
+              >
+                {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-600" /> : <ChevronRight className="w-4 h-4 text-gray-600" />}
+              </button>
+            ) : (
+              <span className="inline-block w-4 h-4" />
+            )}
+            <Folder className="w-5 h-5 text-blue-600" />
+            <span className="text-sm font-medium text-gray-700">{item.name}</span>
+          </div>
+          {isExpanded && groupsOnly.length > 0 && (
+            <div className="ml-4">
+              {groupsOnly.map((child: any, index: number) => (
+                <div key={`${itemPath}/${child.name}-${index}`}>
+                  {renderTreeItem(child, level + 1, itemPath, storeName)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    } else if (item.type === 'array') {
+      // Hide arrays (variables) from the tree view
+      return null;
+    }
+    return null;
+  };
+
+  // Status colors based on loading/error/content
+  const hasStoreError = !!(s3Data?.structure?.stores?.some((s) => s.error));
+  const statusColor = s3Loading ? 'bg-yellow-400' : (s3Error || hasStoreError) ? 'bg-red-500' : 'bg-green-400';
+
   return (
-    <aside className={`h-screen flex flex-col transition-all duration-300 bg-white border-r border-gray-200 shadow-lg ${
-      isCollapsed ? 'w-20' : 'w-[420px]'
-    }`}>
+    <aside className="h-screen flex flex-col transition-all duration-300 bg-white border-r border-gray-200 shadow-lg w-full">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-4 relative">
         <div className="flex items-center justify-between">
-          {!isCollapsed ? (
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-white/20 rounded-xl shadow-lg backdrop-blur-sm">
-                <Database className="w-7 h-7 text-white" />
-              </div>
-              <div>
-                <h2 className="font-bold text-2xl">ZARR FUSE</h2>
-                <p className="text-blue-100 text-base">Data Platform</p>
-              </div>
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-white/20 rounded-xl shadow-lg backdrop-blur-sm">
+              <Database className="w-7 h-7 text-white" />
             </div>
-          ) : (
-            <div className="flex items-center justify-center w-full">
-              <div className="p-2.5 bg-white/20 rounded-xl shadow-lg backdrop-blur-sm">
-                <Database className="w-7 h-7 text-white" />
-              </div>
+            <div>
+              <h2 className="font-bold text-2xl">ZARR FUSE</h2>
+              <p className="text-blue-100 text-base">Data Platform</p>
             </div>
-          )}
+          </div>
           <div className="flex gap-2">
-            {!isCollapsed && (
-              <>
-                <button
-                  onClick={onToggle}
-                  className="p-2.5 bg-blue-100 hover:bg-blue-200 text-blue-600 rounded-xl transition-all duration-200 hover:shadow-md transform hover:scale-105 shadow-sm"
-                  aria-label="Collapse sidebar"
-                >
-                  <ChevronLeft className="w-6 h-6" />
-                </button>
-                <button
-                  onClick={onClose}
-                  className="p-2.5 bg-blue-100 hover:bg-blue-200 text-blue-600 rounded-xl transition-all duration-200 hover:shadow-md transform hover:scale-105 shadow-sm"
-                  aria-label="Close sidebar"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </>
-            )}
+            <button
+              onClick={onClose}
+              className="p-2.5 bg-blue-100 hover:bg-blue-200 text-blue-600 rounded-xl transition-all duration-200 hover:shadow-md transform hover:scale-105 shadow-sm"
+              aria-label="Close sidebar"
+            >
+              <X className="w-6 h-6" />
+            </button>
           </div>
         </div>
+        
+        {/* Store URL and Description */}
+        {configData && (
+          <div className="mt-3 pt-3 border-t border-blue-500/30">
+            <div className="text-sm">
+              <div className="font-medium mb-1">{configData.endpoint.STORE_URL}</div>
+              <div className="text-blue-100">{configData.endpoint.Description}</div>
+            </div>
+          </div>
+        )}
+
+        {/* Progress Bar - Clickable for reload */}
+        {configData && (
+          <div className="mt-3 pt-3 border-t border-blue-500/30">
+            <div className="flex items-center justify-between text-sm text-blue-100 mb-2">
+              <span>Service Status</span>
+              <span className="flex items-center gap-1">
+                <span className={`inline-block w-2 h-2 ${statusColor} rounded-full`}></span>
+                <span>{s3Loading ? 'Loading' : (s3Error || hasStoreError) ? 'Issues' : 'Active'}</span>
+              </span>
+            </div>
+            <div 
+              className="w-full bg-blue-500/30 rounded-full h-3 cursor-pointer hover:bg-blue-500/50 transition-colors duration-200"
+              onClick={() => {
+                fetchS3Data();
+              }}
+              title="Click to force reload"
+            >
+              <div className="bg-green-400 h-3 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
+            </div>
+            <div className="flex items-center gap-2 mt-2 text-xs text-blue-200">
+              <Clock className="w-3 h-3" />
+              <span>Updated: {new Date(lastFetchAt ?? Date.now()).toLocaleString()}</span>
+              {/* Data age indicator placeholder */}
+              {/* <span className="text-blue-300">• Data age: 2m 30s</span> */}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Content */}
       <div className="flex-1 p-4 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
-        {!isCollapsed ? (
-          <>
-            {/* Storage Info */}
-            <div className="mb-6 p-4 bg-blue-50 rounded-xl border border-blue-200 shadow-sm hover:shadow-md transition-shadow duration-200">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="p-2.5 bg-blue-500 rounded-xl shadow-md">
-                  <BarChart3 className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-lg text-blue-800">Storage Info</h3>
-                  <p className="text-blue-600 text-base">structure_tree.zarr</p>
-                </div>
+        {/* Loading State */}
+        {configLoading && (
+          <div className="mb-6 p-4 bg-yellow-50 rounded-xl border border-yellow-200 shadow-sm">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2.5 bg-yellow-500 rounded-xl shadow-md">
+                <RefreshCw className="w-6 h-6 text-white animate-spin" />
               </div>
-              <div className="space-y-2 text-sm text-blue-700">
-                <div className="flex items-center gap-2">
-                  <span className="text-blue-600">structure_tree.zarr</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-blue-600">structure_weather.zarr</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="inline-block w-2 h-2 bg-green-500 rounded-full"></span>
-                  <span>Active</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span>Updated 2 hours ago</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span>{treeData.length} tree nodes, {weatherData.length} weather variables</span>
-                </div>
+              <div>
+                <h3 className="font-semibold text-lg text-yellow-800">Loading Configuration</h3>
+                <p className="text-yellow-600 text-base">Fetching S3 endpoint data...</p>
               </div>
-            </div>
-
-            {/* Sources Section */}
-            <div className="mb-4">
-              <h4 className="text-base font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                <div className="p-2 bg-gray-100 rounded-xl shadow-sm">
-                  <Globe className="w-5 h-5 text-gray-600" />
-                </div>
-                Sources
-              </h4>
-            </div>
-
-            {/* Tree View with Loading/Error States */}
-            <div className="p-4">
-              {loading ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="flex items-center gap-3 text-blue-600">
-                    <Loader2 className="w-6 h-6 animate-spin" />
-                    <span className="text-lg">Loading tree structure...</span>
-                  </div>
-                </div>
-              ) : error ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="flex items-center gap-3 text-red-600">
-                    <AlertCircle className="w-6 h-6" />
-                    <div className="text-center">
-                      <p className="font-medium">Failed to load tree data</p>
-                      <p className="text-sm text-red-500">{error}</p>
-                    </div>
-                  </div>
-                </div>
-              ) : treeData.length === 0 ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="text-center text-gray-500">
-                    <Globe className="w-8 h-8 mx-auto mb-2" />
-                    <p>No tree data available</p>
-                  </div>
-                </div>
-              ) : (
-                <TreeView 
-                  nodes={treeData} 
-                  isCollapsed={isCollapsed} 
-                  onFileClick={onFileClick}
-                />
-              )}
-            </div>
-
-            {/* Weather View with Loading/Error States */}
-            <div className="p-4">
-              {weatherLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="flex items-center gap-3 text-blue-600">
-                    <Loader2 className="w-6 h-6 animate-spin" />
-                    <span className="text-lg">Loading weather data...</span>
-                  </div>
-                </div>
-              ) : weatherError ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="flex items-center gap-3 text-red-600">
-                    <AlertCircle className="w-6 h-6" />
-                    <div className="text-center">
-                      <p className="font-medium">Failed to load weather data</p>
-                      <p className="text-sm text-red-500">{weatherError}</p>
-                    </div>
-                  </div>
-                </div>
-              ) : weatherData.length === 0 ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="text-center text-gray-500">
-                    <Cloud className="w-8 h-8 mx-auto mb-2" />
-                    <p>No weather data available</p>
-                  </div>
-                </div>
-              ) : (
-                <WeatherView 
-                  variables={weatherData} 
-                  isCollapsed={isCollapsed}
-                  onVariableClick={(variable) => {
-                    console.log('Weather variable clicked:', variable);
-                    // TODO: Handle weather variable click
-                  }}
-                />
-              )}
-            </div>
-          </>
-        ) : (
-          /* Collapsed State - Icons only */
-          <div className="space-y-4">
-            {/* Expand button as first icon in column */}
-            <div className="flex justify-center">
-              <button
-                onClick={onToggle}
-                className="p-3 bg-blue-100 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer transform hover:scale-110 text-blue-600"
-                aria-label="Expand sidebar"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-            </div>
-
-            {/* Platform Info Icon */}
-            <div className="flex justify-center">
-              <div className="p-3 bg-blue-100 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer transform hover:scale-110">
-                <BarChart3 className="w-6 h-6 text-blue-600" />
-              </div>
-            </div>
-
-            {/* Sources Icon */}
-            <div className="flex justify-center">
-              <div className="p-3 bg-gray-100 rounded-xl shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer transform hover:scale-110">
-                <Globe className="w-6 h-6 text-gray-600" />
-              </div>
-            </div>
-
-            {/* Tree View Icons - Show loading or data */}
-            <div className="p-3">
-              {loading ? (
-                <div className="flex justify-center">
-                  <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-                </div>
-              ) : error ? (
-                <div className="flex justify-center">
-                  <AlertCircle className="w-5 h-5 text-red-600" />
-                </div>
-              ) : (
-                <TreeView 
-                  nodes={treeData} 
-                  isCollapsed={isCollapsed}
-                  onFileClick={onFileClick}
-                />
-              )}
-            </div>
-
-            {/* Weather Icons - Show loading or data */}
-            <div className="p-3">
-              {weatherLoading ? (
-                <div className="flex justify-center">
-                  <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-                </div>
-              ) : weatherError ? (
-                <div className="flex justify-center">
-                  <AlertCircle className="w-5 h-5 text-red-600" />
-                </div>
-              ) : (
-                <WeatherView 
-                  variables={weatherData} 
-                  isCollapsed={isCollapsed}
-                  onVariableClick={(variable) => {
-                    console.log('Weather variable clicked:', variable);
-                    // TODO: Handle weather variable click
-                  }}
-                />
-              )}
             </div>
           </div>
         )}
+
+        {/* Error State */}
+        {configError && (
+          <div className="mb-6 p-4 bg-red-50 rounded-xl border border-red-200 shadow-sm">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="p-2.5 bg-red-500 rounded-xl shadow-md">
+                <AlertCircle className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-lg text-red-800">Configuration Error</h3>
+                <p className="text-red-600 text-base">Failed to load configuration</p>
+              </div>
+            </div>
+            <div className="text-sm text-red-700 mt-2">
+              {configError}
+            </div>
+          </div>
+        )}
+
+        {/* Sources */}
+        <div className="mb-6 p-4 bg-green-50 rounded-xl border border-green-200 shadow-sm hover:shadow-md transition-shadow duration-200">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="p-2.5 bg-green-500 rounded-xl shadow-md">
+              <BarChart3 className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-lg text-green-800">Sources</h3>
+              <p className="text-green-600 text-base">Available data sources</p>
+            </div>
+          </div>
+          
+          {/* S3 Loading State */}
+          {s3Loading && (
+            <div className="flex items-center gap-2 py-2">
+              <RefreshCw className="w-4 h-4 text-green-600 animate-spin" />
+              <span className="text-sm text-green-600">Loading S3 data...</span>
+            </div>
+          )}
+
+          {/* S3 Error State */}
+          {s3Error && (
+            <div className="flex items-center gap-2 py-2">
+              <AlertCircle className="w-4 h-4 text-red-600" />
+              <span className="text-sm text-red-600">S3 Error: {s3Error}</span>
+            </div>
+          )}
+
+          {/* S3 Data */}
+          {s3Data && s3Data.structure.stores.length > 0 && (
+            <div className="space-y-3">
+              {s3Data.structure.stores.map((store) => (
+                <div key={store.name} className="border border-green-200 rounded-lg p-3 bg-white">
+                  <div className="mb-2">
+                    <span className="font-semibold text-green-800">{store.name}</span>
+                  </div>
+                  
+                  {store.error ? (
+                    <div className="text-sm text-red-600">{store.error}</div>
+                  ) : store.structure ? (
+                    <div className="space-y-1 pl-4">
+                      {renderTreeItem(
+                        {
+                          name: 'root',
+                          type: 'group',
+                          children: (store.structure?.children || []).filter((c: any) => c.type === 'group'),
+                        },
+                        0,
+                        '',
+                        store.name
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-gray-500">No structure data</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      {/* Fixed Footer - Store Log */}
+      <div className="p-4 border-t border-gray-200 bg-white">
+        <div className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-2 rounded-lg transition-colors duration-200">
+          <span className={`inline-block w-2 h-2 ${statusColor} rounded-full`}></span>
+          <span className="text-gray-700 font-medium">Store Log</span>
+        </div>
       </div>
     </aside>
   );

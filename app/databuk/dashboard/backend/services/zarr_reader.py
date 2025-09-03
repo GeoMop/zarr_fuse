@@ -33,7 +33,7 @@ class ZarrReader:
         """Close the Zarr store."""
         if self._store is not None:
             try:
-                self._store.close()
+                # Zarr groups don't have a close method, so we just set to None
                 self._store = None
                 self._root_group = None
                 logger.info("Zarr store closed")

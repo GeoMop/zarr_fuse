@@ -1,24 +1,26 @@
-export interface TreeNode {
-  id: string;
-  name: string;
-  type: 'folder' | 'file';
-  path: string;
-  children?: TreeNode[];
+export interface ConfigData {
+  status: string;
+  endpoint: {
+    Reload_interval: number;
+    Schema_file: string;
+    STORE_URL: string;
+    S3_ENDPOINT_URL: string;
+    S3_access_key: string;
+    S3_secret_key: string;
+    S3_region: string;
+    S3_use_ssl: boolean;
+    S3_verify_ssl: boolean;
+    Description: string;
+    Store_type: string;
+    Version: string;
+  };
 }
 
 export interface SidebarProps {
-  isCollapsed: boolean;
-  onToggle: () => void;
   onClose: () => void;
-  treeData: TreeNode[];
-  loading: boolean;
-  error: string | null;
-  onFileClick?: (filePath: string, fileName: string) => void;
+  configData: ConfigData | null;
+  configLoading: boolean;
+  configError: string | null;
+  onNodeClick?: (storeName: string, nodePath: string) => void;
 }
 
-export interface TreeViewProps {
-  nodes: TreeNode[];
-  level?: number;
-  isCollapsed?: boolean;
-  onFileClick?: (filePath: string, fileName: string) => void;
-}

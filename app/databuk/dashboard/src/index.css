@@ -2,6 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Plotly.js Override Styles */
+.js-plotly-plot .plotly .main-svg {
+  background-color: transparent !important;
+}
+
+.js-plotly-plot .plotly .bg {
+  background-color: transparent !important;
+}
+
+.js-plotly-plot .plotly .plot-container {
+  background-color: transparent !important;
+}
+
+.js-plotly-plot .plotly .svg-container {
+  background-color: transparent !important;
+}
+
+/* Remove Plotly's default white background */
+.js-plotly-plot {
+  background-color: transparent !important;
+}
+
+/* Custom class for transparent plots */
+.plotly-transparent {
+  background-color: transparent !important;
+}
+
+.plotly-transparent .js-plotly-plot {
+  background-color: transparent !important;
+}
+
 /* Custom scrollbar styles */
 .scrollbar-thin {
   scrollbar-width: thin;
