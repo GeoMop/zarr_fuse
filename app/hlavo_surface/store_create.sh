@@ -13,8 +13,9 @@ set -euo pipefail
 
 AWS="../../aws.sh"
 
-TENANT="6505d0ea_cc40_4dea_bf99_0c5b3f7eb526"
-# TODO: extract from list-buckets
+#TENANT="6505d0ea_cc40_4dea_bf99_0c5b3f7eb526"
+# extract tenant from list-buckets
+TENANT=`$AWS personal s3api list-buckets | jq -r '.Owner.ID | split("$")[0]'`
 
 BUCKET="hlavo-release"
 FORCE=0
