@@ -1,258 +1,262 @@
 # ZARR FUSE Dashboard
 
-A modern, interactive dashboard for exploring Zarr stores with advanced visualization capabilities. Built with React, TypeScript, FastAPI, and Plotly.js.
+A modern, interactive dashboard for exploring Zarr stores on S3 with real-time data visualization. Built with React, TypeScript, FastAPI, and designed for generic Zarr store structures.
 
 ## Features
 
-- **Tree Structure Explorer**: Navigate through Zarr store hierarchies
-- **Weather Data Visualization**: Interactive plots for meteorological data
-- **Advanced Plotting**: Multiple plot types including maps, time series, and 4D visualizations
-- **Mock Data Plots**: Built-in sample data for testing and development
+- **Generic S3 Zarr Store Support**: Works with any S3-hosted Zarr store structure
+- **Interactive Tree Explorer**: Navigate through hierarchical Zarr groups and arrays
+- **Variable Data Viewer**: Accordion-style variable display with sample data
+- **Real-time Store Connection**: Live S3 connection with status indicators
+- **Progress Bar & Auto-reload**: Configurable reload intervals with visual progress
+- **Error Handling**: Comprehensive error display and debugging
+- **YAML Configuration**: Flexible endpoint configuration via YAML files
 - **Responsive Design**: Modern UI with Tailwind CSS
-- **Real-time Data**: Live data fetching from Zarr stores
 
-## Project Structure
+## Architecture
 
+### Frontend (React + TypeScript)
 ```
-dashboard/
-├── src/                    # Frontend source code
-│   ├── components/         # React components
-│   │   ├── plots/         # Plot components (WeatherPlots, MapView, TimeZoom)
-│   │   ├── sidebar/       # Sidebar components (TreeView, WeatherView)
-│   │   └── ui/            # UI components
-│   ├── data/              # Mock data and data utilities
-│   ├── types/             # TypeScript type definitions
-│   └── App.tsx            # Main application component
-├── backend/                # FastAPI backend
-│   ├── routers/           # API endpoints (tree, weather, plot)
-│   ├── services/          # Business logic (Zarr operations)
-│   ├── models/            # Pydantic data models
-│   └── main.py            # FastAPI application
-├── public/                 # Static assets
-└── package.json            # Node.js dependencies
+src/
+├── components/
+│   ├── sidebar/           # Store navigation and tree view
+│   └── App.tsx           # Main application with variable display
+├── types/                # TypeScript type definitions
+└── index.css            # Tailwind CSS styles
 ```
 
-## Prerequisites
+### Backend (FastAPI + Python)
+```
+backend/
+├── services/
+│   └── s3_service.py     # Core S3 and Zarr operations
+├── routers/
+│   ├── s3.py            # S3 API endpoints
+│   └── config.py        # Configuration management
+├── core/
+│   └── config_manager.py # YAML configuration handling
+├── config/
+│   └── endpoints.yaml   # S3 endpoint configuration
+└── main.py              # FastAPI application
+```
 
-- **Node.js** 18+ and **npm** 9+
-- **Python** 3.8+ and **pip**
-- **Zarr stores** (structure_tree.zarr, structure_weather.zarr)
+## Quick Start
 
-## Installation and Setup
+### Prerequisites
+- **Python 3.8+** with zarr_fuse library installed
+- **Node.js 18+** and npm
+- **S3 credentials** and access to Zarr stores
 
-### 1. Clone and Navigate
+### 1. Environment Setup
 ```bash
-git clone <your-repo-url>
+# Clone repository
+git clone <repo-url>
+cd zarr_fuse/app/databuk/dashboard
+
+# Install zarr_fuse first (from project root)
+cd ../../../
+pip install -e .
+
+# Install dashboard dependencies
 cd app/databuk/dashboard
-```
-
-### 2. Frontend Setup
-```bash
-# Install Node.js dependencies
 npm install
-
-# Verify installation
-npm run lint
 ```
 
-### 3. Backend Setup
-```bash
-# Navigate to backend directory
-cd backend
-
-# Create virtual environment (recommended)
-python -m venv venv
-
-# Activate virtual environment
-# On Windows:
-venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Verify installation
-python -c "import fastapi, zarr, plotly; print('All dependencies installed successfully!')"
-```
-
-### 4. Zarr Store Setup
-Ensure you have the required Zarr stores in your project:
-- `structure_tree.zarr` - Contains file hierarchy data
-- `structure_weather.zarr` - Contains meteorological data
-
-## Running the Application
-
-### 1. Start Backend Server
+### 2. Backend Setup
 ```bash
 cd backend
 
-# Activate virtual environment if not already active
-# Windows: venv\Scripts\activate
-# macOS/Linux: source venv/bin/activate
+# Install web framework dependencies only
+# (zarr_fuse provides S3/Zarr functionality)
+pip install fastapi uvicorn pydantic
 
-# Start the server
-python run.py
+# Configure S3 credentials in root .env
+# (See Configuration section)
 ```
 
-The backend will start on `http://localhost:8000`
+### 3. Configuration
 
-**Alternative method:**
+Create `.env` file in project root (copy from `env.example`):
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+# S3 Configuration
+# Contact project maintainers for access credentials
+S3_BUCKET_NAME=your_bucket_name
+S3_ACCESS_KEY=your_access_key_here
+S3_SECRET_KEY=your_secret_key_here
+S3_ENDPOINT_URL=https://s3.cl4.du.cesnet.cz
+S3_ADDRESSING_STYLE=path
+
+# Multiple bucket configurations available in env.example
 ```
 
-### 2. Start Frontend Development Server
+Configure `backend/config/endpoints.yaml`:
+```yaml
+"your_endpoint_name":
+  Reload_interval: 300  # seconds
+  Schema_file: "schemas/your_schema.yaml"
+  STORE_URL: "s3://${S3_BUCKET_NAME}/path/to/your/store.zarr"
+  S3_ENDPOINT_URL: "${S3_ENDPOINT_URL}"
+  S3_access_key: "${S3_ACCESS_KEY}"
+  S3_secret_key: "${S3_SECRET_KEY}"
+  S3_region: "us-east-1"
+  S3_use_ssl: true
+  S3_verify_ssl: true
+  Description: "Your store description"
+  Store_type: "zarr"
+  Version: "1.0.0"
+```
+
+### 4. Run Application
 ```bash
-# In a new terminal, from the dashboard root directory
+# Terminal 1: Start backend
+cd backend
+python main.py
+
+# Terminal 2: Start frontend  
+cd ..  # back to dashboard root
 npm run dev
 ```
 
-The frontend will start on `http://localhost:5173` (or next available port)
-
-### 3. Access the Dashboard
-Open your browser and navigate to:
+Access at:
 - **Frontend**: http://localhost:5173
 - **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
+- **API Docs**: http://localhost:8000/docs
+
+## Usage
+
+### Store Navigation
+1. **Store Name**: Click store name to view root-level variables
+2. **Groups**: Click group names to view nested variables
+3. **Variables**: Click variables to expand and view data details
+
+### Status Indicators
+- **Green**: Store connected and operational
+- **Yellow**: Loading or connecting
+- **Red**: Connection error or issues
+
+### Progress Bar
+- Shows time since last reload
+- Click to force immediate reload
+- Auto-reloads based on `Reload_interval`
+
+## Supported Store Structures
+
+### Tree Structure
+```
+store.zarr/
+├── root variables (temperature, time, etc.)
+├── child_1/
+│   ├── variables
+│   └── child_3/
+│       └── variables
+└── child_2/
+    └── variables
+```
+
+### Weather Structure (yr.no style)
+```
+store.zarr/
+├── root variables (lat, lon, etc.)
+└── yr.no/
+    ├── air_pressure
+    ├── temperature
+    └── other weather variables
+```
+
+### Generic Structure
+Works with any Zarr group/array hierarchy!
 
 ## API Endpoints
 
-### Tree Structure
-- `GET /api/tree/structure` - Get complete tree hierarchy
-- `GET /api/tree/file/data` - Get file data by path
-- `GET /api/tree/node` - Get specific node information
+### Configuration
+- `GET /api/config/current` - Get current endpoint config
+- `GET /api/config/endpoints` - Get all endpoints
 
-### Weather Data
-- `GET /api/weather/structure` - Get weather variables structure
-- `GET /api/weather/variable` - Get specific variable data
-
-### Health & Info
-- `GET /` - API information
-- `GET /health` - Health check
-- `GET /docs` - Interactive API documentation (Swagger UI)
-
-## Available Plot Types
-
-### Weather Data Plots
-- **Basic Plots**: Line charts, scatter plots
-- **Map View**: Geographic visualization with coordinates
-- **Time Zoom**: Interactive time series with zoom capabilities
-
-### Mock Data Plots
-- **Basic Plots**: Sample temperature, humidity, wind data
-- **Time Zoom**: Interactive time series examples
-- **Hlava Map**: Geographic mock data visualization
-- **Map View**: Coordinate-based mock data
-- **4 Variables**: Multi-variable mock data plots
-- **Hlava Time Zoom**: Advanced time series mock data
+### S3 Operations
+- `GET /api/s3/structure` - Get store structure
+- `GET /api/s3/node/{store_name}/{node_path}` - Get node details
+- `GET /api/s3/variable/{store_name}/{variable_path}` - Get variable data
+- `GET /api/s3/status` - Get S3 connection status
 
 ## Development
 
-### Frontend Development
-```bash
-# Start development server with hot reload
-npm run dev
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
-
-# Run linting
-npm run lint
-```
-
-### Backend Development
-```bash
-cd backend
-
-# Start with auto-reload
-python run.py
-
-# Or with uvicorn
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
 ### Code Structure
-- **Components**: React functional components with TypeScript
-- **State Management**: React hooks (useState, useEffect)
-- **Styling**: Tailwind CSS with custom components
-- **Data Fetching**: Fetch API with async/await
-- **Plotting**: Plotly.js with React wrapper
+- **Generic S3 handling**: Works with any Zarr store structure
+- **Error resilient**: Comprehensive error handling and display
+- **Configurable**: YAML-based configuration system
+- **Scalable**: Clean separation of concerns
+
+### Key Components
+- **S3Service**: Core S3 and Zarr operations
+- **ConfigManager**: YAML configuration management
+- **Sidebar**: Store navigation and status display
+- **App**: Main application with variable viewer
+
+### Testing Different Stores
+1. Update `STORE_URL` in `endpoints.yaml`
+2. Restart backend
+3. Frontend automatically adapts to new structure
+
+## Recent Improvements
+
+### Completed Features
+- Generic Zarr store support (any structure)
+- Root prefix handling (Zarr-native paths)
+- NaN value JSON serialization
+- Accordion-style variable display
+- Store-level clickable navigation
+- Code cleanup and refactoring
+- Multi-store testing capability
+
+### Current Status
+- Fully functional with multiple store types
+- Clean, maintainable codebase
+- Ready for production use
 
 ## Troubleshooting
 
 ### Common Issues
 
-**Backend won't start:**
-- Check if port 8000 is available
-- Verify Python dependencies are installed
-- Check virtual environment activation
+**S3 Connection Errors:**
+- Verify credentials in `.env`
+- Check S3 endpoint URL
+- Ensure bucket/store exists
 
-**Frontend won't start:**
-- Verify Node.js version (18+)
+**Backend Won't Start:**
+- Check if zarr_fuse is installed: `pip list | grep zarr`
+- Verify port 8000 is available
+- Check Python version (3.8+)
+
+**Frontend Issues:**
 - Clear npm cache: `npm cache clean --force`
-- Delete node_modules and reinstall: `rm -rf node_modules && npm install`
+- Reinstall dependencies: `rm -rf node_modules && npm install`
+- Check Node.js version (18+)
 
-**Zarr store errors:**
-- Verify Zarr stores exist and are accessible
-- Check file permissions
-- Ensure stores are valid Zarr format
-
-**CORS errors:**
-- Backend CORS is configured for localhost:5173
-- Check if frontend is running on correct port
-
-### Debug Mode
-```bash
-# Backend debug logging
-cd backend
-python run.py --debug
-
-# Frontend development tools
-# Use browser DevTools for React debugging
-```
+**Store Structure Issues:**
+- Verify store is valid Zarr format
+- Check S3 permissions
+- Try different STORE_URL paths
 
 ## File Locations
 
-### Important Files
+### Configuration
+- **S3 Credentials**: `/.env` (project root)
+- **Endpoint Config**: `backend/config/endpoints.yaml`
+- **Dependencies**: `backend/requirements.txt`, `package.json`
+
+### Core Files
 - **Main App**: `src/App.tsx`
 - **Sidebar**: `src/components/sidebar/Sidebar.tsx`
-- **Tree View**: `src/components/sidebar/TreeView.tsx`
-- **Weather View**: `src/components/sidebar/WeatherView.tsx`
-- **Plot Components**: `src/components/plots/`
-- **Mock Data**: `src/data/mockPlotData.ts`
-- **Backend API**: `backend/main.py`
-
-### Configuration Files
-- **Frontend**: `package.json`, `tsconfig.json`, `vite.config.ts`
-- **Backend**: `requirements.txt`, `backend/core/config.py`
-- **Styling**: `tailwind.config.js`, `postcss.config.cjs`
+- **S3 Service**: `backend/services/s3_service.py`
+- **API Routes**: `backend/routers/s3.py`
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## Notes
-
-- Environment files (`.env.local`) are ignored by git
-- Backend automatically detects test stores from project structure
-- CORS is configured for frontend development
-- Mock data plots work independently of backend
-
-## Links
-
-- **Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
-- **Health Check**: http://localhost:8000/health
+1. Follow existing code patterns
+2. Test with multiple store structures
+3. Update documentation
+4. Ensure error handling is comprehensive
 
 ---
 
-**Happy coding!**
+**Built for the Zarr community**

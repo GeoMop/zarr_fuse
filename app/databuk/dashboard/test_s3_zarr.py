@@ -16,7 +16,6 @@ from dotenv import load_dotenv
 
 # Import common S3 configuration from backend
 sys.path.append('backend')
-from services.s3_service import get_s3_storage_options
 
 # Load environment variables
 load_dotenv()

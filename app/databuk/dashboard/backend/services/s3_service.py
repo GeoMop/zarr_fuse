@@ -1,54 +1,243 @@
-import s3fs
 import zarr
+from zarr.storage import FsspecStore
 import logging
+import math
 from typing import Dict, Any, Optional, List
 from core.config_manager import config_manager, EndpointConfig
 import fsspec
 
 logger = logging.getLogger(__name__)
 
-def get_s3_storage_options(access_key: str, secret_key: str, endpoint_url: str) -> Dict[str, Any]:
-    """Get common S3 storage options to avoid code duplication"""
-    return {
-        'key': access_key,
-        'secret': secret_key,
-        'endpoint_url': endpoint_url,
-        'listings_expiry_time': 1,
-        'max_paths': 0,
-        'asynchronous': False,
-        'config_kwargs': {
-            'request_checksum_calculation': 'when_required',
-            'response_checksum_validation': 'when_required',
-        }
-    }
+def clean_nan_values(data):
+    """Clean NaN and Infinity values from data for JSON serialization"""
+    if isinstance(data, float):
+        if math.isnan(data):
+            return "NaN"  # Return as string
+        elif math.isinf(data):
+            return "Infinity" if data > 0 else "-Infinity"
+    elif isinstance(data, dict):
+        return {k: clean_nan_values(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_nan_values(item) for item in data]
+    return data
 
 class S3Service:
     """Service for S3 operations with custom S3 configuration"""
     
     def __init__(self):
-        self._fs: Optional[s3fs.S3FileSystem] = None
+        self._fs: Optional[fsspec.AbstractFileSystem] = None
         self._current_config: Optional[EndpointConfig] = None
+    
+    def _get_storage_options(self, config: Optional[EndpointConfig] = None) -> Dict[str, Any]:
+        """Get S3 storage options - centralized configuration"""
+        if not config:
+            config = self._current_config
+        
+        if not config:
+            raise ValueError("No configuration provided")
+            
+        return {
+            'key': config.S3_access_key,
+            'secret': config.S3_secret_key,
+            'client_kwargs': {'endpoint_url': config.S3_ENDPOINT_URL},
+            'config_kwargs': {
+                's3': {
+                    'payload_signing_enabled': False,
+                    'addressing_style': 'path'
+                },
+                'retries': {'max_attempts': 5, 'mode': 'standard'},
+                'connect_timeout': 20,
+                'read_timeout': 60,
+                'request_checksum_calculation': 'when_required',
+                'response_checksum_validation': 'when_required'
+            }
+        }
+    
+    def _open_zarr_store(self, store_path: str) -> tuple:
+        """Open Zarr store and return (store_mapper, store_group)"""
+        storage_options = self._get_storage_options()
+        
+        bucket_name = self._current_config.STORE_URL.split('/')[2]
+        # Normalize path and avoid duplicating bucket
+        normalized_path = store_path.lstrip('/')
+        if normalized_path.startswith(f"{bucket_name}/"):
+            mapper_url = f"s3://{normalized_path}"
+        else:
+            mapper_url = f"s3://{bucket_name}/{normalized_path}"
+        store = fsspec.get_mapper(mapper_url, **storage_options)
+        
+        # Open the Zarr store - try different approaches
+        store_group = None
+        print(f"Attempting to open store: {store_path}")
+        
+        # Attempt 1: Try to open as Zarr group (preferred method)
+        try:
+            store_group = zarr.open_group(store)
+            return store, store_group
+        except Exception as zarr_error:
+            print(f"WARNING: Could not open as Zarr group: {zarr_error}")
+        
+        # Attempt 2: Fallback to minimal structure from store contents
+        try:
+            contents = list(store.list_dir(""))
+            if contents:
+                print(f"Creating minimal structure from {len(contents)} items")
+                minimal_structure = {
+                    'name': store_path.split('/')[-1],
+                    'path': store_path,
+                    'type': 'group',
+                    'children': [{'name': item, 'path': item, 'type': 'unknown'} for item in contents]
+                }
+                return store, minimal_structure
+        except Exception as fallback_error:
+            print(f"WARNING: Fallback method also failed: {fallback_error}")
+        
+        # Both attempts failed
+        raise Exception(f"Could not open store '{store_path}' in any format")
+    
+    def _find_group_variables(self, store, store_group, group_path: str = "") -> List[str]:
+        """Find available variables in a group using multiple fallback approaches"""
+        
+        # Method 1: Use store.list_dir() (preferred for FsspecStore)
+        try:
+            store_keys = list(store.list_dir(""))
+            print(f"Store list_dir result: {len(store_keys)} items")
+            
+            group_variables = []
+            group_prefix = f"{group_path}/" if group_path else ""
+            
+            for key in store_keys:
+                if key.startswith(group_prefix) and key.endswith('/zarr.json'):
+                    var_path_parts = key.split('/')
+                    # Extract variable name from group_path/variable_name/zarr.json
+                    expected_parts = len(group_prefix.split('/')) + 1 if group_prefix else 2
+                    if len(var_path_parts) == expected_parts:
+                        variable_name = var_path_parts[-2]  # Second to last part
+                        group_variables.append(variable_name)
+            
+            if group_variables:
+                print(f"SUCCESS: Found {len(group_variables)} variables using list_dir in {group_path or 'root'}")
+                return group_variables
+        except Exception as e:
+            print(f"WARNING: list_dir method failed: {e}")
+        
+        # Method 2: Access group directly
+        try:
+            if group_path:
+                target_group = store_group[group_path]
+            else:
+                target_group = store_group
+            group_variables = list(target_group.keys())
+            print(f"SUCCESS: Found {len(group_variables)} variables using group keys in {group_path or 'root'}")
+            return group_variables
+        except Exception as e:
+            print(f"WARNING: Group access method failed: {e}")
+        
+        # Both methods failed
+        print(f"ERROR: Could not find variables in {group_path or 'root'} using any method")
+        return []
+    
+    def _process_group(self, group, group_path: str) -> Dict[str, Any]:
+        """Recursively process a Zarr group"""
+        result = {
+            'name': group_path.split('/')[-1] if group_path else 'root',
+            'path': group_path,
+            'type': 'group',
+            'children': []
+        }
+        
+        # Use test script approach for subgroups and arrays
+        all_subkeys = list(group.keys()) if hasattr(group, 'keys') else []
+        subgroups = []
+        arrays = []
+        
+        # Check if this is a group that needs store-level variable detection
+        if hasattr(group, 'store') and hasattr(group, 'path'):
+            group_path_attr = getattr(group, 'path', '')
+            # Generic check for any group that might have variables in store
+            if group_path_attr:
+                try:
+                    store_keys = list(group.store.list_dir(""))
+                    group_prefix = f"{group_path_attr}/"
+                    group_keys = [key for key in store_keys if key.startswith(group_prefix) and '/' in key[len(group_prefix):]]
+                    # Extract variable names from group_path/variable_name/...
+                    variable_names = set()
+                    for key in group_keys:
+                        parts = key.split('/')
+                        if len(parts) >= 2 and parts[0] == group_path_attr:
+                            var_name = parts[1]
+                            if var_name and not var_name.startswith('.'):
+                                variable_names.add(var_name)
+                    
+                    all_subkeys = list(variable_names)
+                    
+                    # Assume all are arrays (weather variables)
+                    arrays = all_subkeys
+                    subgroups = []
+                    
+                    # Process arrays
+                    for name in arrays:
+                        try:
+                            array_info = {
+                                'name': name,
+                                'path': f"{group_path}/{name}" if group_path else name,
+                                'type': 'array',
+                                'shape': 'unknown',
+                                'dtype': 'unknown'
+                            }
+                            result['children'].append(array_info)
+                        except Exception as e:
+                            print(f"WARNING: Could not process array {name}: {e}")
+                    
+                    return result
+                    
+                except Exception as e:
+                    print(f"WARNING: Store-level variable detection failed for {group_path_attr}: {e}")
+        
+        for key in all_subkeys:
+            try:
+                item = group[key]
+                if hasattr(item, 'shape'):  # It's an array
+                    arrays.append(key)
+                else:  # It's a group
+                    subgroups.append(key)
+            except Exception as e:
+                print(f"WARNING: Could not access subkey {key}: {e}")
+        
+        # Process arrays first
+        for name in arrays:
+            try:
+                dataset = group[name]
+                sample_data = self._get_sample_data(dataset)
+                result['children'].append({
+                    'name': name,
+                    'path': f"{group_path}/{name}" if group_path else name,
+                    'type': 'array',
+                    'shape': getattr(dataset, 'shape', None),
+                    'dtype': str(getattr(dataset, 'dtype', 'unknown')),
+                    'chunks': getattr(dataset, 'chunks', None),
+                    'size': getattr(dataset, 'size', None),
+                    'sample_data': sample_data
+                })
+            except Exception as e:
+                print(f"WARNING: Failed to process array {name}: {e}")
+
+        # Then process subgroups
+        for name in subgroups:
+            try:
+                subgroup = group[name]
+                subgroup_result = self._process_group(subgroup, f"{group_path}/{name}" if group_path else name)
+                result['children'].append(subgroup_result)
+            except Exception as e:
+                print(f"WARNING: Failed to process subgroup {name}: {e}")
+        
+        return result
     
     def connect(self, endpoint_config: EndpointConfig) -> bool:
         """Connect to S3 using common S3 configuration"""
         try:
             # Use fsspec.get_mapper approach for listing
-            storage_options = dict(
-                key=endpoint_config.S3_access_key,
-                secret=endpoint_config.S3_secret_key,
-                client_kwargs=dict(endpoint_url=endpoint_config.S3_ENDPOINT_URL),
-                config_kwargs={
-                    "s3": {
-                        "payload_signing_enabled": False,
-                        "addressing_style": "path"
-                    },
-                    "retries": {"max_attempts": 5, "mode": "standard"},
-                    "connect_timeout": 20,
-                    "read_timeout": 60,
-                    "request_checksum_calculation": "when_required",
-                    "response_checksum_validation": "when_required",
-                },
-            )
+            storage_options = self._get_storage_options(endpoint_config)
             
             # Use fsspec.filesystem for listing operations
             self._fs = fsspec.filesystem('s3', **storage_options)
@@ -61,100 +250,60 @@ class S3Service:
             return False
     
     def get_store_structure(self) -> Dict[str, Any]:
-        """Get the structure of all Zarr stores in the bucket"""
+        """Get the structure of the specific Zarr store from STORE_URL"""
         if not self._fs:
             raise ValueError("Not connected to S3")
         
         try:
-            # Get bucket name from STORE_URL
-            bucket_name = self._current_config.STORE_URL.split('/')[2]
-            print(f"🔍 Searching bucket: {bucket_name}")
+            # Extract store path from STORE_URL
+            store_url = self._current_config.STORE_URL
+            if store_url.startswith('s3://'):
+                store_path = store_url[5:]  # Remove 's3://' prefix
+            else:
+                store_path = store_url
             
-            # List all items in the bucket
-            bucket_items = self._fs.ls(bucket_name, detail=True)
-            print(f"📁 Found {len(bucket_items)} items in bucket")
+            print(f"Using specific store path from STORE_URL: {store_path}")
             
-            # Debug: print all items
-            for item in bucket_items:
-                print(f"  {'📁' if item['type'] == 'directory' else '📄'} {item['name']} (ends with .zarr: {item['name'].endswith('.zarr')})")
+            # Get store name (last part of path)
+            store_name = store_path.split('/')[-1]
+            print(f"Store name: {store_name}")
             
-            # Find all Zarr stores (directories ending with .zarr)
+            # Try to open the specific Zarr store
             zarr_stores = []
+            try:
+                store_structure = self._extract_structure(store_path)
+                zarr_stores.append({
+                    'name': store_name,
+                    'path': store_path,
+                    'type': 'zarr_store',
+                    'structure': store_structure
+                })
+                print(f"SUCCESS: Successfully processed: {store_name}")
+            except Exception as e:
+                # If we can't read the store, still list it but mark as error
+                zarr_stores.append({
+                    'name': store_name,
+                    'path': store_path,
+                    'type': 'zarr_store',
+                    'error': f"Could not read store: {str(e)}"
+                })
+                print(f"ERROR: Error processing: {store_name} - {e}")
             
-            # First, check root level items
-            for item in bucket_items:
-                if item['type'] == 'directory' and item['name'].endswith('.zarr'):
-                    print(f"🎯 Found Zarr store: {item['name']}")
-                    store_name = item['name'].split('/')[-1]  # Get just the store name
-                    store_path = item['name']
-                    
-                    # Try to open the Zarr store
-                    try:
-                        store_structure = self._extract_structure(store_path)
-                        zarr_stores.append({
-                            'name': store_name,
-                            'path': store_path,
-                            'type': 'zarr_store',
-                            'structure': store_structure
-                        })
-                        print(f"✅ Successfully processed: {store_name}")
-                    except Exception as e:
-                        # If we can't read the store, still list it but mark as error
-                        zarr_stores.append({
-                            'name': store_name,
-                            'path': store_path,
-                            'type': 'zarr_store',
-                            'error': f"Could not read store: {str(e)}"
-                        })
-                        print(f"❌ Error processing: {store_name} - {e}")
+            print(f"Total Zarr stores found: {len(zarr_stores)}")
             
-            # Then, check subdirectories for .zarr files
-            for item in bucket_items:
-                if item['type'] == 'directory' and not item['name'].endswith('.zarr'):
-                    print(f"🔍 Checking subdirectory: {item['name']}")
-                    try:
-                        sub_items = self._fs.ls(item['name'], detail=True)
-                        for sub_item in sub_items:
-                            print(f"    {'📁' if sub_item['type'] == 'directory' else '📄'} {sub_item['name']} (ends with .zarr: {sub_item['name'].endswith('.zarr')})")
-                            
-                            if sub_item['type'] == 'directory' and sub_item['name'].endswith('.zarr'):
-                                print(f"🎯 Found Zarr store in subdirectory: {sub_item['name']}")
-                                store_name = sub_item['name'].split('/')[-1]  # Get just the store name
-                                store_path = sub_item['name']
-                                
-                                # Try to open the Zarr store
-                                try:
-                                    store_structure = self._extract_structure(store_path)
-                                    zarr_stores.append({
-                                        'name': store_name,
-                                        'path': store_path,
-                                        'type': 'zarr_store',
-                                        'structure': store_structure
-                                    })
-                                    print(f"✅ Successfully processed: {store_name}")
-                                except Exception as e:
-                                    # If we can't read the store, still list it but mark as error
-                                    zarr_stores.append({
-                                        'name': store_name,
-                                        'path': store_path,
-                                        'type': 'zarr_store',
-                                        'error': f"Could not read store: {str(e)}"
-                                    })
-                                    print(f"❌ Error processing: {store_name} - {e}")
-                    except Exception as e:
-                        print(f"❌ Error listing subdirectory {item['name']}: {e}")
-            
-            print(f"📊 Total Zarr stores found: {len(zarr_stores)}")
-            
-            # Debug: print the structure of the first store
+            # Debug: print the structure of the store
             if zarr_stores and zarr_stores[0].get('structure'):
-                print("🔍 First store structure:")
+                print("Store structure:")
                 import json
                 print(json.dumps(zarr_stores[0]['structure'], indent=2, default=str))
+            
+            # Extract bucket name for response
+            bucket_name = store_path.split('/')[0]
             
             return {
                 'status': 'success',
                 'bucket_name': bucket_name,
+                'store_url': store_url,
                 'total_stores': len(zarr_stores),
                 'stores': zarr_stores
             }
@@ -164,154 +313,20 @@ class S3Service:
             raise ValueError(f"Failed to get store structure: {e}")
     
     def _extract_structure(self, store_path: str) -> Dict[str, Any]:
-        """Extract structure from a Zarr store"""
+        """Extract structure from a Zarr store - refactored and simplified"""
         try:
-            print(f"🔍 Extracting structure from: {store_path}")
+            print(f"Extracting structure from: {store_path}")
             
-            # Use fsspec.get_mapper like test script
-            storage_options = dict(
-                key=self._current_config.S3_access_key,
-                secret=self._current_config.S3_secret_key,
-                client_kwargs=dict(endpoint_url=self._current_config.S3_ENDPOINT_URL),
-                config_kwargs={
-                    "s3": {
-                        "payload_signing_enabled": False,
-                        "addressing_style": "path"
-                    },
-                    "retries": {"max_attempts": 5, "mode": "standard"},
-                    "connect_timeout": 20,
-                    "read_timeout": 60,
-                    "request_checksum_calculation": "when_required",
-                    "response_checksum_validation": "when_required",
-                },
-            )
+            # Step 1: Open the Zarr store
+            store, store_group = self._open_zarr_store(store_path)
             
-            print(f"🔧 Using storage options: {storage_options}")
-            print(f"🔍 Original store_path: {store_path}")
-            bucket_name = self._current_config.STORE_URL.split('/')[2]
-            # Normalize path and avoid duplicating bucket
-            normalized_path = store_path.lstrip('/')
-            if normalized_path.startswith(f"{bucket_name}/"):
-                mapper_url = f"s3://{normalized_path}"
-            else:
-                mapper_url = f"s3://{bucket_name}/{normalized_path}"
-            print(f"🔗 Mapper URL: {mapper_url}")
-            store = fsspec.get_mapper(mapper_url, **storage_options)
-            print(f"✅ Created mapper for: {mapper_url}")
+            # Handle early return case (minimal structure)
+            if isinstance(store_group, dict):
+                return store_group
             
-            # Open the Zarr store - try different approaches
-            store_group = None
-            print(f"🔍 Attempting to open store: {store_path}")
-            
-            try:
-                # First try to open as a group
-                print(f"🔍 Trying to open as group...")
-                store_group = zarr.open_group(store, mode='r')
-                print(f"✅ Opened Zarr store as group: {store_path}")
-            except Exception as e:
-                print(f"⚠️  Failed to open as group: {e}")
-                try:
-                    # Try to open as an array (some stores might be just arrays)
-                    print(f"🔍 Trying to open as array...")
-                    store_group = zarr.open_array(store, mode='r')
-                    print(f"✅ Opened Zarr store as array: {store_path}")
-                    # Convert array to group-like structure
-                    return {
-                        'name': store_path.split('/')[-1],
-                        'path': store_path,
-                        'type': 'array',
-                        'shape': store_group.shape,
-                        'dtype': str(store_group.dtype),
-                        'chunks': store_group.chunks,
-                        'size': store_group.size,
-                        'sample_data': self._get_sample_data(store_group)
-                    }
-                except Exception as e2:
-                    print(f"⚠️  Failed to open as array: {e2}")
-                    # Try to list contents directly
-                    try:
-                        print(f"🔍 Trying to list store contents directly...")
-                        contents = list(store.keys())
-                        print(f"📁 Store contents: {contents}")
-                        if contents:
-                            # Create a minimal group structure
-                            return {
-                                'name': store_path.split('/')[-1],
-                                'path': store_path,
-                                'type': 'group',
-                                'children': [{'name': item, 'path': item, 'type': 'unknown'} for item in contents]
-                            }
-                    except Exception as e3:
-                        print(f"⚠️  Failed to list contents: {e3}")
-                        raise e  # Re-raise original error
-            
-            if store_group is None:
-                raise Exception("Could not open store in any format")
-                
-            try:
-                g_keys = list(getattr(store_group, 'group_keys')())
-            except Exception:
-                g_keys = []
-            try:
-                a_keys = list(getattr(store_group, 'array_keys')())
-            except Exception:
-                a_keys = []
-            print(f"📁 Store group_keys: {g_keys}")
-            print(f"📄 Store array_keys: {a_keys}")
-            
-            def _process_group(group, group_path):
-                """Recursively process a Zarr group"""
-                result = {
-                    'name': group_path.split('/')[-1] if group_path else 'root',
-                    'path': group_path,
-                    'type': 'group',
-                    'children': []
-                }
-                
-                try:
-                    subgroups = list(getattr(group, 'group_keys')())
-                except Exception:
-                    subgroups = []
-                try:
-                    arrays = list(getattr(group, 'array_keys')())
-                except Exception:
-                    arrays = []
-                print(f"📁 Processing group: {result['name']} with subgroups={subgroups}, arrays={arrays}")
-                
-                # Process arrays first
-                for name in arrays:
-                    try:
-                        dataset = group[name]
-                        print(f"📄 Found array: {name} shape={getattr(dataset, 'shape', None)}")
-                        sample_data = self._get_sample_data(dataset)
-                        result['children'].append({
-                            'name': name,
-                            'path': f"{group_path}/{name}" if group_path else name,
-                            'type': 'array',
-                            'shape': getattr(dataset, 'shape', None),
-                            'dtype': str(getattr(dataset, 'dtype', 'unknown')),
-                            'chunks': getattr(dataset, 'chunks', None),
-                            'size': getattr(dataset, 'size', None),
-                            'sample_data': sample_data
-                        })
-                    except Exception as e:
-                        print(f"⚠️  Failed to process array {name}: {e}")
-
-                # Then process subgroups
-                for name in subgroups:
-                    try:
-                        subgroup = group[name]
-                        print(f"📁 Found subgroup: {name}")
-                        subgroup_result = _process_group(subgroup, f"{group_path}/{name}" if group_path else name)
-                        result['children'].append(subgroup_result)
-                    except Exception as e:
-                        print(f"⚠️  Failed to process subgroup {name}: {e}")
-                
-                print(f"✅ Finished processing group: {result['name']} with {len(result['children'])} children")
-                return result
-            
-            final_result = _process_group(store_group, "")
-            print(f"🎯 Final structure: {final_result['name']} with {len(final_result['children'])} children")
+            # Step 2: Process the store group recursively
+            final_result = self._process_group(store_group, "")
+            print(f"Final structure: {final_result['name']} with {len(final_result['children'])} children")
             return final_result
             
         except Exception as e:
@@ -333,53 +348,13 @@ class S3Service:
                 else:
                     # Higher dimensional - get first slice
                     sample_data = dataset[tuple(slice(0, min(3, dim)) for dim in dataset.shape)]
-                return sample_data.tolist()
+                return clean_nan_values(sample_data.tolist())
             else:
                 return []
         except Exception as e:
             logger.warning(f"Failed to get sample data for dataset: {e}")
             return []
     
-    def get_array_data(self, array_path: str, slice_info: Optional[Dict] = None) -> Dict[str, Any]:
-        """Get data from a specific array"""
-        if not self._fs or not self._current_config:
-            raise ValueError("Not connected to S3. Call connect() first.")
-        
-        try:
-            store_url = self._current_config.STORE_URL
-            if store_url.startswith('s3://'):
-                store_path = store_url[5:]
-            else:
-                store_path = store_url
-            
-            full_path = f"{store_path}/{array_path}"
-            
-            if not self._fs.exists(full_path):
-                raise FileNotFoundError(f"Array not found: {array_path}")
-            
-            # Open the array
-            array = zarr.open_array(store=self._fs.get_mapper(store_path), path=array_path)
-            
-            # Get basic info
-            data_info = {
-                'path': array_path,
-                'shape': array.shape,
-                'dtype': str(array.dtype),
-                'chunks': array.chunks,
-                'size': array.size
-            }
-            
-            # Get actual data if slice_info is provided
-            if slice_info:
-                # For now, just get a small sample
-                sample_slice = tuple(slice(0, min(10, dim)) for dim in array.shape)
-                data_info['sample_data'] = array[sample_slice].tolist()
-            
-            return data_info
-            
-        except Exception as e:
-            logger.error(f"Failed to get array data for {array_path}: {e}")
-            raise
 
     def get_node_details(self, store_name: str, node_path: str) -> Dict[str, Any]:
         """Get detailed information about a specific node in a Zarr store"""
@@ -387,63 +362,25 @@ class S3Service:
             raise ValueError("Not connected to S3. Call connect() first.")
         
         try:
-            print(f"🔍 Getting details for node: {store_name}/{node_path}")
+            print(f"Getting details for node: {store_name}/{node_path}")
             
-            # Find the store path
-            store_path = None
-            bucket_name = self._current_config.STORE_URL.split('/')[2]
+            # Use the store path from STORE_URL directly
+            store_url = self._current_config.STORE_URL
+            if store_url.startswith('s3://'):
+                store_path = store_url[5:]  # Remove 's3://' prefix
+            else:
+                store_path = store_url
             
-            # Check if it's a direct store
-            try:
-                bucket_items = self._fs.ls(bucket_name, detail=True)
-                for item in bucket_items:
-                    if item['name'] == f"{bucket_name}/{store_name}":
-                        store_path = item['name']
-                        break
-                
-                if not store_path:
-                    # Check subdirectories
-                    for item in bucket_items:
-                        if item['type'] == 'directory' and not item['name'].endswith('.zarr'):
-                            try:
-                                sub_items = self._fs.ls(item['name'], detail=True)
-                                for sub_item in sub_items:
-                                    if sub_item['name'].endswith(f"/{store_name}"):
-                                        store_path = sub_item['name']
-                                        break
-                                if store_path:
-                                    break
-                            except Exception as e:
-                                print(f"⚠️  Failed to list subdirectory {item['name']}: {e}")
-                                continue
-            except Exception as e:
-                print(f"⚠️  Failed to list bucket contents: {e}")
-                raise FileNotFoundError(f"Store not found: {store_name}")
-            
-            if not store_path:
-                raise FileNotFoundError(f"Store not found: {store_name}")
-            
-            print(f"📁 Found store at: {store_path}")
+            print(f"Using store path from STORE_URL: {store_path}")
             
             # Open the store
-            storage_options = dict(
-                key=self._current_config.S3_access_key,
-                secret=self._current_config.S3_secret_key,
-                client_kwargs=dict(endpoint_url=self._current_config.S3_ENDPOINT_URL),
-                config_kwargs={
-                    "s3": {
-                        "payload_signing_enabled": False,
-                        "addressing_style": "path"
-                    },
-                    "retries": {"max_attempts": 5, "mode": "standard"},
-                    "connect_timeout": 20,
-                    "read_timeout": 60,
-                    "request_checksum_calculation": "when_required",
-                    "response_checksum_validation": "when_required",
-                },
-            )
+            storage_options = self._get_storage_options()
             
-            store = fsspec.get_mapper(f"s3://{store_path}", **storage_options)
+            # Use zarr_fuse approach: FsspecStore instead of get_mapper
+            fs = fsspec.filesystem('s3', asynchronous=False, **storage_options)
+            clean_path = store_path  # Already clean, no s3:// prefix
+            store = FsspecStore(fs, path=clean_path)
+            print(f"Created FsspecStore for node details: {clean_path}")
             
             # Try to open as group first
             try:
@@ -454,36 +391,39 @@ class S3Service:
                 if clean_node_path == 'root' or clean_node_path == '':
                     node = zarr.open_group(store, mode='r')
                     node_type = 'group'
-                    print(f"✅ Opened root group")
                 elif clean_node_path:
-                    node = zarr.open_group(store, path=clean_node_path, mode='r')
+                    # For FsspecStore, don't use path parameter - create new store with path
+                    node_fs = fsspec.filesystem('s3', asynchronous=False, **storage_options)
+                    node_store = FsspecStore(node_fs, path=f"{clean_path}/{clean_node_path}")
+                    node = zarr.open_group(node_store, mode='r')
                     node_type = 'group'
-                    print(f"✅ Opened as group: {clean_node_path}")
                 else:
                     node = zarr.open_group(store, mode='r')
                     node_type = 'group'
-                    print(f"✅ Opened as group: {clean_node_path}")
             except Exception as e:
-                print(f"⚠️  Failed to open as group: {e}")
+                print(f"WARNING: Failed to open as group: {e}")
+                print(f"Now trying to open as array...")
                 try:
                     # Remove 'root/' prefix if present
                     clean_node_path = node_path.replace('root/', '') if node_path.startswith('root/') else node_path
                     
                     # Special handling for root node
                     if clean_node_path == 'root' or clean_node_path == '':
-                        node = zarr.open_array(store, mode='r')
-                        node_type = 'array'
-                        print(f"✅ Opened root array")
+                        # Root should be opened as group, not array
+                        node = zarr.open_group(store, mode='r')
+                        node_type = 'group'
                     elif clean_node_path:
-                        node = zarr.open_array(store, path=clean_node_path, mode='r')
+                        # For FsspecStore, don't use path parameter - create new store with path
+                        node_fs = fsspec.filesystem('s3', asynchronous=False, **storage_options)
+                        node_store = FsspecStore(node_fs, path=f"{clean_path}/{clean_node_path}")
+                        node = zarr.open_array(node_store, mode='r')
                         node_type = 'array'
-                        print(f"✅ Opened as array: {clean_node_path}")
                     else:
                         node = zarr.open_array(store, mode='r')
                         node_type = 'array'
-                        print(f"✅ Opened as array: {clean_node_path}")
                 except Exception as e2:
-                    print(f"⚠️  Failed to open as array: {e2}")
+                    print(f"WARNING: Failed to open as array: {e2}")
+                    print(f"ERROR: Both group and array attempts failed")
                     raise FileNotFoundError(f"Node not found: {node_path}")
             
             # Extract node details
@@ -502,7 +442,44 @@ class S3Service:
                 try:
                     details['attrs'] = dict(node.attrs)
                 except Exception as e:
-                    print(f"⚠️  Failed to get attributes: {e}")
+                    print(f"WARNING: Failed to get attributes: {e}")
+                
+                # Special handling for yr.no group
+                if clean_node_path == 'yr.no':
+                    print(f"Special handling for yr.no group in get_node_details")
+                    try:
+                        # Use store.list_dir() to find weather variables
+                        store_keys = list(store.list_dir(""))
+                        yr_no_keys = [key for key in store_keys if key.startswith('yr.no/') and '/' in key[6:]]
+                        
+                        # Extract variable names
+                        variable_names = set()
+                        for key in yr_no_keys:
+                            parts = key.split('/')
+                            if len(parts) >= 2 and parts[0] == 'yr.no':
+                                var_name = parts[1]
+                                if var_name and not var_name.startswith('.'):
+                                    variable_names.add(var_name)
+                        
+                        print(f"Found yr.no variables in get_node_details: {list(variable_names)}")
+                        
+                        # Add variables to details (LIMITED INFO)
+                        for var_name in sorted(variable_names):
+                            details['vars'][var_name] = {
+                                'name': var_name,
+                                'path': f"{clean_node_path}/{var_name}",
+                                'type': 'array',
+                                'shape': 'Click to load...',
+                                'dtype': 'Loading...',
+                                'sample_data': '(Click variable to see data)'
+                            }
+                            print(f"📄 Added variable to details: {var_name}")
+                        
+                        print(f"SUCCESS: Extracted details for {node_path}")
+                        return clean_nan_values(details)
+                        
+                    except Exception as e:
+                        print(f"WARNING: yr.no fallback in get_node_details failed: {e}")
                 
                 # Get coordinates and variables
                 try:
@@ -516,7 +493,7 @@ class S3Service:
                             coord_details = self._extract_coordinate_info(coord_group, name)
                             details['coords'][name] = coord_details
                         except Exception as e:
-                            print(f"⚠️  Failed to process coordinate {name}: {e}")
+                            print(f"WARNING: Failed to process coordinate {name}: {e}")
                     
                     # Process variables (arrays)
                     for name in arrays:
@@ -525,21 +502,134 @@ class S3Service:
                             var_details = self._extract_variable_info(var_array, name)
                             details['vars'][name] = var_details
                         except Exception as e:
-                            print(f"⚠️  Failed to process variable {name}: {e}")
+                            print(f"WARNING: Failed to process variable {name}: {e}")
                             
                 except Exception as e:
-                    print(f"⚠️  Failed to get group contents: {e}")
+                    print(f"WARNING: Failed to get group contents: {e}")
                     
             elif node_type == 'array':
                 # For arrays, treat as a variable
                 var_details = self._extract_variable_info(node, node_path.split('/')[-1] if node_path else store_name)
                 details['vars'][node_path.split('/')[-1] if node_path else store_name] = var_details
             
-            print(f"✅ Extracted details for {node_path}")
-            return details
+            print(f"SUCCESS: Extracted details for {node_path}")
+            return clean_nan_values(details)
             
         except Exception as e:
             logger.error(f"Failed to get node details for {store_name}/{node_path}: {e}")
+            raise
+
+    def get_variable_data(self, store_name: str, variable_path: str) -> Dict[str, Any]:
+        """Get actual data for a specific variable (limited sample)"""
+        try:
+            print(f"Getting variable data: {store_name}/{variable_path}")
+            
+            # Ensure config is loaded
+            if not self._current_config:
+                from core.config_manager import config_manager
+                self._current_config = config_manager.get_first_endpoint()
+                if not self._current_config:
+                    raise Exception("No endpoint configuration found")
+            
+            # Get store configuration
+            store_url = self._current_config.STORE_URL
+            store_path = store_url[5:] if store_url.startswith('s3://') else store_url
+            print(f"Using store path: {store_path}")
+            
+            # Create storage options
+            storage_options = self._get_storage_options()
+            print(f"Using storage options: {storage_options}")
+            
+            # Use zarr_fuse approach: FsspecStore instead of get_mapper
+            fs = fsspec.filesystem('s3', asynchronous=False, **storage_options)
+            clean_path = store_path  # Already clean, no s3:// prefix
+            store = FsspecStore(fs, path=clean_path)
+            print(f"Created FsspecStore like zarr_fuse: {clean_path}")
+            
+            # Open the variable array using test script approach
+            try:
+                print(f"Opening variable array: {variable_path}")
+                
+                # First open the store as group
+                store_group = zarr.open_group(store, mode='r')
+                print(f"Opened store group, accessing: {variable_path}")
+                
+                # Debug: List what's actually in the store
+                print(f"Store group keys: {list(store_group.keys())}")
+                
+                # Generic approach: Parse full variable path
+                print(f"Opening variable array: {variable_path}")
+                
+                try:
+                    # Try direct path access first
+                    variable_array = zarr.open_array(store, path=variable_path, mode='r')
+                    print(f"SUCCESS: Opened variable using direct path: {variable_path}")
+                except Exception as e:
+                    print(f"ERROR: Direct path failed: {e}")
+                    try:
+                        # Alternative: Use zarr.open with full path
+                        variable_array = zarr.open(store)[variable_path]
+                        print(f"SUCCESS: Opened variable using zarr.open()[path]: {variable_path}")
+                    except Exception as e2:
+                        print(f"ERROR: Both approaches failed: {e2}")
+                        return {"error": f"Failed to open variable {variable_path}: {e2}"}
+                else:
+                    variable_array = store_group[variable_path]
+                
+                print(f"SUCCESS: Opened variable array: {variable_path}")
+                
+                # Get basic info
+                shape = variable_array.shape
+                dtype = str(variable_array.dtype)
+                
+                # Get sample data (first few values)
+                if len(shape) == 1:
+                    # 1D array - get first 10 values
+                    sample_data = variable_array[:10].tolist()
+                elif len(shape) == 2:
+                    # 2D array - get first 5x5 slice
+                    sample_data = variable_array[:5, :5].tolist()
+                elif len(shape) == 3:
+                    # 3D array - get first slice
+                    sample_data = variable_array[0, :5, :5].tolist()
+                else:
+                    # Higher dimensions - just get first few elements flattened
+                    flat_data = variable_array.flatten()
+                    sample_data = flat_data[:20].tolist()
+                
+                # Get min/max (from small sample to avoid memory issues)
+                if len(shape) <= 2:
+                    min_val = float(variable_array[:100].min()) if variable_array.size > 0 else None
+                    max_val = float(variable_array[:100].max()) if variable_array.size > 0 else None
+                else:
+                    # For higher dimensions, use a smaller sample
+                    sample = variable_array.flatten()[:1000]
+                    min_val = float(sample.min()) if len(sample) > 0 else None
+                    max_val = float(sample.max()) if len(sample) > 0 else None
+                
+                result = {
+                    'name': variable_path.split('/')[-1],
+                    'path': variable_path,
+                    'shape': list(shape),
+                    'dtype': dtype,
+                    'size': int(variable_array.size),
+                    'sample_data': sample_data,
+                    'min': min_val,
+                    'max': max_val,
+                    'attrs': dict(variable_array.attrs) if hasattr(variable_array, 'attrs') else {}
+                }
+                return clean_nan_values(result)
+                
+            except Exception as e:
+                print(f"WARNING: Failed to open variable array: {e}")
+                return {
+                    'name': variable_path.split('/')[-1],
+                    'path': variable_path,
+                    'error': f"Failed to load variable: {str(e)}"
+                }
+                
+        except Exception as e:
+            print(f"ERROR: Error getting variable data: {e}")
             raise
     
     def _extract_coordinate_info(self, coord_group, name: str) -> Dict[str, Any]:
@@ -570,11 +660,11 @@ class S3Service:
                         'count': array.size
                     }
                 except Exception as e:
-                    print(f"⚠️  Failed to process coordinate array {array_name}: {e}")
+                    print(f"WARNING: Failed to process coordinate array {array_name}: {e}")
             
             return info
         except Exception as e:
-            print(f"⚠️  Failed to extract coordinate info for {name}: {e}")
+            print(f"WARNING: Failed to extract coordinate info for {name}: {e}")
             return {'name': name, 'type': 'coordinate', 'error': str(e)}
     
     def _extract_variable_info(self, var_array, name: str) -> Dict[str, Any]:
@@ -600,7 +690,7 @@ class S3Service:
             
             return info
         except Exception as e:
-            print(f"⚠️  Failed to extract variable info for {name}: {e}")
+            print(f"WARNING: Failed to extract variable info for {name}: {e}")
             return {'name': name, 'type': 'variable', 'error': str(e)}
 
 # Global S3 service instance

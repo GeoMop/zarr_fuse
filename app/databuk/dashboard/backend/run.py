@@ -12,11 +12,11 @@ backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))
 
 if __name__ == "__main__":
-    print(f"🚀 Starting ZARR FUSE Dashboard Backend")
-    print(f"📁 Backend directory: {backend_dir}")
-    print(f"🌐 Server will be available at: http://localhost:8000")
-    print(f"📚 API documentation: http://localhost:8000/docs")
-    print(f"🔍 Health check: http://localhost:8000/health")
+    print(f"Starting ZARR FUSE Dashboard Backend")
+    print(f"Backend directory: {backend_dir}")
+    print(f"Server will be available at: http://localhost:8000")
+    print(f"API documentation: http://localhost:8000/docs")
+    print(f"Health check: http://localhost:8000/health")
     print()
     
     # Run the server

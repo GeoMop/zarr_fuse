@@ -53,10 +53,9 @@ The backend automatically detects test stores from the project structure:
 
 ## Data Flow
 
-1. **ZarrReader**: Opens and explores Zarr stores
-2. **TreeService**: Builds hierarchical tree structures
-3. **TreeRouter**: Exposes HTTP endpoints
-4. **Frontend**: Consumes tree data for sidebar rendering
+1. **S3Service**: Opens and explores Zarr stores from S3
+2. **S3Router**: Exposes HTTP endpoints for S3 operations
+3. **Frontend**: Consumes data for sidebar rendering and variable display
 
 ## Testing
 

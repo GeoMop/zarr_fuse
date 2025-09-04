@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Database, BarChart3, AlertCircle, Clock, RefreshCw, Folder, FileText, ChevronRight, ChevronDown } from 'lucide-react';
+import { X, Database, BarChart3, AlertCircle, Clock, RefreshCw, Folder, ChevronRight, ChevronDown } from 'lucide-react';
 import type { SidebarProps } from './types/sidebar';
 
 // Types for S3 data
@@ -30,8 +30,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   configError,
   onNodeClick
 }) => {
-  // Get current timestamp for "Updated" display
-  const currentTime = new Date().toLocaleString();
   
   // S3 data state
   const [s3Data, setS3Data] = useState<S3Response | null>(null);
@@ -287,24 +285,25 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="space-y-3">
               {s3Data.structure.stores.map((store) => (
                 <div key={store.name} className="border border-green-200 rounded-lg p-3 bg-white">
-                  <div className="mb-2">
+                  <div 
+                    className="mb-2 cursor-pointer hover:bg-green-50 p-2 rounded transition-colors"
+                    onClick={() => onNodeClick?.(store.name, '')}
+                  >
                     <span className="font-semibold text-green-800">{store.name}</span>
+                    <span className="text-xs text-gray-500 ml-2">(click to view root variables)</span>
                   </div>
                   
                   {store.error ? (
                     <div className="text-sm text-red-600">{store.error}</div>
                   ) : store.structure ? (
                     <div className="space-y-1 pl-4">
-                      {renderTreeItem(
-                        {
-                          name: 'root',
-                          type: 'group',
-                          children: (store.structure?.children || []).filter((c: any) => c.type === 'group'),
-                        },
-                        0,
-                        '',
-                        store.name
-                      )}
+                      {(store.structure?.children || [])
+                        .filter((c: any) => c.type === 'group')
+                        .map((child: any, index: number) => (
+                          <div key={`${child.name}-${index}`}>
+                            {renderTreeItem(child, 0, '', store.name)}
+                          </div>
+                        ))}
                     </div>
                   ) : (
                     <div className="text-sm text-gray-500">No structure data</div>

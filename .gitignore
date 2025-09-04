@@ -197,3 +197,7 @@ app/databuk/dashboard/dist-ssr/
 app/databuk/dashboard/*.local
 app/databuk/dashboard/.vscode/*
 !app/databuk/dashboard/.vscode/extensions.json
+
+# Dashboard backend virtual environment
+app/databuk/dashboard/backend/venv/
+app/databuk/dashboard/backend/.env

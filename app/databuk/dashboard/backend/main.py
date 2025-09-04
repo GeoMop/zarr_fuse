@@ -10,10 +10,10 @@ env_path = Path("C:/Users/fatih/Documents/GitHub/zarr_fuse/.env")
 load_dotenv(env_path)
 
 # Debug: Check if environment variables are loaded
-print(f"🔍 Environment variables loaded:")
-print(f"   S3_ACCESS_KEY: {'✅ Found' if os.getenv('S3_ACCESS_KEY') else '❌ Not found'}")
-print(f"   S3_SECRET_KEY: {'✅ Found' if os.getenv('S3_SECRET_KEY') else '❌ Not found'}")
-print(f"   S3_BUCKET_NAME: {'✅ Found' if os.getenv('S3_BUCKET_NAME') else '❌ Not found'}")
+print(f"Environment variables loaded:")
+print(f"   S3_ACCESS_KEY: {'Found' if os.getenv('S3_ACCESS_KEY') else 'Not found'}")
+print(f"   S3_SECRET_KEY: {'Found' if os.getenv('S3_SECRET_KEY') else 'Not found'}")
+print(f"   S3_BUCKET_NAME: {'Found' if os.getenv('S3_BUCKET_NAME') else 'Not found'}")
 print(f"   .env path: {env_path}")
 
 # Use absolute imports
@@ -24,13 +24,13 @@ from routers import config, s3
 async def lifespan(app: FastAPI):
     """Application lifespan events."""
     # Startup
-    print(f"🚀 Starting {settings.PROJECT_NAME} v{settings.VERSION}")
-    print(f"📁 Test stores directory: {settings.TEST_STORES_DIR}")
+    print(f"Starting {settings.PROJECT_NAME} v{settings.VERSION}")
+    print(f"Test stores directory: {settings.TEST_STORES_DIR}")
     
     yield
     
     # Shutdown
-    print(f"🛑 Shutting down {settings.PROJECT_NAME}")
+    print(f"Shutting down {settings.PROJECT_NAME}")
 
 # Create FastAPI app
 app = FastAPI(
