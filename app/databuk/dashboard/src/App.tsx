@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Sidebar } from './components/sidebar';
+import LogPanel from './components/LogPanel';
 import type { ConfigData } from './components/sidebar/types/sidebar';
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
   const [nodeError, setNodeError] = useState<string | null>(null);
   const [expandedVariables, setExpandedVariables] = useState<Set<string>>(new Set());
   const [variableData, setVariableData] = useState<{[key: string]: any}>({});
+  const [showLogPanel, setShowLogPanel] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
   // Fetch configuration data
@@ -64,6 +66,10 @@ function App() {
     } finally {
       setNodeLoading(false);
     }
+  };
+
+  const handleLogClick = () => {
+    setShowLogPanel(true);
   };
 
   useEffect(() => {
@@ -153,6 +159,7 @@ function App() {
             configLoading={configLoading}
             configError={configError}
             onNodeClick={handleNodeClick}
+            onLogClick={handleLogClick}
           />
           
           {/* Resize Handle */}
@@ -353,6 +360,12 @@ function App() {
           </div>
         )}
       </main>
+
+      {/* Log Panel */}
+      <LogPanel 
+        show={showLogPanel} 
+        onClose={() => setShowLogPanel(false)} 
+      />
     </div>
   );
 }

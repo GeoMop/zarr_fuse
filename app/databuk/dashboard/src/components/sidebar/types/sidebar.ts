@@ -22,5 +22,6 @@ export interface SidebarProps {
   configLoading: boolean;
   configError: string | null;
   onNodeClick?: (storeName: string, nodePath: string) => void;
+  onLogClick?: () => void;
 }
 

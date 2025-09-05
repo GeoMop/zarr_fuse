@@ -9,7 +9,7 @@
   Schema_file: "schemas/test_schema.yaml"
   
   # S3 Store configuration - Using new credentials 
-  STORE_URL: "s3://${S3_BUCKET_NAME}/surface.zarr"
+  STORE_URL: "s3://${S3_BUCKET_NAME}/dashboard-test/structure_tree.zarr"
 
   S3_ENDPOINT_URL: "${S3_ENDPOINT_URL}"
   S3_access_key: "${S3_ACCESS_KEY}"

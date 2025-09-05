@@ -28,7 +28,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   configData,
   configLoading,
   configError,
-  onNodeClick
+  onNodeClick,
+  onLogClick
 }) => {
   
   // S3 data state
@@ -316,7 +317,10 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
       {/* Fixed Footer - Store Log */}
       <div className="p-4 border-t border-gray-200 bg-white">
-        <div className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-2 rounded-lg transition-colors duration-200">
+        <div 
+          className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-2 rounded-lg transition-colors duration-200"
+          onClick={onLogClick}
+        >
           <span className={`inline-block w-2 h-2 ${statusColor} rounded-full`}></span>
           <span className="text-gray-700 font-medium">Store Log</span>
         </div>
