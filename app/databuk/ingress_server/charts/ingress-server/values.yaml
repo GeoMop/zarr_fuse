@@ -27,7 +27,7 @@ deployment:
   # -- Queue configuration
   queue:
     # -- Path to the queue directory
-    path: /var/data/queue
+    path: /var/zarr_fuse
   # -- Deployment secrets
   secrets:
     # -- S3 credentials
