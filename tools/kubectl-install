@@ -1,6 +1,10 @@
 #!/bin/bash
 #
 # Script to install kubectl and krew plugin manager.
+# 
+# Usage:
+#    install_kubectl.sh [debian|redhat|suse]
+#
 # It also installs some useful kubectl plugins like ctx and ns.
 # Usage for plugins:
 #   kubectl ctx <context-name> or just kubectl ctx, if you use fzf
