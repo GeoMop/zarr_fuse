@@ -4,15 +4,14 @@ import logging
 import time
 
 from threading import Thread
-from flask import Flask, request, jsonify, g
+from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
-from .auth import AUTH, AUTH_ENABLED, auth_wrapper
-from .io_utils import validate_content_type, sanitize_node_path, atomic_write, new_msg_path, validate_data
-from .configs import CONFIG, ACCEPTED_DIR, STOP
-from .worker import startup_recover, install_signal_handlers, working_loop
-from .logging_setup import setup_logging
-
+from auth import AUTH, AUTH_ENABLED, auth_wrapper
+from io_utils import validate_content_type, sanitize_node_path, atomic_write, new_msg_path, validate_data
+from configs import CONFIG, ACCEPTED_DIR, STOP
+from worker import startup_recover, install_signal_handlers, working_loop
+from logging_setup import setup_logging
 
 load_dotenv()
 APP = Flask(__name__)

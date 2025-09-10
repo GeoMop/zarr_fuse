@@ -2,8 +2,10 @@ import os
 import json
 import logging
 from flask_httpauth import HTTPBasicAuth
+from dotenv import load_dotenv
 
 LOG = logging.getLogger("auth")
+load_dotenv()
 
 def _parse_users_json(raw: str | None) -> dict:
     if not raw:

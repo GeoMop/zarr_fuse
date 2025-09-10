@@ -2,7 +2,9 @@ import os
 import yaml
 from threading import Event
 from pathlib import Path
+from dotenv import load_dotenv
 
+load_dotenv()
 
 STOP = Event()
 BASE_DIR = Path(os.getenv("QUEUE_DIR", "./var/zarr_fuse"))

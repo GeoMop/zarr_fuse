@@ -3,11 +3,13 @@ import os
 import time
 import uuid
 import json
+import csv
 import polars as pl
 import zarr_fuse as zf
-import io
-import csv
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # =========================
 # Filesystem helpers
@@ -96,4 +98,4 @@ def open_root(schema_path: Path) -> tuple[zf.Node | None, str | None]:
         }),
     }
 
-    return zf.open_store(schema_path, **opts)
+    return zf.open_store(schema_path, **opts), None

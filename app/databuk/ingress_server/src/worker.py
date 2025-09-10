@@ -5,12 +5,10 @@ import shutil
 import logging
 
 from pathlib import Path
-from .configs import ACCEPTED_DIR, FAILED_DIR, SUCCESS_DIR, ENDPOINT_NAME_TO_SCHEMA, STOP
-from .io_utils import open_root, read_df_from_bytes
-
+from configs import ACCEPTED_DIR, FAILED_DIR, SUCCESS_DIR, ENDPOINT_NAME_TO_SCHEMA, STOP
+from io_utils import open_root, read_df_from_bytes
 
 LOG = logging.getLogger("worker")
-
 
 def _move_tree_contents(src: Path, dst: Path):
     if not src.exists():
@@ -18,9 +16,25 @@ def _move_tree_contents(src: Path, dst: Path):
         return
 
     dst.mkdir(parents=True, exist_ok=True)
-    for item in src.iterdir():
-        shutil.move(str(item), str(dst / item.name))
-
+    for root, dirs, files in os.walk(src, topdown=False):
+        root_p = Path(root)
+        rel = root_p.relative_to(src)
+        target_root = dst / rel
+        target_root.mkdir(parents=True, exist_ok=True)
+        for name in files:
+            s = root_p / name
+            d = target_root / name
+            d.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.replace(s, d)
+            except Exception:
+                shutil.copy2(s, d)
+                s.unlink(missing_ok=True)
+        if root_p != src:
+            try:
+                root_p.rmdir()
+            except OSError:
+                pass
 
 def _iter_accepted_files():
     if not ACCEPTED_DIR.exists():
