@@ -1,0 +1,30 @@
+import os
+import json
+import logging
+from flask_httpauth import HTTPBasicAuth
+
+LOG = logging.getLogger("auth")
+
+def _parse_users_json(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        LOG.warning("[WARN] BASIC_AUTH_USERS_JSON invalid: %s; value=%r", e, raw)
+        return {}
+
+AUTH = HTTPBasicAuth()
+USERS = _parse_users_json(os.getenv("BASIC_AUTH_USERS_JSON"))
+AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() == "true"
+
+@AUTH.verify_password
+def verify_password(username, password):
+    if username in USERS and USERS[username] == password:
+        return username
+    else:
+        LOG.warning("[WARN] BASIC_AUTH failed: username=%r", username)
+    return None
+
+def auth_wrapper(view):
+    return AUTH.login_required(view) if AUTH_ENABLED else view

@@ -1,6 +1,6 @@
 import requests
 
-url = "https://zarr-fuse-ingress-server-latest.dyn.cloud.e-infra.cz/api/v1/ci-tree"
+url = "https://zarr-fuse-ingress-server-latest.dyn.cloud.e-infra.cz/api/v1/bukov"
 
 csv_data = """time,temperature
 2025-05-13T08:00:00,20.0
@@ -9,6 +9,6 @@ csv_data = """time,temperature
 
 headers = {"Content-Type": "text/csv"}
 
-r = requests.post(url, headers=headers, data=csv_data.encode("utf-8"), auth=("test", "test"))
+r = requests.post(url, headers=headers, data=csv_data.encode("utf-8"), auth=("fiedler-service", "7Zj3?2ho"))
 
 print(r.status_code, r.text)

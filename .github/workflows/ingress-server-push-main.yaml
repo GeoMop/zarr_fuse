@@ -1,6 +1,6 @@
 name: Ingress server - push main
 on:
-  push:
+  pull_request:
     branches:
       - main
   workflow_dispatch:
@@ -33,5 +33,5 @@ jobs:
       tag: generate
       namespace: ingress-server-latest
       release-name: ingress-server-latest
-      production: true
+      production: false
     secrets: inherit
