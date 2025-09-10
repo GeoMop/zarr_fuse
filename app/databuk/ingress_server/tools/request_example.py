@@ -9,6 +9,6 @@ csv_data = """time,temperature
 
 headers = {"Content-Type": "text/csv"}
 
-r = requests.post(url, headers=headers, data=csv_data.encode("utf-8"), auth=("fiedler-service", "7Zj3?2ho"))
+r = requests.post(url, headers=headers, data=csv_data.encode("utf-8"), auth=("test", "test"))
 
 print(r.status_code, r.text)

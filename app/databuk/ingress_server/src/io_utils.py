@@ -3,14 +3,11 @@ import os
 import time
 import uuid
 import json
-import logging
 import polars as pl
 import zarr_fuse as zf
 import io
 import csv
 from pathlib import Path
-
-LOG = logging.getLogger("io_utils")
 
 # =========================
 # Filesystem helpers
@@ -26,15 +23,14 @@ def new_msg_path(base: Path, suffix: str) -> Path:
     uid = uuid.uuid4().hex[:12]
     return base / f"{ts}_{uid}{suffix}"
 
-def read_df_from_bytes(data: bytes, content_type: str) -> pl.DataFrame:
+def read_df_from_bytes(data: bytes, content_type: str) -> tuple[pl.DataFrame | None, str | None]:
     ct = content_type.lower()
-    if "text/csv" in ct:
-        return pl.read_csv(io.BytesIO(data))
-    elif "application/json" in ct:
-        return pl.read_json(io.BytesIO(data))
+    if "csv" in ct:
+        return pl.read_csv(io.BytesIO(data)), None
+    elif "json" in ct:
+        return pl.read_json(io.BytesIO(data)), None
     else:
-        LOG.error("Unsupported content type: %s", content_type)
-        raise ValueError(f"Unsupported content type: {content_type}. Use application/json or text/csv.")
+        return None, f"Unsupported content type: {content_type}. Use application/json or text/csv."
 
 def validate_content_type(content_type: str | None) -> tuple[bool, str | None]:
     if not content_type:
@@ -42,19 +38,17 @@ def validate_content_type(content_type: str | None) -> tuple[bool, str | None]:
 
     ct = content_type.lower()
     if ("application/json" not in ct) and ("text/csv" not in ct):
-        LOG.error("Unsupported Content-Type: %s", content_type)
         return False, f"Unsupported Content-Type: {content_type}"
     return True, None
 
-def sanitize_node_path(p: str) -> Path:
+def sanitize_node_path(p: str) -> tuple[Path, str | None]:
     p = (p or "").strip().lstrip("/")
     candidate = Path(p)
 
     if candidate.is_absolute() or any(part == ".." for part in candidate.parts):
-        LOG.error("Invalid node_path: %s", p)
-        raise ValueError("Invalid node_path")
+        return None, f"Invalid node_path {p}"
 
-    return candidate
+    return candidate, None
 
 def validate_data(data: bytes, content_type: str) -> tuple[bool, str | None]:
     if not data:
@@ -64,16 +58,14 @@ def validate_data(data: bytes, content_type: str) -> tuple[bool, str | None]:
         try:
             json.loads(data.decode("utf-8"))
         except Exception as e:
-            LOG.warning("Invalid JSON payload: %s", e)
-            return False, "Invalid JSON"
+            return False, f"Invalid JSON payload: {e}"
 
     elif "csv" in content_type:
         try:
             reader = csv.reader(io.StringIO(data.decode("utf-8")))
             next(reader)
         except Exception as e:
-            LOG.warning("Invalid CSV payload: %s", e)
-            return False, "Invalid CSV"
+            return False, f"Invalid CSV payload: {e}"
 
     return True, None
 
@@ -81,20 +73,20 @@ def validate_data(data: bytes, content_type: str) -> tuple[bool, str | None]:
 # =========================
 # S3 / zarr_fuse helpers
 # =========================
-def _get_env_vars():
+def _get_env_vars() -> tuple[tuple[str, str] | None, str | None]:
     s3_key = os.getenv("S3_ACCESS_KEY")
     s3_sec = os.getenv("S3_SECRET_KEY")
 
     if s3_key is None:
-        LOG.error("S3 access key is missing")
-        raise ValueError("S3 access key must be provided")
+        return None, "S3 access key must be provided"
     if s3_sec is None:
-        LOG.error("S3 secret key is missing")
-        raise ValueError("S3 secret key must be provided")
-    return s3_key, s3_sec
+        return None, "S3 secret key must be provided"
+    return (s3_key, s3_sec), None
 
-def open_root(schema_path: Path):
-    s3_key, s3_sec = _get_env_vars()
+def open_root(schema_path: Path) -> tuple[zf.Node | None, str | None]:
+    (s3_key, s3_sec), err = _get_env_vars()
+    if err:
+        return None, err
 
     opts = {
         "S3_ACCESS_KEY": s3_key,

@@ -11,7 +11,7 @@ def _parse_users_json(raw: str | None) -> dict:
     try:
         return json.loads(raw)
     except json.JSONDecodeError as e:
-        LOG.warning("BASIC_AUTH_USERS_JSON invalid: %s", e)
+        LOG.error("BASIC_AUTH_USERS_JSON invalid: %s", e)
         return {}
 
 AUTH = HTTPBasicAuth()

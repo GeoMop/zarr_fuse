@@ -35,15 +35,13 @@ def _iter_accepted_files():
             yield Path(root) / name
 
 
-def _load_meta(data_path: Path) -> dict:
+def _load_meta(data_path: Path) -> tuple[dict, str | None]:
     LOG.info("Loading meta for %s", data_path)
     meta_path = data_path.with_suffix(data_path.suffix + ".meta.json")
     try:
-        LOG.info("Loading meta from %s", meta_path)
-        return json.loads(meta_path.read_text(encoding="utf-8"))
-    except Exception:
-        LOG.warning("Failed to load meta for %s", data_path)
-        return {"content_type": "application/json", "node_path": "", "endpoint_name": data_path.parts[data_path.parts.index("accepted") + 1]}
+        return json.loads(meta_path.read_text(encoding="utf-8")), None
+    except Exception as e:
+        return {}, f"Failed to load meta: {e}"
 
 
 def _target_dirs_for(data_path: Path) -> tuple[Path, Path]:
@@ -51,25 +49,33 @@ def _target_dirs_for(data_path: Path) -> tuple[Path, Path]:
     return (SUCCESS_DIR / rel).parent, (FAILED_DIR / rel).parent
 
 
-def _process_one(data_path: Path):
-    meta = _load_meta(data_path)
+def _process_one(data_path: Path) -> str | None:
+    meta, err = _load_meta(data_path)
+    if err:
+        return err
+
     endpoint_name = meta.get("endpoint_name", "")
     node_path = meta.get("node_path", "")
     content_type = meta.get("content_type", "application/json")
 
     schema_path = ENDPOINT_NAME_TO_SCHEMA.get(endpoint_name)
     if not schema_path:
-        LOG.warning("No schema_path mapping for endpoint_name=%s", endpoint_name)
-        raise RuntimeError(f"No schema_path mapping for endpoint_name={endpoint_name}")
+        return f"No schema for endpoint {endpoint_name}"
 
     payload = data_path.read_bytes()
-    df = read_df_from_bytes(payload, content_type)
+    df, err = read_df_from_bytes(payload, content_type)
+    if err:
+        return f"Failed to read DataFrame: {err}"
 
-    root = open_root(schema_path)
+    root, err = open_root(schema_path)
+    if err:
+        return f"Failed to open root: {err}"
+
     if not node_path:
         root.update(df)
     else:
         root[node_path].update(df)
+    return None
 
 
 def _save_to_queue(src: Path, dst: Path):
@@ -94,13 +100,16 @@ def working_loop(poll_sleep: float = 30.0):
 
             try:
                 LOG.info("Processing data %s", data_path)
-                _process_one(data_path)
+                err = _process_one(data_path)
+                if err:
+                    LOG.error("Processing failed for %s: %s", data_path, err)
+                    _save_to_queue(data_path, failed_dir)
+                else:
+                    LOG.info("Processing succeeded for %s", data_path)
+                    _save_to_queue(data_path, success_dir)
             except Exception as e:
                 LOG.exception("Processing failed for %s: %s", data_path, e)
                 _save_to_queue(data_path, failed_dir)
-            else:
-                LOG.info("Processing succeeded for %s", data_path)
-                _save_to_queue(data_path, success_dir)
 
             progressed = True
         if not progressed:

@@ -36,20 +36,19 @@ def _upload_node(endpoint_name: str, node_path: str = ""):
     content_type = (request.headers.get("Content-Type") or "").lower()
     ok, err = validate_content_type(content_type)
     if not ok:
-        LOG.warning("Invalid content type: %s", content_type)
+        LOG.warning("Validation content type failed for %s: %s", content_type, err)
         return jsonify({"error": err}), 415 if "Unsupported" in err else 400
 
     data = request.get_data()
     ok, err = validate_data(data, content_type)
     if not ok:
-        LOG.warning("Invalid data: %s", err)
+        LOG.warning("Validating data failed for %s", err)
         return jsonify({"error": err}), 400
 
-    try:
-        safe_child = sanitize_node_path(node_path)
-    except ValueError as e:
-        LOG.warning("Invalid node_path: %s", node_path)
-        return jsonify({"error": str(e)}), 400
+    safe_child, err = sanitize_node_path(node_path)
+    if err:
+        LOG.warning("Sanitizing node_path failed for %s: %s", node_path, err)
+        return jsonify({"error": err}), 400
 
     base = (ACCEPTED_DIR / endpoint_name) / safe_child
     suffix = ".csv" if "csv" in content_type else ".json"
@@ -67,7 +66,7 @@ def _upload_node(endpoint_name: str, node_path: str = ""):
 
     atomic_write(msg_path.with_suffix(msg_path.suffix + ".meta.json"), json.dumps(meta_data).encode("utf-8"))
 
-    LOG.info("ingress.accepted endpoint=%s node_path=%s path=%s user=%s ct=%s bytes=%d",
+    LOG.info("Accepted data for endpoint=%s node_path=%s path=%s user=%s ct=%s bytes=%d",
             endpoint_name, node_path, msg_path, meta_data["username"],
             content_type, len(data))
     return jsonify({"status": "accepted"}), 202
