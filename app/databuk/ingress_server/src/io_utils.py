@@ -75,24 +75,28 @@ def validate_data(data: bytes, content_type: str) -> tuple[bool, str | None]:
 # =========================
 # S3 / zarr_fuse helpers
 # =========================
-def _get_env_vars() -> tuple[tuple[str, str] | None, str | None]:
+def _get_env_vars() -> tuple[tuple[str, str, str] | None, str | None]:
     s3_key = os.getenv("S3_ACCESS_KEY")
     s3_sec = os.getenv("S3_SECRET_KEY")
+    store_url = os.getenv("S3_STORE_URL")
 
     if s3_key is None:
         return None, "S3 access key must be provided"
     if s3_sec is None:
         return None, "S3 secret key must be provided"
-    return (s3_key, s3_sec), None
+    if store_url is None:
+        return None, "S3 store URL must be provided"
+    return (s3_key, s3_sec, store_url), None
 
 def open_root(schema_path: Path) -> tuple[zf.Node | None, str | None]:
-    (s3_key, s3_sec), err = _get_env_vars()
+    (s3_key, s3_sec, store_url), err = _get_env_vars()
     if err:
         return None, err
 
     opts = {
         "S3_ACCESS_KEY": s3_key,
         "S3_SECRET_KEY": s3_sec,
+        "STORE_URL": store_url,
         "S3_OPTIONS": json.dumps({
             "config_kwargs": {"s3": {"addressing_style": "path"}}
         }),
