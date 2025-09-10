@@ -182,3 +182,5 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+app/hlavo_surface/inputs/.env
