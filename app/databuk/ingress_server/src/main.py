@@ -1,196 +1,145 @@
-import io
-import yaml
 import os
-import traceback
-from pathlib import Path
+import json
+import logging
+import time
+import atexit
+
+from threading import Thread
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-import polars as pl
-import zarr_fuse as zf
-import json
-from flask_httpauth import HTTPBasicAuth
-import time, uuid, shutil
 
-# ---------- DEFAULT BOOTSTRAPPING ----------
+from auth import AUTH, AUTH_ENABLED, auth_wrapper
+from io_utils import validate_content_type, sanitize_node_path, atomic_write, new_msg_path, validate_data
+from configs import CONFIG, ACCEPTED_DIR, STOP
+from worker import startup_recover, install_signal_handlers, working_loop
+from logging_setup import setup_logging
+
 load_dotenv()
 APP = Flask(__name__)
+handler = setup_logging()
+LOG = logging.getLogger("ingress")
+
+# =========================
+# Flask handlers
+# =========================
+@APP.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
 
 
-# ---------- QUEUE BOOTSTRAPPING ----------
-QUEUE_DIR = Path(os.getenv("QUEUE_DIR", "./data/queue"))
-PENDING_DIR = QUEUE_DIR / "pending"
-PROCESSED_DIR = QUEUE_DIR / "processed"
-for d in (PENDING_DIR, PROCESSED_DIR):
-    d.mkdir(parents=True, exist_ok=True)
+def _upload_node(endpoint_name: str, node_path: str = ""):
+    username = AUTH.current_user() if AUTH_ENABLED else "anonymous"
 
+    LOG.debug("ingress.request endpoint=%s node_path=%r ct=%r user=%r",
+        endpoint_name, node_path, request.headers.get("Content-Type"), username)
 
-# ---------- AUTH BOOTSTRAPPING ----------
-def _parse_users_json(raw: str | None) -> dict:
-    if not raw:
-        return {}
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"[WARN] BASIC_AUTH_USERS_JSON invalid: {e}; value={raw!r}")
-        return {}
+    content_type = (request.headers.get("Content-Type") or "").lower()
+    ok, err = validate_content_type(content_type)
+    if not ok:
+        LOG.warning("Validation content type failed for %s: %s", content_type, err)
+        return jsonify({"error": err}), 415 if "Unsupported" in err else 400
 
-AUTH = HTTPBasicAuth()
-USERS = _parse_users_json(os.getenv("BASIC_AUTH_USERS_JSON"))
-AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() == "true"
+    data = request.get_data()
+    ok, err = validate_data(data, content_type)
+    if not ok:
+        LOG.warning("Validating data failed for %s", err)
+        return jsonify({"error": err}), 400
 
+    safe_child, err = sanitize_node_path(node_path)
+    if err:
+        LOG.warning("Sanitizing node_path failed for %s: %s", node_path, err)
+        return jsonify({"error": err}), 400
 
-# ---------- AUTH HELPERS ----------
-@AUTH.verify_password
-def verify_password(username, password):
-    if not AUTH_ENABLED:
-        return username
+    base = (ACCEPTED_DIR / endpoint_name) / safe_child
+    suffix = ".csv" if "csv" in content_type else ".json"
+    msg_path = new_msg_path(base, suffix)
 
-    if username in USERS and USERS[username] == password:
-        return username
-    return None
+    atomic_write(msg_path, data)
 
-
-# ---------- QUEUE HELPERS ----------
-def _atomic_write(path: Path, data: bytes):
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_bytes(data)
-    os.replace(tmp, path)
-
-def _new_msg_path(suffix: str = ".json") -> Path:
-    ts = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
-    uid = uuid.uuid4().hex[:12]
-    return PENDING_DIR / f"{ts}_{uid}{suffix}"
-
-
-# ---------- S3 HELPERS ----------
-def _get_env_vars():
-    s3_key = os.getenv("S3_ACCESS_KEY")
-    s3_sec = os.getenv("S3_SECRET_KEY")
-
-    if s3_key is None:
-        raise ValueError("S3 access key must be provided")
-    if s3_sec is None:
-        raise ValueError("S3 secret key must be provided")
-    return s3_key, s3_sec
-
-def _get_root(schema_path: Path):
-    s3_key, s3_sec = _get_env_vars()
-
-    opts = {
-        "S3_ACCESS_KEY": s3_key,
-        "S3_SECRET_KEY": s3_sec,
-        "S3_OPTIONS": json.dumps({
-            "config_kwargs": {"s3": {"addressing_style": "path"}}
-        }),
+    meta_data = {
+        "content_type": content_type,
+        "node_path": node_path,
+        "endpoint_name": endpoint_name,
+        "username": username,
+        "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
-    return zf.open_store(schema_path, **opts)
+    atomic_write(msg_path.with_suffix(msg_path.suffix + ".meta.json"), json.dumps(meta_data).encode("utf-8"))
 
-# ---------- DATA PARSING ----------
-def _get_file_data(data, content_type):
-    ct = (content_type or "").lower()
-    if "text/csv" in ct:
-        return pl.read_csv(io.BytesIO(data))
-    elif "application/json" in ct:
-        return pl.read_json(io.BytesIO(data))
-    else:
-        raise ValueError(f"Unsupported content type: {content_type}. Use application/json or text/csv.")
-
-def _validate_request_data(data, content_type):
-    if not data:
-        return jsonify({"error": "No data provided"}), 400
-    if not content_type:
-        return jsonify({"error": "No Content-Type provided"}), 400
-
-    ct = content_type.lower()
-    if ("application/json" not in ct) and ("text/csv" not in ct):
-        return jsonify({"error": f"Unsupported Content-Type: {content_type}"}), 415
-
-    return None
-
-# ---------- HANDLERS ----------
-@AUTH.login_required
-def upload_node(schema_path, node_path=""):
-    content_type = (request.headers.get("Content-Type") or "").lower()
-    data = request.data
-    msg_path = None
-
-    valid = _validate_request_data(data, content_type)
-    if valid:
-        return valid
-
-    try:
-        suffix = ".csv" if "csv" in content_type else ".json"
-        msg_path = _new_msg_path(suffix)
-        _atomic_write(msg_path, data)
-
-        df = _get_file_data(data, content_type)
-        root = _get_root(Path(schema_path))
-        if not node_path:
-            root.update(df)
-        else:
-            root[node_path].update(df)
-
-        shutil.move(msg_path, PROCESSED_DIR / msg_path.name)
-
-        return jsonify({"status": f"Updated {node_path or '/'} successfully"})
-
-    except Exception as e:
-        payload = {"error": f"Update failed: {e}", "trace": traceback.format_exc()}
-        if msg_path is not None:
-            payload["pending_file"] = str(msg_path)
-        return jsonify(payload), 400
+    LOG.info("Accepted data for endpoint=%s node_path=%s path=%s user=%s ct=%s bytes=%d",
+            endpoint_name, node_path, msg_path, meta_data["username"],
+            content_type, len(data))
+    return jsonify({"status": "accepted"}), 202
 
 
-# ---------- ROUTE REGISTRACE ----------
-def create_upload_endpoint(endpoint_name, endpoint_url, schema_path):
+# =========================
+# Route creation
+# =========================
+def create_upload_endpoint(endpoint_name: str, endpoint_url: str):
+    wrapped = auth_wrapper(_upload_node)
+
     # Root path (without node_path)
     APP.add_url_rule(
         endpoint_url,
         endpoint=f"upload_node_root_{endpoint_name.replace('-', '_')}",
-        view_func=upload_node,
+        view_func=wrapped,
         methods=["POST"],
-        defaults={"schema_path": schema_path, "node_path": ""},
+        defaults={"endpoint_name": endpoint_name, "node_path": ""},
     )
 
     # Subpath with node_path
     APP.add_url_rule(
         f"{endpoint_url}/<path:node_path>",
         endpoint=f"upload_node_sub_{endpoint_name.replace('-', '_')}",
-        view_func=upload_node,
+        view_func=wrapped,
         methods=["POST"],
-        defaults={"schema_path": schema_path},
+        defaults={"endpoint_name": endpoint_name},
     )
 
 
-# ---------- HEALTH ENDPOINTS ----------
-@APP.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok"}), 200
-
-
-# ---------- APP FACTORY ----------
+# =========================
+# App creation and worker thread
+# =========================
 def create_app():
-    path_prefix = Path(__file__).parent
-    if os.getenv("PRODUCTION", "false").lower() == "true":
-        path_prefix /= "inputs/prod"
-    else:
-        path_prefix /= "inputs/ci"
-
-    config_path = path_prefix / "endpoints_config.yaml"
-
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
-
-    for endpoint in config.get("endpoints", []):
-        endpoint_name = endpoint["name"]
-        endpoint_url = endpoint["endpoint"]
-        schema_path = path_prefix / endpoint["schema_path"]
-        create_upload_endpoint(endpoint_name, endpoint_url, schema_path)
-
+    for ep in CONFIG.get("endpoints", []):
+        create_upload_endpoint(ep["name"], ep["endpoint"])
     return APP
 
+def _start_worker_thread():
+    t = Thread(target=working_loop, name="worker", daemon=True)
+    t.start()
+    APP.config["worker_thread"] = t
+    return t
 
-# ---------- MAIN ----------
+def _graceful_shutdown():
+    STOP.set()
+    t = APP.config.get("worker_thread")
+    if t:
+        t.join(timeout=10)
+
+def create_app_with_worker():
+    startup_recover()
+    install_signal_handlers()
+    _start_worker_thread()
+
+    atexit.register(_graceful_shutdown)
+
+    return create_app()
+
+
+# =========================
+# Main
+# =========================
 if __name__ == "__main__":
-    create_app().run(debug=True, port=8000)
+    create_app()
+    startup_recover()
+    install_signal_handlers()
+
+    t = _start_worker_thread()
+    try:
+        APP.run(host="0.0.0.0", port=int(os.getenv("PORT", 8000)), debug=False, use_reloader=False)
+    except KeyboardInterrupt:
+        LOG.info("KeyboardInterrupt - shutting down…")
+    finally:
+        LOG.info("Waiting for worker to stop…")
+        _graceful_shutdown()
