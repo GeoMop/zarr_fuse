@@ -81,7 +81,7 @@ pip install .[plotting, apps]
 
 ## Development
 
-Run `bash setup_env.sh` in the root of the sources to create development virtual environment.
+Run `bash tools/setup_env.sh` in the root of the sources to create development virtual environment.
 In particular it installs zarr_fuse as:
 
 ```
