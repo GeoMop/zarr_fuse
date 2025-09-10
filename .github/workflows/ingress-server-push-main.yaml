@@ -21,7 +21,6 @@ jobs:
         uses: tj-actions/changed-files@v45
         with:
           files: |
-            charts/ingress-server/**
             app/databuk/ingress_server/**
   build-and-deploy:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
@@ -32,7 +31,7 @@ jobs:
       push-container: true
       deploy-helm-chart: true
       tag: generate
-      namespace: ingress-server
-      release-name: ingress-server
+      namespace: ingress-server-latest
+      release-name: ingress-server-latest
       production: true
     secrets: inherit

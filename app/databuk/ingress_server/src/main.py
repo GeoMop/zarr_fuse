@@ -43,9 +43,6 @@ AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() == "true"
 
 @AUTH.verify_password
 def verify_password(username, password):
-    if not AUTH_ENABLED:
-        return username
-
     if username in USERS and USERS[username] == password:
         return username
     return None
@@ -140,6 +137,15 @@ def _validate_content_type(content_type):
         return False, f"Unsupported Content-Type: {content_type}"
     return True, None
 
+def _sanitize_node_path(p: str) -> Path:
+    p = (p or "").strip().lstrip("/")
+    candidate = Path(p)
+
+    if candidate.is_absolute() or any(part == ".." for part in candidate.parts):
+        raise ValueError("Invalid node_path")
+
+    return candidate
+
 
 # =========================
 # Flask handlers
@@ -148,8 +154,7 @@ def _validate_content_type(content_type):
 def health():
     return jsonify({"status": "ok"}), 200
 
-@AUTH.login_required
-def upload_node(endpoint_name, node_path=""):
+def _upload_node(endpoint_name, node_path=""):
     content_type = (request.headers.get("Content-Type") or "").lower()
     ok, err = _validate_content_type(content_type)
     if not ok:
@@ -159,7 +164,11 @@ def upload_node(endpoint_name, node_path=""):
     if not data:
         return jsonify({"error": "No data provided"}), 400
 
-    safe_child = Path(node_path) if node_path else Path("")
+    try:
+        safe_child = _sanitize_node_path(node_path)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
     base = (ACCEPTED_DIR / endpoint_name) / safe_child
     suffix = ".csv" if "csv" in content_type else ".json"
     msg_path = _new_msg_path(base, suffix)
@@ -170,21 +179,30 @@ def upload_node(endpoint_name, node_path=""):
         "content_type": content_type,
         "node_path": node_path,
         "endpoint_name": endpoint_name,
+        "username": AUTH.current_user() or "anonymous",
+        "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
     _atomic_write(msg_path.with_suffix(msg_path.suffix + ".meta.json"), json.dumps(meta_data).encode("utf-8"))
 
-    LOG.info("Accepted payload -> %s", msg_path)
+    LOG.info("Accepted payload -> %s (user=%s)", msg_path, meta_data["username"])
     return jsonify({"status": "accepted", "path": str(msg_path.relative_to(BASE_DIR))}), 202
 
 
-# ---------- ROUTE REGISTRACE ----------
+# =========================
+# Route creation
+# =========================
+def _protected(view):
+    return AUTH.login_required(view) if AUTH_ENABLED else view
+
 def create_upload_endpoint(endpoint_name, endpoint_url):
+    wrapped = _protected(_upload_node)
+
     # Root path (without node_path)
     APP.add_url_rule(
         endpoint_url,
         endpoint=f"upload_node_root_{endpoint_name.replace('-', '_')}",
-        view_func=upload_node,
+        view_func=wrapped,
         methods=["POST"],
         defaults={"endpoint_name": endpoint_name, "node_path": ""},
     )
@@ -193,7 +211,7 @@ def create_upload_endpoint(endpoint_name, endpoint_url):
     APP.add_url_rule(
         f"{endpoint_url}/<path:node_path>",
         endpoint=f"upload_node_sub_{endpoint_name.replace('-', '_')}",
-        view_func=upload_node,
+        view_func=wrapped,
         methods=["POST"],
         defaults={"endpoint_name": endpoint_name},
     )
@@ -207,26 +225,10 @@ STOP = Event()
 def move_tree_contents(src: Path, dst: Path):
     if not src.exists():
         return
-
     dst.mkdir(parents=True, exist_ok=True)
-    for root, dirs, files in os.walk(src, topdown=False):
-        root_p = Path(root)
-        rel = root_p.relative_to(src)
-        target_root = dst / rel
-        target_root.mkdir(parents=True, exist_ok=True)
-        for name in files:
-            s = root_p / name
-            d = target_root / name
-            d.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                os.replace(s, d)
-            except Exception:
-                shutil.copy2(s, d)
-                s.unlink(missing_ok=True)
-        try:
-            root_p.rmdir()
-        except OSError:
-            pass
+
+    for item in src.iterdir():
+        shutil.move(str(item), str(dst / item.name))
 
 
 def _iter_accepted_files():
