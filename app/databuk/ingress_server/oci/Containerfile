@@ -38,4 +38,4 @@ USER ingress
 WORKDIR /ingress-server
 EXPOSE 8000
 
-CMD ["waitress-serve", "--host", "0.0.0.0", "--port", "8000", "--call", "main:create_app"]
+CMD ["waitress-serve", "--host", "0.0.0.0", "--port", "8000", "--call", "main:create_app_with_worker"]

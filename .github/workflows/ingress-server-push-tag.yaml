@@ -1,7 +1,4 @@
-# ---------------------------
-# ---- DONT USE FOR NOW -----
-# ---------------------------
-name: Ingress server - push main
+name: Ingress server - push tag
 on:
   push:
     tags:

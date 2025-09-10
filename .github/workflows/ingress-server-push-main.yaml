@@ -33,5 +33,5 @@ jobs:
       tag: generate
       namespace: ingress-server-latest
       release-name: ingress-server-latest
-      production: true
+      production: false
     secrets: inherit
