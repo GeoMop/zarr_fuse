@@ -8,7 +8,7 @@ from flask import Flask, request, jsonify, g
 from dotenv import load_dotenv
 
 from .auth import AUTH, AUTH_ENABLED, auth_wrapper
-from .io_utils import validate_content_type, sanitize_node_path, atomic_write, new_msg_path
+from .io_utils import validate_content_type, sanitize_node_path, atomic_write, new_msg_path, validate_data
 from .configs import CONFIG, ACCEPTED_DIR, STOP
 from .worker import startup_recover, install_signal_handlers, working_loop
 from .logging_setup import setup_logging
@@ -27,10 +27,11 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 
-def _upload_node(endpoint_name, node_path=""):
+def _upload_node(endpoint_name: str, node_path: str = ""):
+    username = AUTH.current_user() if AUTH_ENABLED else "anonymous"
+
     LOG.debug("ingress.request endpoint=%s node_path=%r ct=%r user=%r",
-        endpoint_name, node_path, request.headers.get("Content-Type"),
-        AUTH.current_user() if AUTH_ENABLED else "anonymous")
+        endpoint_name, node_path, request.headers.get("Content-Type"), username)
 
     content_type = (request.headers.get("Content-Type") or "").lower()
     ok, err = validate_content_type(content_type)
@@ -39,9 +40,10 @@ def _upload_node(endpoint_name, node_path=""):
         return jsonify({"error": err}), 415 if "Unsupported" in err else 400
 
     data = request.get_data()
-    if not data:
-        LOG.warning("No data provided")
-        return jsonify({"error": "No data provided"}), 400
+    ok, err = validate_data(data, content_type)
+    if not ok:
+        LOG.warning("Invalid data: %s", err)
+        return jsonify({"error": err}), 400
 
     try:
         safe_child = sanitize_node_path(node_path)
@@ -59,7 +61,7 @@ def _upload_node(endpoint_name, node_path=""):
         "content_type": content_type,
         "node_path": node_path,
         "endpoint_name": endpoint_name,
-        "username": AUTH.current_user() or "anonymous",
+        "username": username,
         "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
@@ -74,7 +76,7 @@ def _upload_node(endpoint_name, node_path=""):
 # =========================
 # Route creation
 # =========================
-def create_upload_endpoint(endpoint_name, endpoint_url):
+def create_upload_endpoint(endpoint_name: str, endpoint_url: str):
     wrapped = auth_wrapper(_upload_node)
 
     # Root path (without node_path)

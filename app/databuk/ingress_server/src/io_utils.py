@@ -6,6 +6,8 @@ import json
 import logging
 import polars as pl
 import zarr_fuse as zf
+import io
+import csv
 from pathlib import Path
 
 LOG = logging.getLogger("io_utils")
@@ -24,7 +26,7 @@ def new_msg_path(base: Path, suffix: str) -> Path:
     uid = uuid.uuid4().hex[:12]
     return base / f"{ts}_{uid}{suffix}"
 
-def read_df_from_bytes(data, content_type):
+def read_df_from_bytes(data: bytes, content_type: str) -> pl.DataFrame:
     ct = content_type.lower()
     if "text/csv" in ct:
         return pl.read_csv(io.BytesIO(data))
@@ -34,7 +36,7 @@ def read_df_from_bytes(data, content_type):
         LOG.error("Unsupported content type: %s", content_type)
         raise ValueError(f"Unsupported content type: {content_type}. Use application/json or text/csv.")
 
-def validate_content_type(content_type):
+def validate_content_type(content_type: str | None) -> tuple[bool, str | None]:
     if not content_type:
         return False, "No Content-Type provided"
 
@@ -53,6 +55,27 @@ def sanitize_node_path(p: str) -> Path:
         raise ValueError("Invalid node_path")
 
     return candidate
+
+def validate_data(data: bytes, content_type: str) -> tuple[bool, str | None]:
+    if not data:
+        return False, "No data provided"
+
+    if "json" in content_type:
+        try:
+            json.loads(data.decode("utf-8"))
+        except Exception as e:
+            LOG.warning("Invalid JSON payload: %s", e)
+            return False, "Invalid JSON"
+
+    elif "csv" in content_type:
+        try:
+            reader = csv.reader(io.StringIO(data.decode("utf-8")))
+            next(reader)
+        except Exception as e:
+            LOG.warning("Invalid CSV payload: %s", e)
+            return False, "Invalid CSV"
+
+    return True, None
 
 
 # =========================
