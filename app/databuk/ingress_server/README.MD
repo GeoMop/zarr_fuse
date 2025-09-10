@@ -46,16 +46,14 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 S3_ACCESS_KEY=YOUR_ACCESS_KEY
 S3_SECRET_KEY=YOUR_SECRET_KEY
 S3_ENDPOINT_URL=S3_ENDPOINT_URL
+S3_STORE_URL=s3://...
 
 # Queue
-QUEUE_DIR=./data/queue
+QUEUE_DIR=./data/zarr_fuse
 
 # Required for HTTP Basic Auth
 BASIC_AUTH_USERS_JSON={"alice":"password"}
-AUTH_ENABLED=true
 
-# Production environment, if true than prod_endpoints_config.yaml will be used
-PRODUCTION=false
 ```
 
 The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.

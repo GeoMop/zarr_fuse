@@ -20,8 +20,6 @@ app:
 # -- Deployment configuration
 # @default -- ~
 deployment:
-  # -- If is production
-  production: false
   # -- Number of replicas
   replicaCount: 1
   # -- Queue configuration
@@ -32,7 +30,12 @@ deployment:
   secrets:
     # -- S3 credentials
     s3:
+      # -- S3 store URL (e.g., s3://bucket-name/path/to/store.zarr)
+      # -- Replaced during deploy
       endpointUrl: ""
+      # -- S3 store URL
+      # -- Replaced during deploy
+      storeUrl: ""
       # -- S3 access key
       # -- Replaced during deploy
       accessKey: ""
@@ -41,8 +44,6 @@ deployment:
       secretKey: ""
     # -- Basic authentication configuration
     basicAuth:
-      # -- Enable or disable basic auth
-      enabled: true
       # -- JSON string of users for basic auth
       # -- Example: '{"user1": "password1", "user2": "password2"}'
       # -- Replaced during deploy
