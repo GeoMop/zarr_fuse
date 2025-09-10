@@ -16,7 +16,7 @@ def _move_tree_contents(src: Path, dst: Path):
         return
 
     dst.mkdir(parents=True, exist_ok=True)
-    for root, dirs, files in os.walk(src, topdown=False):
+    for root, _, files in os.walk(src, topdown=False):
         root_p = Path(root)
         rel = root_p.relative_to(src)
         target_root = dst / rel

@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import time
+import atexit
 
 from threading import Thread
 from flask import Flask, request, jsonify
@@ -97,24 +98,48 @@ def create_upload_endpoint(endpoint_name: str, endpoint_url: str):
 
 
 # =========================
+# App creation and worker thread
+# =========================
+def create_app():
+    for ep in CONFIG.get("endpoints", []):
+        create_upload_endpoint(ep["name"], ep["endpoint"])
+    return APP
+
+def _start_worker_thread():
+    t = Thread(target=working_loop, name="worker", daemon=True)
+    t.start()
+    APP.config["worker_thread"] = t
+    return t
+
+def _graceful_shutdown():
+    STOP.set()
+    t = APP.config.get("worker_thread")
+    if t:
+        t.join(timeout=10)
+
+def create_app_with_worker():
+    startup_recover()
+    install_signal_handlers()
+    _start_worker_thread()
+
+    atexit.register(_graceful_shutdown)
+
+    return create_app()
+
+
+# =========================
 # Main
 # =========================
 if __name__ == "__main__":
-    LOG.info("Starting ingress server…")
-    for ep in CONFIG.get("endpoints", []):
-        create_upload_endpoint(ep["name"], ep["endpoint"])
-
+    create_app()
     startup_recover()
     install_signal_handlers()
 
-    worker = Thread(target=working_loop, name="worker", daemon=True)
-    worker.start()
-
+    t = _start_worker_thread()
     try:
         APP.run(host="0.0.0.0", port=int(os.getenv("PORT", 8000)), debug=False, use_reloader=False)
     except KeyboardInterrupt:
         LOG.info("KeyboardInterrupt - shutting down…")
     finally:
         LOG.info("Waiting for worker to stop…")
-        STOP.set()
-        worker.join(timeout=10)
+        _graceful_shutdown()
