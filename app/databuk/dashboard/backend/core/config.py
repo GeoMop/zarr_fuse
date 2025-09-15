@@ -1,6 +1,15 @@
 import os
 from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv
+
+CURRENT_DIR = Path(__file__).resolve().parent.parent  # points to backend/
+
+# Strictly load only backend-local .env (no fallback to repo root)
+BACKEND_ENV_PATH = CURRENT_DIR / ".env"
+if BACKEND_ENV_PATH.exists():
+    load_dotenv(BACKEND_ENV_PATH)
+
 
 class Settings:
     """Backend configuration settings."""

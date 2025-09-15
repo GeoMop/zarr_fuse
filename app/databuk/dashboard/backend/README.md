@@ -1,80 +1,96 @@
 # ZARR FUSE Dashboard Backend
 
-Modular FastAPI backend for exploring Zarr stores and building tree structures.
+Modular FastAPI backend for exploring Zarr stores on S3. Now packaged as a standalone Python project with its own `pyproject.toml` and `.env` inside `backend/`.
 
 ## Architecture
 
 ```
 backend/
-├── core/           # Configuration and utilities
-├── models/         # Pydantic response models
-├── services/       # Business logic (Zarr operations)
-├── routers/        # HTTP API endpoints
-├── main.py         # FastAPI application
-├── run.py          # Server startup script
-└── requirements.txt # Python dependencies
+├── core/            # Configuration and utilities
+├── services/        # Business logic (Zarr operations)
+├── routers/         # HTTP API endpoints (s3, logs, config)
+├── config/          # YAML endpoint configs (endpoints.yaml)
+├── main.py          # FastAPI application
+├── run.py           # Server startup script
+├── pyproject.toml   # Packaging and dependencies
+└── env.example      # Example env vars (copy to .env)
 ```
 
 ## Setup
 
-1. **Install dependencies:**
-   ```bash
-   cd backend
-   pip install -r requirements.txt
+1. Create and activate a virtual environment (Windows PowerShell):
+   ```powershell
+   cd app/databuk/dashboard/backend
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
    ```
 
-2. **Run the server:**
-   ```bash
+2. Install package (editable) with dev extras:
+   ```powershell
+   pip install -e .[dev]
+   ```
+
+3. Configure environment variables:
+   - Copy `env.example` to `.env`
+   - Fill `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_ENDPOINT_URL`, `S3_BUCKET_NAME`, etc.
+
+4. Run the server:
+   ```powershell
    python run.py
    ```
-   
    Or directly with uvicorn:
-   ```bash
+   ```powershell
    uvicorn main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 ## API Endpoints
 
-### Tree Structure
-- `GET /api/tree/structure` - Get complete tree hierarchy
-- `GET /api/tree/node` - Get specific node information
-- `GET /api/tree/store/summary` - Get store summary
+### Configuration
+- `GET /api/config/endpoints` - List configured endpoints
+
+### S3 Operations
+- `GET /api/s3/status` - Connection status
+- `GET /api/s3/structure` - Current store structure
+- `GET /api/s3/node/{store_name}/{node_path}` - Node details
+- `GET /api/s3/variable/{store_name}/{variable_path}` - Variable data
+
+### Logs
+- `GET /api/logs` - Backend warnings and errors from latest log
 
 ### Health & Info
 - `GET /` - API information
 - `GET /health` - Health check
-- `GET /docs` - Interactive API documentation (Swagger UI)
+- `GET /docs` - Swagger UI
 
 ## Configuration
 
-The backend automatically detects test stores from the project structure:
-- **structure_tree.zarr**: Located at `zarr_fuse/test/workdir/structure_tree.zarr`
-- **CORS**: Configured for frontend development (`localhost:5173`)
+Environment variables are loaded only from `backend/.env`.
+
+- `.env`: S3 credentials and settings (see `env.example`)
+- `config/endpoints.yaml`: defines STORE_URL and S3 options per endpoint
+- CORS: enabled for `http://localhost:5173`
 
 ## Data Flow
 
-1. **S3Service**: Opens and explores Zarr stores from S3
-2. **S3Router**: Exposes HTTP endpoints for S3 operations
-3. **Frontend**: Consumes data for sidebar rendering and variable display
+1. S3Service: Opens and explores Zarr stores from S3
+2. S3Router: Exposes HTTP endpoints for S3 operations
+3. LogsRouter: Exposes backend logs to the UI
+4. Frontend: Consumes data for tree and variable views
 
 ## Testing
 
-Test the API:
-```bash
-# Health check
+```powershell
+# Health
 curl http://localhost:8000/health
 
-# Get tree structure
-curl http://localhost:8000/api/tree/structure
+# Structure
+curl http://localhost:8000/api/s3/structure
 
-# Get specific node
-curl "http://localhost:8000/api/tree/node?path=root"
+# Logs
+curl http://localhost:8000/api/logs
 ```
 
-## Next Steps
+## Notes
 
-- [ ] Add weather data endpoints
-- [ ] Implement data sampling for plotting
-- [ ] Add authentication/authorization
-- [ ] Implement caching for large trees
-- [ ] Add metrics and monitoring
+- NaN/Infinity are serialized as strings for JSON compliance
+- Uses Zarr FsspecStore and list_dir for S3-backed stores

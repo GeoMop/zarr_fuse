@@ -31,13 +31,17 @@ backend/
 ├── services/
 │   └── s3_service.py     # Core S3 and Zarr operations
 ├── routers/
-│   ├── s3.py            # S3 API endpoints
-│   └── config.py        # Configuration management
+│   ├── s3.py             # S3 API endpoints
+│   ├── logs.py           # Logs endpoint
+│   └── config.py         # Configuration management
 ├── core/
-│   └── config_manager.py # YAML configuration handling
+│   ├── config_manager.py # YAML configuration handling
+│   └── config.py         # Settings (loads backend/.env)
 ├── config/
-│   └── endpoints.yaml   # S3 endpoint configuration
-└── main.py              # FastAPI application
+│   └── endpoints.yaml    # S3 endpoint configuration
+├── pyproject.toml        # Backend packaging and deps
+├── env.example           # Example env (copy to .env)
+└── main.py               # FastAPI application
 ```
 
 ## Quick Start
@@ -53,40 +57,27 @@ backend/
 git clone <repo-url>
 cd zarr_fuse/app/databuk/dashboard
 
-# Install zarr_fuse first (from project root)
-cd ../../../
-pip install -e .
-
-# Install dashboard dependencies
-cd app/databuk/dashboard
 npm install
 ```
 
 ### 2. Backend Setup
-```bash
+```powershell
 cd backend
-
-# Install web framework dependencies only
-# (zarr_fuse provides S3/Zarr functionality)
-pip install fastapi uvicorn pydantic
-
-# Configure S3 credentials in root .env
-# (See Configuration section)
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -e .[dev]
 ```
 
 ### 3. Configuration
 
-Create `.env` file in project root (copy from `env.example`):
-```bash
-# S3 Configuration
-# Contact project maintainers for access credentials
+Create `.env` file in `backend/` (copy from `backend/env.example`):
+```ini
+# S3 Configuration (placeholders)
 S3_BUCKET_NAME=your_bucket_name
 S3_ACCESS_KEY=your_access_key_here
 S3_SECRET_KEY=your_secret_key_here
-S3_ENDPOINT_URL=https://s3.cl4.du.cesnet.cz
+S3_ENDPOINT_URL=https://s3.example.com
 S3_ADDRESSING_STYLE=path
-
-# Multiple bucket configurations available in env.example
 ```
 
 Configure `backend/config/endpoints.yaml`:
@@ -107,12 +98,12 @@ Configure `backend/config/endpoints.yaml`:
 ```
 
 ### 4. Run Application
-```bash
+```powershell
 # Terminal 1: Start backend
 cd backend
-python main.py
+python run.py
 
-# Terminal 2: Start frontend  
+# Terminal 2: Start frontend
 cd ..  # back to dashboard root
 npm run dev
 ```
@@ -169,7 +160,6 @@ Works with any Zarr group/array hierarchy!
 ## API Endpoints
 
 ### Configuration
-- `GET /api/config/current` - Get current endpoint config
 - `GET /api/config/endpoints` - Get all endpoints
 
 ### S3 Operations
@@ -240,9 +230,9 @@ Works with any Zarr group/array hierarchy!
 ## File Locations
 
 ### Configuration
-- **S3 Credentials**: `/.env` (project root)
+- **S3 Credentials**: `backend/.env`
 - **Endpoint Config**: `backend/config/endpoints.yaml`
-- **Dependencies**: `backend/requirements.txt`, `package.json`
+- **Dependencies**: `backend/pyproject.toml`, `package.json`
 
 ### Core Files
 - **Main App**: `src/App.tsx`

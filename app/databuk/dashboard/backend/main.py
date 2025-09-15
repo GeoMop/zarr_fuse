@@ -2,19 +2,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pathlib import Path
-import os
-from dotenv import load_dotenv
-
-# Load environment variables from .env file in root directory
-env_path = Path("C:/Users/fatih/Documents/GitHub/zarr_fuse/.env")
-load_dotenv(env_path)
-
-# Debug: Check if environment variables are loaded
-print(f"Environment variables loaded:")
-print(f"   S3_ACCESS_KEY: {'Found' if os.getenv('S3_ACCESS_KEY') else 'Not found'}")
-print(f"   S3_SECRET_KEY: {'Found' if os.getenv('S3_SECRET_KEY') else 'Not found'}")
-print(f"   S3_BUCKET_NAME: {'Found' if os.getenv('S3_BUCKET_NAME') else 'Not found'}")
-print(f"   .env path: {env_path}")
 
 # Use absolute imports
 from core.config import settings
