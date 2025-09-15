@@ -315,14 +315,14 @@ const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
       </div>
-      {/* Fixed Footer - Store Log */}
+      {/* Fixed Footer - Logs */}
       <div className="p-4 border-t border-gray-200 bg-white">
         <div 
           className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-2 rounded-lg transition-colors duration-200"
           onClick={onLogClick}
         >
           <span className={`inline-block w-2 h-2 ${statusColor} rounded-full`}></span>
-          <span className="text-gray-700 font-medium">Store Log</span>
+          <span className="text-gray-700 font-medium">Logs</span>
         </div>
       </div>
     </aside>

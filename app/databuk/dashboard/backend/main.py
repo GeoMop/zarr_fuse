@@ -19,6 +19,7 @@ print(f"   .env path: {env_path}")
 # Use absolute imports
 from core.config import settings
 from routers import config, s3
+from routers import logs
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -52,6 +53,7 @@ app.add_middleware(
 # Include routers
 app.include_router(config.router, prefix=settings.API_V1_STR)
 app.include_router(s3.router, prefix=settings.API_V1_STR)
+app.include_router(logs.router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():

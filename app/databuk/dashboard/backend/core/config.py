@@ -10,6 +10,7 @@ class Settings:
     # Need to go up to: zarr_fuse/ (project root)
     PROJECT_ROOT = Path(__file__).parent.parent.parent.parent.parent.parent
     TEST_STORES_DIR = PROJECT_ROOT / "zarr_fuse" / "test" / "workdir"
+    LOGS_DIR = PROJECT_ROOT / "log_store.zarr" / "logs"
     
     # API settings
     API_V1_STR: str = "/api"
