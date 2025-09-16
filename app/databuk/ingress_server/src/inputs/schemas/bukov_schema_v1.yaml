@@ -1,7 +1,7 @@
 # Configuration of the ZARR-FUSE storage
 ATTRS:
   S3_ENDPOINT_URL: https://s3.cl4.du.cesnet.cz
-  STORE_URL: s3://app-databuk-release-service/bukov.zarr # bucket + filename
+  # STORE_URL: s3://app-databuk-release-service/bukov.zarr # bucket + filename
   location_file: &loc_file bukov_locations.csv
   grid_min: [50.840000, 14.850000] # unit deg
   grid_max: [50.8400000, 14.8500000] # unit deg
