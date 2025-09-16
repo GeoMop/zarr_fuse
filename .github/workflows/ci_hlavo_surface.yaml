@@ -1,4 +1,6 @@
 on:
+  push:
+  workflow_dispatch:
   schedule:
     # yr.no short term world updates: 01:00, 09:30, 13:00, 20:30
     # every 6 h starting at 00:15 UTC → 00:15, 06:15, 12:15, 18:15
@@ -21,6 +23,17 @@ jobs:
       - name: Install hlavo_surface environment.
         run: |
           bash app/hlavo_surface/setup_env
+      - name: Inject dotenv secret into environment
+        # Expected secret format:
+        # ZF_S3_ACCESS_KEY=<access key>
+        # ZF_S3_SECRET_KEY=<secret key>
+        shell: bash
+        run: |
+            # load each line of the multiline secret into env
+            while IFS= read -r line; do
+            echo "$line" >> $GITHUB_ENV
+            done <<< "${{ secrets.ZF_TEST_DOTENV }}"
+
       - name: Run scrapper
         run: |
           app/hlavo_surface/venv/bin/python3 -m hlavo_surface.scrap.weather

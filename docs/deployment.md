@@ -2,7 +2,7 @@
 
 ## Kubernetes basics
 
-### Install kubectl and krew
+### Install kubectl
 
 Install `kubectl`, you can use the installation script:
 
@@ -13,16 +13,27 @@ Follow [CERIT doc](https://docs.cerit-sc.cz/en/docs/kubernetes/kubectl).
 
 1. Login to [rancher](https://rancher.cloud.e-infra.cz/) using e-infra identity.
 
-2. Click to 'kuba-cluster'. Download the kubeconfig through a document-like icon at the top right corner.   
+2. Click to 'kuba-cluster'. Download the kubeconfig through a document-like icon at the top right corner.
    Rename to `~/.kube/config` and set permissions to 700 (see the doc).
-   
-### Download accepted files 
+
+### Download accepted files
 
 ```
-   toolts/ingress-download ingress-server kuba-cluster 
+   tools/ingress-download ingress-server kuba-cluster
 ```
 
-See directory `pending` for accepted data frames not yet processed into ZARR store.
-See directory `processed` for processed data frames.
-   
+See directory `accepted` for accepted data frames not yet processed into ZARR store.
+See directory `success` for processed data frames.
+TODO: See directory `failed` for failed data frames.
 
+
+### List pods
+```
+   kubectl get pods 
+```
+### Shell in the pod
+```
+   kubectl exec -it <pod-name> -n <namespace> -- /bin/bash
+```
+
+namespace = ingress-server

@@ -36,7 +36,7 @@ kubectl config set-context "$kube_context_name" --namespace="$namespace"
 pod_name=$(kubectl get pods -o jsonpath='{.items[0].metadata.name}')
 
 # If this does not work check value in app/databuk/ingress_server/charts/values.yaml under deployment.queue.path
-kubectl cp "$pod_name:/var/data/queue" .
+kubectl cp "$pod_name:/var/zarr_fuse" .
 
 # Example of ~/.kube/config
 # You can install kubeconfig directly from https://rancher.cloud.e-infra.cz/
