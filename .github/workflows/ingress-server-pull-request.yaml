@@ -1,6 +1,3 @@
-# ---------------------------------------------
-# ---- CHART DEPLOY IS TEMPORARY DISABLED -----
-# ---------------------------------------------
 name: Ingress server - pull request
 on:
   pull_request:
@@ -33,32 +30,9 @@ jobs:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     with:
       push-container: true
-      deploy-helm-chart: false
+      deploy-helm-chart: true
       tag: generate
       namespace: ingress-server-development
       release-name: ingress-server-development
-      production: false
+      s3-store-url: s3://app-databuk-test-service/bukov-pull-request.zarr
     secrets: inherit
-
-  #check-bucket:
-  #  steps:
-  #    - name: Check S3 bucket
-  #      run: |
-  #        aws s3 ls s3://testing/tree-ci.zarr
-#
-  #test-ingress-server:
-  #  name: Test ingress server
-  #  runs-on: ubuntu-latest
-  #  container:
-  #    image: docker.io/library/python:3.11-slim
-  #  needs:
-  #    - build
-  #  defaults:
-  #    run:
-  #      working-directory: app/databuk/ingress_server/tools
-  #  concurrency:
-  #    group: "${{ github.workflow }}-${{ github.ref }}-test-ingress-server"
-  #    cancel-in-progress: true
-  #  steps:
-  #    - name: Checkout
-  #      uses: actions/checkout@v4

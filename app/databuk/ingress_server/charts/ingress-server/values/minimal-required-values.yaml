@@ -4,6 +4,7 @@ deployment:
       endpointUrl: "http://localhost:9000"
       accessKey: "s3-access-key"
       secretKey: "s3-secret-key"
+      storeUrl: "s3://bucket-name/store-path"
     basicAuth:
       enabled: true
       usersJson: "{}"
