@@ -19,9 +19,21 @@ Follow [CERIT doc](https://docs.cerit-sc.cz/en/docs/kubernetes/kubectl).
 ### Download accepted files
 
 ```
-   toolts/ingress-download ingress-server kuba-cluster
+   tools/ingress-download ingress-server kuba-cluster
 ```
 
 See directory `accepted` for accepted data frames not yet processed into ZARR store.
-See directory `failed` for failed data frames.
 See directory `success` for processed data frames.
+TODO: See directory `failed` for failed data frames.
+
+
+### List pods
+```
+   kubectl get pods 
+```
+### Shell in the pod
+```
+   kubectl exec -it <pod-name> -n <namespace> -- /bin/bash
+```
+
+namespace = ingress-server
