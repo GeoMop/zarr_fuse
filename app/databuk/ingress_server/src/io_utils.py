@@ -75,6 +75,8 @@ def validate_data(data: bytes, content_type: str) -> tuple[bool, str | None]:
 # =========================
 # S3 / zarr_fuse helpers
 # =========================
+
+# this could be removed, as open_store provides a logic to load environment variables.
 def _get_env_vars() -> tuple[tuple[str, str, str] | None, str | None]:
     s3_key = os.getenv("S3_ACCESS_KEY")
     s3_sec = os.getenv("S3_SECRET_KEY")
@@ -89,6 +91,7 @@ def _get_env_vars() -> tuple[tuple[str, str, str] | None, str | None]:
     return (s3_key, s3_sec, store_url), None
 
 def open_root(schema_path: Path) -> tuple[zf.Node | None, str | None]:
+    # this could be removed, as open_store provides a logic to load environment variables.
     (s3_key, s3_sec, store_url), err = _get_env_vars()
     if err:
         return None, err
