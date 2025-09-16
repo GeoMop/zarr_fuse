@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.app.name }}
+  labels:
+    app.kubernetes.io/name: {{ .Values.app.name }}
+spec:
+  replicas: {{ .Values.deployment.replicaCount }}
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.app.name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Values.app.name }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      volumes:
+        - name: ingress-server-tmp
+          emptyDir: {}
+        - name: ingress-server-queue
+          persistentVolumeClaim:
+            claimName: "{{ .Values.app.name }}-queue-pvc"
+      containers:
+        - name: {{ .Values.app.name }}
+          image: "{{ .Values.registry.host }}/{{ .Values.image.name }}:{{ .Values.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: {{ .Values.service.internalPort.name | quote }}
+              containerPort: {{ .Values.service.internalPort.number | int }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
+          env:
+            - name: S3_ENDPOINT_URL
+              value: {{ required "S3_ENDPOINT_URL needs to be set" .Values.deployment.secrets.s3.endpointUrl | quote }}
+            - name: S3_ACCESS_KEY
+              value: {{ required "S3_ACCESS_KEY needs to be set" .Values.deployment.secrets.s3.accessKey | quote }}
+            - name: S3_SECRET_KEY
+              value: {{ required "S3_SECRET_KEY needs to be set" .Values.deployment.secrets.s3.secretKey | quote }}
+            - name: BASIC_AUTH_USERS_JSON
+              value: {{ required "BASIC_AUTH_USERS_JSON needs to be set" .Values.deployment.secrets.basicAuth.usersJson | toJson | quote }}
+            - name: AUTH_ENABLED
+              value: {{ .Values.deployment.secrets.basicAuth.enabled | toString | quote }}
+            - name: PRODUCTION
+              value: {{ .Values.deployment.production | toString | quote }}
+            - name: QUEUE_DIR
+              value: {{ .Values.deployment.queue.path | quote }}
+          volumeMounts:
+            - name: ingress-server-tmp
+              mountPath: /tmp
+            - name: ingress-server-queue
+              mountPath: {{ .Values.deployment.queue.path | quote }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            successThreshold: 1
+            failureThreshold: 72
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 10

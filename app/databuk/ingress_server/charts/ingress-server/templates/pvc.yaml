@@ -1,0 +1,22 @@
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: "{{ .Values.app.name }}-queue-pvc"
+  labels:
+    app.kubernetes.io/name: {{ .Values.app.name }}
+spec:
+  {{- with .Values.persistence }}
+  {{- range .accessModes }}
+  accessModes:
+    - {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .size | quote }}
+  volumeMode: {{ .volumeMode | quote }}
+  {{- if .storageClassName }}
+  storageClassName: {{ .storageClassName | quote }}
+  {{- end }}
+  {{- end }}
+{{- end }}
