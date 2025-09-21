@@ -73,7 +73,7 @@ jobs:
           repository: jbrezmorf/zarr-fuse-ingress-server
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           dockerfile-path: oci/Containerfile
-          push-container: ${{ inputs.push-container }}
+          push: ${{ inputs.push-container }}
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
           extra-build-args: |
