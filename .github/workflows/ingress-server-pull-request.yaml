@@ -5,7 +5,7 @@ name: Ingress server - pull request
 on:
   pull_request:
     branches:
-      - "*"
+      - "**"
 jobs:
   get-changed-files:
     name: Get changed file
