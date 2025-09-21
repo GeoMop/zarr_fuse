@@ -43,10 +43,7 @@ runs:
     - name: Build container file
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: |
-        buildah build -t ${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }} \
-        ${{ inputs.extra-build-args }} \
-        -f ${{ inputs.containerfile-path }} .
+      run: buildah build -t ${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }} ${{ inputs.extra-build-args }} -f ${{ inputs.containerfile-path }} .
     - name: Push container image
       shell: bash
       if: ${{ inputs.push }} == 'true'

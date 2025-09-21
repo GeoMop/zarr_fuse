@@ -49,6 +49,8 @@ backend:
       runAsNonRoot: true
       runAsUser: 11233
       runAsGroup: 11233
+      seccompProfile:
+        type: RuntimeDefault
 
 frontend:
   name: dashboard-frontend
@@ -90,6 +92,8 @@ frontend:
       runAsNonRoot: true
       runAsUser: 11233
       runAsGroup: 11233
+      seccompProfile:
+        type: RuntimeDefault
 
 # -- Ingress configuration
 # @default -- ~
