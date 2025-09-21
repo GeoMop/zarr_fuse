@@ -11,7 +11,7 @@ inputs:
   tag:
     description: Tag for the container image
     required: true
-  dockerfile-path:
+  containerfile-path:
     description: Path to the Dockerfile
     required: false
     default: oci/Containerfile
@@ -46,7 +46,7 @@ runs:
       run: |
         buildah build -t ${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }} \
         ${{ inputs.extra-build-args }} \
-        -f ${{ inputs.dockerfile-path }} .
+        -f ${{ inputs.containerfile-path }} .
     - name: Push container image
       shell: bash
       if: ${{ inputs.push }} == 'true'

@@ -44,7 +44,7 @@ jobs:
       run:
         working-directory: app/databuk/dashboard
     concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-containerize"
+      group: "${{ github.workflow }}-${{ github.ref }}-containerize-backend"
       cancel-in-progress: true
     steps:
       - name: Checkout
@@ -54,7 +54,7 @@ jobs:
         with:
           repository: jbrezmorf/zarr-fuse-dashboard-backend
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
-          dockerfile-path: oci/Containerfile.backend
+          containerfile-path: oci/Containerfile.backend
           push: true
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
@@ -98,7 +98,7 @@ jobs:
       run:
         working-directory: app/databuk/dashboard
     concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-containerize"
+      group: "${{ github.workflow }}-${{ github.ref }}-containerize-frontend"
       cancel-in-progress: true
     steps:
       - name: Checkout
@@ -113,7 +113,7 @@ jobs:
         with:
           repository: jbrezmorf/zarr-fuse-dashboard-frontend
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
-          dockerfile-path: oci/Containerfile.frontend
+          containerfile-path: oci/Containerfile.frontend
           push: true
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
@@ -154,7 +154,7 @@ jobs:
         working-directory: app/databuk/dashboard/charts
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-deploy"
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4

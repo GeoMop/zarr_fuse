@@ -67,7 +67,7 @@ jobs:
         with:
           repository: jbrezmorf/zarr-fuse-ingress-server
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
-          dockerfile-path: oci/Containerfile
+          containerfile-path: oci/Containerfile
           push: true
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
@@ -111,7 +111,7 @@ jobs:
         working-directory: app/databuk/ingress_server/charts
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-deploy"
-      cancel-in-progress: true
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
