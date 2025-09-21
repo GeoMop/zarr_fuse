@@ -5,7 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: {{ .Values.backend.name }}
 data:
-  endpoint.yaml: |-
+  endpoints.yaml: |-
     "production_s3_endpoint":
       # Reload settings
       Reload_interval: 300 # 5 minutes in seconds
