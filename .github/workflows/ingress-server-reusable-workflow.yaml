@@ -32,7 +32,7 @@ jobs:
     outputs:
       version-tag: ${{ steps.get_version_tag.outputs.version-tag }}
     concurrency:
-      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-version-tag
+      group: ${{ github.workflow }}-${{ github.ref }}-get-version-tag
       cancel-in-progress: true
     steps:
       - name: Checkout

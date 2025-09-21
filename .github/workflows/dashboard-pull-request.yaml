@@ -10,7 +10,7 @@ jobs:
     outputs:
       any-changed: ${{ steps.changed.outputs.any_changed }}
     concurrency:
-      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-changed-files
+      group: ${{ github.workflow }}-${{ github.ref }}-get-changed-files
       cancel-in-progress: true
     steps:
       - name: Checkout
@@ -29,5 +29,5 @@ jobs:
     uses: ./.github/workflows/dashboard-reusable-workflow.yaml
     with:
       tag: generate
-      deploy: false
+      deploy: true
     secrets: inherit
