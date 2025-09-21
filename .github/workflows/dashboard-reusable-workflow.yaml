@@ -83,7 +83,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dashboard-frontend
-          path: dist/**
+          path: app/databuk/dashboard/dist
           if-no-files-found: error
   containerize-frontend:
     name: Containerize frontend
@@ -107,7 +107,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: dashboard-frontend
-          path: dist
+          path: app/databuk/dashboard/dist
       - name: Containerize
         uses: ./.github/actions/containerize
         with:
