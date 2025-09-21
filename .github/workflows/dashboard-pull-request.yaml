@@ -28,6 +28,6 @@ jobs:
     if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
     uses: ./.github/workflows/dashboard-reusable-workflow.yaml
     with:
-      push-container: true
       tag: generate
+      deploy: false
     secrets: inherit

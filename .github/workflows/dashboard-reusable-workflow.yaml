@@ -2,17 +2,12 @@ name: Dashboard - reusable workflow
 on:
   workflow_call:
     inputs:
-      push-container:
-        description: Whether to push the container image
-        required: false
-        type: boolean
-        default: false
       tag:
         description: The tag to use for the container image
         required: false
         type: string
         default: generate
-      deploy-helm-chart:
+      deploy:
         description: Whether to deploy the Helm chart
         required: false
         type: boolean
@@ -60,9 +55,10 @@ jobs:
           repository: jbrezmorf/zarr-fuse-dashboard-backend
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           dockerfile-path: oci/Containerfile.backend
-          push: ${{ inputs.push-container }}
+          push: true
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
+          working-directory: app/databuk/dashboard
   build-frontend:
     name: Build frontend
     runs-on: ubuntu-latest
@@ -118,9 +114,10 @@ jobs:
           repository: jbrezmorf/zarr-fuse-dashboard-frontend
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           dockerfile-path: oci/Containerfile.frontend
-          push: ${{ inputs.push-container }}
+          push: true
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
+          working-directory: app/databuk/dashboard
   lint-helm-chart:
     name: Lint dashboard Helm chart
     runs-on: ubuntu-latest
@@ -142,7 +139,7 @@ jobs:
   deploy:
     name: Deploy dashboard to e-infra rancher
     runs-on: ubuntu-latest
-    if: ${{ inputs.deploy-helm-chart }}
+    if: ${{ inputs.deploy }}
     container:
       image: alpine/k8s:1.29.14
     needs:

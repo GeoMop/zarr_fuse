@@ -28,8 +28,7 @@ jobs:
       - get-changed-files
     if: always() && ( github.event_name == 'push' || needs.get-changed-files.outputs.any-changed == 'true' )
     with:
-      push-container: true
-      deploy-helm-chart: true
+      deploy: true
       tag: generate
       namespace: ingress-server-latest
       release-name: ingress-server-latest

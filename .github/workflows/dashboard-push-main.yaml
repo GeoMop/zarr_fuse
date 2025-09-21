@@ -28,7 +28,6 @@ jobs:
       - get-changed-files
     if: always() && ( github.event_name == 'push' || needs.get-changed-files.outputs.any-changed == 'true' )
     with:
-      push-container: true
       tag: generate
-      deploy-helm-chart: true
+      deploy: true
     secrets: inherit

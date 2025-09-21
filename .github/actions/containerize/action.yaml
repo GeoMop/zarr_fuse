@@ -29,23 +29,27 @@ inputs:
   registry-password:
     description: Password for the container registry (if pushing)
     required: true
+  working-directory:
+    description: The working directory to run the action in
+    required: true
 
 runs:
   using: composite
   steps:
     - name: Login to registry
       shell: bash
-      if: ${{ inputs.push }}
+      if: ${{ inputs.push }} == 'true'
       run: buildah login -u ${{ inputs.registry-username }} -p "${{ inputs.registry-password }}" ${{ inputs.registry }}
     - name: Build container file
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       run: |
         buildah build -t ${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }} \
         ${{ inputs.extra-build-args }} \
         -f ${{ inputs.dockerfile-path }} .
     - name: Push container image
       shell: bash
-      if: ${{ inputs.push }}
+      if: ${{ inputs.push }} == 'true'
       run: |
         buildah push ${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }} docker://${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }}
         buildah logout ${{ inputs.registry }}
