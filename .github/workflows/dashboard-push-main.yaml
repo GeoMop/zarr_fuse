@@ -1,4 +1,4 @@
-name: Ingress server - push main
+name: Dashboard - push main
 on:
   push:
     branches:
@@ -16,22 +16,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Check if Ingress Server files or Helm Charts were changed
+      - name: Check if Dashboard files were changed
         id: changed
         uses: tj-actions/changed-files@v45
         with:
           files: |
-            app/databuk/ingress_server/**
+            app/databuk/dashboard/**
   build-and-deploy:
-    uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    uses: ./.github/workflows/dashboard-reusable-workflow.yaml
     needs:
       - get-changed-files
     if: always() && ( github.event_name == 'push' || needs.get-changed-files.outputs.any-changed == 'true' )
     with:
       push-container: true
-      deploy-helm-chart: true
       tag: generate
-      namespace: ingress-server-latest
-      release-name: ingress-server-latest
-      production: false
+      deploy-helm-chart: true
     secrets: inherit

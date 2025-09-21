@@ -1,0 +1,168 @@
+name: Dashboard - reusable workflow
+on:
+  workflow_call:
+    inputs:
+      push-container:
+        description: Whether to push the container image
+        required: false
+        type: boolean
+        default: false
+      tag:
+        description: The tag to use for the container image
+        required: false
+        type: string
+        default: generate
+      deploy-helm-chart:
+        description: Whether to deploy the Helm chart
+        required: false
+        type: boolean
+        default: false
+jobs:
+  get-version-tag:
+    name: Get version tag
+    runs-on: ubuntu-latest
+    outputs:
+      version-tag: ${{ steps.get_version_tag.outputs.version-tag }}
+    concurrency:
+      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-version-tag
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Get version tag
+        id: get_version_tag
+        run: |
+          if [[ ${{ inputs.tag }} == "generate" ]]; then
+            echo "version-tag=ci-$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+          else
+            echo "version-tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          fi
+  containerize-backend:
+    name: Containerize backend
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/buildah/stable:v1.35.4
+      options: --privileged
+    needs:
+      - get-version-tag
+    defaults:
+      run:
+        working-directory: app/databuk/dashboard
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-containerize"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Containerize
+        uses: ./.github/actions/containerize
+        with:
+          repository: jbrezmorf/zarr-fuse-dashboard-backend
+          tag: ${{ needs.get-version-tag.outputs.version-tag }}
+          dockerfile-path: oci/Containerfile.backend
+          push-container: ${{ inputs.push-container }}
+  build-frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/node:24.8.0-trixie-slim
+    needs:
+      - get-version-tag
+    defaults:
+      run:
+        working-directory: app/databuk/dashboard
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-build-frontend"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: npm ci
+      - name: Build frontend
+        run: npm run build
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-frontend
+          path: dist
+  containerize-frontend:
+    name: Containerize frontend
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/buildah/stable:v1.35.4
+      options: --privileged
+    needs:
+      - get-version-tag
+      - build-frontend
+    defaults:
+      run:
+        working-directory: app/databuk/dashboard
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-containerize"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-frontend
+          path: dist
+      - name: Containerize
+        uses: ./.github/actions/containerize
+        with:
+          repository: jbrezmorf/zarr-fuse-dashboard-frontend
+          tag: ${{ needs.get-version-tag.outputs.version-tag }}
+          dockerfile-path: oci/Containerfile.frontend
+          push-container: ${{ inputs.push-container }}
+  lint-helm-chart:
+    name: Lint dashboard Helm chart
+    runs-on: ubuntu-latest
+    container:
+      image: alpine/k8s:1.29.14
+    defaults:
+      run:
+        working-directory: app/databuk/dashboard/charts/dashboard
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-lint-helm-chart"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Lint helm chart
+        uses: ./.github/actions/helm-lint
+  deploy:
+    name: Deploy dashboard to e-infra rancher
+    runs-on: ubuntu-latest
+    if: ${{ inputs.deploy-helm-chart }}
+    container:
+      image: alpine/k8s:1.29.14
+    needs:
+      - lint-helm-chart
+      - get-version-tag
+    env:
+      KUBECONFIG: ./kubeconfig.yaml
+    defaults:
+      run:
+        working-directory: app/databuk/dashboard/charts
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-deploy"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Decode kubeconfig
+        run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
+      - name: Ensure that the namespace exists
+        run: kubectl create namespace --dry-run=client -o yaml zarr-fuse-dashboard
+      - name: Set context
+        run: kubectl config set-context --current --namespace=zarr-fuse-dashboard
+      - name: Deploy app
+        run: |
+          helm upgrade dashboard dashboard \
+          --install --atomic --timeout 10m --namespace zarr-fuse-dashboard \
+          --set backend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
+          --set frontend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
+          --set backend.secrets.s3.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
+          --set backend.secrets.s3.secretKey="${{ secrets.S3_SECRET_KEY }}"
