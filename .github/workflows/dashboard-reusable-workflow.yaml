@@ -132,6 +132,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Lint helm chart
         uses: ./.github/actions/helm-lint
+        with:
+          working-directory: app/databuk/dashboard/charts/dashboard
   deploy:
     name: Deploy dashboard to e-infra rancher
     runs-on: ubuntu-latest

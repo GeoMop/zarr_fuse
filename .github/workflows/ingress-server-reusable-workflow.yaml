@@ -95,6 +95,7 @@ jobs:
       - name: Lint helm chart
         uses: ./.github/actions/helm-lint
         with:
+          working-directory: app/databuk/ingress_server/charts/ingress-server
           values: --values values/minimal-required-values.yaml
   deploy:
     name: Deploy ingress server to e-infra rancher

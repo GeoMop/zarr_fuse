@@ -23,6 +23,12 @@ inputs:
     description: Build arguments for the container build (key=value pairs, comma-separated)
     required: false
     default: ""
+  registry-username:
+    description: Username for the container registry (if pushing)
+    required: true
+  registry-password:
+    description: Password for the container registry (if pushing)
+    required: true
 
 runs:
   using: composite
@@ -30,7 +36,7 @@ runs:
     - name: Login to registry
       shell: bash
       if: ${{ inputs.push-container }}
-      run: buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ inputs.registry }}
+      run: buildah login -u ${{ inputs.registry-username }} -p "${{ inputs.registry-password }}" ${{ inputs.registry }}
     - name: Build container file
       shell: bash
       run: |
