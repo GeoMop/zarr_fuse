@@ -61,6 +61,8 @@ jobs:
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           dockerfile-path: oci/Containerfile.backend
           push-container: ${{ inputs.push-container }}
+          registry-username: ${{ vars.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
   build-frontend:
     name: Build frontend
     runs-on: ubuntu-latest
@@ -116,6 +118,8 @@ jobs:
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           dockerfile-path: oci/Containerfile.frontend
           push-container: ${{ inputs.push-container }}
+          registry-username: ${{ vars.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
   lint-helm-chart:
     name: Lint dashboard Helm chart
     runs-on: ubuntu-latest
