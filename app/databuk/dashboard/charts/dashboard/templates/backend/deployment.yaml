@@ -42,7 +42,8 @@ spec:
             - name: dashboard-tmp
               mountPath: /tmp
             - name: dashboard-config
-              mountPath: /app/config/endpoints.yaml
+              mountPath: /app/config
+              subPath: endpoints.yaml
               readOnly: true
           startupProbe:
             httpGet:

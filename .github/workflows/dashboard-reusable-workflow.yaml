@@ -122,7 +122,7 @@ jobs:
     name: Lint dashboard Helm chart
     runs-on: ubuntu-latest
     container:
-      image: alpine/k8s:1.29.14
+      image: docker.io/alpine/k8s:1.29.14
     defaults:
       run:
         working-directory: app/databuk/dashboard/charts/dashboard
@@ -141,7 +141,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.deploy }}
     container:
-      image: alpine/k8s:1.29.14
+      image: docker.io/alpine/k8s:1.29.14
     needs:
       - lint-helm-chart
       - get-version-tag
