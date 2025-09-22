@@ -28,5 +28,5 @@ jobs:
       tag: ${{ needs.get-version.outputs.version }}
       namespace: ingress-server
       release-name: ingress-server
-      production: true
+      s3-store-url: s3://app-databuk-release-service/bukov.zarr
     secrets: inherit
