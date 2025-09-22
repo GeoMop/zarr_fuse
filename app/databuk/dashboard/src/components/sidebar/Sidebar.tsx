@@ -1,5 +1,6 @@
 import { AlertCircle, BarChart3, ChevronDown, ChevronRight, Clock, Database, Folder, RefreshCw, X } from 'lucide-react';
 import React, { useCallback, useEffect, useState } from 'react';
+import { API_BASE_URL } from '../../api';
 import type { SidebarProps } from './types/sidebar';
 
 // Types for S3 data
@@ -58,7 +59,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     setS3Loading(true);
     setS3Error(null);
     try {
-      const response = await fetch('/api/s3/structure');
+      const response = await fetch(`${API_BASE_URL}/api/s3/structure`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }

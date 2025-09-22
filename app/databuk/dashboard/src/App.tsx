@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { API_BASE_URL } from './api';
 import LogPanel from './components/LogPanel';
 import { Sidebar } from './components/sidebar';
 import type { ConfigData } from './components/sidebar/types/sidebar';
@@ -24,7 +25,7 @@ function App() {
     const fetchConfig = async () => {
       try {
         setConfigLoading(true);
-        const response = await fetch('/api/config/current');
+        const response = await fetch(`${API_BASE_URL}/api/config/current`);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -54,7 +55,7 @@ function App() {
     setNodeError(null);
 
     try {
-      const response = await fetch(`/api/s3/node/${storeName}/${nodePath}`);
+      const response = await fetch(`${API_BASE_URL}/api/s3/node/${storeName}/${nodePath}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -124,7 +125,7 @@ function App() {
 
       // Call backend to get variable data
       console.log(`🔍 Fetching: /api/s3/variable/${selectedNode.storeName}/${variablePath}`);
-      const response = await fetch(`/api/s3/variable/${selectedNode.storeName}/${variablePath}`);
+      const response = await fetch(`${API_BASE_URL}/api/s3/variable/${selectedNode.storeName}/${variablePath}`);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch variable data: ${response.statusText}`);

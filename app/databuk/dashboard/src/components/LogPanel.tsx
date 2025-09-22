@@ -1,5 +1,6 @@
 import { AlertCircle, CheckCircle, Clock, RefreshCw, X } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { API_BASE_URL } from '../api';
 
 interface LogEntry {
   id: string;
@@ -26,7 +27,7 @@ const LogPanel: React.FC<LogPanelProps> = ({ show, onClose }) => {
     if (show) {
       setLoading(true);
       // Fetch logs (errors and warnings only) from backend
-      fetch('/api/logs')
+      fetch(`${API_BASE_URL}/api/logs`)
         .then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
