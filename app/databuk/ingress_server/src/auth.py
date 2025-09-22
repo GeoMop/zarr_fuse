@@ -18,7 +18,6 @@ def _parse_users_json(raw: str | None) -> dict:
 
 AUTH = HTTPBasicAuth()
 USERS = _parse_users_json(os.getenv("BASIC_AUTH_USERS_JSON"))
-AUTH_ENABLED = os.getenv("AUTH_ENABLED", "true").lower() == "true"
 
 @AUTH.verify_password
 def verify_password(username: str, password: str) -> str | None:
@@ -27,6 +26,3 @@ def verify_password(username: str, password: str) -> str | None:
     else:
         LOG.warning("BASIC_AUTH failed: username=%r", username)
     return None
-
-def auth_wrapper(view):
-    return AUTH.login_required(view) if AUTH_ENABLED else view

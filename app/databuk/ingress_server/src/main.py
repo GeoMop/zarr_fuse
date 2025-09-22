@@ -8,7 +8,7 @@ from threading import Thread
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
-from auth import AUTH, AUTH_ENABLED, auth_wrapper
+from auth import AUTH
 from io_utils import validate_content_type, sanitize_node_path, atomic_write, new_msg_path, validate_data
 from configs import CONFIG, ACCEPTED_DIR, STOP
 from worker import startup_recover, install_signal_handlers, working_loop
@@ -26,12 +26,10 @@ LOG = logging.getLogger("ingress")
 def health():
     return jsonify({"status": "ok"}), 200
 
-
+@AUTH.login_required
 def _upload_node(endpoint_name: str, node_path: str = ""):
-    username = AUTH.current_user() if AUTH_ENABLED else "anonymous"
-
     LOG.debug("ingress.request endpoint=%s node_path=%r ct=%r user=%r",
-        endpoint_name, node_path, request.headers.get("Content-Type"), username)
+        endpoint_name, node_path, request.headers.get("Content-Type"), AUTH.current_user())
 
     content_type = (request.headers.get("Content-Type") or "").lower()
     ok, err = validate_content_type(content_type)
@@ -60,7 +58,7 @@ def _upload_node(endpoint_name: str, node_path: str = ""):
         "content_type": content_type,
         "node_path": node_path,
         "endpoint_name": endpoint_name,
-        "username": username,
+        "username": AUTH.current_user(),
         "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
 
@@ -76,13 +74,11 @@ def _upload_node(endpoint_name: str, node_path: str = ""):
 # Route creation
 # =========================
 def create_upload_endpoint(endpoint_name: str, endpoint_url: str):
-    wrapped = auth_wrapper(_upload_node)
-
     # Root path (without node_path)
     APP.add_url_rule(
         endpoint_url,
         endpoint=f"upload_node_root_{endpoint_name.replace('-', '_')}",
-        view_func=wrapped,
+        view_func=_upload_node,
         methods=["POST"],
         defaults={"endpoint_name": endpoint_name, "node_path": ""},
     )
@@ -91,7 +87,7 @@ def create_upload_endpoint(endpoint_name: str, endpoint_url: str):
     APP.add_url_rule(
         f"{endpoint_url}/<path:node_path>",
         endpoint=f"upload_node_sub_{endpoint_name.replace('-', '_')}",
-        view_func=wrapped,
+        view_func=_upload_node,
         methods=["POST"],
         defaults={"endpoint_name": endpoint_name},
     )

@@ -28,9 +28,9 @@ jobs:
     if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     with:
-      deploy: false
+      deploy: true
       tag: generate
       namespace: ingress-server-development
       release-name: ingress-server-development
-      production: false
+      s3-store-url: s3://app-databuk-test-service/bukov-pull-request.zarr
     secrets: inherit
