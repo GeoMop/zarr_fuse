@@ -26,7 +26,7 @@ const LogPanel: React.FC<LogPanelProps> = ({ show, onClose }) => {
     if (show) {
       setLoading(true);
       // Fetch logs (errors and warnings only) from backend
-      fetch('http://localhost:8000/api/logs')
+      fetch('/api/logs')
         .then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();

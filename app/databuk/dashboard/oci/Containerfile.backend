@@ -20,15 +20,12 @@ RUN groupadd -r dashboard && useradd -r -g dashboard -u 11233 -m -d /app dashboa
 # --- Install dashboard server ---
 WORKDIR /app
 
-COPY --chown=dashboard:dashboard backend/pyproject.toml /app/
+COPY --chown=dashboard:dashboard backend/ /app/
 
 RUN python -m pip install --upgrade pip && \
     pip install .
 
-COPY backend/ /app/
-
-RUN pip install --no-cache-dir /app \
-    && pip install --no-cache-dir waitress
+RUN pip install --no-cache-dir /app
 
 RUN chown -R dashboard:dashboard /app
 
