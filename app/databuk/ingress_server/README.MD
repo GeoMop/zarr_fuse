@@ -11,9 +11,9 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 
 - **Purpose:** Ingest tabular data (CSV/JSON) and merge it into a Zarr dataset on S3.
 - **Where to write:** S3 endpoint and path are defined in the *schema* (`ATTRS.s3_url`, `ATTRS.store_path`).
-- **How endpoints are defined:** via `endpoints_config.yaml`.
+- **How endpoints are defined:** via `config.yaml`.
 - **Auth:** Basic HTTP authentication (Flask-HTTPAuth) is enabled; credentials via environment variables. S3 credentials also come from environment.
-- **Swagger/OpenAPI:** Generated dynamically from `endpoints_config.yaml` using `tools/gen_swagger.py`.
+- **Swagger/OpenAPI:** Generated dynamically from `config.yaml` using `tools/gen_swagger.py`.
 
 ---
 
@@ -24,7 +24,7 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 ├─ ingress_server/
 │  ├─ src/
 │  │  ├─ main.py                  # Flask backend server
-│  │  ├─ endpoints_config.yaml    # List of API endpoints and their schema paths
+│  │  ├─ config.yaml    # List of API endpoints and their schema paths
 │  │  └─ schemas/                 # Schema files (prod/ci_test)
 │  ├─ docs/
 │  │  └─ swagger.yaml             # Generated OpenAPI spec
@@ -58,7 +58,7 @@ BASIC_AUTH_USERS_JSON={"alice":"password"}
 
 The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.
 
-### 2) Endpoints (`src/endpoints_config.yaml`)
+### 2) Endpoints (`src/config.yaml`)
 
 ```yaml
 endpoints:
@@ -129,12 +129,12 @@ docker run --rm -p 8000:8000 \
 
 ### Mounting schemas/config without rebuild
 
-The container already includes `schemas/` and `endpoints_config.yaml` from the build context.
+The container already includes `schemas/` and `config.yaml` from the build context.
 If you want to override them without rebuilding, mount them as read-only volumes:
 
 ```bash
 -v $(pwd)/src/schemas:/ingress-server/schemas:ro \
--v $(pwd)/src/endpoints_config.yaml:/ingress-server/endpoints_config.yaml:ro
+-v $(pwd)/src/config.yaml:/ingress-server/config.yaml:ro
 ```
 
 ---

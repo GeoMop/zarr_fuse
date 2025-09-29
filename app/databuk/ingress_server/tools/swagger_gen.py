@@ -3,7 +3,7 @@ import yaml
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-cfg_path = ROOT / "src" / "endpoints_config.yaml"
+cfg_path = ROOT / "src" / "config.yaml"
 out_path = ROOT / "docs" / "swagger.yaml"
 
 BASE = {

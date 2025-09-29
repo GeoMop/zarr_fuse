@@ -17,25 +17,25 @@ ENV PIP_NO_CACHE_DIR=1
 ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
 
-RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server ingress
-RUN apt-get update && apt-get install -y --no-install-recommends git
+RUN groupadd -r INGRESS && useradd -r -g INGRESS -u 11233 -m -d /app INGRESS && \
+    apt-get update && apt-get install -y --no-install-recommends git
 
-RUN pip install --upgrade pip setuptools wheel
-RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@main"
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@main"
 
 # --- Install ingress server ---
-WORKDIR /ingress-server
+WORKDIR /app
 
-COPY --chown=ingress:ingress pyproject.toml /ingress-server/pyproject.toml
-COPY --chown=ingress:ingress src/ /ingress-server/
+COPY --chown=INGRESS:INGRESS pyproject.toml /app/pyproject.toml
+COPY --chown=INGRESS:INGRESS src/ /app/
 
-RUN pip install --no-cache-dir /ingress-server \
-    && pip install --no-cache-dir waitress
+RUN pip install --no-cache-dir /app && \
+    pip install --no-cache-dir waitress
 
-RUN chown -R ingress:ingress /ingress-server
+RUN chown -R INGRESS:INGRESS /app
 
-USER ingress
-WORKDIR /ingress-server
+USER INGRESS
+WORKDIR /app
 EXPOSE 8000
 
 CMD ["waitress-serve", "--host", "0.0.0.0", "--port", "8000", "--call", "main:create_app_with_worker"]

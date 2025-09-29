@@ -13,6 +13,7 @@ from io_utils import validate_content_type, sanitize_node_path, atomic_write, ne
 from configs import CONFIG, ACCEPTED_DIR, STOP
 from worker import startup_recover, install_signal_handlers, working_loop
 from logging_setup import setup_logging
+from active_scrapper import start_scrapper_jobs
 
 load_dotenv()
 APP = Flask(__name__)
@@ -27,9 +28,9 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 @AUTH.login_required
-def _upload_node(endpoint_name: str, node_path: str = ""):
+def _upload_node(name: str, schema_path: str, node_path: str = ""):
     LOG.debug("ingress.request endpoint=%s node_path=%r ct=%r user=%r",
-        endpoint_name, node_path, request.headers.get("Content-Type"), AUTH.current_user())
+        name, node_path, request.headers.get("Content-Type"), AUTH.current_user())
 
     content_type = (request.headers.get("Content-Type") or "").lower()
     ok, err = validate_content_type(content_type)
@@ -48,7 +49,7 @@ def _upload_node(endpoint_name: str, node_path: str = ""):
         LOG.warning("Sanitizing node_path failed for %s: %s", node_path, err)
         return jsonify({"error": err}), 400
 
-    base = (ACCEPTED_DIR / endpoint_name) / safe_child
+    base = (ACCEPTED_DIR / name) / safe_child
     suffix = ".csv" if "csv" in content_type else ".json"
     msg_path = new_msg_path(base, suffix)
 
@@ -57,39 +58,49 @@ def _upload_node(endpoint_name: str, node_path: str = ""):
     meta_data = {
         "content_type": content_type,
         "node_path": node_path,
-        "endpoint_name": endpoint_name,
+        "name": name,
         "username": AUTH.current_user(),
         "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "schema_path": schema_path,
     }
 
-    atomic_write(msg_path.with_suffix(msg_path.suffix + ".meta.json"), json.dumps(meta_data).encode("utf-8"))
+    atomic_write(
+        msg_path.with_suffix(msg_path.suffix + ".meta.json"),
+        json.dumps(meta_data).encode("utf-8")
+    )
 
-    LOG.info("Accepted data for endpoint=%s node_path=%s path=%s user=%s ct=%s bytes=%d",
-            endpoint_name, node_path, msg_path, meta_data["username"],
-            content_type, len(data))
+    LOG.info(
+        "Accepted data for endpoint=%s node_path=%s path=%s user=%s ct=%s bytes=%d",
+        name,
+        node_path,
+        msg_path,
+        meta_data["username"],
+        content_type,
+        len(data),
+    )
     return jsonify({"status": "accepted"}), 202
 
 
 # =========================
 # Route creation
 # =========================
-def create_upload_endpoint(endpoint_name: str, endpoint_url: str):
+def create_upload_endpoint(name: str, endpoint_url: str, schema_path: str):
     # Root path (without node_path)
     APP.add_url_rule(
         endpoint_url,
-        endpoint=f"upload_node_root_{endpoint_name.replace('-', '_')}",
+        endpoint=f"upload_node_root_{name.replace('-', '_')}",
         view_func=_upload_node,
         methods=["POST"],
-        defaults={"endpoint_name": endpoint_name, "node_path": ""},
+        defaults={"name": name, "schema_path": schema_path, "node_path": ""},
     )
 
     # Subpath with node_path
     APP.add_url_rule(
         f"{endpoint_url}/<path:node_path>",
-        endpoint=f"upload_node_sub_{endpoint_name.replace('-', '_')}",
+        endpoint=f"upload_node_sub_{name.replace('-', '_')}",
         view_func=_upload_node,
         methods=["POST"],
-        defaults={"endpoint_name": endpoint_name},
+        defaults={"name": name, "schema_path": schema_path},
     )
 
 
@@ -98,8 +109,7 @@ def create_upload_endpoint(endpoint_name: str, endpoint_url: str):
 # =========================
 def create_app():
     for ep in CONFIG.get("endpoints", []):
-        create_upload_endpoint(ep["name"], ep["endpoint"])
-    return APP
+        create_upload_endpoint(ep["name"], ep["endpoint"], ep["schema_path"])
 
 def _start_worker_thread():
     t = Thread(target=working_loop, name="worker", daemon=True)
@@ -114,9 +124,13 @@ def _graceful_shutdown():
         t.join(timeout=10)
 
 def create_app_with_worker():
+    # Worker
     startup_recover()
     install_signal_handlers()
     _start_worker_thread()
+
+    # Scrapper
+    start_scrapper_jobs()
 
     atexit.register(_graceful_shutdown)
 

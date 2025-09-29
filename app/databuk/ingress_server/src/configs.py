@@ -15,11 +15,5 @@ FAILED_DIR = BASE_DIR / "failed"
 for d in (ACCEPTED_DIR, SUCCESS_DIR, FAILED_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-with open("inputs/endpoints_config.yaml", "r", encoding="utf-8") as f:
+with open("inputs/config.yaml", "r", encoding="utf-8") as f:
     CONFIG = yaml.safe_load(f) or {}
-
-ENDPOINT_NAME_TO_SCHEMA: dict[str, Path] = {}
-for ep in CONFIG.get("endpoints", []):
-    name = ep["name"]
-    schema_path = f"inputs/{ep['schema_path']}"
-    ENDPOINT_NAME_TO_SCHEMA[name] = Path(schema_path)

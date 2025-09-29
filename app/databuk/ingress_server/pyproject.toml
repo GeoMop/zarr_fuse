@@ -28,7 +28,8 @@ dependencies = [
     "flask",
     "Flask-HTTPAuth",
     "python-dotenv",
-    "polars"
+    "polars",
+    "APScheduler",
 ]
 
 [tool.setuptools.packages.find]
