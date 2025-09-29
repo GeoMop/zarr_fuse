@@ -29,5 +29,5 @@ jobs:
     uses: ./.github/workflows/dashboard-reusable-workflow.yaml
     with:
       tag: generate
-      deploy: true
+      deploy: false
     secrets: inherit
