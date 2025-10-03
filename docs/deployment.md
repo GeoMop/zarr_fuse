@@ -37,3 +37,13 @@ TODO: See directory `failed` for failed data frames.
 ```
 
 namespace = ingress-server
+
+
+### View logs on Rancher web
+
+1. login to [Rancher](https://rancher.cloud.e-infra.cz)
+2. click to kuba-cluster
+3. Workloads (left pannel) -> Pods
+4. Click to particular pod instance 'ingress-server-*'
+5. Dots on right top -> 'View logs'
+6. Select time interval for logs on the bottom bar, a wheel icon
