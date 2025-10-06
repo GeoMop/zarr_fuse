@@ -6,6 +6,21 @@ from typing import Dict, Any, Optional, List
 from core.config_manager import config_manager, EndpointConfig
 import fsspec
 
+# zarr_fuse integration - simplified approach
+ZARR_FUSE_AVAILABLE = False
+try:
+    # Add project root to Python path
+    import sys
+    from pathlib import Path
+    project_root = Path(__file__).parent.parent.parent.parent.parent.parent
+    sys.path.insert(0, str(project_root))
+    
+    import zarr_fuse
+    ZARR_FUSE_AVAILABLE = True
+except ImportError as e:
+    ZARR_FUSE_AVAILABLE = False
+    print(f"DEBUG: zarr_fuse import failed: {e}")
+
 logger = logging.getLogger(__name__)
 
 def clean_nan_values(data):
@@ -254,6 +269,16 @@ class S3Service:
         if not self._fs:
             raise ValueError("Not connected to S3")
         
+        # Check if zarr_fuse integration is enabled
+        use_zarr_fuse = getattr(self._current_config, 'Use_zarr_fuse', False)
+        if use_zarr_fuse:
+            if ZARR_FUSE_AVAILABLE:
+                print(f"Using zarr_fuse path for structure")
+                return self._get_store_structure_zarr_fuse()
+            else:
+                raise Exception("zarr_fuse integration enabled but library not available")
+        
+        # LEGACY CODE BELOW - NO CHANGES TO EXISTING LOGIC
         try:
             # Extract store path from STORE_URL
             store_url = self._current_config.STORE_URL
@@ -311,6 +336,11 @@ class S3Service:
         except Exception as e:
             logger.error(f"Failed to get store structure: {e}")
             raise ValueError(f"Failed to get store structure: {e}")
+    
+    def _get_store_structure_zarr_fuse(self) -> Dict[str, Any]:
+        """New implementation using zarr_fuse library"""
+        # TODO: Implement zarr_fuse integration
+        raise NotImplementedError("zarr_fuse structure integration not yet implemented")
     
     def _extract_structure(self, store_path: str) -> Dict[str, Any]:
         """Extract structure from a Zarr store - refactored and simplified"""
@@ -531,6 +561,16 @@ class S3Service:
                 if not self._current_config:
                     raise Exception("No endpoint configuration found")
             
+            # Check if zarr_fuse integration is enabled
+            use_zarr_fuse = getattr(self._current_config, 'Use_zarr_fuse', False)
+            if use_zarr_fuse:
+                if ZARR_FUSE_AVAILABLE:
+                    print(f"Using zarr_fuse path for variable: {variable_path}")
+                    return self._get_variable_data_zarr_fuse(store_name, variable_path)
+                else:
+                    raise Exception("zarr_fuse integration enabled but library not available")
+            
+            # LEGACY CODE BELOW - NO CHANGES TO EXISTING LOGIC
             # Get store configuration
             store_url = self._current_config.STORE_URL
             store_path = store_url[5:] if store_url.startswith('s3://') else store_url
@@ -631,6 +671,11 @@ class S3Service:
         except Exception as e:
             print(f"ERROR: Error getting variable data: {e}")
             raise
+    
+    def _get_variable_data_zarr_fuse(self, store_name: str, variable_path: str) -> Dict[str, Any]:
+        """New implementation using zarr_fuse library"""
+        # TODO: Implement zarr_fuse integration
+        raise NotImplementedError("zarr_fuse integration not yet implemented")
     
     def _extract_coordinate_info(self, coord_group, name: str) -> Dict[str, Any]:
         """Extract information about a coordinate"""

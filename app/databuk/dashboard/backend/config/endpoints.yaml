@@ -3,12 +3,15 @@
 
 "test_s3_endpoint":
   # Reload settings
-  Reload_interval: 300  # 5 minutes in seconds
-  
+  Reload_interval: 300 # 5 minutes in seconds
+
+  # Feature flag for zarr_fuse integration
+  Use_zarr_fuse: true
+
   # Schema configuration
   Schema_file: "schemas/test_schema.yaml"
-  
-  # S3 Store configuration - Using new credentials 
+
+  # S3 Store configuration - Using new credentials
   STORE_URL: "s3://${S3_BUCKET_NAME}/dashboard-test/structure_tree.zarr"
 
   S3_ENDPOINT_URL: "${S3_ENDPOINT_URL}"
