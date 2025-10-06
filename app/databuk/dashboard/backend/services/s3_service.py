@@ -339,8 +339,268 @@ class S3Service:
     
     def _get_store_structure_zarr_fuse(self) -> Dict[str, Any]:
         """New implementation using zarr_fuse library"""
-        # TODO: Implement zarr_fuse integration
-        raise NotImplementedError("zarr_fuse structure integration not yet implemented")
+        try:
+            # Get store configuration
+            store_url = self._current_config.STORE_URL
+            store_path = store_url[5:] if store_url.startswith('s3://') else store_url
+            store_name = store_path.split('/')[-1]
+            
+            print(f"Opening store with zarr_fuse: {store_path}")
+            
+            # Create storage options for zarr_fuse
+            storage_options = self._get_storage_options()
+            
+            # Create zarr store directly using zarr_fuse's internal functions
+            # Convert dashboard config to zarr_fuse format
+            zf_options = {
+                'STORE_URL': store_url,
+                'S3_ENDPOINT_URL': self._current_config.S3_ENDPOINT_URL,  # Use config directly
+                'S3_ACCESS_KEY': self._current_config.S3_access_key,      # Use config directly
+                'S3_SECRET_KEY': self._current_config.S3_secret_key,      # Use config directly
+                'S3_OPTIONS': '{}'  # Empty JSON for custom options
+            }
+            
+            print(f"DEBUG: zf_options = {zf_options}")
+            
+            # Open zarr store using zarr_fuse's internal function
+            zarr_store = zarr_fuse.zarr_storage._zarr_store_open(zf_options)
+            
+            # Use direct xarray approach instead of Node for now
+            # This avoids the FsspecStore.get() prototype issue
+            try:
+                # Open the root dataset directly
+                import xarray as xr
+                ds = xr.open_zarr(zarr_store)
+                structure = self._build_structure_from_dataset(ds, "")
+            except Exception as e:
+                print(f"Warning: Could not open root dataset, trying group approach: {e}")
+                # Fallback: try to open as group and traverse
+                import zarr
+                group = zarr.open_group(zarr_store, mode='r')
+                structure = self._build_structure_from_zarr_group(group, "")
+            
+            # Convert zarr_fuse structure to legacy format
+            legacy_structure = self._convert_to_legacy_format(structure)
+            
+            # Format response to match legacy format
+            zarr_stores = [{
+                'name': store_name,
+                'path': store_path,
+                'type': 'zarr_store',
+                'structure': legacy_structure
+            }]
+            
+            # Debug: print structure to see what we're returning
+            print(f"DEBUG: zarr_fuse structure = {structure}")
+            import json
+            print(f"DEBUG: structure JSON = {json.dumps(structure, indent=2, default=str)}")
+            
+            bucket_name = store_path.split('/')[0]
+            
+            return {
+                'status': 'success',
+                'bucket_name': bucket_name,
+                'store_url': store_url,
+                'total_stores': len(zarr_stores),
+                'stores': zarr_stores
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get store structure with zarr_fuse: {e}")
+            raise ValueError(f"Failed to get store structure with zarr_fuse: {e}")
+    
+    def _build_structure_from_node(self, node: 'zarr_fuse.Node') -> Dict[str, Any]:
+        """Build structure dictionary from zarr_fuse Node"""
+        structure = {}
+        
+        # Add current node's dataset info
+        try:
+            ds = node.dataset
+            if ds:
+                # Add variables
+                if ds.data_vars:
+                    structure['vars'] = {}
+                    for var_name, var in ds.data_vars.items():
+                        structure['vars'][var_name] = {
+                            'dims': list(var.dims),
+                            'shape': list(var.shape),
+                            'dtype': str(var.dtype),
+                            'attrs': dict(var.attrs)
+                        }
+                
+                # Add coordinates
+                if ds.coords:
+                    structure['coords'] = {}
+                    for coord_name, coord in ds.coords.items():
+                        structure['coords'][coord_name] = {
+                            'dims': list(coord.dims),
+                            'shape': list(coord.shape),
+                            'dtype': str(coord.dtype),
+                            'attrs': dict(coord.attrs)
+                        }
+                
+                # Add global attributes
+                if ds.attrs:
+                    structure['attrs'] = dict(ds.attrs)
+        except Exception as e:
+            print(f"Warning: Could not read dataset for node {node.name}: {e}")
+        
+        # Add children (subgroups)
+        if hasattr(node, 'children') and node.children:
+            structure['groups'] = {}
+            for child_name, child_node in node.children.items():
+                structure['groups'][child_name] = self._build_structure_from_node(child_node)
+        
+        return structure
+    
+    def _build_structure_from_dataset(self, ds: 'xr.Dataset', group_path: str) -> Dict[str, Any]:
+        """Build structure dictionary from xarray Dataset"""
+        structure = {}
+        
+        # Add variables
+        if ds.data_vars:
+            structure['vars'] = {}
+            for var_name, var in ds.data_vars.items():
+                structure['vars'][var_name] = {
+                    'dims': list(var.dims),
+                    'shape': list(var.shape),
+                    'dtype': str(var.dtype),
+                    'attrs': dict(var.attrs)
+                }
+        
+        # Add coordinates
+        if ds.coords:
+            structure['coords'] = {}
+            for coord_name, coord in ds.coords.items():
+                structure['coords'][coord_name] = {
+                    'dims': list(coord.dims),
+                    'shape': list(coord.shape),
+                    'dtype': str(coord.dtype),
+                    'attrs': dict(coord.attrs)
+                }
+        
+        # Add global attributes
+        if ds.attrs:
+            structure['attrs'] = dict(ds.attrs)
+        
+        return structure
+    
+    def _build_structure_from_zarr_group(self, group: 'zarr.Group', group_path: str) -> Dict[str, Any]:
+        """Build structure dictionary from zarr Group"""
+        structure = {}
+        
+        # Add arrays (variables)
+        arrays = list(group.arrays())
+        if arrays:
+            structure['vars'] = {}
+            for name, array in arrays:
+                structure['vars'][name] = {
+                    'dims': list(array.shape),  # Simplified - zarr doesn't have dim names
+                    'shape': list(array.shape),
+                    'dtype': str(array.dtype),
+                    'attrs': dict(array.attrs)
+                }
+        
+        # Add subgroups
+        subgroups = list(group.groups())
+        if subgroups:
+            structure['groups'] = {}
+            for name, subgroup in subgroups:
+                structure['groups'][name] = self._build_structure_from_zarr_group(subgroup, f"{group_path}/{name}")
+        
+        # Add group attributes
+        if group.attrs:
+            structure['attrs'] = dict(group.attrs)
+        
+        return structure
+    
+    def _convert_to_legacy_format(self, zf_structure: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert zarr_fuse structure format to legacy dashboard format"""
+        legacy = {
+            'name': 'root',
+            'path': '',
+            'type': 'group',
+            'children': []
+        }
+        
+        # Add variables as arrays
+        if 'vars' in zf_structure:
+            for var_name, var_info in zf_structure['vars'].items():
+                legacy['children'].append({
+                    'name': var_name,
+                    'path': var_name,
+                    'type': 'array',
+                    'shape': var_info['shape'],
+                    'dtype': var_info['dtype'],
+                    'chunks': var_info['shape'],  # Simplified
+                    'size': var_info['shape'][0] if var_info['shape'] else 0,
+                    'sample_data': []  # Will be filled by legacy code
+                })
+        
+        # Add groups recursively
+        if 'groups' in zf_structure:
+            for group_name, group_info in zf_structure['groups'].items():
+                group_legacy = {
+                    'name': group_name,
+                    'path': group_name,
+                    'type': 'group',
+                    'children': []
+                }
+                
+                # Add group variables
+                if 'vars' in group_info:
+                    for var_name, var_info in group_info['vars'].items():
+                        group_legacy['children'].append({
+                            'name': var_name,
+                            'path': f"{group_name}/{var_name}",
+                            'type': 'array',
+                            'shape': var_info['shape'],
+                            'dtype': var_info['dtype'],
+                            'chunks': var_info['shape'],
+                            'size': var_info['shape'][0] if var_info['shape'] else 0,
+                            'sample_data': []
+                        })
+                
+                # Add subgroups recursively
+                if 'groups' in group_info:
+                    for subgroup_name, subgroup_info in group_info['groups'].items():
+                        subgroup_legacy = self._convert_group_to_legacy(subgroup_name, f"{group_name}/{subgroup_name}", subgroup_info)
+                        group_legacy['children'].append(subgroup_legacy)
+                
+                legacy['children'].append(group_legacy)
+        
+        return legacy
+    
+    def _convert_group_to_legacy(self, group_name: str, group_path: str, group_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert a single group to legacy format"""
+        group_legacy = {
+            'name': group_name,
+            'path': group_path,
+            'type': 'group',
+            'children': []
+        }
+        
+        # Add variables
+        if 'vars' in group_info:
+            for var_name, var_info in group_info['vars'].items():
+                group_legacy['children'].append({
+                    'name': var_name,
+                    'path': f"{group_path}/{var_name}",
+                    'type': 'array',
+                    'shape': var_info['shape'],
+                    'dtype': var_info['dtype'],
+                    'chunks': var_info['shape'],
+                    'size': var_info['shape'][0] if var_info['shape'] else 0,
+                    'sample_data': []
+                })
+        
+        # Add subgroups recursively
+        if 'groups' in group_info:
+            for subgroup_name, subgroup_info in group_info['groups'].items():
+                subgroup_legacy = self._convert_group_to_legacy(subgroup_name, f"{group_path}/{subgroup_name}", subgroup_info)
+                group_legacy['children'].append(subgroup_legacy)
+        
+        return group_legacy
     
     def _extract_structure(self, store_path: str) -> Dict[str, Any]:
         """Extract structure from a Zarr store - refactored and simplified"""
@@ -391,6 +651,16 @@ class S3Service:
         if not self._fs or not self._current_config:
             raise ValueError("Not connected to S3. Call connect() first.")
         
+        # Check if zarr_fuse integration is enabled
+        use_zarr_fuse = getattr(self._current_config, 'Use_zarr_fuse', False)
+        if use_zarr_fuse:
+            if ZARR_FUSE_AVAILABLE:
+                print(f"Using zarr_fuse path for node details: {node_path}")
+                return self._get_node_details_zarr_fuse(store_name, node_path)
+            else:
+                raise Exception("zarr_fuse integration enabled but library not available")
+        
+        # LEGACY CODE BELOW - NO CHANGES TO EXISTING LOGIC
         try:
             print(f"Getting details for node: {store_name}/{node_path}")
             
@@ -548,7 +818,12 @@ class S3Service:
         except Exception as e:
             logger.error(f"Failed to get node details for {store_name}/{node_path}: {e}")
             raise
-
+    
+    def _get_node_details_zarr_fuse(self, store_name: str, node_path: str) -> Dict[str, Any]:
+        """New implementation using zarr_fuse library"""
+        # TODO: Implement zarr_fuse integration
+        raise NotImplementedError("zarr_fuse node details integration not yet implemented")
+    
     def get_variable_data(self, store_name: str, variable_path: str) -> Dict[str, Any]:
         """Get actual data for a specific variable (limited sample)"""
         try:
