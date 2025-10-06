@@ -18,6 +18,7 @@ class EndpointConfig(BaseModel):
     Description: str = Field(..., description="Endpoint description")
     Store_type: str = Field(default="zarr", description="Store type")
     Version: str = Field(default="1.0.0", description="Version")
+    Use_zarr_fuse: bool = Field(default=False, description="Enable zarr_fuse integration")
 
 class ConfigManager:
     """Manages YAML configuration for S3 endpoints"""
