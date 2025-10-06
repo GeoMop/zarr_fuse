@@ -1,0 +1,25 @@
+name: Helm Lint
+description: Lint a Helm chart
+inputs:
+  working-directory:
+    description: The working directory to run the action in
+    required: true
+  chart:
+    description: Path to the Helm chart to lint
+    required: false
+    default: .
+  values:
+    description: Additional values to pass to helm lint command
+    required: false
+    default: ""
+runs:
+  using: "composite"
+  steps:
+    - name: Lint helm chart
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: helm lint ${{ inputs.chart }} --strict ${{ inputs.values }} > /dev/null
+    - name: Template helm chart
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: helm template chart ${{ inputs.chart }} ${{ inputs.values }} > /dev/null
