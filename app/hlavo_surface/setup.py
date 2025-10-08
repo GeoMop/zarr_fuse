@@ -1,6 +1,8 @@
 from setuptools import setup
 
 requirements = [
+    "fsspec",
+    "joblib",
     "pytest",
     "pandas",
     "fastparquet",     # searialization of pandas tables

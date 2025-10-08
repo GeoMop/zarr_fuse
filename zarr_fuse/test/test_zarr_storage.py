@@ -93,6 +93,8 @@ def test_open_store(smart_tmp_path, options):
     load_dotenv()
     schema = zf.schema.deserialize(inputs_dir / "schema_open_store_tst.yaml")
     schema.ds.ATTRS['WORKDIR'] = str(smart_tmp_path)
+
+    # Test open - close usage
     zf.remove_store(schema, **options)
     print("AFTER REMOVAL: ", _store_ls(schema, **options))  # Should be empty
     node = zf.open_store(schema, **options)
@@ -102,8 +104,20 @@ def test_open_store(smart_tmp_path, options):
     assert isinstance(node, zf.Node)
     ds = node.dataset
     assert "__structure__" in ds.attrs
+    node.close()
+    assert node.store is None
 
+    # Test context manager
+    zf.remove_store(schema, **options)
+    print("AFTER REMOVAL: ", _store_ls(schema, **options))  # Should be empty
+    with zf.open_store(schema, **options) as node:
+        #print("AFTER Node open: ", _store_ls(schema, **options))  # Should be empty
 
+        # Common assertions for both backends
+        assert isinstance(node, zf.Node)
+        ds = node.dataset
+        assert "__structure__" in ds.attrs
+    assert node.store is None
 
 
 def sync_remove_store(storage_options, path):

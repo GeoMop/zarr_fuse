@@ -255,9 +255,13 @@ def open_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
 
     return Node("", store, new_schema = node_schema)
 
+
 class Node:
     """
-    A lazy node representing a dataset stored in a single Zarr storage.
+    A handle to the zarr group and a dataset stored in it.
+    It also works as a context manager for the store connection (applies to S3 storage).
+
+    Implementation:
     We flatten the tree structure representing every node by a key equal to the node's path.
     (Note: if the length of the ptah would be the problem, we can have a dict attribute asigning path -> hash)
     Each path starts with and is separated by "/", root node name is "/".
@@ -277,11 +281,7 @@ class Node:
 
     TODO:
     -  merge of schema:
-        - new nodes ok
-        - change in ATTRS OK
-        - adding vars ok
-        - adding coords ok
-        - distinguisn:
+        - distinguish:
             - parts that affects the storage (VARS, COORDS)
             - parts that affects Metadata
             - change in data acquisition
@@ -442,6 +442,31 @@ class Node:
         # maintain consistency between node tree and zarr storage.
         # Alternatively we can eliminate the dict like interface and only provide
         # access to keys and getitem method (minimalistic corresponding to the zarr storage API)
+
+    # --- context manager ---
+    def __enter__(self) -> "Node":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+
+        self.close()
+        return False  # don't suppress exceptions
+
+    def close(self) -> None:
+        is_root = self.parent is None
+        is_closed = self.store is None
+        if not is_root or is_closed:
+            return
+        try:
+            try:
+                self.store.fs.close()
+            except Exception as e:
+                pass
+            self.store.close()
+            self.store = None
+        except Exception:
+            # swallow close errors so they don't hide real exceptions
+            pass
 
 
     def _storage_group_paths(self):

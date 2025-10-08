@@ -80,9 +80,9 @@ def loc_forecast(scrapping_fn, cache, location):
 def update_meteo(scrapping_fn, df_locs: pl.DataFrame):
     loc_df = df_locs #.filter(pl.col('grid') == 1)
 
-    html_cache_flag = False
-    cache = generic.create_http_cache(work_dir / 'http_cache.sqlite', html_cache_flag)
-    loc_dfs = [loc_forecast(scrapping_fn, cache, loc) for loc in loc_df.iter_rows(named=True)]
+    html_cache_flag = True
+    with generic.create_http_cache(work_dir / 'http_cache.sqlite', html_cache_flag) as cache:
+        loc_dfs = [loc_forecast(scrapping_fn, cache, loc) for loc in loc_df.iter_rows(named=True)]
     # Concatenate all DataFrames
     final_df = pl.concat(loc_dfs)
     return final_df
@@ -110,8 +110,13 @@ def main():
     df_locs = location_df(schema.ds.ATTRS)
 
     df = update_meteo(yr_no.get_3day_forecast, df_locs)
-    root_node = zarr_fuse.open_store(schema, workdir = work_dir)
-    root_node['yr.no'].update(df)
+    # df.write_csv("weather_table.csv")
+    # df = polars.read_csv("weather_table.csv")
+    print('Open node')
+    with zarr_fuse.open_store(schema, workdir = work_dir) as root_node:
+        print('Update')
+        root_node['yr.no'].update(df)
+        print('Finalize')
 
 if __name__ == '__main__':
     main()
