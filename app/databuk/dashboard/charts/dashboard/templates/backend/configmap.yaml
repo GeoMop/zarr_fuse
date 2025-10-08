@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.backend.name }}-config
+  labels:
+    app.kubernetes.io/name: {{ .Values.backend.name }}
+data:
+  endpoints.yaml: |-
+    "production_s3_endpoint":
+      # Reload settings
+      Reload_interval: 300 # 5 minutes in seconds
+
+      # Schema configuration
+      Schema_file: "schemas/production_schema.yaml"
+
+      # S3 Store configuration - Using new credentials
+      STORE_URL: "s3://app-databuk-release-service/bukov.zarr"
+
+      S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
+      S3_access_key: "{{ .Values.backend.secrets.s3.accessKey }}"
+      S3_secret_key: "{{ .Values.backend.secrets.s3.secretKey }}"
+
+      S3_region: "us-east-1"
+      S3_use_ssl: true
+      S3_verify_ssl: true
+
+      Description: "Surface Zarr store with weather data (CESNET)"
+      Store_type: "zarr"
+      Version: "1.0.0"

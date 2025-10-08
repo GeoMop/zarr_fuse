@@ -2,12 +2,7 @@ name: Ingress server - reusable workflow
 on:
   workflow_call:
     inputs:
-      push-container:
-        description: Whether to push the container image
-        required: false
-        type: boolean
-        default: false
-      deploy-helm-chart:
+      deploy:
         description: Whether to deploy the Helm chart
         required: false
         type: boolean
@@ -29,9 +24,6 @@ on:
         description: The S3 store URL (e.g., s3://bucket-name/path/to/store.zarr)
         required: true
         type: string
-env:
-  repository: jbrezmorf/zarr-fuse-ingress-server
-  registry: docker.io
 jobs:
   get-version-tag:
     name: Get version tag
@@ -39,7 +31,7 @@ jobs:
     outputs:
       version-tag: ${{ steps.get_version_tag.outputs.version-tag }}
     concurrency:
-      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-version-tag
+      group: ${{ github.workflow }}-${{ github.ref }}-get-version-tag
       cancel-in-progress: true
     steps:
       - name: Checkout
@@ -69,24 +61,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Login to registry
-        if: ${{ inputs.push-container }}
-        run: buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ env.registry }}
-      - name: Build container file
-        run: |
-          buildah build -t ${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }} \
-          --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}" \
-          -f oci/Containerfile .
-      - name: Push container image
-        if: ${{ inputs.push-container }}
-        run: |
-          buildah push ${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }} docker://${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }}
-          buildah logout ${{ env.registry }}
+      - name: Containerize
+        uses: ./.github/actions/containerize
+        with:
+          repository: jbrezmorf/zarr-fuse-ingress-server
+          tag: ${{ needs.get-version-tag.outputs.version-tag }}
+          containerfile-path: oci/Containerfile
+          push: true
+          registry-username: ${{ vars.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
+          working-directory: app/databuk/ingress_server
+          extra-build-args: --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}"
   lint-helm-chart:
     name: Lint ingress server Helm chart
     runs-on: ubuntu-latest
     container:
-      image: alpine/k8s:1.29.14
+      image: docker.io/alpine/k8s:1.29.14
     needs:
       - containerize
     defaults:
@@ -99,15 +89,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Lint helm chart
-        run: helm lint --values values/minimal-required-values.yaml --strict > /dev/null
-      - name: Template helm chart
-        run: helm template ingress-server . --values values/minimal-required-values.yaml > /dev/null
-  deploy-helm-chart:
+        uses: ./.github/actions/helm-lint
+        with:
+          working-directory: app/databuk/ingress_server/charts/ingress-server
+          values: --values values/minimal-required-values.yaml
+  deploy:
     name: Deploy ingress server to e-infra rancher
     runs-on: ubuntu-latest
-    if: ${{ inputs.deploy-helm-chart }}
+    if: ${{ inputs.deploy }}
     container:
-      image: alpine/k8s:1.29.14
+      image: docker.io/alpine/k8s:1.29.14
     needs:
       - lint-helm-chart
       - get-version-tag
@@ -117,8 +108,8 @@ jobs:
       run:
         working-directory: app/databuk/ingress_server/charts
     concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-deploy-helm-chart"
-      cancel-in-progress: true
+      group: "${{ github.workflow }}-${{ github.ref }}-deploy"
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
