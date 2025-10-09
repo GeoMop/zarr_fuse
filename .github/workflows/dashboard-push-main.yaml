@@ -2,7 +2,7 @@ name: Dashboard - push main
 on:
   push:
     branches:
-      - dashboard-main
+      - dashboard-main, JB-dashboard-deploy
   workflow_dispatch:
 jobs:
   get-changed-files:
