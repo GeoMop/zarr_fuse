@@ -6,20 +6,20 @@ from typing import Dict, Any, Optional, List
 from core.config_manager import config_manager, EndpointConfig
 import fsspec
 
-# zarr_fuse integration - simplified approach
-ZARR_FUSE_AVAILABLE = False
+# Add project root to Python path (keep for monorepo)
+import sys
+from pathlib import Path
+project_root = Path(__file__).parent.parent.parent.parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+# Fail-fast import: hard-require zarr_fuse
 try:
-    # Add project root to Python path
-    import sys
-    from pathlib import Path
-    project_root = Path(__file__).parent.parent.parent.parent.parent.parent
-    sys.path.insert(0, str(project_root))
-    
     import zarr_fuse
-    ZARR_FUSE_AVAILABLE = True
 except ImportError as e:
-    ZARR_FUSE_AVAILABLE = False
-    print(f"DEBUG: zarr_fuse import failed: {e}")
+    raise RuntimeError(
+        "zarr_fuse is required but not found. Ensure repo root is on sys.path "
+        "or install the package before starting the backend."
+    ) from e
 
 logger = logging.getLogger(__name__)
 
@@ -269,16 +269,11 @@ class S3Service:
         if not self._fs:
             raise ValueError("Not connected to S3")
         
-        # Check if zarr_fuse integration is enabled
-        use_zarr_fuse = getattr(self._current_config, 'Use_zarr_fuse', False)
-        if use_zarr_fuse:
-            if ZARR_FUSE_AVAILABLE:
-                print(f"Using zarr_fuse path for structure")
-                return self._get_store_structure_zarr_fuse()
-            else:
-                raise Exception("zarr_fuse integration enabled but library not available")
+        # Always use zarr_fuse path
+        print(f"Using zarr_fuse path for structure")
+        return self._get_store_structure_zarr_fuse()
         
-        # LEGACY CODE BELOW - NO CHANGES TO EXISTING LOGIC
+        # LEGACY CODE BELOW - COMMENTED OUT (kept for reference)
         try:
             # Extract store path from STORE_URL
             store_url = self._current_config.STORE_URL
@@ -338,48 +333,33 @@ class S3Service:
             raise ValueError(f"Failed to get store structure: {e}")
     
     def _get_store_structure_zarr_fuse(self) -> Dict[str, Any]:
-        """New implementation using zarr_fuse library"""
+        """Temporary workaround using direct xarray instead of zarr_fuse"""
         try:
             # Get store configuration
             store_url = self._current_config.STORE_URL
             store_path = store_url[5:] if store_url.startswith('s3://') else store_url
             store_name = store_path.split('/')[-1]
             
-            print(f"Opening store with zarr_fuse: {store_path}")
+            print(f"Opening store with zarr (temporary workaround): {store_path}")
             
-            # Create storage options for zarr_fuse
-            storage_options = self._get_storage_options()
+            # Direct zarr approach - bypass FsspecStore prototype issue
+            import zarr
             
-            # Create zarr store directly using zarr_fuse's internal functions
-            # Convert dashboard config to zarr_fuse format
-            zf_options = {
-                'STORE_URL': store_url,
-                'S3_ENDPOINT_URL': self._current_config.S3_ENDPOINT_URL,  # Use config directly
-                'S3_ACCESS_KEY': self._current_config.S3_access_key,      # Use config directly
-                'S3_SECRET_KEY': self._current_config.S3_secret_key,      # Use config directly
-                'S3_OPTIONS': '{}'  # Empty JSON for custom options
+            # Prepare S3 storage options for zarr
+            storage_options = {
+                'endpoint_url': self._current_config.S3_ENDPOINT_URL,
+                'key': self._current_config.S3_access_key,
+                'secret': self._current_config.S3_secret_key
             }
             
-            print(f"DEBUG: zf_options = {zf_options}")
+            # Open with zarr directly using storage options
+            zarr_group = zarr.open_group(store_url, mode='r', storage_options=storage_options)
+            print(f"Zarr group opened successfully")
             
-            # Open zarr store using zarr_fuse's internal function
-            zarr_store = zarr_fuse.zarr_storage._zarr_store_open(zf_options)
+            # Build structure from zarr group
+            structure = self._build_structure_from_zarr_group(zarr_group, "")
             
-            # Use direct xarray approach instead of Node for now
-            # This avoids the FsspecStore.get() prototype issue
-            try:
-                # Open the root dataset directly
-                import xarray as xr
-                ds = xr.open_zarr(zarr_store)
-                structure = self._build_structure_from_dataset(ds, "")
-            except Exception as e:
-                print(f"Warning: Could not open root dataset, trying group approach: {e}")
-                # Fallback: try to open as group and traverse
-                import zarr
-                group = zarr.open_group(zarr_store, mode='r')
-                structure = self._build_structure_from_zarr_group(group, "")
-            
-            # Convert zarr_fuse structure to legacy format
+            # Convert to legacy format
             legacy_structure = self._convert_to_legacy_format(structure)
             
             # Format response to match legacy format
@@ -391,7 +371,7 @@ class S3Service:
             }]
             
             # Debug: print structure to see what we're returning
-            print(f"DEBUG: zarr_fuse structure = {structure}")
+            print(f"DEBUG: zarr structure = {structure}")
             import json
             print(f"DEBUG: structure JSON = {json.dumps(structure, indent=2, default=str)}")
             
@@ -406,8 +386,62 @@ class S3Service:
             }
             
         except Exception as e:
-            logger.error(f"Failed to get store structure with zarr_fuse: {e}")
-            raise ValueError(f"Failed to get store structure with zarr_fuse: {e}")
+            logger.error(f"Failed to get store structure with zarr: {e}")
+            raise ValueError(f"Failed to get store structure with zarr: {e}")
+    
+    def _build_structure_from_xarray(self, ds) -> Dict[str, Any]:
+        """Build structure from xarray dataset"""
+        structure = {
+            'vars': {},
+            'coords': {},
+            'dims': list(ds.dims.keys()),
+            'attrs': dict(ds.attrs)
+        }
+        
+        # Add data variables
+        for var_name, var in ds.data_vars.items():
+            structure['vars'][var_name] = {
+                'dims': list(var.dims),
+                'shape': var.shape,
+                'dtype': str(var.dtype),
+                'attrs': dict(var.attrs)
+            }
+        
+        # Add coordinates
+        for coord_name, coord in ds.coords.items():
+            structure['coords'][coord_name] = {
+                'dims': list(coord.dims),
+                'shape': coord.shape,
+                'dtype': str(coord.dtype),
+                'attrs': dict(coord.attrs)
+            }
+        
+        return structure
+    
+    def _build_structure_from_zarr_group(self, zarr_group, group_path: str = "") -> Dict[str, Any]:
+        """Build structure from zarr group"""
+        structure = {
+            'vars': {},
+            'coords': {},
+            'dims': {},
+            'attrs': dict(zarr_group.attrs),
+            'groups': {}
+        }
+        
+        # Add arrays (variables)
+        for name, array in zarr_group.arrays():
+            structure['vars'][name] = {
+                'shape': array.shape,
+                'dtype': str(array.dtype),
+                'chunks': array.chunks,
+                'attrs': dict(array.attrs)
+            }
+        
+        # Add groups
+        for name, group in zarr_group.groups():
+            structure['groups'][name] = self._build_structure_from_zarr_group(group, f"{group_path}/{name}")
+        
+        return structure
     
     def _build_structure_from_node(self, node: 'zarr_fuse.Node') -> Dict[str, Any]:
         """Build structure dictionary from zarr_fuse Node"""
@@ -651,15 +685,11 @@ class S3Service:
         if not self._fs or not self._current_config:
             raise ValueError("Not connected to S3. Call connect() first.")
         
-        # Check if zarr_fuse integration is enabled
-        use_zarr_fuse = getattr(self._current_config, 'Use_zarr_fuse', False)
-        if use_zarr_fuse:
-            if ZARR_FUSE_AVAILABLE:
-                print(f"Using zarr_fuse path for node details: {node_path}")
-                return self._get_node_details_zarr_fuse(store_name, node_path)
-            else:
-                raise Exception("zarr_fuse integration enabled but library not available")
+        # TODO: Implement zarr_fuse path for node details
+        # For now, use legacy implementation
+        print(f"Using legacy path for node details: {node_path}")
         
+        '''
         # LEGACY CODE BELOW - NO CHANGES TO EXISTING LOGIC
         try:
             print(f"Getting details for node: {store_name}/{node_path}")
@@ -818,7 +848,7 @@ class S3Service:
         except Exception as e:
             logger.error(f"Failed to get node details for {store_name}/{node_path}: {e}")
             raise
-    
+    '''
     def _get_node_details_zarr_fuse(self, store_name: str, node_path: str) -> Dict[str, Any]:
         """New implementation using zarr_fuse library"""
         # TODO: Implement zarr_fuse integration
@@ -836,14 +866,9 @@ class S3Service:
                 if not self._current_config:
                     raise Exception("No endpoint configuration found")
             
-            # Check if zarr_fuse integration is enabled
-            use_zarr_fuse = getattr(self._current_config, 'Use_zarr_fuse', False)
-            if use_zarr_fuse:
-                if ZARR_FUSE_AVAILABLE:
-                    print(f"Using zarr_fuse path for variable: {variable_path}")
-                    return self._get_variable_data_zarr_fuse(store_name, variable_path)
-                else:
-                    raise Exception("zarr_fuse integration enabled but library not available")
+            # TODO: Implement zarr_fuse path for variable data
+            # For now, use legacy implementation
+            print(f"Using legacy path for variable: {variable_path}")
             
             # LEGACY CODE BELOW - NO CHANGES TO EXISTING LOGIC
             # Get store configuration

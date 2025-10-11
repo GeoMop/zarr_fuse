@@ -6,7 +6,7 @@
   Reload_interval: 300 # 5 minutes in seconds
 
   # Feature flag for zarr_fuse integration
-  Use_zarr_fuse: true
+  Use_zarr_fuse: false
 
   # Schema configuration
   Schema_file: "schemas/test_schema.yaml"

@@ -1,0 +1,31 @@
+ATTRS:
+  STORE_URL: "s3://hlavo-release/dashboard-test/structure_tree.zarr"
+  S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
+  S3_ACCESS_KEY: "4AYEM989E085FY167A5W"
+  S3_SECRET_KEY: "sh7iiSQgJaf8uS9ddQlSRKH9G8GIekR3pxLlDMMv"
+
+VARS:
+    temperature:
+        coords: time
+COORDS:
+    time: {}
+
+child_1:
+    VARS:
+        temperature:
+            coords: time
+    COORDS:
+        time: {}
+    child_3:
+        VARS:
+            temperature:
+                coords: time
+        COORDS:
+            time: {}
+    ATTRS: {}
+child_2:
+    VARS:
+        temperature:
+            coords: time
+    COORDS:
+        time: {}
