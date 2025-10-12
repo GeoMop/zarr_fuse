@@ -1,23 +1,23 @@
 name: Ingress server - push main
 on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - ingress_server/**
+      workflow_dispatch:
+      push:
+            branches:
+                  - main
+            paths:
+                  - ingress_server/**
 jobs:
-  build-and-deploy:
-    name: Build and deploy ingress server
-    uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
-    concurrency:
-      group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
-      cancel-in-progress: false
-    with:
-      deploy: true
-      tag: generate
-      namespace: ingress-server-latest
-      release-name: ingress-server-latest
-      s3-store-url: s3://app-databuk-test-service/bukov-main.zarr
-      zarr-fuse-ref: main
-    secrets: inherit
+      build-and-deploy:
+            name: Build and deploy ingress server
+            uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+            concurrency:
+                  group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
+                  cancel-in-progress: false
+            with:
+                  deploy: true
+                  tag: generate
+                  namespace: ingress-server-latest
+                  release-name: ingress-server-latest
+                  s3-store-url: s3://app-databuk-test-service/bukov-main.zarr
+                  zarr-fuse-ref: main
+            secrets: inherit
