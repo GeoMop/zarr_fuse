@@ -2,7 +2,7 @@ name: Ingress server - pull request
 on:
   pull_request:
     branches:
-      - "*"
+      - "**"
     paths:
       - app/databuk/ingress_server/**
 jobs:
@@ -10,8 +10,7 @@ jobs:
     name: Build and deploy ingress server
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     with:
-      push-container: true
-      deploy-helm-chart: true
+      deploy: true
       tag: generate
       namespace: ingress-server-development
       release-name: ingress-server-development

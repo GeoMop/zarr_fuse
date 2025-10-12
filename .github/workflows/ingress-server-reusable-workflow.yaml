@@ -2,12 +2,7 @@ name: Ingress server - reusable workflow
 on:
   workflow_call:
     inputs:
-      push-container:
-        description: Whether to push the container image
-        required: false
-        type: boolean
-        default: false
-      deploy-helm-chart:
+      deploy:
         description: Whether to deploy the Helm chart
         required: false
         type: boolean
@@ -39,6 +34,11 @@ on:
         required: false
         type: string
         default: docker.io
+      configuration-dir:
+        description: Path to the directory containing configuration files
+        required: false
+        type: string
+        default: app/databuk/ingress_server/inputs
 jobs:
   get-version-tag:
     name: Get version tag
@@ -46,7 +46,7 @@ jobs:
     outputs:
       version-tag: ${{ steps.get_version_tag.outputs.version_tag }}
     concurrency:
-      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-version-tag
+      group: ${{ github.workflow }}-${{ github.ref_name }}-get-version-tag
       cancel-in-progress: true
     steps:
       - name: Get version tag
@@ -57,66 +57,98 @@ jobs:
           else
             echo "version_tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
           fi
+  pre-containerize:
+    name: Prepare for containerization
+    runs-on: ubuntu-latest
+    if: ${{ inputs.configuration-dir != '' }}
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref_name }}-pre-containerize"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+
+      - name: Copy configuration files
+        run: |
+          if [ ! -d "inputs" ]; then
+            mkdir -p inputs
+          else
+            rm -rf inputs/*
+          fi
+
+          cp -r ${{ inputs.configuration-dir }}/* inputs/
+
+      - name: Upload configuration files as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingress-server-configuration
+          path: inputs/
   containerize:
     name: Containerize ingress server
     runs-on: ubuntu-latest
+    needs:
+      - get-version-tag
+      - pre-containerize
     container:
       image: quay.io/buildah/stable:v1.35.4
       options: --privileged
-    needs:
-      - get-version-tag
-    defaults:
-      run:
-        working-directory: app/databuk/ingress_server
     concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-containerize"
+      group: "${{ github.workflow }}-${{ github.ref_name }}-containerize"
       cancel-in-progress: true
     steps:
-      - name: Checkout
+      - name: Checkout zarr_fuse
         uses: actions/checkout@v4
         with:
           repository: GeoMop/zarr_fuse
-      - name: Login to registry
-        if: ${{ inputs.push-container }}
-        run: buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ inputs.docker-registry }}
-      - name: Build container file
-        run: |
-          buildah build -t ${{ inputs.docker-registry }}/${{ inputs.docker-repository }}:${{ needs.get-version-tag.outputs.version-tag }} \
-          --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}" \
-          -f oci/Containerfile .
-      - name: Push container image
-        if: ${{ inputs.push-container }}
-        run: |
-          buildah push ${{ inputs.docker-registry }}/${{ inputs.docker-repository }}:${{ needs.get-version-tag.outputs.version-tag }} docker://${{ inputs.docker-registry }}/${{ inputs.docker-repository }}:${{ needs.get-version-tag.outputs.version-tag }}
-          buildah logout ${{ inputs.docker-registry }}
+
+      - name: Download configuration files artifact
+        if: ${{ inputs.configuration-dir != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ingress-server-configuration
+          path: app/databuk/ingress_server/src/inputs/
+
+      - name: Containerize
+        uses: ./.github/actions/containerize
+        with:
+          repository: ${{ inputs.docker-repository }}
+          registry: ${{ inputs.docker-registry }}
+          tag: ${{ needs.get-version-tag.outputs.version-tag }}
+          containerfile-path: oci/Containerfile
+          push: true
+          registry-username: ${{ vars.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
+          working-directory: zarr_fuse/app/databuk/ingress_server
+          extra-build-args: --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}"
   lint-helm-chart:
     name: Lint ingress server Helm chart
     runs-on: ubuntu-latest
     container:
-      image: alpine/k8s:1.29.14
+      image: docker.io/alpine/k8s:1.29.14
     needs:
       - containerize
     defaults:
       run:
         working-directory: app/databuk/ingress_server/charts/ingress-server
     concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-lint-helm-chart"
+      group: "${{ github.workflow }}-${{ github.ref_name }}-lint-helm-chart"
       cancel-in-progress: true
     steps:
-      - name: Checkout
+      - name: Checkout zarr_fuse
         uses: actions/checkout@v4
         with:
           repository: GeoMop/zarr_fuse
       - name: Lint helm chart
-        run: helm lint --values values/minimal-required-values.yaml --strict > /dev/null
-      - name: Template helm chart
-        run: helm template ingress-server . --values values/minimal-required-values.yaml > /dev/null
-  deploy-helm-chart:
+        uses: ./.github/actions/helm-lint
+        with:
+          working-directory: app/databuk/ingress_server/charts/ingress-server
+          values: --values values/minimal-required-values.yaml
+  deploy:
     name: Deploy ingress server to e-infra rancher
     runs-on: ubuntu-latest
-    if: ${{ inputs.deploy-helm-chart }}
+    if: ${{ inputs.deploy }}
     container:
-      image: alpine/k8s:1.29.14
+      image: docker.io/alpine/k8s:1.29.14
     needs:
       - lint-helm-chart
       - get-version-tag
@@ -126,17 +158,15 @@ jobs:
       run:
         working-directory: app/databuk/ingress_server/charts
     concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-deploy-helm-chart"
-      cancel-in-progress: true
+      group: "${{ github.workflow }}-${{ github.ref_name }}-deploy"
+      cancel-in-progress: false
     steps:
-      - name: Checkout
+      - name: Checkout zarr_fuse
         uses: actions/checkout@v4
         with:
           repository: GeoMop/zarr_fuse
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
-      - name: Ensure that the namespace exists
-        run: kubectl create namespace --dry-run=client -o yaml "${{ inputs.namespace }}"
       - name: Set context
         run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
       - name: Deploy app
