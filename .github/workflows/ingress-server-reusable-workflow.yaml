@@ -34,7 +34,7 @@ on:
         required: false
         type: string
         default: docker.io
-      configuration-dir:
+      configuration-dir-path:
         description: Path to the directory containing configuration files
         required: false
         type: string
@@ -120,7 +120,7 @@ jobs:
           push: true
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
-          working-directory: zarr_fuse/app/databuk/ingress_server
+          working-directory: app/databuk/ingress_server
           extra-build-args: --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}"
   lint-helm-chart:
     name: Lint ingress server Helm chart
