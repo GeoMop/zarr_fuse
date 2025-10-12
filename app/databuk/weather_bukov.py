@@ -9,9 +9,13 @@ import polars as pl
 import json
 
 import zarr_fuse
+import extract
 
-import hlavo_surface.inputs as inputs
+#import hlavo_surface.inputs as inputs
+import inputs
+
 work_dir = inputs.work_dir
+
 #from . import generic, yr_no
 import generic, bukov_get_data
 
@@ -82,7 +86,9 @@ def loc_forecast(scrapping_fn, cache, location, sensors_profile):
     print(df)
     return df
 
-def update_data(node, scrapping_fn, df_locs: pl.DataFrame, sensors_profile: pl.DataFrame):
+#def update_data(node, scrapping_fn, df_locs: pl.DataFrame, sensors_profile: pl.DataFrame):
+def update_data(scrapping_fn, df_locs: pl.DataFrame):
+    '''
     yr_no_node = node
     loc_df = df_locs #.filter(pl.col('grid') == 1)
 
@@ -92,6 +98,16 @@ def update_data(node, scrapping_fn, df_locs: pl.DataFrame, sensors_profile: pl.D
     loc_dfs = [loc_forecast(scrapping_fn, cache, loc, sensors_profile) for loc in loc_df.iter_rows(named=True)]
     # Concatenate all DataFrames
     final_df = pl.concat(loc_dfs)
+    '''
+
+    loc_df = df_locs  # .filter(pl.col('grid') == 1)
+
+    html_cache_flag = False
+    cache = generic.create_http_cache(work_dir / 'http_cache.sqlite', html_cache_flag)
+    loc_dfs = [loc_forecast(scrapping_fn, cache, loc) for loc in loc_df.iter_rows(named=True)]
+    # Concatenate all DataFrames
+    final_df = pl.concat(loc_dfs)
+    return final_df
 
     # df = final_df
     #
@@ -108,17 +124,33 @@ def update_data(node, scrapping_fn, df_locs: pl.DataFrame, sensors_profile: pl.D
     # # Print result
     # print(result)
 
-    yr_no_node.update(final_df)
+    #yr_no_node.update(final_df)
 
 
 
 def main():
+    '''
     #schema = zarr_fuse.schema.deserialize(inputs.surface_schema_yaml)
-    schema = zarr_fuse.schema.deserialize(inputs.surface_schema_bukov_yaml)
+    schema = zarr_fuse.schema.deserialize(inputs.schema_bukov_yaml)
     df_locs, sensors_profile = location_df(schema.ds.ATTRS)
 
-    root_node = zarr_fuse.open_storage(schema, workdir = work_dir)
+    root_node = zarr_fuse.open_store(schema, workdir = work_dir)
     update_data(   root_node['bukov'], bukov_get_data.get_bukov, df_locs, sensors_profile)
+    '''
+
+    schema = zarr_fuse.schema.deserialize(inputs.schema_bukov_yaml)
+    #df_locs = location_df(schema.ds.ATTRS)
+    #df = update_data(bukov_get_data.get_bukov, df_locs)
+
+
+    #recs_new = extract.normalize(extract.IN_JSON_NEW, "new")   #read actual data file from Fiedler
+    recs_new = extract.normalize(extract.IN_JSON, "old")    #read old file with manual data
+    df = pl.DataFrame(recs_new)
+    print(df)
+    #df.write_csv(extract.OUT_CSV)
+
+    root_node = zarr_fuse.open_store(schema, workdir=work_dir)
+    root_node['bukov'].update(df)
 
 if __name__ == '__main__':
     main()

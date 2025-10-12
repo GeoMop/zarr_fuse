@@ -7,5 +7,5 @@ work_dir.mkdir(parents=True, exist_ok=True)
 
 # Following is public
 input_dir = __script_dir__.parent / "inputs"
-schema_bukov_yaml = input_dir / "schema_bukov.yaml"
+schema_bukov_yaml = input_dir / "surface_schema_bukov_nove.yaml"
 bukov_locations_csv = input_dir / "bukov_locations.csv"
