@@ -29,28 +29,33 @@ on:
         description: The S3 store URL (e.g., s3://bucket-name/path/to/store.zarr)
         required: true
         type: string
-env:
-  repository: jbrezmorf/zarr-fuse-ingress-server
-  registry: docker.io
+      docker-repository:
+        description: The Docker repository to use
+        required: false
+        type: string
+        default: jbrezmorf/zarr-fuse-ingress-server
+      docker-registry:
+        description: The Docker registry to use
+        required: false
+        type: string
+        default: docker.io
 jobs:
   get-version-tag:
     name: Get version tag
     runs-on: ubuntu-latest
     outputs:
-      version-tag: ${{ steps.get_version_tag.outputs.version-tag }}
+      version-tag: ${{ steps.get_version_tag.outputs.version_tag }}
     concurrency:
       group: ${{ github.head_ref }}-${{ github.ref_name }}-get-version-tag
       cancel-in-progress: true
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
       - name: Get version tag
         id: get_version_tag
         run: |
           if [[ ${{ inputs.tag }} == "generate" ]]; then
-            echo "version-tag=ci-$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+            echo "version_tag=ci-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
           else
-            echo "version-tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+            echo "version_tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
           fi
   containerize:
     name: Containerize ingress server
@@ -69,19 +74,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          repository: GeoMop/zarr_fuse
       - name: Login to registry
         if: ${{ inputs.push-container }}
-        run: buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ env.registry }}
+        run: buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ inputs.docker-registry }}
       - name: Build container file
         run: |
-          buildah build -t ${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }} \
+          buildah build -t ${{ inputs.docker-registry }}/${{ inputs.docker-repository }}:${{ needs.get-version-tag.outputs.version-tag }} \
           --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}" \
           -f oci/Containerfile .
       - name: Push container image
         if: ${{ inputs.push-container }}
         run: |
-          buildah push ${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }} docker://${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }}
-          buildah logout ${{ env.registry }}
+          buildah push ${{ inputs.docker-registry }}/${{ inputs.docker-repository }}:${{ needs.get-version-tag.outputs.version-tag }} docker://${{ inputs.docker-registry }}/${{ inputs.docker-repository }}:${{ needs.get-version-tag.outputs.version-tag }}
+          buildah logout ${{ inputs.docker-registry }}
   lint-helm-chart:
     name: Lint ingress server Helm chart
     runs-on: ubuntu-latest
@@ -98,6 +105,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          repository: GeoMop/zarr_fuse
       - name: Lint helm chart
         run: helm lint --values values/minimal-required-values.yaml --strict > /dev/null
       - name: Template helm chart
@@ -122,6 +131,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          repository: GeoMop/zarr_fuse
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
       - name: Ensure that the namespace exists

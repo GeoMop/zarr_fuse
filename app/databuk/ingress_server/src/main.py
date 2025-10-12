@@ -59,7 +59,7 @@ def _upload_node(endpoint_name: str, node_path: str = ""):
         "node_path": node_path,
         "endpoint_name": endpoint_name,
         "username": AUTH.current_user(),
-        "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     }
 
     atomic_write(msg_path.with_suffix(msg_path.suffix + ".meta.json"), json.dumps(meta_data).encode("utf-8"))
