@@ -2,7 +2,9 @@ name: Ingress server - pull request
 on:
   pull_request:
     branches:
-      - "*"
+      - "**"
+    paths:
+      - app/databuk/ingress_server/**
 jobs:
   get-changed-files:
     name: Get changed file
@@ -29,8 +31,7 @@ jobs:
     if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     with:
-      push-container: true
-      deploy-helm-chart: true
+      deploy: true
       tag: generate
       namespace: ingress-server-development
       release-name: ingress-server-development
