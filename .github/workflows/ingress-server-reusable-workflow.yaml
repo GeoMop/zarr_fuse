@@ -60,7 +60,7 @@ jobs:
   pre-containerize:
     name: Prepare for containerization
     runs-on: ubuntu-latest
-    if: ${{ inputs.configuration-dir != '' }}
+    if: ${{ inputs.configuration-dir-path != '' }}
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref_name }}-pre-containerize"
       cancel-in-progress: true
@@ -76,7 +76,7 @@ jobs:
             rm -rf inputs/*
           fi
 
-          cp -r ${{ inputs.configuration-dir }}/* inputs/
+          cp -r ${{ inputs.configuration-dir-path}}/* inputs/
 
       - name: Upload configuration files as artifact
         uses: actions/upload-artifact@v4
@@ -102,7 +102,7 @@ jobs:
           repository: GeoMop/zarr_fuse
 
       - name: Download configuration files artifact
-        if: ${{ inputs.configuration-dir != '' }}
+        if: ${{ inputs.configuration-dir-path != '' }}
         uses: actions/download-artifact@v4
         with:
           name: ingress-server-configuration
