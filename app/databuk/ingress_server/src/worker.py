@@ -6,7 +6,7 @@ import logging
 
 from pathlib import Path
 from configs import ACCEPTED_DIR, FAILED_DIR, SUCCESS_DIR, STOP
-from io_utils import open_root, read_df_from_bytes
+from io_utils import open_store, read_df_from_bytes
 
 LOG = logging.getLogger("worker")
 
@@ -81,7 +81,7 @@ def _process_one(data_path: Path) -> str | None:
     if err:
         return f"Failed to read DataFrame: {err}"
 
-    root, err = open_root(schema_path)
+    root, err = open_store(schema_path)
     if err:
         return f"Failed to open root: {err}"
 

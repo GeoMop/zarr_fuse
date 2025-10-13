@@ -2,8 +2,6 @@ endpoints:
   - name: bukov
     endpoint: /api/v1/bukov
     schema_path: schemas/bukov_schema_v1.yaml
-    convert_fn: normalize_new # fn(json_data) -> pd.DataFrame
-    # import extract.py from modules/extract.py
 
 active_scrappers:
   - name: bukov-scraper

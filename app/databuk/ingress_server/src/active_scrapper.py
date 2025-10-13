@@ -2,7 +2,6 @@ import requests
 import logging
 import json
 import time
-import logging
 
 from io_utils import (
     validate_content_type,

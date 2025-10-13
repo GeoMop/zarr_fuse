@@ -14,6 +14,7 @@ from configs import CONFIG, ACCEPTED_DIR, STOP
 from worker import startup_recover, install_signal_handlers, working_loop
 from logging_setup import setup_logging
 from active_scrapper import start_scrapper_jobs
+from active_scrapper import scheduler
 
 load_dotenv()
 APP = Flask(__name__)
@@ -119,6 +120,7 @@ def _start_worker_thread():
 
 def _graceful_shutdown():
     STOP.set()
+    scheduler.shutdown(wait=False)
     t = APP.config.get("worker_thread")
     if t:
         t.join(timeout=10)
