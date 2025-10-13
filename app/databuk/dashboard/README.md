@@ -1,6 +1,10 @@
 # ZARR FUSE Dashboard
 
-A modern, interactive dashboard for exploring Zarr stores on S3 with real-time data visualization. Built with React, TypeScript, FastAPI, and designed for generic Zarr store structures.
+[release deploy](https://zarr-fuse-dashboard.dyn.cloud.e-infra.cz/)
+
+A modern, interactive dashboard for exploring Zarr stores on S3 with real-time data visualization. 
+
+Built with React, TypeScript, FastAPI, and designed for generic Zarr store structures.
 
 ## Features
 
