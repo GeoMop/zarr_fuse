@@ -1,4 +1,4 @@
-name: Ingress server - pull request
+name: Dashboard - pull request
 on:
   pull_request:
     branches:
@@ -15,22 +15,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Check if Ingress Server files or Helm Charts were changed
+      - name: Check if Dashboard files were changed
         id: changed
         uses: tj-actions/changed-files@v45
         with:
           files: |
-            app/databuk/ingress_server/**
+            app/databuk/dashboard/**
   build:
-    name: Build and deploy ingress server
+    name: Build and lint dashboard
     needs:
       - get-changed-files
     if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
-    uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    uses: ./.github/workflows/dashboard-reusable-workflow.yaml
     with:
-      deploy: true
       tag: generate
-      namespace: ingress-server-development
-      release-name: ingress-server-development
-      s3-store-url: s3://app-databuk-test-service/bukov-pull-request.zarr
+      deploy: false
     secrets: inherit

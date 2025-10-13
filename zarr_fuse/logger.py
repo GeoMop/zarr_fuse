@@ -93,8 +93,9 @@ class StoreLogHandler(logging.Handler):
 
 
         # choose initial append strategy
-        if isinstance(store, (zarr.storage.LocalStore,)):
-            assert store.supports_partial_writes, "Store does not support partial writes"
+        if isinstance(store, (zarr.storage.LocalStore,)) :
+            # Partial writes are not supported form zarr 3
+            # but appending may stil work on LocalStore.
             self._append = self._append_unsafe
         else:
             self._append = self._append_safe

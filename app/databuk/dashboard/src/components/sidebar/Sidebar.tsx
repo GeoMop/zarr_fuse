@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { X, Database, BarChart3, AlertCircle, Clock, RefreshCw, Folder, ChevronRight, ChevronDown } from 'lucide-react';
+import { AlertCircle, BarChart3, ChevronDown, ChevronRight, Clock, Database, Folder, RefreshCw, X } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { API_BASE_URL } from '../../api';
 import type { SidebarProps } from './types/sidebar';
 
 // Types for S3 data
@@ -23,7 +24,7 @@ interface S3Response {
   structure: S3Structure;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ 
+const Sidebar: React.FC<SidebarProps> = ({
   onClose,
   configData,
   configLoading,
@@ -31,7 +32,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   onNodeClick,
   onLogClick
 }) => {
-  
+
   // S3 data state
   const [s3Data, setS3Data] = useState<S3Response | null>(null);
   const [s3Loading, setS3Loading] = useState(false);
@@ -58,7 +59,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     setS3Loading(true);
     setS3Error(null);
     try {
-      const response = await fetch('http://localhost:8000/api/s3/structure');
+      const response = await fetch(`${API_BASE_URL}/api/s3/structure`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -106,15 +107,15 @@ const Sidebar: React.FC<SidebarProps> = ({
   const renderTreeItem = (item: any, level: number = 0, parentPath: string = '', storeName: string = '') => {
     const indent = level * 16;
     const itemPath = parentPath ? `${parentPath}/${item.name}` : item.name;
-    
+
     console.log('Rendering item:', item); // Debug log
-    
+
     if (item.type === 'group') {
       const groupsOnly = (item.children || []).filter((c: any) => c.type === 'group');
       const isExpanded = expandedPaths.has(itemPath);
       return (
         <div key={itemPath} style={{ marginLeft: indent }}>
-          <div 
+          <div
             className="flex items-center gap-3 py-2 hover:bg-gray-100 rounded px-2 cursor-pointer"
             onClick={() => onNodeClick?.(storeName, itemPath)}
           >
@@ -178,7 +179,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
         </div>
-        
+
         {/* Store URL and Description */}
         {configData && (
           <div className="mt-3 pt-3 border-t border-blue-500/30">
@@ -199,7 +200,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <span>{s3Loading ? 'Loading' : (s3Error || hasStoreError) ? 'Issues' : 'Active'}</span>
               </span>
             </div>
-            <div 
+            <div
               className="w-full bg-blue-500/30 rounded-full h-3 cursor-pointer hover:bg-blue-500/50 transition-colors duration-200"
               onClick={() => {
                 fetchS3Data();
@@ -264,7 +265,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               <p className="text-green-600 text-base">Available data sources</p>
             </div>
           </div>
-          
+
           {/* S3 Loading State */}
           {s3Loading && (
             <div className="flex items-center gap-2 py-2">
@@ -286,14 +287,14 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="space-y-3">
               {s3Data.structure.stores.map((store) => (
                 <div key={store.name} className="border border-green-200 rounded-lg p-3 bg-white">
-                  <div 
+                  <div
                     className="mb-2 cursor-pointer hover:bg-green-50 p-2 rounded transition-colors"
                     onClick={() => onNodeClick?.(store.name, '')}
                   >
                     <span className="font-semibold text-green-800">{store.name}</span>
                     <span className="text-xs text-gray-500 ml-2">(click to view root variables)</span>
                   </div>
-                  
+
                   {store.error ? (
                     <div className="text-sm text-red-600">{store.error}</div>
                   ) : store.structure ? (
@@ -317,7 +318,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
       {/* Fixed Footer - Logs */}
       <div className="p-4 border-t border-gray-200 bg-white">
-        <div 
+        <div
           className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-2 rounded-lg transition-colors duration-200"
           onClick={onLogClick}
         >
@@ -330,5 +331,3 @@ const Sidebar: React.FC<SidebarProps> = ({
 };
 
 export default Sidebar;
-
-
