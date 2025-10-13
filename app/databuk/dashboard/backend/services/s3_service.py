@@ -2,24 +2,13 @@ import zarr
 from zarr.storage import FsspecStore
 import logging
 import math
+import os
 from typing import Dict, Any, Optional, List
-from core.config_manager import config_manager, EndpointConfig
+from core.config_manager import load_endpoints, get_first_endpoint, EndpointConfig
 import fsspec
 
-# Add project root to Python path (keep for monorepo)
-import sys
-from pathlib import Path
-project_root = Path(__file__).parent.parent.parent.parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-# Fail-fast import: hard-require zarr_fuse
-try:
-    import zarr_fuse
-except ImportError as e:
-    raise RuntimeError(
-        "zarr_fuse is required but not found. Ensure repo root is on sys.path "
-        "or install the package before starting the backend."
-    ) from e
+# Import zarr_fuse (now installed via pip)
+import zarr_fuse
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +41,9 @@ class S3Service:
             raise ValueError("No configuration provided")
             
         return {
-            'key': config.S3_access_key,
-            'secret': config.S3_secret_key,
-            'client_kwargs': {'endpoint_url': config.S3_ENDPOINT_URL},
+            'key': os.getenv('S3_ACCESS_KEY'),
+            'secret': os.getenv('S3_SECRET_KEY'),
+            'client_kwargs': {'endpoint_url': os.getenv('S3_ENDPOINT_URL')},
             'config_kwargs': {
                 's3': {
                     'payload_signing_enabled': False,
@@ -72,7 +61,7 @@ class S3Service:
         """Open Zarr store and return (store_mapper, store_group)"""
         storage_options = self._get_storage_options()
         
-        bucket_name = self._current_config.STORE_URL.split('/')[2]
+        bucket_name = self._current_config.store_url.split('/')[2]
         # Normalize path and avoid duplicating bucket
         normalized_path = store_path.lstrip('/')
         if normalized_path.startswith(f"{bucket_name}/"):
@@ -248,16 +237,22 @@ class S3Service:
         
         return result
     
-    def connect(self, endpoint_config: EndpointConfig) -> bool:
+    def connect(self, endpoint_config: Optional[EndpointConfig] = None) -> bool:
         """Connect to S3 using common S3 configuration"""
         try:
+            # Use first endpoint if none provided
+            if endpoint_config is None:
+                endpoint_config = get_first_endpoint()
+                if not endpoint_config:
+                    raise ValueError("No endpoint configuration found")
+            
             # Use fsspec.get_mapper approach for listing
             storage_options = self._get_storage_options(endpoint_config)
             
             # Use fsspec.filesystem for listing operations
             self._fs = fsspec.filesystem('s3', **storage_options)
             self._current_config = endpoint_config
-            logger.info(f"Successfully connected to S3: {endpoint_config.STORE_URL}")
+            logger.info(f"Successfully connected to S3: {endpoint_config.store_url}")
             return True
         except Exception as e:
             logger.error(f"Failed to connect to S3: {e}")
@@ -275,14 +270,14 @@ class S3Service:
         
         # LEGACY CODE BELOW - COMMENTED OUT (kept for reference)
         try:
-            # Extract store path from STORE_URL
-            store_url = self._current_config.STORE_URL
+            # Extract store path from store_url
+            store_url = self._current_config.store_url
             if store_url.startswith('s3://'):
                 store_path = store_url[5:]  # Remove 's3://' prefix
             else:
                 store_path = store_url
             
-            print(f"Using specific store path from STORE_URL: {store_path}")
+            print(f"Using specific store path from store_url: {store_path}")
             
             # Get store name (last part of path)
             store_name = store_path.split('/')[-1]
@@ -336,7 +331,7 @@ class S3Service:
         """Temporary workaround using direct xarray instead of zarr_fuse"""
         try:
             # Get store configuration
-            store_url = self._current_config.STORE_URL
+            store_url = self._current_config.store_url
             store_path = store_url[5:] if store_url.startswith('s3://') else store_url
             store_name = store_path.split('/')[-1]
             
@@ -345,11 +340,11 @@ class S3Service:
             # Direct zarr approach - bypass FsspecStore prototype issue
             import zarr
             
-            # Prepare S3 storage options for zarr
+            # Prepare S3 storage options for zarr (from environment variables)
             storage_options = {
-                'endpoint_url': self._current_config.S3_ENDPOINT_URL,
-                'key': self._current_config.S3_access_key,
-                'secret': self._current_config.S3_secret_key
+                'endpoint_url': os.getenv('S3_ENDPOINT_URL'),
+                'key': os.getenv('S3_ACCESS_KEY'),
+                'secret': os.getenv('S3_SECRET_KEY')
             }
             
             # Open with zarr directly using storage options
@@ -694,14 +689,14 @@ class S3Service:
         try:
             print(f"Getting details for node: {store_name}/{node_path}")
             
-            # Use the store path from STORE_URL directly
-            store_url = self._current_config.STORE_URL
+            # Use the store path from store_url directly
+            store_url = self._current_config.store_url
             if store_url.startswith('s3://'):
                 store_path = store_url[5:]  # Remove 's3://' prefix
             else:
                 store_path = store_url
             
-            print(f"Using store path from STORE_URL: {store_path}")
+            print(f"Using store path from store_url: {store_path}")
             
             # Open the store
             storage_options = self._get_storage_options()
@@ -861,8 +856,7 @@ class S3Service:
             
             # Ensure config is loaded
             if not self._current_config:
-                from core.config_manager import config_manager
-                self._current_config = config_manager.get_first_endpoint()
+                self._current_config = get_first_endpoint()
                 if not self._current_config:
                     raise Exception("No endpoint configuration found")
             
@@ -872,7 +866,7 @@ class S3Service:
             
             # LEGACY CODE BELOW - NO CHANGES TO EXISTING LOGIC
             # Get store configuration
-            store_url = self._current_config.STORE_URL
+            store_url = self._current_config.store_url
             store_path = store_url[5:] if store_url.startswith('s3://') else store_url
             print(f"Using store path: {store_path}")
             

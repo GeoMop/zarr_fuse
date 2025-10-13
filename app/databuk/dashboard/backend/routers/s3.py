@@ -1,14 +1,14 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 from services.s3_service import s3_service
-from core.config_manager import config_manager
+from core.config_manager import get_first_endpoint
 
 router = APIRouter(prefix="/s3", tags=["s3"])
 
 async def ensure_connected():
     """Ensure S3 service is connected, connect if not"""
     if not s3_service._fs:
-        endpoint_config = config_manager.get_first_endpoint()
+        endpoint_config = get_first_endpoint()
         if not endpoint_config:
             raise HTTPException(status_code=400, detail="No endpoint configuration found")
         
@@ -20,7 +20,7 @@ async def ensure_connected():
 async def connect_to_s3():
     """Connect to S3 using the current configuration"""
     try:
-        endpoint_config = config_manager.get_first_endpoint()
+        endpoint_config = get_first_endpoint()
         if not endpoint_config:
             raise HTTPException(status_code=400, detail="No endpoint configuration found")
         

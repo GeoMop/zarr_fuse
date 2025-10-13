@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+venv/
+.env
+dist/
+build/
+*.egg-info/
+__pycache__/
