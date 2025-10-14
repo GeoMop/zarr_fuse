@@ -977,13 +977,13 @@ def get_df_col(df, var:zarr_schema.Variable, logger: logging.Logger):
         logger.error(f"Source column '{var.df_col}' not found in the input DataFrame:\n{df.head()}")
         return np.full(df.shape[0], np.nan)
     try:
-        source_quantity_arr = units.create_quantity(col_series, from_unit=var.source_unit)
+        q_new = units.create_quantity(col_series, from_unit=var.source_unit, to_unit=var.unit)
     except ValueError as e:
+        print(col_series)
         logger.error(f"Failed to parse values of column '{var.df_col}' with\n"
                      f"unit/format specification:{var.source_unit}\n"
                      f"values:\n{df.head()}")
         return np.full(df.shape[0], np.nan)
-    q_new = source_quantity_arr.to(var.unit)
     return q_new.magnitude
 
         # TODO: log missing column
