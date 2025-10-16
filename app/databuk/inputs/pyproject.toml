@@ -1,0 +1,11 @@
+[project]
+name = "extract"
+version = "0.1.0"
+description = "Custom conversion module for ingress server"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["extract"]
