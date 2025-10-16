@@ -1,0 +1,6 @@
+endpoints:
+  - name: bukov
+    endpoint: /api/v1/bukov
+    schema_path: schemas/bukov_schema.yaml
+    extract_fn: normalize_new # fn(json_data, meta_data) -> pd.DataFrame
+    # in module : extract
