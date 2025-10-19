@@ -1,6 +1,6 @@
 # ZarrFuse Ingress – Backend & Docker/OCI
 
-Backend-only Flask service running in a container with **gunicorn**.
+Backend-only FastAPI service running in a container with **gunicorn**.
 The image contains both the `zarr_fuse` library and the ingress server code.
 The service accepts CSV/JSON uploads and merges them into an S3-backed Zarr store using `zarr-fuse`.
 There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
@@ -11,9 +11,9 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 
 - **Purpose:** Ingest tabular data (CSV/JSON) and merge it into a Zarr dataset on S3.
 - **Where to write:** S3 endpoint and path are defined in the *schema* (`ATTRS.s3_url`, `ATTRS.store_path`).
-- **How endpoints are defined:** via `endpoints_config.yaml`.
-- **Auth:** Basic HTTP authentication (Flask-HTTPAuth) is enabled; credentials via environment variables. S3 credentials also come from environment.
-- **Swagger/OpenAPI:** Generated dynamically from `endpoints_config.yaml` using `tools/gen_swagger.py`.
+- **How endpoints are defined:** via `config.yaml`.
+- **Auth:** Basic HTTP authentication (fastapi.security) is enabled; credentials via environment variables. S3 credentials also come from environment.
+- **Swagger/OpenAPI:** localhost:8000/docs or **/docs**
 
 ---
 
@@ -23,13 +23,11 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 .
 ├─ ingress_server/
 │  ├─ src/
-│  │  ├─ main.py                  # Flask backend server
-│  │  ├─ endpoints_config.yaml    # List of API endpoints and their schema paths
+│  │  ├─ main.py                  # FastAPI backend server
+│  │  ├─ config.yaml              # List of API endpoints and their schema paths
 │  │  └─ schemas/                 # Schema files (prod/ci_test)
-│  ├─ docs/
-│  │  └─ swagger.yaml             # Generated OpenAPI spec
 │  ├─ tools/
-│  │  └─ gen_swagger.py           # Swagger generator script
+│  │  └─ request_example.py       # Makes example request
 │  ├─ oci/
 │  │  ├─ Dockerfile               # Container build
 │  └─ pyproject.toml              # Project metadata & dependencies
@@ -39,7 +37,7 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 
 ## Configuration
 
-### 1) Environment (.env)
+### 1 Environment (.env)
 
 ```ini
 # Required
@@ -58,7 +56,7 @@ BASIC_AUTH_USERS_JSON={"alice":"password"}
 
 The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.
 
-### 2) Endpoints (`src/endpoints_config.yaml`)
+### 2 Endpoints (`src/config.yaml`)
 
 ```yaml
 endpoints:
@@ -80,7 +78,7 @@ Each entry creates two routes:
 - `POST {endpoint}` — updates the root (`/`) of the Zarr tree
 - `POST {endpoint}/{node_path}` — updates a specific node (e.g. `/api/v1/tree/a/b/c`)
 
-### 3) Schema (example)
+### 3 Schema (example)
 
 ```yaml
 ATTRS:
@@ -129,21 +127,12 @@ docker run --rm -p 8000:8000 \
 
 ### Mounting schemas/config without rebuild
 
-The container already includes `schemas/` and `endpoints_config.yaml` from the build context.
+The container already includes `schemas/` and `config.yaml` from the build context.
 If you want to override them without rebuilding, mount them as read-only volumes:
 
 ```bash
 -v $(pwd)/src/schemas:/ingress-server/schemas:ro \
--v $(pwd)/src/endpoints_config.yaml:/ingress-server/endpoints_config.yaml:ro
-```
-
----
-
-## Generate Swagger
-
-```bash
-python tools/gen_swagger.py
-# Output will be in docs/swagger.yaml
+-v $(pwd)/src/config.yaml:/ingress-server/config.yaml:ro
 ```
 
 ---
