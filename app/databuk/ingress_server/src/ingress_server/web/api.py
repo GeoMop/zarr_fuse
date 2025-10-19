@@ -35,7 +35,7 @@ async def _upload_node(
     ok, err = validation.validate_data(payload, content_type)
     if not ok:
         LOG.warning("Validating data failed for %s", err)
-        return JSONResponse({"error": err}, status_code=400)
+        return JSONResponse({"error": err}, status_code=406)
 
     meta_data = MetadataModel(
         content_type=content_type,
@@ -57,10 +57,30 @@ async def _upload_node(
     return JSONResponse({"status": "accepted"}, status_code=202)
 
 def register_upload_endpoints(app: FastAPI, endpoint_name: str, endpoint_url: str, schema_path: str):
-    @app.post(endpoint_url)
+    @app.post(
+        endpoint_url,
+        summary=f"Upload to root node {endpoint_name}",
+        description=f"Upload data to the s3 queue for endpoint {endpoint_name}.",
+        responses={
+            202: {"description": "Accepted (saved to S3)"},
+            400: {"description": "Bad Request"},
+            406: {"description": "Not Acceptable (data validation failed)"},
+            415: {"description": "Unsupported Media Type (content type not supported)"},
+        }
+    )
     async def upload_root(request: Request, username: str = Depends(auth.authenticate)):
         return await _upload_node(endpoint_name, schema_path, request, username)
 
-    @app.post(f"{endpoint_url}/{{node_path:path}}")
+    @app.post(
+        f"{endpoint_url}/{{node_path:path}}",
+        summary=f"Upload to child node of {endpoint_name}",
+        description=f"Upload child data to the s3 queue for endpoint {endpoint_name}.",
+        responses={
+            202: {"description": "Accepted (saved to S3)"},
+            400: {"description": "Bad Request"},
+            406: {"description": "Not Acceptable (data validation failed)"},
+            415: {"description": "Unsupported Media Type (content type not supported)"},
+        }
+    )
     async def upload_node(node_path: str, request: Request, username: str = Depends(auth.authenticate)):
         return await _upload_node(endpoint_name, schema_path, request, username, node_path)
