@@ -69,22 +69,25 @@ jobs:
     steps:
       - name: Checkout caller repository
         uses: actions/checkout@v4
-
       - name: Copy configuration files
         run: |
-          if [ ! -d "inputs" ]; then
-            mkdir -p inputs
-          else
-            rm -rf inputs/*
+          SRC_DIR="${{ inputs.configuration-dir-path }}"
+          DEST_DIR="ci-inputs"
+
+          if [[ ! -d "$SRC_DIR" ]]; then
+            echo "Source directory '$SRC_DIR' does not exist."
+            exit 1
           fi
 
-          cp -r ${{ inputs.configuration-dir-path}}/* inputs/
+          mkdir -p "$DEST_DIR"
+          rm -rf "$DEST_DIR/*"
 
+          cp -r "$SRC_DIR"/. "$DEST_DIR"/
       - name: Upload configuration files as artifact
         uses: actions/upload-artifact@v4
         with:
           name: ingress-server-configuration
-          path: inputs/
+          path: ci-inputs/
   containerize:
     name: Containerize ingress server
     runs-on: ubuntu-latest
