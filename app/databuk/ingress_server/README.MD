@@ -1,6 +1,6 @@
 # ZarrFuse Ingress – Backend & Docker/OCI
 
-Backend-only Flask service running in a container with **gunicorn**.
+Backend-only FastAPI service running in a container with **gunicorn**.
 The image contains both the `zarr_fuse` library and the ingress server code.
 The service accepts CSV/JSON uploads and merges them into an S3-backed Zarr store using `zarr-fuse`.
 There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
@@ -12,7 +12,7 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 - **Purpose:** Ingest tabular data (CSV/JSON) and merge it into a Zarr dataset on S3.
 - **Where to write:** S3 endpoint and path are defined in the *schema* (`ATTRS.s3_url`, `ATTRS.store_path`).
 - **How endpoints are defined:** via `config.yaml`.
-- **Auth:** Basic HTTP authentication (Flask-HTTPAuth) is enabled; credentials via environment variables. S3 credentials also come from environment.
+- **Auth:** Basic HTTP authentication (fastapi.security) is enabled; credentials via environment variables. S3 credentials also come from environment.
 - **Swagger/OpenAPI:** Generated dynamically from `config.yaml` using `tools/gen_swagger.py`.
 
 ---
@@ -23,7 +23,7 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 .
 ├─ ingress_server/
 │  ├─ src/
-│  │  ├─ main.py                  # Flask backend server
+│  │  ├─ main.py                  # FastAPI backend server
 │  │  ├─ config.yaml    # List of API endpoints and their schema paths
 │  │  └─ schemas/                 # Schema files (prod/ci_test)
 │  ├─ docs/

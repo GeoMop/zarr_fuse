@@ -12,7 +12,7 @@ authors = [
   { name = "Jan Brezina", email = "jan.brezina@tul.cz" }
 ]
 license = { text = "BSD-3-Clause" }
-keywords = ["backend","ingestion","upload","HTTP API","S3","Zarr","fsspec","Flask","CSV","data pipeline"]
+keywords = ["backend","ingestion","upload","HTTP API","S3","Zarr","fsspec","CSV","data pipeline"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -25,11 +25,12 @@ requires-python = ">=3.11"
 
 dependencies = [
     "PyYAML",
-    "flask",
-    "Flask-HTTPAuth",
+    "fastapi"
     "python-dotenv",
     "polars",
     "APScheduler",
+    "pydantic",
+    "boto3"
 ]
 
 [tool.setuptools.packages.find]
