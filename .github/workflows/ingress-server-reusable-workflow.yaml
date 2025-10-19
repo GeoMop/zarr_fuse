@@ -39,8 +39,8 @@ on:
         required: false
         type: string
         default: app/databuk/ingress_server/src/inputs
-      extra-helm-values:
-        description: Extra Helm values to pass during deployment
+      extra-helm-args:
+        description: Extra Helm arguments to pass during deployment
         required: false
         type: string
         default: ""
@@ -186,4 +186,4 @@ jobs:
           --set deployment.secrets.s3.storeUrl='${{ inputs.s3-store-url }}' \
           --set-json deployment.secrets.basicAuth.usersJson='${{ secrets.BASIC_AUTH_USERS_JSON }}' \
           --set app.name="${{ inputs.release-name }}" \
-          ${{ inputs.extra-helm-values }}
+          ${{ inputs.extra-helm-args }}
