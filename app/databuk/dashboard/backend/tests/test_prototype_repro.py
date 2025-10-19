@@ -79,6 +79,11 @@ def test_zarr_fuse_schema_prototype_error():
         error_msg = str(e)
         print(f"Caught TypeError: {error_msg}")
         
+        # Print full traceback for debugging
+        import traceback
+        print("Full traceback:")
+        traceback.print_exc()
+        
         if "prototype" in error_msg.lower():
             print("Successfully reproduced the prototype error with schema-based approach!")
             pytest.xfail(f"Compatibility issue: {error_msg}")
