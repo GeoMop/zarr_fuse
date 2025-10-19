@@ -1,14 +1,13 @@
-import atexit
 import logging
 import os
-
 import uvicorn
+
 from fastapi import FastAPI
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from ingress_server.web import api
-from ingress_server.scrapper import scheduler
+from ingress_service.web import api
+from ingress_service.scrapper import scheduler
 from common import configuration, logging as config_logging
 
 APP = FastAPI(title="Databuk Ingress Server", version="2.0.0")

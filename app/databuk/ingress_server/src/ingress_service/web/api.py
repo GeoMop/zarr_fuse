@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from common import validation
 from common import s3io
 from common.models.metadata_model import MetadataModel
-from ingress_server.web import auth
+from ingress_service.web import auth
 
 LOG = logging.getLogger("ingress")
 
