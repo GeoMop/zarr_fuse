@@ -1,6 +1,6 @@
 import requests
 
-url = "https://zarr-fuse-ingress-server-latest.dyn.cloud.e-infra.cz/api/v1/bukov"
+url = "http://localhost:8000/api/v1/bukov"
 
 csv_data = """time,temperature
 2025-05-13T08:00:00,20.0
