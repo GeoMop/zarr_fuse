@@ -15,6 +15,11 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: {{ .Values.frontend.name }}
+        app.kubernetes.io/component: frontend
+        app.kubernetes.io/part-of: dashboard
+        app.kubernetes.io/managed-by: Helm
+        app.kubernetes.io/version: {{ .Values.frontend.image.tag }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
       securityContext:
         {{- toYaml .Values.frontend.securityContext.pod | nindent 8 }}

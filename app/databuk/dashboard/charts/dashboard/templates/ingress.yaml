@@ -11,7 +11,7 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
   rules:
-    - host: zarr-fuse-dashboard.dyn.cloud.e-infra.cz
+    - host: zarr-fuse-{{ .Release.Name }}.dyn.cloud.e-infra.cz
       http:
         paths:
           - path: /
@@ -29,6 +29,6 @@ spec:
                 port:
                   number: {{ .Values.backend.service.externalPort.number | int }}
   tls:
-    - secretName: zarr-fuse-dashboard-dyn-cloud-e-infra-cz-tls
+    - secretName: zarr-fuse-{{ .Release.Name }}-dyn-cloud-e-infra-cz-tls
       hosts:
-        - zarr-fuse-dashboard.dyn.cloud.e-infra.cz
+        - zarr-fuse-{{ .Release.Name }}.dyn.cloud.e-infra.cz

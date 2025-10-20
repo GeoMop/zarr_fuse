@@ -12,6 +12,18 @@ on:
         required: false
         type: boolean
         default: false
+      namespace:
+        description: The Kubernetes namespace to use
+        required: true
+        type: string
+      release-name:
+        description: The Helm release name
+        required: true
+        type: string
+      s3-store-url:
+        description: The S3 store URL for the backend
+        required: false
+        type: string
 jobs:
   get-version-tag:
     name: Get version tag
@@ -163,14 +175,15 @@ jobs:
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
       - name: Ensure that the namespace exists
-        run: kubectl create namespace --dry-run=client -o yaml zarr-fuse-dashboard
+        run: kubectl create namespace --dry-run=client -o yaml ${{ inputs.namespace }} | kubectl apply -f -
       - name: Set context
-        run: kubectl config set-context --current --namespace=zarr-fuse-dashboard
+        run: kubectl config set-context --current --namespace=${{ inputs.namespace }}
       - name: Deploy app
         run: |
-          helm upgrade dashboard dashboard \
-          --install --atomic --timeout 10m --namespace zarr-fuse-dashboard \
+          helm upgrade ${{ inputs.release-name }} dashboard \
+          --install --atomic --timeout 10m --namespace ${{ inputs.namespace }} \
           --set backend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
           --set frontend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
-          --set backend.secrets.s3.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
-          --set backend.secrets.s3.secretKey="${{ secrets.S3_SECRET_KEY }}"
+          --set backend.s3.secrets.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
+          --set backend.s3.secrets.secretKey="${{ secrets.S3_SECRET_KEY }}" \
+          --set backend.s3.storeUrl="${{ inputs.s3-store-url }}"

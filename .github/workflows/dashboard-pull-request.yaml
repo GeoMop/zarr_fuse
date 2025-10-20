@@ -3,31 +3,16 @@ on:
   pull_request:
     branches:
       - "**"
+    paths:
+      - app/databuk/dashboard/**
 jobs:
-  get-changed-files:
-    name: Get changed file
-    runs-on: ubuntu-latest
-    outputs:
-      any-changed: ${{ steps.changed.outputs.any_changed }}
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-get-changed-files
-      cancel-in-progress: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Check if Dashboard files were changed
-        id: changed
-        uses: tj-actions/changed-files@v45
-        with:
-          files: |
-            app/databuk/dashboard/**
   build:
     name: Build and lint dashboard
-    needs:
-      - get-changed-files
-    if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
     uses: ./.github/workflows/dashboard-reusable-workflow.yaml
     with:
       tag: generate
-      deploy: false
+      deploy: true
+      namespace: zarr-fuse-dashboard-development
+      release-name: dashboard-development
+      s3-store-url: s3://app-databuk-test-service/bukov-main.zarr
     secrets: inherit
