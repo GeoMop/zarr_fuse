@@ -91,7 +91,7 @@ jobs:
         run: npm ci
       - name: Build frontend
         env:
-          VITE_API_URL: "https://zarr-fuse-dashboard.dyn.cloud.e-infra.cz"
+          VITE_API_URL: "https://zarr-fuse-${{ inputs.release-name }}.dyn.cloud.e-infra.cz"
         run: npm run build
       - name: Upload artifact
         uses: actions/upload-artifact@v4
