@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from configs import ACCEPTED_DIR, FAILED_DIR, SUCCESS_DIR, STOP
 from io_utils import open_root, read_df_from_bytes
+from extractor import apply_extractor_if_any
 
 LOG = logging.getLogger("worker")
 
@@ -68,6 +69,8 @@ def _process_one(data_path: Path) -> str | None:
     if err:
         return err
 
+    extract_fn = meta.get("extract_fn", "")
+    fn_module = meta.get("fn_module", "")
     endpoint_name = meta.get("endpoint_name", "")
     node_path = meta.get("node_path", "")
     content_type = meta.get("content_type", "application/json")
@@ -76,8 +79,20 @@ def _process_one(data_path: Path) -> str | None:
         return f"No schema for endpoint {endpoint_name}"
 
     payload = data_path.read_bytes()
+
+    if "json" in content_type.lower():
+        try:
+            payload = apply_extractor_if_any(
+                payload=payload,
+                extract_fn=extract_fn,
+                fn_module=fn_module,
+                endpoint_name=endpoint_name,
+            )
+        except Exception as e:
+            return f"Failed to read JSON: {e}"
+
     df, err = read_df_from_bytes(payload, content_type)
-    if err:
+    if err or df.height == 0:
         return f"Failed to read DataFrame: {err}"
 
     root, err = open_root(schema_path)
