@@ -123,10 +123,10 @@ jobs:
           path: app/databuk/ingress_server/src/inputs/
 
       - name: Containerize
-        uses: GeoMop/zarr_fuse/.github/actions/containerize@SM-CI-outside-repository
+        uses: GeoMop/github-actions/.github/actions/containerize@v1
         with:
-          repository: ${{ inputs.docker-repository }}
           registry: ${{ inputs.docker-registry }}
+          repository: ${{ inputs.docker-repository }}
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           containerfile-path: oci/Containerfile
           push: true
@@ -151,7 +151,7 @@ jobs:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
       - name: Lint helm chart
-        uses: GeoMop/zarr_fuse/.github/actions/helm-lint@SM-CI-outside-repository
+        uses: GeoMop/github-actions/.github/actions/helm-lint@v1
         with:
           working-directory: app/databuk/ingress_server/charts/ingress-server
           values: --values values/minimal-required-values.yaml
