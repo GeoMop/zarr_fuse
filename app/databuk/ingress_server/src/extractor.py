@@ -1,5 +1,7 @@
 import json
 import logging
+import polars as pl
+
 from importlib import import_module
 
 LOG = logging.getLogger("extractor")
@@ -19,7 +21,7 @@ def apply_extractor_if_any(
     payload: bytes,
     extract_fn: str,
     fn_module: str,
-) -> bytes:
+) -> pl.DataFrame:
     extractor = resolve_extractor(fn_module, extract_fn)
     if not extractor:
         LOG.info("No extractor for endpoint %s, skipping extraction", endpoint_name)
@@ -44,4 +46,4 @@ def apply_extractor_if_any(
         LOG.error("Extractor %s from %s failed for endpoint %s: %s", extract_fn, fn_module, endpoint_name, e)
         raise ValueError("Extractor function failed")
 
-    return json.dumps(extracted_data, ensure_ascii=False).encode("utf-8")
+    return extracted_data
