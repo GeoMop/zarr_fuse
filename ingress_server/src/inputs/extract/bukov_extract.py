@@ -131,9 +131,9 @@ def read_json(path: Path):
         data = json.load(f)
     return data
 
-def normalize_new(json_dict : dict) -> dict:
+def normalize_new(json_dict : dict) -> pl.DataFrame:
     json_dict_new = read_new_fiedler_json(json_dict)
-    return normalize(json_dict_new)
+    return pl.DataFrame(normalize(json_dict_new))
 
-def normalize_old(json_dict : dict) -> dict:
-    return normalize(json_dict)
+def normalize_old(json_dict : dict) -> pl.DataFrame:
+    return pl.DataFrame(normalize(json_dict))
