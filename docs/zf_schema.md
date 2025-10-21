@@ -32,17 +32,28 @@ Each variable is defined by its own dictionary of properties.
 ### `coords`
 String or list of strings, name(s) of the coordinate(s) indexing the variable. 
 The variable is N dimensional tensor, where each of N axes corresponds to one named coordinate defined in COORDS.
-  
-### `unit`
+
+### `type` (optional)
+Explicit data type of the variable in terms of Numpy dtype. 
+Default is 'None', meaning the dtype is determined by the first write. 
+We accept also following types for non-physical quantities:
+  [`bool`, `int`, `int8`, `int32`, `int64`, `float`, `float64`, `complex`, `str[n]` ]. 
+  Here `str[n]` defines fixed length UTF8 string of length n, 
+  longer strings are truncated on write to the store. The variable length strings have support in the ZARR and
+  might be supported in future versions.
+If  `unit` is provided, the `bool` and `str[n]` are not allowed.
+Explicit type specification is recommended.
+
+### `invalid_value`
+Value used to represent missing or invalid data in the variable. Native NaN is used by default for float quantities.
+'signed_max_int' and 'signed_min_int' keywords are supported for integer types, representing the maximum and minimum 
+signed integer values of the variable type. Otherwise you have to provide the actual value compatible with the variable type.
+
+### `unit` 
 Could be string or dictionary. The second case is used to define more complex variable values. 
 
 - **string** physical unit of the variable, [pint package](https://pint.readthedocs.io/en/stable/) 
-  syntax is applied. Moreover, we accept also following types for non-physical quantities:
-  [`bool`, `int64`, `str[n]` ]. Here `str[n]` defines fixed length string of length n, 
-  longer strings are truncated on write to the store.
-    - "TimeStamp" - for time coordinates
-    - "category" - for discrete variables
-    - "boolean" - for boolean variables
+  syntax is applied.
 
 - **Date Time Unit** 
   Defines a variable with time stamp values, internally using [Numpy datetime64](https://numpy.org/doc/stable/reference/arrays.datetime.html) type. 
@@ -57,10 +68,19 @@ Could be string or dictionary. The second case is used to define more complex va
   - `dayfirst` : bool, default = False; Interpret the first value as day (set to True), or as the month (set to False).
   - `yearfirst` : bool, default = True; If true YY is at the frist place, else it is at the last place. 
 
-### `discrete`
-If set, the variable could only take values from provided set. The set could either be defined as a list of values, or
-as a string containing path to a CSV file which would be used to populate the set of discrete values.
-The keys `df_col` and `source_unit` are used for extracting the and converting the values.
+### `range` (optional)
+  - `discrete`: If set, the variable could only take values from provided set. 
+     The set could either be defined as a list of values, or as a string containing 
+     path to a CSV file which would be used to populate the set of discrete values.
+     Also the feature  primarily enable categorical string values, the discrete sets of ints, 
+     floats or complex numbers are supported as well.
+     The keys `df_col` and `source_unit` are used for extracting the and converting the values.
+     Discrete values are stored as int values indexing the set of allowed values stored in the derived array named:
+     `__discrete_values_<variable_name>`. Invalid value is stored as 0 index. 
+  - `interval`: Exclusive with discrete, works only for float quantities. Defines min and max allowed values for the variable.
+     The interval is given as a pair  [min, max] or triplet [min, max, unit]. Default is variable's unit. 
+     E.g. to define allowed temperature range between -20C and 40C one could write:
+     `interval: [-20, 40, 'degC']`
 
 ### `description` (optional)
 String description of the variable. Could describe: physical name, origin of the values, measurement environment, or its use.
