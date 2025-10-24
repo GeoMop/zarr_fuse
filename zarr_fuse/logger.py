@@ -20,19 +20,20 @@
 #    (author_hash, computer_hash, process_hash), message_id,
 #
 
-
 import logging
+from logging import Logger, DEBUG, Formatter, Handler
 import threading
 import asyncio
 import sys
 from asyncio import wait_for
+
 
 import zarr
 CpuBuffer = zarr.core.buffer.cpu.Buffer
 from datetime import datetime, timezone
 
 
-def get_logger(store, path, name: str = None) -> logging.Logger:
+def get_logger(store :'Store', path, name: str = None) -> Logger:
     """
     Create and return a logger that writes into the given Zarr store
     via StoreLogHandler.
@@ -51,21 +52,24 @@ def get_logger(store, path, name: str = None) -> logging.Logger:
     """
     logger_name = name or f"zarr_logger_{id(store)}{path}"
     logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(DEBUG)
     logger.propagate = False
 
     # Remove any existing handlers (to avoid duplicate logs)
+    # StoreLogHandlers are connected to the same store, just report different path
     for h in list(logger.handlers):
         logger.removeHandler(h)
 
     # Attach our StoreLogHandler
+    #if isinstance(store, logging.Logger):
+    #    store = store.handlers[0].store
     handler = StoreLogHandler(store, path)
     logger.addHandler(handler)
 
     return logger
 
 
-class StoreLogHandler(logging.Handler):
+class StoreLogHandler(Handler):
     """
     Zarr-3 handler that writes into logs/YYYYMMDD.log via a private
     background asyncio loop. DEBUG/ERROR block until written (with
@@ -80,7 +84,7 @@ class StoreLogHandler(logging.Handler):
         self.store = store
         self.group_path = group_path
         self.prefix = "logs"
-        self.setFormatter(logging.Formatter(
+        self.setFormatter(Formatter(
             f"%(asctime)s %(levelname)-5s [{self.group_path}] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S"
         ))

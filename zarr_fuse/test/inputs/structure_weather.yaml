@@ -19,20 +19,19 @@ VARS:
     # df_col = <var's name is default source data frame column>
     # coords = <var's name is self coordinated variable>
 
+
+COORDS:
   "time of year":
     unit: { tick: "h", tz: "UTC" }
     description: "Time coordinate"
     df_col: "timestamp"
     source_unit: { tick: "s", tz: "CET" }
-
-COORDS:
-  "time of year": # Defines coord from the variable of the same name.
     sorted: None # Automatic, sort coord by itself.
     chunk_size: 1024
-    merge: # configuration of merging existing and new coordinates and transfer (interpolation) of the data arrays
+    #merge: # configuration of merging existing and new coordinates and transfer (interpolation) of the data arrays
       #allow_inserts: False  # This is currently only supported and default value.
       #sorted: None  # Automatic, sort coord by itself for non-composed coordinates.
-      step_limits: [1, 1, "h"]
+    step_limits: [1, 1, "h"]
       # None - no limits add all new coordinates out of existing range.
       # scalar - regular grid with this step size (use units to convert string values
       # [min, max] - regular grid with this step size (TODO)

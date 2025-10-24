@@ -124,9 +124,9 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     else:
         # Constrained coordinates step.
         # Construct adjusted coordinates grid.
-        min_step, max_step, unit = schema.step_limits
-        step_range = np.array([min_step, max_step])
-        step_range = units.create_quantity(step_range, unit)
+        step_range = schema.step_limits
+        step_range = np.array([step_range.start, step_range.end])
+        step_range = units.create_quantity(step_range, step_range.unit)
         coord_unit = schema.step_unit()
         step_range = step_range.to(coord_unit).magnitude
 

@@ -58,6 +58,9 @@ def build_tzinfos():
 
 TZINFOS = build_tzinfos()
 
+class Unit(pint.Unit):
+    def asdict(self, value_serializer, filter):
+        return str(self)
 
 @attrs.define
 class DateTimeUnit:
@@ -453,7 +456,7 @@ def create_quantity(values, from_unit, to_unit):
     # 4) Fallback: just float array (keeps behavior sane if only from_unit given)
     return _to_float(values)
 
-def create_quantity(values, unit=None):
+def create_quantity(values, unit=None, type=None):
     """
     Construct a quantity from raw values and an optional unit *specification*.
 
@@ -492,13 +495,13 @@ def create_quantity(values, unit=None):
 
 
 
-def step_unit(unit: str):
+def step_unit(unit: pint.Unit | DateTimeUnit):
     """
-    Return the step unit for a given unit.
+    Return the step unit for a given unit. For DataTimeUnit the increments has
+    a clasical unit of time representable by pint.Unit.
     """
-    q = create_quantity([], unit)
-    if isinstance(q, DateTimeUnit):
-        return q.tick
+    if isinstance(unit, DateTimeUnit):
+        return Unit(unit.tick) # TODO: change from 'str' to pint.Unit in DataTimeUnit
     else:
-        assert isinstance(q, pint.Quantity), "unit must be a string or DateTimeUnit"
+        assert isinstance(unit, pint.Unit), f"Invalid unit: {unit})"
         return unit

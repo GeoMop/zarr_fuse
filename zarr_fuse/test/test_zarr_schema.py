@@ -1,41 +1,77 @@
 import pytest
 import warnings
-from pathlib import Path
+import logging
+import pint
+from zarr_fuse import schema, units
+import numpy as np
 
+from pathlib import Path
 script_dir = Path(__file__).parent
 inputs_dir = script_dir / "inputs"
 
-from zarr_fuse import schema
+
+def test_default_logger_error_and_logging(caplog, attach_logger):
+    logger = schema.default_logger()
+    attach_logger(logger)
+
+
+    # Case: Exception instance → logs then raises same instance
+    with pytest.raises(ValueError) as ei2:
+        logger.error(ValueError("bad-value"))
+    assert isinstance(ei2.value, ValueError)
+    assert "bad-value" in str(ei2.value)
+    assert any(
+        rec.levelno == logging.ERROR and "bad-value" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+    caplog.clear()
+    # Case: plain message → logs ERROR then raises RuntimeError
+    with pytest.raises(RuntimeError) as ei:
+        logger.error("boom-message")
+    # Check exception message
+    assert "boom-message" in str(ei.value)
+
+    # Check that the log record was produced
+    # `caplog.records` is a list of LogRecord objects
+    assert any(
+        rec.levelno == logging.ERROR and "boom-message" in rec.getMessage()
+        for rec in caplog.records
+    )
+
+    caplog.clear()
+
+
 
 
 def test_schemaaddress():
-    a = schema.SchemaAddress(["root", "section", "key"], file="cfg.yaml")
+    a = schema.SchemaCtx(["root", "section", "key"], file="cfg.yaml")
     assert str(a) == "cfg.yaml:root/section/key"
 
-    b = schema.SchemaAddress(["only"])
+    b = schema.SchemaCtx(["only"])
     assert str(b) == "<SCHEMA STREAM>:only"
 
 
 def test_schemaaddress_dive_and_int_key():
-    base = schema.SchemaAddress(["root"], file="cfg.yaml")
-    a = base.dive("VARS").dive("temp").dive(0)
+    base = schema.SchemaCtx(["root"], file="cfg.yaml")
+    a = base.dive("VARS", "temp", 0)
     assert str(a) == "cfg.yaml:root/VARS/temp/0"
 
 
 def test_schemaerror():
     assert issubclass(schema.SchemaError, Exception)
 
-    err = schema.SchemaError("boom", schema.SchemaAddress(["x", "y"], file="f.yaml"))
-    s = str(err)
+    with pytest.raises(schema.SchemaError) as ei:
+        raise schema.SchemaError("boom", schema.SchemaCtx(["x", "y"], file="f.yaml"))
+    s = str(ei.value)
     assert "boom" in s
     assert "(at f.yaml:x/y)" in s
-
 
 def test_schemawarning():
     assert issubclass(schema.SchemaWarning, UserWarning)
     assert issubclass(schema.SchemaWarning, Warning)
 
-    warn_obj = schema.SchemaWarning("heads up", schema.SchemaAddress(["x"], file="f.yaml"))
+    warn_obj = schema.SchemaWarning("heads up", schema.SchemaCtx(["x"], file="f.yaml"))
     # __str__ should work
     s = str(warn_obj)
     assert "heads up" in s and "f.yaml:x" in s
@@ -59,13 +95,16 @@ def aux_read_struc(tmp_dir, struc_yaml):
     assert isinstance(node_schema, schema.NodeSchema)
     assert isinstance(node_schema.groups, dict)
     assert isinstance(node_schema.ds, schema.DatasetSchema)
-    stream = schema.serialize(node_schema)
-    struc2 = schema.deserialize(stream)
-    assert schema.serialize(node_schema) == schema.serialize(struc2)
+    stream_1 = schema.serialize(node_schema)
+    schema_2 = schema.deserialize(stream_1)
 
-    schema.serialize(struc2, path=tmp_dir / struc_yaml)
-    struc3 = schema.deserialize(tmp_dir / struc_yaml)
-    assert schema.serialize(node_schema) == schema.serialize(struc3)
+    schema.serialize(schema_2, path=tmp_dir / struc_yaml)
+    stream_2 = schema.serialize(schema_2)
+
+    # Stability of second serialization
+    assert stream_1 == stream_2, "Second serialization mismatch"
+    # Stability of second deserialization
+    assert node_schema == schema_2
 
     return node_schema
 
@@ -78,6 +117,8 @@ def test_schema_serialization(smart_tmp_path, struc_yaml):
     node_schema = aux_read_struc(smart_tmp_path, struc_yaml)
     fn_name = f"check_{(inputs_dir/struc_yaml).stem}"
     check_fn = globals()[fn_name]
+
+    print(f"Checking function {fn_name}...")
     check_fn(node_schema)
 
 
@@ -95,8 +136,8 @@ def check_structure_weather(node_schema):
     # In our processed structure, we expect that variables used only as coordinates
     # (e.g., "time of year", "latitude", "longitude") are removed and only "temperature" remains.
     assert isinstance(ds_schema.VARS, dict), "VARS must be a dictionary"
-    assert len(ds_schema.VARS) == 4, \
-        f"Expected 1 variable definition, got {len(ds_schema.VARS)}"
+    assert len(ds_schema.VARS) == 3, \
+        f"Expected 3 variable definition, got {len(ds_schema.VARS)}"
     assert "temperature" in ds_schema.VARS, "Expected 'temperature' variable in VARS"
 
     # Print coordinate definitions.
@@ -106,6 +147,8 @@ def check_structure_weather(node_schema):
     print("Coordinates:")
     for coord_name, coord_details in coords.items():
         print(f"{coord_name}: {coord_details}")
+
+    assert ds_schema.COORDS["time of year"].step_limits == schema.Interval(1, 1, units.Unit('h'))
 
     # Print primary variable(s).
     print("\nQuantities:")
@@ -119,7 +162,7 @@ def check_structure_tensors(structure):
         "Expected DatasetSchema instance"
 
     assert len(ds_schema.COORDS) == 3
-    assert len(ds_schema.VARS) == 5
+    assert len(ds_schema.VARS) == 2
     print("Coordinates:")
     for coord in ds_schema.COORDS:
         print(coord)
@@ -139,7 +182,7 @@ def _check_node(struc, ref_node):
 
 
 def check_structure_tree(structure):
-    ref_node = (["temperature", "time"], ["time"])
+    ref_node = (["temperature"], ["time"])
 
     children_0 = _check_node(structure, ref_node)
     children_1 = _check_node(children_0['child_1'], ref_node)
@@ -151,45 +194,113 @@ def check_structure_tree(structure):
 
 # -------------------- new tests for _address + helpers -------------------- #
 
-def _addr_field_for(cls_name: str) -> str:
-    cls = getattr(schema, cls_name)
-    if hasattr(cls, "__attrs_attrs__"):
-        names = {a.name for a in cls.__attrs_attrs__}
-        if "_address" in names:
-            return "_address"
-        if "address" in names:
-            return "address"
-    # Fallback for Coord custom __init__: prefer _address
-    return "_address"
+
+class _TestLogger:
+    def __init__(self):
+        self.errors = []
+        self.warnings = []
+    def error(self, exc, *args, **kwargs):
+        self.errors.append(str(exc))
+    def warning(self, warn, *args, **kwargs):
+        self.warnings.append(str(warn))
+
+def _ctx(data: dict, *, logger=None, path=None):
+    """Create a ContextCfg with a SchemaCtx wired to our capture logger."""
+    logger = logger or _TestLogger()
+    ctx = schema.SchemaCtx(addr=[] if path is None else path, file="test.yaml", logger=logger)
+    return schema.ContextCfg(data, ctx), logger
+
+def _mk_var(d: dict, *, logger=None):
+    cfg, log = _ctx(d, logger=logger)
+    return schema.Variable(cfg), log
+
+def _mk_coord(d: dict, *, logger=None):
+    cfg, log = _ctx(d, logger=logger)
+    return schema.Coord(cfg), log
+
+def _has(bag: list[str], needle: str) -> bool:
+    return any(needle in s for s in bag)
+
+def test_variable_logging_and_basics():
+    # logs error on invalid unit
+    _, log = _mk_var({"name": "v", "coords": [], "unit": "NOT_A_UNIT"})
+    assert _has(log.errors, "Invalid unit string")
+
+    # error on invalid source_unit
+    _, log = _mk_var({"name": "v", "coords": [], "unit": "m", "source_unit": "NOPE"})
+    assert _has(log.errors, "Invalid unit string")
+
+    # error on invalid range key
+    _, log = _mk_var({"name": "v", "coords": [], "range": {"bogus": 123}})
+    assert _has(log.errors, "Invalid range specification")
+
+    # coords: str -> list normalization (sanity check)
+    v, _ = _mk_var({"name": "v", "coords": "x"})
+    assert v.coords == ["x"]
+
+    # attrs expose expected keys
+    v, _ = _mk_var({"name": "v", "coords": []})
+    assert {"unit", "description", "df_col", "source_unit"} <= set(v.attrs.keys())
+
+    # warning path through logger
+    v, log = _mk_var({"name": "v", "coords": []})
+    v.warn("be careful")
+    assert _has(log.warnings, "be careful")
+
+    # ---------- NEW unit & range initialization checks ----------
+
+    # unit + source_unit parsing
+    v, _ = _mk_var({"name": "v", "coords": [], "unit": "m", "source_unit": "cm"})
+    assert v.unit == schema.units.Unit("m") and v.source_unit == schema.units.Unit("cm")
+
+    # interval range: default unit == variable.unit
+    v, _ = _mk_var({"name": "v", "coords": [], "unit": "m", "range": {"interval": [0, 10]}})
+    assert isinstance(v.range, schema.IntervalRange)
+    assert (v.range.start, v.range.end) == (0, 10) and v.range.unit == v.unit
+
+    # interval range: explicit unit in list overrides
+    v, _ = _mk_var({"name": "v", "coords": [], "unit": "m", "range": {"interval": [0, 100, "cm"]}})
+    assert isinstance(v.range, schema.IntervalRange)
+    assert v.range.unit == schema.units.Unit("cm")
+
+    # discrete range
+    v, _ = _mk_var({"name": "v", "coords": [], "unit": None, "range": {"discrete": [1, 2, 3]}})
+    assert isinstance(v.range, schema.DiscreteRange)
+    assert list(v.range.values) == [1, 2, 3]
+
+    # conversion source_unit → unit
+    #v, _ = _mk_var({"name": "v", "coords": [], "unit": "m", "source_unit": "cm"})
+    #q = v.convert_values([0, 100])
+    #assert str(q.units) in {"meter", "m"} and np.allclose(q.m, [0.0, 1.0])
 
 
-def test_address_mixin_error_and_warn_on_variable_and_coord():
-    base = schema.SchemaAddress(["root"], file="f.yaml")
+def test_coord_specific_attributes():
+    # default coords injected == name
+    c, _ = _mk_coord({"name": "time"})
+    assert c.coords == ["time"]
 
-    # Variable: accept either _address or address
-    var_addr_key = _addr_field_for("Variable")
-    v = schema.Variable(**{var_addr_key: base.dive("VARS").dive("temp")}, name="temp")
+    # default composed is singleton name
+    c, _ = _mk_coord({"name": "y", "coords": []})
+    assert c.composed == ["y"]
 
-    with pytest.raises(schema.SchemaError) as ei:
-        v.error("bad variable", subkeys=["df_col"])  # should append subkeys
-    msg = str(ei.value)
-    assert "bad variable" in msg
-    assert "(at f.yaml:root/VARS/temp/df_col)" in msg
+    # explicit composed respected
+    c, _ = _mk_coord({"name": "yx", "coords": [], "composed": ["y", "x"]})
+    assert c.composed == ["y", "x"]
 
-    with warnings.catch_warnings(record=True) as rec:
-        warnings.simplefilter("always")
-        v.warn("use default", subkeys=["ATTRS", "unit"])  # int/str subkeys accepted
-        assert any(
-            "(at f.yaml:root/VARS/temp/ATTRS/unit)" in str(w.message) for w in rec
-        )
+    # chunk_size default and custom
+    c, _ = _mk_coord({"name": "lat", "coords": []})
+    assert c.chunk_size == 1024
+    c, _ = _mk_coord({"name": "lat", "coords": [], "chunk_size": 64})
+    assert c.chunk_size == 64
 
-    # Coord: try with _address first, then fallback to address for older versions
-    try:
-        c = schema.Coord(name="time", _address=base.dive("COORDS").dive("time"))
-    except TypeError:
-        c = schema.Coord(name="time", address=base.dive("COORDS").dive("time"))
+    # step_limits default interval vs. explicit None
+    c, _ = _mk_coord({"name": "t", "coords": []})
+    assert c.step_limits == schema.Interval(None, None, pint.Unit(""))
+    c, _ = _mk_coord({"name": "t", "coords": [], "step_limits": None})
+    assert c.step_limits is None
 
-    with warnings.catch_warnings(record=True) as rec2:
-        warnings.simplefilter("always")
-        c.warn("note", subkeys=[1])  # integer subkey should render as "/1"
-        assert any("/COORDS/time/1)" in str(w.message) for w in rec2)
+    # sorted default depends on composition
+    c, _ = _mk_coord({"name": "x", "coords": []})
+    assert c.sorted is True
+    c, _ = _mk_coord({"name": "xy", "coords": [], "composed": ["x", "y"]})
+    assert c.is_composed() and c.sorted is False
