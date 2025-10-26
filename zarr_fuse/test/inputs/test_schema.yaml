@@ -1,0 +1,29 @@
+ATTRS:
+  STORE_URL: "s3://test-zarr-storage/test_prototype/write_read_test.zarr"
+  S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
+
+VARS:
+    temperature:
+        coords: time
+COORDS:
+    time: {}
+
+child_1:
+    VARS:
+        temperature:
+            coords: time
+    COORDS:
+        time: {}
+    child_3:
+        VARS:
+            temperature:
+                coords: time
+        COORDS:
+            time: {}
+    ATTRS: {}
+child_2:
+    VARS:
+        temperature:
+            coords: time
+    COORDS:
+        time: {}
