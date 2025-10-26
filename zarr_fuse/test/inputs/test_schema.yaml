@@ -1,5 +1,5 @@
 ATTRS:
-  STORE_URL: "s3://test-zarr-storage/test_prototype/write_read_test.zarr"
+  STORE_URL: "s3://hlavo-release/dashboard-test/structure_tree.zarr"
   S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
 
 VARS:

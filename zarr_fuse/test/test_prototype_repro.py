@@ -18,19 +18,18 @@ REPRO TEST COMMANDS:
    cd C:\Users\fatih\Documents\GitHub\zarr_fuse
    python -m pytest zarr_fuse/test/test_prototype_repro.py::test_read_s3_zarr_store_via_zarr_fuse_api -v -s
 
-2. Run existing store test (uses hlavo-release bucket):
+2. Run pure zarr write test (investigate metadata issue):
+   python -m pytest zarr_fuse/test/test_prototype_repro.py::test_write_with_pure_zarr_read_with_zarr_fuse -v -s
+
+3. Run existing store test (uses hlavo-release bucket):
    python -m pytest zarr_fuse/test/test_prototype_repro.py::test_read_existing_s3_store -v -s
 
-3. Run all tests in this file:
+4. Run all tests in this file:
    python -m pytest zarr_fuse/test/test_prototype_repro.py -v -s
 
-4. Direct Python execution:
+5. Direct Python execution:
    python zarr_fuse/test/test_prototype_repro.py
 
-EXPECTED STATUS:
-- All tests should PASS when zarr_fuse S3 support is working correctly
-- If tests fail with "TypeError: FsspecStore.get() missing 'prototype' argument",
-  this indicates a bug in xarray's zarr backend integration
 """
 
 import pytest
@@ -101,9 +100,6 @@ def test_read_s3_zarr_store_via_zarr_fuse_api():
     3. Verify data integrity
     
     Expected: Test PASSES (data successfully written and read from S3)
-    
-    Note: If this test fails with "TypeError: FsspecStore.get() missing 'prototype' argument",
-    it indicates a bug in xarray's zarr backend when working with FsspecStore.
     """
     # Setup S3 credentials
     creds = load_s3_credentials()
@@ -169,6 +165,146 @@ def test_read_s3_zarr_store_via_zarr_fuse_api():
         print("✓ Data integrity verified!")
     
     print("\n✓ Test PASSED - Successfully wrote to and read from S3 using zarr_fuse API!")
+
+
+def test_write_with_pure_zarr_read_with_zarr_fuse():
+    """Test writing with pure zarr (no xarray) and reading with zarr_fuse.
+    
+    This test investigates what happens when data is written using pure zarr library
+    (without xarray metadata like _ARRAY_DIMENSIONS) and then read using zarr_fuse
+    which relies on xarray for reading.
+    
+    S3 Configuration:
+    - Bucket: test-zarr-storage
+    - Store: s3://test-zarr-storage/test_prototype/write_read_test.zarr
+    - Endpoint: https://s3.cl4.du.cesnet.cz
+    
+    Workflow:
+    1. Write data using pure zarr locally (no xarray metadata)
+    2. Upload to S3
+    3. Attempt to read it back using zarr_fuse
+    4. See if zarr_fuse can handle data without _ARRAY_DIMENSIONS
+    
+    Purpose: Understand how zarr_fuse handles zarr stores without xarray metadata.
+    """
+    # Setup S3 credentials
+    creds = load_s3_credentials()
+    setup_s3_environment(creds)
+    
+    import zarr
+    import s3fs
+    import tempfile
+    import shutil
+    
+    # Load test schema configuration
+    schema_path = Path(__file__).parent / 'inputs' / 'test_schema.yaml'
+    if not schema_path.exists():
+        pytest.skip(f"Schema file not found: {schema_path}")
+    
+    schema = zarr_fuse.zarr_schema.deserialize(schema_path)
+    store_url = schema.ds.ATTRS['STORE_URL']
+    
+    print(f"\n=== STEP 1: Writing with PURE ZARR locally (no xarray metadata) ===")
+    print(f"Target S3 URL: {store_url}")
+    print("Method: Direct zarr.open_group() + create_dataset() on local filesystem")
+    
+    # Create temporary local directory
+    with tempfile.TemporaryDirectory() as tmpdir:
+        local_store_path = Path(tmpdir) / "test_store.zarr"
+        
+        print(f"\nLocal temp path: {local_store_path}")
+        print("Writing data with pure zarr...")
+        
+        # Create zarr store locally with pure zarr (NO xarray metadata!)
+        root = zarr.open_group(str(local_store_path), mode='w')
+        
+        # Create arrays WITHOUT _ARRAY_DIMENSIONS metadata
+    time_data = np.array([1000, 1001, 1002])
+    root.create_array('time', data=time_data)
+
+    temp_data = np.array([20.0, 21.0, 22.0])
+    root.create_array('temperature', data=temp_data)
+
+    print("✓ Data written locally with pure zarr (no _ARRAY_DIMENSIONS metadata)")
+    print(f"  - time: {time_data}")
+    print(f"  - temperature: {temp_data}")
+
+    # Verify no xarray metadata exists
+    print("\nChecking metadata...")
+    if '_ARRAY_DIMENSIONS' in root['temperature'].attrs:
+        print("  ⚠️  _ARRAY_DIMENSIONS found (unexpected!)")
+    else:
+        print("  ✓ No _ARRAY_DIMENSIONS metadata (as expected for pure zarr)")
+        
+        # Upload to S3
+        print(f"\n=== STEP 2: Uploading to S3 ===")
+        print(f"Destination: {store_url}")
+        
+        fs = s3fs.S3FileSystem(
+            key=creds['access_key'],
+            secret=creds['secret_key'],
+            client_kwargs={'endpoint_url': creds['endpoint_url']},
+            config_kwargs={'s3': {'addressing_style': 'path'}}
+        )
+        
+        clean_path = store_url.replace('s3://', '')
+        
+        # Delete old store if exists
+        try:
+            fs.rm(clean_path, recursive=True)
+            print("✓ Old S3 store deleted")
+        except FileNotFoundError:
+            print("✓ No old S3 store to delete")
+        
+        # Upload directory to S3
+        fs.put(str(local_store_path), clean_path, recursive=True)
+        print("✓ Uploaded to S3")
+    
+    # Step 3: Read with zarr_fuse
+    print("\n=== STEP 3: Reading with zarr_fuse ===")
+    print("Question: Can zarr_fuse read zarr data without xarray metadata?\n")
+    
+    kwargs = {"S3_ENDPOINT_URL": creds['endpoint_url']}
+    
+    print("Opening store with zarr_fuse...")
+    node = zarr_fuse.open_store(schema, **kwargs)
+    print("✓ Store opened")
+    
+    print("\nAttempting to read dataset...")
+    try:
+        dataset = node.dataset
+        
+        print(f"✅ SUCCESS! Dataset read successfully!")
+        print(f"  Variables: {list(dataset.data_vars)}")
+        print(f"  Coordinates: {list(dataset.coords)}")
+        print(f"  Dimensions: {dataset.dims}")
+        
+        # Show what we got
+        if 'temperature' in dataset.data_vars:
+            temp = dataset['temperature'].values
+            print(f"\n  Temperature values: {temp}")
+            print(f"  Expected values: {temp_data}")
+            
+            # Verify data
+            np.testing.assert_array_equal(temp, temp_data)
+            print("  ✓ Data matches!")
+        
+        print("\n✅ CONCLUSION: zarr_fuse CAN read pure zarr data without _ARRAY_DIMENSIONS!")
+        print("   This means hlavo-release issue might be something else.")
+        
+    except TypeError as e:
+        if "prototype" in str(e):
+            print(f"❌ PROTOTYPE ERROR: {e}")
+            print("\n❌ CONCLUSION: zarr_fuse CANNOT read pure zarr data without _ARRAY_DIMENSIONS")
+            print("   Root cause: Missing _ARRAY_DIMENSIONS triggers NCZarr fallback")
+            print("   NCZarr code path has prototype parameter bug")
+            print("\n   This confirms hlavo-release was also written with pure zarr!")
+            raise
+        else:
+            raise
+    except Exception as e:
+        print(f"❌ Unexpected error: {type(e).__name__}: {e}")
+        raise
 
 
 def test_read_existing_s3_store():
