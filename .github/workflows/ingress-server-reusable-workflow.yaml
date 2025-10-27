@@ -112,7 +112,7 @@ jobs:
 
       - name: Remove existing configuration files
         if: ${{ inputs.configuration-dir-path != '' }}
-        run: rm -rf app/databuk/ingress_server/src/inputs/*
+        run: rm -rf ingress_server/src/inputs/*
 
       - name: Download configuration files artifact
         if: ${{ inputs.configuration-dir-path != '' }}
