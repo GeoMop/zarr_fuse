@@ -111,14 +111,14 @@ jobs:
 
       - name: Remove existing configuration files
         if: ${{ inputs.configuration-dir-path != '' }}
-        run: rm -rf app/databuk/ingress_server/src/inputs/*
+        run: rm -rf ingress_server/src/inputs/*
 
       - name: Download configuration files artifact
         if: ${{ inputs.configuration-dir-path != '' }}
         uses: actions/download-artifact@v4
         with:
           name: ingress-server-configuration
-          path: app/databuk/ingress_server/src/inputs/
+          path: ingress_server/src/inputs/
 
       - name: Containerize
         uses: GeoMop/github-actions/.github/actions/containerize@v1
@@ -130,7 +130,7 @@ jobs:
           push: true
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
-          working-directory: app/databuk/ingress_server
+          working-directory: ingress_server
           extra-build-args: --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}"
   lint-helm-chart:
     name: Lint ingress server Helm chart
@@ -139,9 +139,6 @@ jobs:
       image: docker.io/alpine/k8s:1.29.14
     needs:
       - containerize
-    defaults:
-      run:
-        working-directory: app/databuk/ingress_server/charts/ingress-server
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref_name }}-lint-helm-chart"
       cancel-in-progress: true
@@ -153,7 +150,7 @@ jobs:
       - name: Lint helm chart
         uses: GeoMop/github-actions/.github/actions/helm-lint@v1
         with:
-          working-directory: app/databuk/ingress_server/charts/ingress-server
+          working-directory: ingress_server/charts/ingress-server
           values: --values values/minimal-required-values.yaml
   deploy:
     name: Deploy ingress server to e-infra rancher
@@ -168,7 +165,7 @@ jobs:
       KUBECONFIG: ./kubeconfig.yaml
     defaults:
       run:
-        working-directory: app/databuk/ingress_server/charts
+        working-directory: ingress_server/charts
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref_name }}-deploy"
       cancel-in-progress: false

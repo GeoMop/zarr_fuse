@@ -7,6 +7,13 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 
 ---
 
+## URLS:
+
+- **Production:** https://zarr-fuse-ingress-server.dyn.cloud.e-infra.cz/health
+- **Latest (main):** https://zarr-fuse-ingress-server-latest.dyn.cloud.e-infra.cz/health
+- **Development (pull-request):** https://zarr-fuse-ingress-server-development.dyn.cloud.e-infra.cz/health
+
+
 ## Overview
 
 - **Purpose:** Ingest tabular data (CSV/JSON) and merge it into a Zarr dataset on S3.

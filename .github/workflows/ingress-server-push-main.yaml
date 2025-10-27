@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - app/databuk/ingress_server/**
+      - ingress_server/**
 jobs:
   build-and-deploy:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml

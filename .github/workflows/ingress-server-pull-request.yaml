@@ -4,7 +4,7 @@ on:
     branches:
       - "**"
     paths:
-      - app/databuk/ingress_server/**
+      - ingress_server/**
 jobs:
   build:
     name: Build and deploy ingress server
