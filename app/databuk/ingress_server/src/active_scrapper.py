@@ -5,14 +5,8 @@ import requests
 
 import logging
 
-from io_utils import validate_content_type, validate_data
-
-from auth import AUTH
-from io_utils import validate_content_type, sanitize_node_path, atomic_write, new_msg_path, validate_data
-from configs import CONFIG, ACCEPTED_DIR, STOP
-from worker import startup_recover, install_signal_handlers, working_loop
-from logging_setup import setup_logging
-from active_scrapper import add_scrapper_job
+from io_utils import validate_content_type, atomic_write, new_msg_path, validate_data
+from configs import ACCEPTED_DIR
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -28,8 +22,12 @@ def _call_method(url: str, method: str) -> requests.Response:
         raise ValueError(f"Unsupported HTTP method: {method}")
 
 def run_job(name: str, url: str, method: str, schema_path: str):
-    response = _call_method(url, method)
-    response.raise_for_status()
+    try:
+        response = _call_method(url, method)
+        response.raise_for_status()
+    except Exception as e:
+        LOG.warning("Scrapper job %s failed to fetch %s: %s", name, url, e)
+        return
 
     content_type = response.headers.get("Content-Type", "application/json")
 

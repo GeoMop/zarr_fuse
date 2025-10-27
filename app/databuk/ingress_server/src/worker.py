@@ -73,7 +73,7 @@ def _process_one(data_path: Path) -> str | None:
     content_type = meta.get("content_type", "application/json")
     schema_path = meta.get("schema_path")
     if not schema_path:
-        return "No schema_path in meta for " + endpoint_name
+        return f"No schema for endpoint {endpoint_name}"
 
     payload = data_path.read_bytes()
     df, err = read_df_from_bytes(payload, content_type)
