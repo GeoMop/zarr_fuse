@@ -5,6 +5,10 @@ import io
 import json
 import logging
 import posixpath
+
+import pandas as pl
+import zarr_fuse as zf
+
 from pathlib import Path
 
 from airflow import DAG
@@ -14,12 +18,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from packages.common.models.metadata_model import MetadataModel
-from packages.common import configuration, s3io
-
-
-import pandas as pl
-import zarr_fuse as zf
-import packages.common.configuration as configuration
+from packages.common import configuration, s3io, logging_setup
 
 LOG = logging.getLogger("dag_extractor")
 
@@ -169,7 +168,9 @@ with DAG(
     default_args={"owner": "data", "retries": 2},
     tags=["ingress", "s3"],
 ) as dag:
+    logging_setup.setup_logging(os.getenv("LOG_LEVEL", "INFO"))
 
+    # Split it to tasks (functions)
     @task()
     def process_endpoint(endpoint_name: str, batch_size: int = 10) -> str:
         prefixes = _prefixes(endpoint_name)

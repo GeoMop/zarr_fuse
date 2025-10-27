@@ -1,11 +1,7 @@
-import logging
-
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from ingress_service.scrapper import jobs
 from packages.common.models.configuration_model import ScrapperConfig
-
-LOG = logging.getLogger("scrapper-scheduler")
 
 def add_scrapper_job(scheduler: BackgroundScheduler, scrapper: ScrapperConfig):
     minute, hour, day, month, dow = scrapper.cron.split()

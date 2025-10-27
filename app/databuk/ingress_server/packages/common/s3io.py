@@ -2,11 +2,10 @@ import uuid
 import time
 import logging
 
-from common import configuration
-from common.models.metadata_model import MetadataModel
+import configuration
+from models.metadata_model import MetadataModel
 
 from typing import Tuple
-from botocore.client import BaseClient
 
 LOG = logging.getLogger("s3io")
 
@@ -26,12 +25,11 @@ def get_bucket_from_store_url() -> str:
     return bucket
 
 def _build_keys(
-    store_url: str,
     name: str,
     node_path: str,
     suffix: str = ".json",
 ) -> Tuple[str, str, str]:
-    bucket = get_bucket_from_store_url(store_url)
+    bucket = get_bucket_from_store_url()
 
     node = (node_path or "").strip().lstrip("/")
 

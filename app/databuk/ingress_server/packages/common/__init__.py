@@ -1,6 +1,6 @@
-__all__ = ["logging", "configuration", "validation", "s3io", "models"]
+__all__ = ["logging_setup", "configuration", "validation", "s3io", "models"]
 
-from . import logging
+from . import logging_setup
 from . import configuration
 from . import validation
 from . import s3io

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
-from common import validation
+import validation
 
 
 class MetadataModel(BaseModel):

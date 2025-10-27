@@ -12,8 +12,8 @@ license = "BSD-3-Clause"
 keywords = ["Airflow", "Zarr", "s3"]
 
 dependencies = [
-  "pydantic>=2",
-  "python-dotenv",
+  "pydantic==2.12.3",
+  "python-dotenv==1.2.1",
   "apache-airflow==3.1.1",
   "zarr_fuse @ git+https://github.com/GeoMop/zarr_fuse.git@main",
 ]

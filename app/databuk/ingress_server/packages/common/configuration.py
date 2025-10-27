@@ -3,7 +3,7 @@ import yaml
 
 from pathlib import Path
 from dotenv import load_dotenv
-from common.models.configuration_model import S3Config, EndpointConfig, ScrapperConfig
+from models.configuration_model import S3Config, EndpointConfig, ScrapperConfig
 
 import boto3
 from botocore.config import Config

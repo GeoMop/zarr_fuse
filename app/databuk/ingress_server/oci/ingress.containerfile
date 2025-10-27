@@ -2,6 +2,15 @@ FROM python:3.11-slim
 
 ARG APP_VERSION="0.1.0"
 
+LABEL org.opencontainers.image.title="Ingress Server"
+LABEL org.opencontainers.image.description="FastAPI service for CSV/JSON ingestion into an S3-backed Zarr store (no UI)."
+LABEL org.opencontainers.image.version="${APP_VERSION}"
+LABEL org.opencontainers.image.licenses="BSD-3-Clause"
+LABEL org.opencontainers.image.source="https://github.com/geomop/zarr_fuse"
+LABEL org.opencontainers.image.url="https://github.com/geomop/zarr_fuse"
+LABEL org.opencontainers.image.authors="Geomop / Stepan Moc <stepan.mocik@gmail.com>"
+LABEL maintainer="Geomop / Stepan Moc <stepan.mocik@gmail.com>"
+
 WORKDIR /app
 COPY packages/common /app/packages/common
 COPY services/ingress_service /app/services/ingress_service
@@ -15,8 +24,9 @@ RUN pip install --no-cache-dir -e /app/packages/common -e /app/services/ingress_
 ENV PYTHONUNBUFFERED=1
 ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
-ENV PYTHONPATH="/app/services/ingress_service:/app/packages/common:$PYTHONPATH"
+ENV PYTHONPATH=/app
 
+WORKDIR /app/services
 ENV PORT=8000
 EXPOSE ${PORT}
 

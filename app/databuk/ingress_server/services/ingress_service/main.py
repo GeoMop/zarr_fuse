@@ -8,7 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from ingress_service.web import api
 from ingress_service.scrapper import scheduler
-from packages.common import configuration, logging as config_logging
+from packages.common import configuration, logging_setup
 
 APP = FastAPI(title="Databuk Ingress Server", version="2.0.0")
 BG_SCHEDULER = BackgroundScheduler()
@@ -24,7 +24,7 @@ def health():
 def create_app():
     LOG.info("Creating FastAPI application")
 
-    config_logging.setup_logging(os.getenv("LOG_LEVEL", "INFO"))
+    logging_setup.setup_logging(os.getenv("LOG_LEVEL", "INFO"))
 
     endpoints = configuration.load_endpoints_config()
     for ep in endpoints:
