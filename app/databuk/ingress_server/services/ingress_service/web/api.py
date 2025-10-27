@@ -3,9 +3,8 @@ import logging
 from fastapi import FastAPI, Request, Depends
 from fastapi.responses import JSONResponse
 
-from common import validation
-from common import s3io
-from common.models.metadata_model import MetadataModel
+from packages.common import s3io, validation
+from packages.common.models.metadata_model import MetadataModel
 from ingress_service.web import auth
 
 LOG = logging.getLogger("ingress")

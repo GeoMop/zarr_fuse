@@ -1,16 +1,6 @@
 import io
 import json
 import csv
-import polars as pl
-
-def read_df_from_bytes(data: bytes, content_type: str) -> tuple[pl.DataFrame | None, str | None]:
-    ct = content_type.lower()
-    if "csv" in ct:
-        return pl.read_csv(io.BytesIO(data)), None
-    elif "json" in ct:
-        return pl.read_json(io.BytesIO(data)), None
-    else:
-        return None, f"Unsupported content type: {content_type}. Use application/json or text/csv."
 
 def validate_content_type(content_type: str | None) -> tuple[bool, str | None]:
     if not content_type:

@@ -3,7 +3,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from ingress_service.scrapper import jobs
-from common.models.configuration_model import ScrapperConfig
+from packages.common.models.configuration_model import ScrapperConfig
 
 LOG = logging.getLogger("scrapper-scheduler")
 

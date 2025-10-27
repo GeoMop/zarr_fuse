@@ -1,10 +1,9 @@
 import logging
 import requests
 
-from common import validation
-from common import s3io
-from common.models.metadata_model import MetadataModel
-from common.models.configuration_model import ScrapperConfig
+from packages.common import s3io, validation
+from packages.common.models.metadata_model import MetadataModel
+from packages.common.models.configuration_model import ScrapperConfig
 
 LOG = logging.getLogger("scrapper-jobs")
 

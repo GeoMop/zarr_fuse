@@ -8,7 +8,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 from ingress_service.web import api
 from ingress_service.scrapper import scheduler
-from common import configuration, logging as config_logging
+from packages.common import configuration, logging as config_logging
 
 APP = FastAPI(title="Databuk Ingress Server", version="2.0.0")
 BG_SCHEDULER = BackgroundScheduler()

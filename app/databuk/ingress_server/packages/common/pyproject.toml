@@ -1,0 +1,25 @@
+[project]
+name = "common"
+description = "Common utils for services"
+version = "0.1.0"
+requires-python = ">=3.11"
+authors = [
+  { name = "Jan Brezina", email = "jan.brezina@tul.cz" },
+  { name = "Stepan Moc", email = "stepan.mocik@gmail.com" },
+]
+maintainers = [{ name = "Stepan Moc", email = "stepan.mocik@gmail.com" }]
+license = "BSD-3-Clause"
+keywords = ["API", "Airflow", "Zarr", "s3"]
+
+dependencies = ["boto3", "pydantic", "polars", "python-dotenv"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["common*"]
+
+[tool.setuptools.package-dir]
+"" = "."
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"

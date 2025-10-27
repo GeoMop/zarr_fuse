@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import io
+import json
+import logging
 import posixpath
 from pathlib import Path
 
@@ -8,17 +11,21 @@ from airflow import DAG
 from airflow.decorators import task
 from datetime import datetime
 from pydantic import BaseModel
-
-from common import configuration
-from common import validation
-from common import io_utils
-from common import s3io
-from common.models.metadata_model import MetadataModel
-
 from dotenv import load_dotenv
+
+from packages.common.models.metadata_model import MetadataModel
+from packages.common import configuration, s3io
+
+
+import pandas as pl
+import zarr_fuse as zf
+import packages.common.configuration as configuration
+
+LOG = logging.getLogger("dag_extractor")
 
 load_dotenv()
 
+S3_CONFIG = configuration.load_s3_config()
 S3_CLIENT = configuration.create_boto3_client()
 
 class S3Items(BaseModel):
@@ -30,6 +37,28 @@ class Prefixes(BaseModel):
     accepted: str
     processed: str
     failed: str
+
+
+def read_df_from_bytes(data: bytes, content_type: str) -> tuple[pl.DataFrame | None, str | None]:
+    ct = content_type.lower()
+    if "csv" in ct:
+        return pl.read_csv(io.BytesIO(data)), None
+    elif "json" in ct:
+        return pl.read_json(io.BytesIO(data)), None
+    else:
+        return None, f"Unsupported content type: {content_type}. Use application/json or text/csv."
+
+def open_root(schema_path: Path) -> zf.Node:
+    opts = {
+        "S3_ACCESS_KEY": S3_CONFIG.access_key,
+        "S3_SECRET_KEY": S3_CONFIG.secret_key,
+        "STORE_URL": S3_CONFIG.store_url,
+        "S3_OPTIONS": json.dumps({
+            "config_kwargs": {"s3": {"addressing_style": "path"}}
+        }),
+    }
+
+    return zf.open_store(schema_path, **opts)
 
 
 def _prefixes(endpoint_name: str) -> Prefixes:
@@ -84,7 +113,7 @@ def _load_meta(bucket: str, meta_key: str) -> MetadataModel | None:
         return None
 
 def _df_from_payload(payload: bytes, content_type: str):
-    df, err = validation.read_df_from_bytes(payload, content_type)
+    df, err = read_df_from_bytes(payload, content_type)
     if err:
         raise ValueError(err)
     return df
@@ -99,7 +128,7 @@ def _get_schema_dir(schema_name: str) -> Path:
 
 def _write_to_zarr(schema_name: str, node_path: str, df) -> None:
     schema_path = _get_schema_dir(schema_name)
-    root = io_utils.open_root(Path(schema_path))
+    root = open_root(Path(schema_path))
     if node_path:
         root[node_path].update(df)
     else:
