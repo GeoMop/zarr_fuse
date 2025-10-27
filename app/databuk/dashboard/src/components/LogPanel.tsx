@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { X, AlertCircle, CheckCircle, Clock, RefreshCw } from 'lucide-react';
+import { AlertCircle, CheckCircle, Clock, RefreshCw, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { API_BASE_URL } from '../api';
 
 interface LogEntry {
   id: string;
@@ -18,7 +19,7 @@ interface LogPanelProps {
 const LogPanel: React.FC<LogPanelProps> = ({ show, onClose }) => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState<'backend'>('backend');
+  const [filter] = useState<'backend'>('backend');
 
   // No mock data; will be populated from API later
 
@@ -26,7 +27,7 @@ const LogPanel: React.FC<LogPanelProps> = ({ show, onClose }) => {
     if (show) {
       setLoading(true);
       // Fetch logs (errors and warnings only) from backend
-      fetch('http://localhost:8000/api/logs')
+      fetch(`${API_BASE_URL}/api/logs`)
         .then(async (res) => {
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
@@ -49,13 +50,7 @@ const LogPanel: React.FC<LogPanelProps> = ({ show, onClose }) => {
     }
   }, [show]);
 
-  const filteredLogs = logs;
-
-  const handleResolve = (logId: string) => {
-    setLogs(prev => prev.map(log => 
-      log.id === logId ? { ...log, resolved: true } : log
-    ));
-  };
+  const filteredLogs = logs.filter(l => l.category === filter);
 
   const getLevelIcon = (level: string) => {
     switch (level) {
@@ -84,11 +79,11 @@ const LogPanel: React.FC<LogPanelProps> = ({ show, onClose }) => {
   return (
     <div className="fixed inset-0 z-50 flex">
       {/* Overlay */}
-      <div 
-        className="flex-1 bg-black bg-opacity-50" 
+      <div
+        className="flex-1 bg-black bg-opacity-50"
         onClick={onClose}
       />
-      
+
       {/* Log Panel */}
       <div className="w-1/2 bg-white shadow-2xl flex flex-col">
         {/* Header */}
@@ -138,9 +133,8 @@ const LogPanel: React.FC<LogPanelProps> = ({ show, onClose }) => {
                 filteredLogs.map((log) => (
                   <div
                     key={log.id}
-                    className={`border rounded-lg p-4 ${getLevelColor(log.level)} ${
-                      log.resolved ? 'opacity-75' : ''
-                    }`}
+                    className={`border rounded-lg p-4 ${getLevelColor(log.level)} ${log.resolved ? 'opacity-75' : ''
+                      }`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex items-start gap-3 flex-1">
@@ -162,7 +156,7 @@ const LogPanel: React.FC<LogPanelProps> = ({ show, onClose }) => {
                           <p className="text-sm text-gray-700">{log.message}</p>
                         </div>
                       </div>
-                      
+
                       {/* No resolve action for backend-only logs */}
                     </div>
                   </div>

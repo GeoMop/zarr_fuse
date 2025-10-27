@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Sidebar } from './components/sidebar';
+import React, { useEffect, useRef, useState } from 'react';
+import { API_BASE_URL } from './api';
 import LogPanel from './components/LogPanel';
+import { Sidebar } from './components/sidebar';
 import type { ConfigData } from './components/sidebar/types/sidebar';
 
 function App() {
@@ -10,12 +11,12 @@ function App() {
   const [configData, setConfigData] = useState<ConfigData | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
-  const [selectedNode, setSelectedNode] = useState<{storeName: string, nodePath: string} | null>(null);
+  const [selectedNode, setSelectedNode] = useState<{ storeName: string, nodePath: string } | null>(null);
   const [nodeDetails, setNodeDetails] = useState<any>(null);
   const [nodeLoading, setNodeLoading] = useState(false);
   const [nodeError, setNodeError] = useState<string | null>(null);
   const [expandedVariables, setExpandedVariables] = useState<Set<string>>(new Set());
-  const [variableData, setVariableData] = useState<{[key: string]: any}>({});
+  const [variableData, setVariableData] = useState<{ [key: string]: any }>({});
   const [showLogPanel, setShowLogPanel] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
 
@@ -24,7 +25,7 @@ function App() {
     const fetchConfig = async () => {
       try {
         setConfigLoading(true);
-        const response = await fetch('http://localhost:8000/api/config/current');
+        const response = await fetch(`${API_BASE_URL}/api/config/current`);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -52,9 +53,9 @@ function App() {
     setSelectedNode({ storeName, nodePath });
     setNodeLoading(true);
     setNodeError(null);
-    
+
     try {
-      const response = await fetch(`http://localhost:8000/api/s3/node/${storeName}/${nodePath}`);
+      const response = await fetch(`${API_BASE_URL}/api/s3/node/${storeName}/${nodePath}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -75,7 +76,7 @@ function App() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
-      
+
       const newWidth = e.clientX;
       if (newWidth >= 200 && newWidth <= 600) {
         setSidebarWidth(newWidth);
@@ -100,7 +101,7 @@ function App() {
   // Handle variable click - toggle expand/collapse
   const handleVariableClick = async (variableName: string, variablePath: string) => {
     if (!selectedNode) return;
-    
+
     // Toggle expanded state
     const newExpanded = new Set(expandedVariables);
     if (newExpanded.has(variableName)) {
@@ -111,36 +112,38 @@ function App() {
       newExpanded.add(variableName);
       setExpandedVariables(newExpanded);
     }
-    
+
     // If data already loaded, just show it
     if (variableData[variableName] && !variableData[variableName].loading) {
       return;
     }
-    
+
     console.log(`🔍 Clicked variable: ${variableName} at ${variablePath}`);
-    
+
     try {
       setVariableData(prev => ({ ...prev, [variableName]: { loading: true } }));
-      
-      // Call backend to get variable data  
+
+      // Call backend to get variable data
       console.log(`🔍 Fetching: /api/s3/variable/${selectedNode.storeName}/${variablePath}`);
-      const response = await fetch(`http://localhost:8000/api/s3/variable/${selectedNode.storeName}/${variablePath}`);
-      
+      const response = await fetch(`${API_BASE_URL}/api/s3/variable/${selectedNode.storeName}/${variablePath}`);
+
       if (!response.ok) {
         throw new Error(`Failed to fetch variable data: ${response.statusText}`);
       }
-      
+
       const data = await response.json();
       console.log('Variable data:', data);
-      
+
       setVariableData(prev => ({ ...prev, [variableName]: data }));
     } catch (error) {
       console.error('Error loading variable data:', error);
-      setVariableData(prev => ({ ...prev, [variableName]: {
-        name: variableName,
-        path: variablePath,
-        error: `Failed to load data: ${error instanceof Error ? error.message : 'Unknown error'}`
-      }}));
+      setVariableData(prev => ({
+        ...prev, [variableName]: {
+          name: variableName,
+          path: variablePath,
+          error: `Failed to load data: ${error instanceof Error ? error.message : 'Unknown error'}`
+        }
+      }));
     }
   };
 
@@ -148,26 +151,26 @@ function App() {
     <div className="flex h-screen bg-gray-50">
       {/* Sidebar */}
       {isVisible && (
-        <div 
+        <div
           ref={sidebarRef}
           className="relative"
           style={{ width: `${sidebarWidth}px` }}
         >
-          <Sidebar 
-            onClose={() => setIsVisible(false)} 
+          <Sidebar
+            onClose={() => setIsVisible(false)}
             configData={configData}
             configLoading={configLoading}
             configError={configError}
             onNodeClick={handleNodeClick}
             onLogClick={handleLogClick}
           />
-          
+
           {/* Resize Handle */}
           <div
             className="absolute top-0 right-0 w-1 h-full bg-gray-300 hover:bg-blue-500 cursor-col-resize z-10"
             onMouseDown={handleMouseDown}
           />
-      </div>
+        </div>
       )}
 
       {/* Content Area - Main Panel */}
@@ -182,9 +185,9 @@ function App() {
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
-        </button>
+          </button>
         )}
-        
+
         {/* Node Details Content */}
         {selectedNode ? (
           <div className="space-y-6">
@@ -196,8 +199,8 @@ function App() {
                 </h1>
                 <p className="text-gray-600 text-lg">
                   xarray DataSet • {selectedNode.storeName}
-        </p>
-      </div>
+                </p>
+              </div>
             </div>
 
             {/* Loading State */}
@@ -279,11 +282,11 @@ function App() {
                       {Object.entries(nodeDetails.vars).map(([name, variable]: [string, any]) => {
                         const isExpanded = expandedVariables.has(name);
                         const data = variableData[name];
-                        
+
                         return (
                           <div key={name} className="border border-gray-200 rounded-lg overflow-hidden">
                             {/* Variable Header - Clickable */}
-                            <div 
+                            <div
                               className="p-4 bg-gray-50 hover:bg-blue-50 cursor-pointer transition-colors flex items-center justify-between"
                               onClick={() => handleVariableClick(name, variable.path || `${selectedNode?.nodePath ? selectedNode.nodePath + '/' : ''}${name}`)}
                             >
@@ -299,7 +302,7 @@ function App() {
                                 {isExpanded ? 'Click to collapse' : 'Click to expand'}
                               </div>
                             </div>
-                            
+
                             {/* Variable Details - Expandable */}
                             {isExpanded && (
                               <div className="p-4 bg-white border-t border-gray-200">
@@ -309,13 +312,13 @@ function App() {
                                     <p className="text-blue-600">Loading variable data...</p>
                                   </div>
                                 )}
-                                
+
                                 {data?.error && (
                                   <div className="bg-red-50 border border-red-200 rounded p-3">
                                     <p className="text-red-600">Error: {data.error}</p>
                                   </div>
                                 )}
-                                
+
                                 {data && !data.loading && !data.error && (
                                   <div className="space-y-3">
                                     <p className="text-gray-700"><strong>Path:</strong> {data.path}</p>
@@ -362,9 +365,9 @@ function App() {
       </main>
 
       {/* Log Panel */}
-      <LogPanel 
-        show={showLogPanel} 
-        onClose={() => setShowLogPanel(false)} 
+      <LogPanel
+        show={showLogPanel}
+        onClose={() => setShowLogPanel(false)}
       />
     </div>
   );

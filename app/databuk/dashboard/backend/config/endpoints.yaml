@@ -5,7 +5,7 @@
 "test_structure_endpoint":
   reload_interval: 300  # Cache TTL in seconds (5 minutes)
   schema_file: "schemas/test_schema.yaml"
-  store_url: "s3://${S3_BUCKET_NAME}/dashboard-test/structure_tree.zarr"
+  store_url: "s3://${S3_BUCKET_NAME}/bukov.zarr"
   description: "Test structure tree with child_1, child_2, child_3 groups"
   store_type: "zarr"
   version: "1.0.0"

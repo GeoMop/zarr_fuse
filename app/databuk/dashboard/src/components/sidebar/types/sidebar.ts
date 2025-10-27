@@ -1,18 +1,19 @@
 export interface ConfigData {
   status: string;
   endpoint: {
-    Reload_interval: number;
-    Schema_file: string;
-    STORE_URL: string;
-    S3_ENDPOINT_URL: string;
-    S3_access_key: string;
-    S3_secret_key: string;
-    S3_region: string;
-    S3_use_ssl: boolean;
-    S3_verify_ssl: boolean;
-    Description: string;
-    Store_type: string;
-    Version: string;
+    reload_interval: number;
+    schema_file: string;
+    store_url: string;
+    store_type: string;
+    version: string;
+    description: string;
+    // S3 config (optional, if present in backend)
+    s3_endpoint_url?: string;
+    s3_access_key?: string;
+    s3_secret_key?: string;
+    s3_region?: string;
+    s3_use_ssl?: boolean;
+    s3_verify_ssl?: boolean;
   };
 }
 
