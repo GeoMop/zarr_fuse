@@ -8,27 +8,38 @@ version = "0.2.0"
 description = "Backend-only ingestion service: HTTP endpoints that accept uploads and persist validated tables to an S3-backed Zarr store (no UI)."
 readme = "README.md"
 urls = { Homepage = "https://github.com/geomop/zarr_fuse" }
-authors = [
-  { name = "Jan Brezina", email = "jan.brezina@tul.cz" }
-]
+authors = [{ name = "Jan Brezina", email = "jan.brezina@tul.cz" }]
 license = { text = "BSD-3-Clause" }
-keywords = ["backend","ingestion","upload","HTTP API","S3","Zarr","fsspec","Flask","CSV","data pipeline"]
+keywords = [
+  "backend",
+  "ingestion",
+  "upload",
+  "HTTP API",
+  "S3",
+  "Zarr",
+  "fsspec",
+  "Flask",
+  "CSV",
+  "data pipeline",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
   "Intended Audience :: Developers",
   "Topic :: Scientific/Engineering",
   "License :: OSI Approved :: BSD License",
-  "Programming Language :: Python :: 3"
+  "Programming Language :: Python :: 3",
 ]
 requires-python = ">=3.11"
 
 dependencies = [
-    "PyYAML",
-    "flask",
-    "Flask-HTTPAuth",
-    "python-dotenv",
-    "polars"
+  "PyYAML",
+  "flask",
+  "Flask-HTTPAuth",
+  "python-dotenv",
+  "polars",
+  "requests",
+  "apscheduler",
 ]
 
 [tool.setuptools.packages.find]
