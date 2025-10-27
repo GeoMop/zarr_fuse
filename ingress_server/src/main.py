@@ -107,7 +107,26 @@ def create_upload_endpoint(
 # =========================
 def create_app():
     for ep in CONFIG.get("endpoints", []):
-        create_upload_endpoint(ep["name"], ep["endpoint"], ep["extract_fn"], ep["fn_module"])
+        create_upload_endpoint(
+            endpoint_name=ep.get("name"),
+            endpoint_url=ep.get("endpoint"),
+            schema_path=ep.get("schema_path"),
+            extract_fn=ep.get("extract_fn"),
+            fn_module=ep.get("fn_module"),
+        )
+        LOG.info("Created upload endpoint %s at %s", ep.get("name"), ep.get("endpoint"))
+
+    for scrapper in CONFIG.get("active_scrappers", []):
+        add_scrapper_job(
+            name = scrapper.get("name"),
+            url = scrapper.get("url"),
+            cron = scrapper.get("cron"),
+            schema_path = scrapper.get("schema_path"),
+            method = scrapper.get("method", "GET"),
+            extract_fn = scrapper.get("extract_fn", None),
+            fn_module = scrapper.get("fn_module", None),
+        )
+        LOG.info("Created active scrapper job %s for %s", scrapper.get("name"), scrapper.get("url"))
     return APP
 
 def _start_worker_thread():

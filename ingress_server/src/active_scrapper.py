@@ -21,9 +21,13 @@ def _call_method(url: str, method: str) -> requests.Response:
     else:
         raise ValueError(f"Unsupported HTTP method: {method}")
 
-def run_job(name: str, url: str, method: str, schema_path: str):
-    response = _call_method(url, method)
-    response.raise_for_status()
+def run_job(name: str, url: str, method: str, schema_path: str, extract_fn: str = None, fn_module: str = None):
+    try:
+        response = _call_method(url, method)
+        response.raise_for_status()
+    except Exception as e:
+        LOG.warning("Scrapper job %s failed to fetch %s: %s", name, url, e)
+        return
 
     content_type = response.headers.get("Content-Type", "application/json")
 
@@ -45,6 +49,8 @@ def run_job(name: str, url: str, method: str, schema_path: str):
     atomic_write(msg_path, payload)
 
     meta_data = {
+        "extract_fn": extract_fn,
+        "fn_module": fn_module,
         "content_type": content_type,
         "node_path": "",
         "endpoint_name": name,
@@ -57,7 +63,7 @@ def run_job(name: str, url: str, method: str, schema_path: str):
 
     LOG.info("Scrapper accepted name=%s loc=%s", name, msg_path)
 
-def add_scrapper_job(name: str, url: str, cron: str, schema_path: str, method: str = "GET"):
+def add_scrapper_job(name: str, url: str, cron: str, schema_path: str, method: str = "GET", extract_fn: str = None, fn_module: str = None):
     minute, hour, day, month, dow = cron.split()
     BG_SCHEDULER.add_job(
         run_job,
@@ -67,6 +73,8 @@ def add_scrapper_job(name: str, url: str, cron: str, schema_path: str, method: s
             url,
             method,
             schema_path,
+            extract_fn,
+            fn_module,
         ],
         minute=minute, hour=hour, day=day, month=month, day_of_week=dow,
         id=f"scrapper-{name}", replace_existing=True,
