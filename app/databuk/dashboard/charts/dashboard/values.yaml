@@ -21,8 +21,9 @@ backend:
       number: 8000
       name: http
 
-  secrets:
-    s3:
+  s3:
+    storeUrl: ""
+    secrets:
       accessKey: "your-access-key"
       secretKey: "your-secret-key"
 
