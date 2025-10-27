@@ -10,3 +10,5 @@ endpoints:
 #     url: "https://api.restful-api.dev/objects/7"
 #     schema_path: bukov_schema_v1.yaml
 #     method: GET
+#     extract_fn: normalize_new
+#     fn_module: inputs.extract.bukov_extract
