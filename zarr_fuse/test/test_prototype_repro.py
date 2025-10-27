@@ -208,57 +208,54 @@ def test_write_with_pure_zarr_read_with_zarr_fuse():
     print(f"Target S3 URL: {store_url}")
     print("Method: Direct zarr.open_group() + create_dataset() on local filesystem")
     
-    # Create temporary local directory
-    with tempfile.TemporaryDirectory() as tmpdir:
-        local_store_path = Path(tmpdir) / "test_store.zarr"
-        
-        print(f"\nLocal temp path: {local_store_path}")
-        print("Writing data with pure zarr...")
-        
-        # Create zarr store locally with pure zarr (NO xarray metadata!)
-        root = zarr.open_group(str(local_store_path), mode='w')
-        
-        # Create arrays WITHOUT _ARRAY_DIMENSIONS metadata
-    time_data = np.array([1000, 1001, 1002])
-    root.create_array('time', data=time_data)
-
-    temp_data = np.array([20.0, 21.0, 22.0])
-    root.create_array('temperature', data=temp_data)
-
-    print("✓ Data written locally with pure zarr (no _ARRAY_DIMENSIONS metadata)")
-    print(f"  - time: {time_data}")
-    print(f"  - temperature: {temp_data}")
-
-    # Verify no xarray metadata exists
-    print("\nChecking metadata...")
-    if '_ARRAY_DIMENSIONS' in root['temperature'].attrs:
-        print("  ⚠️  _ARRAY_DIMENSIONS found (unexpected!)")
-    else:
-        print("  ✓ No _ARRAY_DIMENSIONS metadata (as expected for pure zarr)")
-        
-        # Upload to S3
-        print(f"\n=== STEP 2: Uploading to S3 ===")
-        print(f"Destination: {store_url}")
-        
-        fs = s3fs.S3FileSystem(
-            key=creds['access_key'],
-            secret=creds['secret_key'],
-            client_kwargs={'endpoint_url': creds['endpoint_url']},
-            config_kwargs={'s3': {'addressing_style': 'path'}}
-        )
-        
+        # Write directly to S3 with pure zarr and fsspec
+    print("\nWriting data with pure zarr directly to S3...")
+    import asyncio
+    import fsspec
+    async def async_zarr_write():
+        s3_opts = {
+            'key': creds['access_key'],
+            'secret': creds['secret_key'],
+            'client_kwargs': {'endpoint_url': creds['endpoint_url']},
+            'config_kwargs': {
+                's3': {
+                    'addressing_style': 'path',
+                    'request_checksum_calculation': 'when_required',
+                    'response_checksum_validation': 'when_required'
+                }
+            },
+            'asynchronous': True
+        }
+        fs = fsspec.filesystem('s3', **s3_opts)
         clean_path = store_url.replace('s3://', '')
-        
-        # Delete old store if exists
+        # Remove old store if exists
         try:
-            fs.rm(clean_path, recursive=True)
+            await fs._rm(clean_path, recursive=True)
             print("✓ Old S3 store deleted")
         except FileNotFoundError:
             print("✓ No old S3 store to delete")
-        
-        # Upload directory to S3
-        fs.put(str(local_store_path), clean_path, recursive=True)
-        print("✓ Uploaded to S3")
+
+        store = zarr.storage.FsspecStore(fs, path=clean_path)
+        root = await zarr.open_group(store, mode='w')
+
+        # Create arrays WITHOUT _ARRAY_DIMENSIONS metadata
+        time_data = np.array([1000, 1001, 1002])
+        await root.create_array('time', data=time_data)
+        temp_data = np.array([20.0, 21.0, 22.0])
+        await root.create_array('temperature', data=temp_data)
+
+        print("✓ Data written to S3 with pure zarr (no _ARRAY_DIMENSIONS metadata)")
+        print(f"  - time: {time_data}")
+        print(f"  - temperature: {temp_data}")
+
+        # Verify no xarray metadata exists
+        print("\nChecking metadata...")
+        if '_ARRAY_DIMENSIONS' in root['temperature'].attrs:
+            print("  ⚠️  _ARRAY_DIMENSIONS found (unexpected!)")
+        else:
+            print("  ✓ No _ARRAY_DIMENSIONS metadata (as expected for pure zarr)")
+
+    asyncio.run(async_zarr_write())
     
     # Step 3: Read with zarr_fuse
     print("\n=== STEP 3: Reading with zarr_fuse ===")
