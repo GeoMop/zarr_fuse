@@ -22,12 +22,8 @@ def _call_method(url: str, method: str) -> requests.Response:
         raise ValueError(f"Unsupported HTTP method: {method}")
 
 def run_job(name: str, url: str, method: str, schema_path: str):
-    try:
-        response = _call_method(url, method)
-        response.raise_for_status()
-    except Exception as e:
-        LOG.warning("Scrapper job %s failed to fetch %s: %s", name, url, e)
-        return
+    response = _call_method(url, method)
+    response.raise_for_status()
 
     content_type = response.headers.get("Content-Type", "application/json")
 
