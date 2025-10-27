@@ -17,9 +17,3 @@ for d in (ACCEPTED_DIR, SUCCESS_DIR, FAILED_DIR):
 
 with open("inputs/endpoints_config.yaml", "r", encoding="utf-8") as f:
     CONFIG = yaml.safe_load(f) or {}
-
-ENDPOINT_NAME_TO_SCHEMA: dict[str, Path] = {}
-for ep in CONFIG.get("endpoints", []):
-    name = ep["name"]
-    schema_path = f"inputs/{ep['schema_path']}"
-    ENDPOINT_NAME_TO_SCHEMA[name] = Path(schema_path)
