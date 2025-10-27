@@ -5,7 +5,7 @@ import shutil
 import logging
 
 from pathlib import Path
-from configs import ACCEPTED_DIR, FAILED_DIR, SUCCESS_DIR, ENDPOINT_NAME_TO_SCHEMA, STOP
+from configs import ACCEPTED_DIR, FAILED_DIR, SUCCESS_DIR, STOP
 from io_utils import open_root, read_df_from_bytes
 
 LOG = logging.getLogger("worker")
