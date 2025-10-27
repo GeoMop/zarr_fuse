@@ -32,7 +32,27 @@ const Sidebar: React.FC<SidebarProps> = ({
   onNodeClick,
   onLogClick
 }) => {
+  // Dummy endpoint options for dropdown (static)
+const endpointOptions = [
+  {
+    key: 'test_structure_endpoint',
+    label: 'Test Structure Tree',
+    url: 's3://hlavo-release/bukov.zarr',
+    description: 'Test structure tree with child_1, child_2, child_3 groups',
+  },
+  {
+    key: 'surface_data_endpoint',
+    label: 'Surface Data',
+    url: 's3://hlavo-release/surface.zarr',
+    description: 'Surface data from hlavo-release storage',
+  },
+];
 
+// Selected endpoint state
+const [selectedEndpoint, setSelectedEndpoint] = useState(endpointOptions[0].key);
+
+// Find selected endpoint details
+const selectedEndpointObj = endpointOptions.find(e => e.key === selectedEndpoint);
   // S3 data state
   const [s3Data, setS3Data] = useState<S3Response | null>(null);
   const [s3Loading, setS3Loading] = useState(false);
@@ -182,12 +202,24 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Store URL and Description */}
         {configData && (
-          <div className="mt-3 pt-3 border-t border-blue-500/30">
-            <div className="text-sm">
-              <div className="font-medium mb-1">{configData.endpoint.store_url}</div>
-              <div className="text-blue-100">{configData.endpoint.description}</div>
+            <div className="mt-3 pt-3 border-t border-blue-500/30">
+              <div className="text-sm">
+                <label htmlFor="endpoint-select" className="font-medium mb-1 block">Store Name</label>
+                <select
+                  id="endpoint-select"
+                  value={selectedEndpoint}
+                  onChange={e => setSelectedEndpoint(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-blue-600 text-blue-100 border border-blue-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-150 font-semibold hover:bg-blue-700"
+                  style={{ minHeight: 44 }}
+                >
+                  {endpointOptions.map(opt => (
+                    <option key={opt.key} value={opt.key}>{opt.label}</option>
+                  ))}
+                </select>
+                <div className="font-medium mt-2 text-blue-100">{selectedEndpointObj?.url}</div>
+                <div className="text-blue-100">{selectedEndpointObj?.description}</div>
+              </div>
             </div>
-          </div>
         )}
 
         {/* Progress Bar - Clickable for reload */}

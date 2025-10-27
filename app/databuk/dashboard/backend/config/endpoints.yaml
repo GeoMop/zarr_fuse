@@ -1,8 +1,8 @@
 # S3 Endpoint Configuration
 # Multiple endpoint support - each endpoint represents a different Zarr store
 
-# Endpoint 1: Test Structure Tree
-"test_structure_endpoint":
+# Endpoint 1: 
+"bukov_endpoint":
   reload_interval: 300  # Cache TTL in seconds (5 minutes)
   schema_file: "schemas/test_schema.yaml"
   store_url: "s3://${S3_BUCKET_NAME}/bukov.zarr"
@@ -10,7 +10,7 @@
   store_type: "zarr"
   version: "1.0.0"
 
-# Endpoint 2: Surface Data
+# Endpoint 2:
 "surface_data_endpoint":
   reload_interval: 300  # Cache TTL in seconds (5 minutes)
   schema_file: "schemas/test_schema.yaml"
