@@ -29,10 +29,12 @@ def create_app():
     endpoints = configuration.load_endpoints_config()
     for ep in endpoints:
         LOG.info("Registering endpoint %s at %s", ep.name, ep.endpoint)
-        api.register_upload_endpoints(APP, ep.name, ep.endpoint, ep.schema_path)
+        api.register_upload_endpoints(APP, ep.name, ep.endpoint, ep.schema_name)
 
     scrappers = configuration.load_scrappers_config()
-    scheduler.start_scrapper_jobs(BG_SCHEDULER, scrappers)
+    for scrapper in scrappers:
+        LOG.info("Configured scrapper job %s with cron '%s'", scrapper.name, scrapper.cron)
+        scheduler.add_scrapper_job(BG_SCHEDULER, scrapper)
 
     BG_SCHEDULER.start()
     LOG.info("Scheduled %d scrappers", len(scrappers))

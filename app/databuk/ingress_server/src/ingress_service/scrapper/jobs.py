@@ -37,7 +37,7 @@ def run_job(job: ScrapperConfig):
         content_type=content_type,
         endpoint_name=job.name,
         username=f"scrapper-{job.name}",
-        schema_path=job.schema_path,
+        schema_name=job.schema_name,
     )
 
     location = s3io.save_accepted_object(job.name, "", content_type, payload, meta_data)

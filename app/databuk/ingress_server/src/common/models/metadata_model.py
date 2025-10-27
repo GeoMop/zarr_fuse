@@ -1,10 +1,8 @@
 from datetime import datetime
 
-from pathlib import Path
 from pydantic import BaseModel, Field, field_validator
 from common import validation
 
-BASE_DIR = Path(__file__).resolve().parents[2]
 
 class MetadataModel(BaseModel):
     content_type: str = Field(..., description="MIME type: application/json or text/csv")
@@ -15,7 +13,7 @@ class MetadataModel(BaseModel):
         default_factory=lambda: datetime.utcnow(),
         description="UTC timestamp (ISO 8601)"
     )
-    schema_path: str = Field(..., description="Path to schema file (absolute after validation)")
+    schema_name: str = Field(..., description="Name of the schema file (without path)")
 
     @field_validator("content_type")
     @classmethod
@@ -31,11 +29,3 @@ class MetadataModel(BaseModel):
         if not v or "/" in v or "\\" in v:
             raise ValueError("Invalid endpoint name (must not contain '/' or '\\').")
         return v
-
-    @field_validator("schema_path")
-    @classmethod
-    def _validate_schema_path(cls, v: str) -> str:
-        p = (BASE_DIR / v).resolve() if not Path(v).is_absolute() else Path(v).resolve()
-        if not p.exists():
-            raise ValueError(f"Schema file does not exist: {p}")
-        return str(p)

@@ -5,6 +5,10 @@ from pathlib import Path
 from dotenv import load_dotenv
 from common.models.configuration_model import S3Config, EndpointConfig, ScrapperConfig
 
+import boto3
+from botocore.config import Config
+from botocore.client import BaseClient
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -24,6 +28,7 @@ def load_s3_config() -> S3Config:
         raise RuntimeError("S3_ENDPOINT_URL must be set")
     if not store_url:
         raise RuntimeError("S3_STORE_URL must be set")
+
     return S3Config(
         access_key=access_key,
         secret_key=secret_key,
@@ -48,3 +53,22 @@ def load_scrappers_config() -> list[ScrapperConfig]:
         raw = yaml.safe_load(file) or {}
 
     return [ScrapperConfig(**sc) for sc in raw.get("active_scrappers", [])]
+
+def create_boto3_client() -> BaseClient:
+    cfg = load_s3_config()
+    config = Config(
+        signature_version="s3v4",
+        s3={
+            "addressing_style": "path",
+        },
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
+        retries={"max_attempts": 3, "mode": "standard"},
+    )
+    return boto3.client(
+        "s3",
+        aws_access_key_id=cfg.access_key,
+        aws_secret_access_key=cfg.secret_key,
+        endpoint_url=cfg.endpoint_url,
+        config=config
+    )

@@ -12,7 +12,7 @@ LOG = logging.getLogger("ingress")
 
 async def _upload_node(
     endpoint_name: str,
-    schema_path: str,
+    schema_name: str,
     request: Request,
     username: str,
     node_path: str = "",
@@ -42,7 +42,7 @@ async def _upload_node(
         node_path=node_path,
         endpoint_name=endpoint_name,
         username=username,
-        schema_path=schema_path,
+        schema_name=schema_name,
     )
 
     location = s3io.save_accepted_object(endpoint_name, node_path, content_type, payload, meta_data)
@@ -56,7 +56,7 @@ async def _upload_node(
     )
     return JSONResponse({"status": "accepted"}, status_code=202)
 
-def register_upload_endpoints(app: FastAPI, endpoint_name: str, endpoint_url: str, schema_path: str):
+def register_upload_endpoints(app: FastAPI, endpoint_name: str, endpoint_url: str, schema_name: str):
     @app.post(
         endpoint_url,
         summary=f"Upload to root node {endpoint_name}",
@@ -69,7 +69,7 @@ def register_upload_endpoints(app: FastAPI, endpoint_name: str, endpoint_url: st
         }
     )
     async def upload_root(request: Request, username: str = Depends(auth.authenticate)):
-        return await _upload_node(endpoint_name, schema_path, request, username)
+        return await _upload_node(endpoint_name, schema_name, request, username)
 
     @app.post(
         f"{endpoint_url}/{{node_path:path}}",
@@ -83,4 +83,4 @@ def register_upload_endpoints(app: FastAPI, endpoint_name: str, endpoint_url: st
         }
     )
     async def upload_node(node_path: str, request: Request, username: str = Depends(auth.authenticate)):
-        return await _upload_node(endpoint_name, schema_path, request, username, node_path)
+        return await _upload_node(endpoint_name, schema_name, request, username, node_path)

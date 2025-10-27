@@ -1,18 +1,14 @@
-[build-system]
-requires = ["setuptools>=61", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "ingress_server"
-version = "0.2.0"
-description = "Backend-only ingestion service: HTTP endpoints that accept uploads and persist validated tables to an S3-backed Zarr store (no UI)."
-readme = "README.md"
-urls = { Homepage = "https://github.com/geomop/zarr_fuse" }
+name = "ingress-server"
+description = "Ingress data processing (API + Airflow extractor) monorepo"
+version = "0.1.0"
+requires-python = ">=3.11"
 authors = [
   { name = "Jan Brezina", email = "jan.brezina@tul.cz" }
+  { name = "Stepan Moc", email = "stepan.mocik@gmail.com" }
 ]
 license = { text = "BSD-3-Clause" }
-keywords = ["backend","ingestion","upload","HTTP API","S3","Zarr","fsspec","CSV","data pipeline"]
+keywords = ["API","Airflow","Zarr","s3"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -21,18 +17,22 @@ classifiers = [
   "License :: OSI Approved :: BSD License",
   "Programming Language :: Python :: 3"
 ]
-requires-python = ">=3.11"
 
 dependencies = [
-    "PyYAML",
-    "fastapi"
-    "python-dotenv",
-    "polars",
-    "APScheduler",
-    "pydantic",
-    "boto3"
+  "fastapi",
+  "uvicorn",
+  "polars",
+  "pydantic",
+  "boto3",
+  "pyyaml"
 ]
 
+[project.optional-dependencies]
+airflow = ["apache-airflow>=2.10"]
+
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["ingress_server", "ingress_server.*"]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
