@@ -32,27 +32,42 @@ const Sidebar: React.FC<SidebarProps> = ({
   onNodeClick,
   onLogClick
 }) => {
-  // Dummy endpoint options for dropdown (static)
-const endpointOptions = [
-  {
-    key: 'test_structure_endpoint',
-    label: 'Test Structure Tree',
-    url: 's3://hlavo-release/bukov.zarr',
-    description: 'Test structure tree with child_1, child_2, child_3 groups',
-  },
-  {
-    key: 'surface_data_endpoint',
-    label: 'Surface Data',
-    url: 's3://hlavo-release/surface.zarr',
-    description: 'Surface data from hlavo-release storage',
-  },
-];
+  // Endpoint options state (fetched from backend)
+  const [endpointOptions, setEndpointOptions] = useState<
+    { key: string; label: string; url: string; description: string }[]
+  >([]);
 
-// Selected endpoint state
-const [selectedEndpoint, setSelectedEndpoint] = useState(endpointOptions[0].key);
+  // Selected endpoint state
+  const [selectedEndpoint, setSelectedEndpoint] = useState<string>('');
 
-// Find selected endpoint details
-const selectedEndpointObj = endpointOptions.find(e => e.key === selectedEndpoint);
+  // Find selected endpoint details
+  const selectedEndpointObj = endpointOptions.find(e => e.key === selectedEndpoint);
+
+  // Fetch endpoint list from backend on mount
+  useEffect(() => {
+    async function fetchEndpoints() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/config/endpoints`);
+        const data = await response.json();
+        if (data.status === 'success' && data.endpoints) {
+          const options = Object.entries(data.endpoints).map(([key, value]) => {
+            const endpoint = value as { description?: string; store_url: string };
+            return {
+              key,
+              label: endpoint.description || key,
+              url: endpoint.store_url,
+              description: endpoint.description ?? "",
+            };
+          });
+          setEndpointOptions(options);
+          if (options.length > 0) setSelectedEndpoint(options[0].key);
+        }
+      } catch (err) {
+        // Optionally handle error
+      }
+    }
+    fetchEndpoints();
+  }, []);
   // S3 data state
   const [s3Data, setS3Data] = useState<S3Response | null>(null);
   const [s3Loading, setS3Loading] = useState(false);
