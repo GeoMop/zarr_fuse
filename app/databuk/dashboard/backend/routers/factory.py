@@ -188,15 +188,14 @@ class ServiceAPI:
         logger.info(f"[{self.name}] Cache MISS for structure - fetching from S3")
         
         try:
-            # Ensure S3 connection
-            if not self.s3_service._fs:
-                logger.info(f"[{self.name}] Connecting to S3: {self.cfg.store_url}")
-                success = self.s3_service.connect(self.cfg)
-                if not success:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Failed to connect to S3 for endpoint '{self.name}'"
-                    )
+            # Ensure S3 connection with correct config
+            logger.info(f"[{self.name}] Connecting to S3: {self.cfg.store_url}")
+            success = self.s3_service.connect(self.cfg)
+            if not success:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to connect to S3 for endpoint '{self.name}'"
+                )
             
             # Fetch structure from S3
             structure = self.s3_service.get_store_structure()

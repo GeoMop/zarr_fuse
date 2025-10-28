@@ -34,7 +34,7 @@ class S3Service:
     
     def _get_storage_options(self, config: Optional[EndpointConfig] = None) -> Dict[str, Any]:
         """Get S3 storage options - centralized configuration"""
-        if not config:
+        if not config and self._current_config:
             config = self._current_config
         
         if not config:
@@ -261,8 +261,8 @@ class S3Service:
     
     def get_store_structure(self) -> Dict[str, Any]:
         """Get the structure of the specific Zarr store from STORE_URL"""
-        if not self._fs:
-            raise ValueError("Not connected to S3")
+        if not self._fs or not self._current_config:
+            raise ValueError("Not connected to S3 or missing endpoint config")
         
         # Always use zarr_fuse path
         print(f"Using zarr_fuse path for structure")
@@ -856,9 +856,7 @@ class S3Service:
             
             # Ensure config is loaded
             if not self._current_config:
-                self._current_config = get_first_endpoint()
-                if not self._current_config:
-                    raise Exception("No endpoint configuration found")
+                raise Exception("No endpoint configuration found for S3Service")
             
             # TODO: Implement zarr_fuse path for variable data
             # For now, use legacy implementation

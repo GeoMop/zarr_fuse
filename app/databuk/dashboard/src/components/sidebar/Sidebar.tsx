@@ -79,6 +79,28 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   // Tree expand/collapse state (paths of expanded groups)
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set(['root']));
+
+  // Fetch config and S3 data when selectedEndpoint changes
+  useEffect(() => {
+    if (!selectedEndpointObj) return;
+    const fetchS3Data = async () => {
+      setS3Loading(true);
+      setS3Error(null);
+      try {
+        // Example: fetch S3 structure for selected endpoint
+        const response = await fetch(`${API_BASE_URL}/api/s3/structure?endpoint=${encodeURIComponent(selectedEndpointObj.key)}`);
+        const data = await response.json();
+        setS3Data(data);
+        setLastFetchAt(Date.now());
+      } catch (err) {
+        setS3Error('Failed to fetch S3 data');
+        setS3Data(null);
+      } finally {
+        setS3Loading(false);
+      }
+    };
+    fetchS3Data();
+  }, [selectedEndpointObj, API_BASE_URL]);
   const toggleExpand = useCallback((path: string) => {
     setExpandedPaths((prev) => {
       const next = new Set(prev);
@@ -94,7 +116,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     setS3Loading(true);
     setS3Error(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/s3/structure`);
+      // Always use selectedEndpoint for fetch
+      if (!selectedEndpointObj) throw new Error('No endpoint selected');
+      const response = await fetch(`${API_BASE_URL}/api/s3/structure?endpoint=${encodeURIComponent(selectedEndpointObj.key)}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -107,7 +131,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       setLastFetchAt(Date.now());
       setProgress(0);
     }
-  }, []);
+  }, [selectedEndpointObj, API_BASE_URL]);
 
   // Initial fetch on mount
   useEffect(() => {
