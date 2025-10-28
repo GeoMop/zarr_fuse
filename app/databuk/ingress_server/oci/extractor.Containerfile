@@ -12,19 +12,25 @@ LABEL org.opencontainers.image.authors="Geomop / Stepan Moc <stepan.mocik@gmail.
 LABEL maintainer="Geomop / Stepan Moc <stepan.mocik@gmail.com>"
 
 USER root
-WORKDIR /opt/app
-
 RUN apt-get update && \
     apt-get install -y --no-install-recommends git=1:2.39.5-0+deb12u2 && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --chown=airflow:root packages/common packages/common
-COPY --chown=airflow:root inputs inputs
-COPY --chown=airflow:root services/extractor_service services/extractor_service
-
 USER airflow
 
-RUN pip install --no-cache-dir -e packages/common -e services/extractor_service && \
-    pip install --no-cache-dir apache-airflow-providers-amazon==9.16.0
+COPY --chown=airflow:root packages/common /opt/app/packages/common
+COPY --chown=airflow:root inputs /opt/app/inputs
+COPY --chown=airflow:root services/extractor_service /opt/app/services/extractor_service
 
-RUN ln -s services/extractor_service/dags /opt/airflow/dags
+ENV PIP_NO_CACHE_DIR=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+RUN pip install --no-cache-dir -e /opt/app/packages/common -e /opt/app/services/extractor_service
+
+COPY --chown=airflow:root services/extractor_service/dags /opt/airflow/dags
+
+ENV SCHEMAS_DIR=/opt/app/inputs/schemas
+ENV PYTHONUNBUFFERED=1
+ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+ENV PYTHONPATH=/opt/app

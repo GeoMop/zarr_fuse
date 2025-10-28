@@ -1,4 +1,6 @@
-version: "3"
+# Docker Compose file for Airflow with Postgres
+# Used for testing purposes only
+---
 services:
   postgres:
     image: postgres:13
@@ -6,33 +8,68 @@ services:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 15s
+      timeout: 15s
+      retries: 3
+      start_period: 5s
+      start_interval: 10s
+
+  airflow-init:
+    build:
+      context: .
+      dockerfile: oci/extractor.Containerfile
+    image: extractor-service:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: ./.env
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__WEBSERVER__SECRET_KEY=mysecretkey
+      - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
+    command: |-
+      bash -c """
+      airflow db init && \
+      airflow users create --username admin --firstname FIRST_NAME --lastname LAST_NAME --role Admin --email admin@example.com --password admin
+      """
 
   webserver:
-    build: .
-    restart: always
+    image: extractor-service:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    env_file: ./.env
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__WEBSERVER__SECRET_KEY=mysecretkey
       - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-    ports:
-      - "8080:8080"
-    entrypoint: /entrypoint.sh
+    ports: ["8080:8080"]
     command: webserver
+    volumes:
+      - airflow_logs:/opt/airflow/logs
 
   scheduler:
-    build: .
-    restart: always
+    image: extractor-service:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    env_file: ./.env
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__WEBSERVER__SECRET_KEY=mysecretkey
       - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-    entrypoint: /entrypoint.sh
     command: scheduler
+    volumes:
+      - airflow_logs:/opt/airflow/logs
+
+volumes:
+  airflow_logs:
