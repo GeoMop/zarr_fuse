@@ -17,7 +17,7 @@ from datetime import datetime
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from packages.common.models.metadata_model import MetadataModel
+from packages.common.models import MetadataModel
 from packages.common import configuration, s3io, logging_setup
 
 LOG = logging.getLogger("dag_extractor")
@@ -122,7 +122,7 @@ def _get_schema_dir(schema_name: str) -> Path:
     if env:
         return Path(env).resolve() / schema_name
 
-    base = Path(__file__).resolve().parents[2] / "inputs/schemas" / schema_name
+    base = Path(__file__).resolve().parents[3] / "inputs/schemas" / schema_name
     return base.resolve()
 
 def _write_to_zarr(schema_name: str, node_path: str, df) -> None:

@@ -6,8 +6,9 @@ from fastapi import FastAPI
 from dotenv import load_dotenv
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from ingress_service.web import api
-from ingress_service.scrapper import scheduler
+from .web import api
+from .scrapper import scheduler
+
 from packages.common import configuration, logging_setup
 
 APP = FastAPI(title="Databuk Ingress Server", version="2.0.0")

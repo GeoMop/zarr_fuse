@@ -1,4 +1,6 @@
-__all__ = ["web", "scrapper"]
+"""Ingress service - FastAPI entrypoint for ingestion into S3/Zarr."""
 
-from . import web
-from . import scrapper
+# optional convenience imports
+from . import web, scrapper
+
+__all__ = ["web", "scrapper"]

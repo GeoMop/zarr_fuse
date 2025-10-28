@@ -1,7 +1,7 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from ingress_service.scrapper import jobs
-from packages.common.models.configuration_model import ScrapperConfig
+from . import jobs
+from packages.common.models import ScrapperConfig
 
 def add_scrapper_job(scheduler: BackgroundScheduler, scrapper: ScrapperConfig):
     minute, hour, day, month, dow = scrapper.cron.split()

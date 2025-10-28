@@ -1,8 +1,7 @@
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
-import validation
-
+from .. import validation
 
 class MetadataModel(BaseModel):
     content_type: str = Field(..., description="MIME type: application/json or text/csv")

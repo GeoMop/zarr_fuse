@@ -3,7 +3,7 @@ import yaml
 
 from pathlib import Path
 from dotenv import load_dotenv
-from models.configuration_model import S3Config, EndpointConfig, ScrapperConfig
+from .models import S3Config, EndpointConfig, ScrapperConfig
 
 import boto3
 from botocore.config import Config
@@ -61,8 +61,8 @@ def create_boto3_client() -> BaseClient:
         s3={
             "addressing_style": "path",
         },
-        request_checksum_calculation="when_required",
-        response_checksum_validation="when_required",
+        #request_checksum_calculation="WHEN_REQUIRED",
+        #response_checksum_validation="WHEN_REQUIRED",
         retries={"max_attempts": 3, "mode": "standard"},
     )
     return boto3.client(

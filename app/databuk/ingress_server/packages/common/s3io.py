@@ -2,8 +2,8 @@ import uuid
 import time
 import logging
 
-import configuration
-from models.metadata_model import MetadataModel
+from . import configuration
+from .models import MetadataModel
 
 from typing import Tuple
 
