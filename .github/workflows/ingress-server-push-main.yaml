@@ -1,35 +1,16 @@
 name: Ingress server - push main
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-  workflow_dispatch:
+    paths:
+      - app/databuk/ingress_server/**
 jobs:
-  get-changed-files:
-    name: Get changed file
-    runs-on: ubuntu-latest
-    outputs:
-      any-changed: ${{ steps.changed.outputs.any_changed }}
-    concurrency:
-      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-changed-files
-      cancel-in-progress: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Check if Ingress Server files or Helm Charts were changed
-        id: changed
-        uses: tj-actions/changed-files@v45
-        with:
-          files: |
-            app/databuk/ingress_server/**
   build-and-deploy:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
-    needs:
-      - get-changed-files
-    if: always() && github.event_name == 'push' || needs.get-changed-files.outputs.any-changed == 'true'
     with:
-      push-container: true
-      deploy-helm-chart: true
+      deploy: true
       tag: generate
       namespace: ingress-server-latest
       release-name: ingress-server-latest
