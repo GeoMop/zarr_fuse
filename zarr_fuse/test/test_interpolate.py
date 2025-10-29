@@ -1,7 +1,12 @@
+import logging
+
 import pytest
 import numpy as np
 import xarray as xr
 import re
+
+from zarr_fuse import schema as zf_schema
+
 try:
     import matplotlib.pyplot as plt
 except ImportError:
@@ -9,8 +14,13 @@ except ImportError:
 
 # ---- adjust this import to match your module path! ----
 from zarr_fuse.interpolate import interpolate_ds, sort_by_coord, interpolate_coord, dflt_logger
-from zarr_fuse.zarr_schema import Coord
 #from ds_interpolate import sort_by_coord, interpolate_coord, interpolate_ds
+
+def _ctx(data: dict):
+    """Create a ContextCfg with a SchemaCtx wired to our capture logger."""
+    logger = logging.Logger("test_logger")
+    ctx = zf_schema.SchemaCtx(addr=[], file="test.yaml", logger=logger)
+    return zf_schema.ContextCfg(data, ctx)
 
 # a tiny dummy schema object in lieu of Coord
 class DummySchema:
@@ -85,8 +95,12 @@ def test_sort_by_coord_unsorted():
 
 
 def run_interp(old, new, step_limits, sort=True,  unit='', step_unit='hour'):
-    schema = DummySchema(sorted=sort, step_limits=step_limits, unit=unit, step_unit=step_unit)
-
+    cfg = dict(
+        name='tst_coord',
+        unit= "s",
+        step_limits=step_limits
+    )
+    schema = zf_schema.Coord(_ctx(cfg))
     new = np.array(new)
     old = np.array(old)
     idx_sorter = sort_by_coord(new, old, schema, dflt_logger)
@@ -118,13 +132,13 @@ def test_interpolate_coord_sorted():
     # sorted, step_limits - unexact step limits
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
-                    step_limits=[72, 126, 'minutes']) # 1.2 h, 2.1 h
+                    step_limits={'start':72, 'end':126, 'unit':'minutes'}) # 1.2 h, 2.1 h
     assert split == 2
     np.allclose(merged, [1, 2, 4, 5.75, 7.5, 8.75,  10])
 
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
-                    step_limits=[150, 150, 'minutes']) # 2.5 h
+                    step_limits=dict(start=150, end=150, unit='minutes')) # 2.5 h
     assert split == 2
     np.allclose(merged, [1, 2, 3.5 + 1/3.0, 5 + 2/3.0, 7.5,  10])
 

@@ -134,7 +134,6 @@ class StoreLogHandler(Handler):
             bytes_old = buf_old.as_numpy_array().tobytes()
             bytes_new = buf.as_numpy_array().tobytes()
             concat = bytes_old + bytes_new
-            print("\n", str(concat))
             buf = CpuBuffer.from_bytes(concat)
 
         await self.store.set(key, buf)

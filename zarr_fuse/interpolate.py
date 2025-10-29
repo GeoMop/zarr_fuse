@@ -46,7 +46,8 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
         idx_sort = np.argsort(new_values)
         new_sorted = new_values[idx_sort]
         if len(old_values) > 0:
-            max_old = np.max(old_values)
+            assert np.all(old_values[:-1]<=old_values[1:]), f"Existing coordinate values are not sorted, got {old_values}"
+            max_old = old_values[-1]
             idx_split = np.searchsorted(new_sorted, max_old, side='right')
         else:
             idx_split = 0
@@ -95,10 +96,10 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
         update_old_part = np.array(old_values[old_range_min:old_range_max])
 
     else:
-        if schema.step_limits is None:
+        if schema.step_limits.no_new():
             # no extension allowed
             assert len(new_sorted[idx_split:]) == 0
-        elif schema.step_limits == []:
+        elif schema.step_limits.any_new():
             # default case, add all new coords
             pass
         else:
@@ -110,7 +111,7 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
 
     new_append = new_sorted[idx_split:]
     last_old = old_values[-1] if len(old_values) > 0 else new_values[idx_split]
-    if schema.step_limits is None:
+    if schema.step_limits.no_new() or len(new_append) == 0:
         # no extension allowed
         if len(new_append) > 1:
             # Non-fatal error.
@@ -118,17 +119,15 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
                       f"Appended coordinates ignored: {new_append[1:]}.")
         # one value in extension is allowed, but used only to interpolate
         update_new_part = np.array([], dtype=new_append.dtype)
-    elif schema.step_limits == [] or not schema.sorted:
-        # deafult case, add all new coords
+    elif schema.step_limits.any_new() or not schema.sorted:
+        # default case, add all new coords
         update_new_part = new_append
     else:
         # Constrained coordinates step.
         # Construct adjusted coordinates grid.
         step_range = schema.step_limits
-        step_range = np.array([step_range.start, step_range.end])
-        step_range = units.create_quantity(step_range, step_range.unit)
-        coord_unit = schema.step_unit()
-        step_range = step_range.to(coord_unit).magnitude
+        range_array = np.array([step_range.start, step_range.end])
+        step_range = schema.convert_values(range_array, from_unit = step_range.unit, to_unit = schema.step_unit())
 
         if last_old < new_append[0]:
             extension_part = np.concatenate(

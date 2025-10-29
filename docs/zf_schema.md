@@ -44,9 +44,9 @@ We accept also following types for non-physical quantities:
 If  `unit` is provided, the `bool` and `str[n]` are not allowed.
 Explicit type specification is recommended.
 
-### `invalid_value`
+### `na_value` (optional)
 Value used to represent missing or invalid data in the variable. Native NaN is used by default for float quantities.
-'signed_max_int' and 'signed_min_int' keywords are supported for integer types, representing the maximum and minimum 
+'max_int' and 'min_int' keywords are supported for integer types, representing the maximum and minimum 
 signed integer values of the variable type. Otherwise you have to provide the actual value compatible with the variable type.
 
 ### `unit` 
@@ -123,8 +123,8 @@ Controls underlaying chunking in the ZARR store. Need more work to support paral
 Optional control over added values in the coordinate. This has to be redesigned as it 
 doesn't work in parallel updates. Zarr is not designed to appending to more coordinates than one.
 The mechanism also involve interpolation which leads to loss of original values. It will be replaced by Apache Air workflow.
-  - `None` : No new values allowed after the initial write.
-  - `[]` : No restrictions, add all new values.
+  - `no_new` : No new values allowed after the initial write.
+  - `any_new` : No restrictions, add all new values.
   - `[min, max]` : Restrict the step between sorted coordinate values to this interval, and then interpolate to this grid.
   -  `[min, max, unit]` : The tuple (min,max) values as given ure used to create a quantity using `unit` (which is the coordinate unit by default).
      This allows to use the same syntax for the coordinate values as for the range specification, but also allows to write a bit more

@@ -21,6 +21,7 @@ from pathlib import Path
 
 
 from . import zarr_schema, units
+from .dtype_converter import to_typed_array, TrimmedArrayWarning
 from .logger import get_logger
 from .interpolate import interpolate_ds
 from .zarr_schema import DatasetSchema, NodeSchema
@@ -326,7 +327,7 @@ class Node:
             xr_var = xr.Variable(
                      dims=list(var.coords),  # Default dimension named after the coordinate key.
                      data=data,
-                     attrs=var.attrs
+                     attrs=var.zarr_attrs()
                  )
         except ValueError as e:
             raise ValueError(f"Variable '{var.name}' has incompatible shape {data.shape} for coordinates {var.coords}.") from e
@@ -350,7 +351,7 @@ class Node:
         np_var = xr.Variable(
             dims=(name,),
             data=np_var,
-            attrs=coord.attrs.copy()
+            attrs=coord.zarr_attrs()
         )
         return np_var
 
@@ -443,6 +444,8 @@ class Node:
         # Alternatively we can eliminate the dict like interface and only provide
         # access to keys and getitem method (minimalistic corresponding to the zarr storage API)
 
+    def _make_null_ctx(self):
+        return zarr_schema.SchemaCtx([], file='', logger=self.logger)
 
     def _storage_group_paths(self):
         """
@@ -477,7 +480,7 @@ class Node:
         if new_node_schema is None:
             # node in storage but not in schema
             # use ds_schema from the storage and empty new children dict
-            null_address = zarr_schema.SchemaAddress([], file=None)
+            null_address = self._make_null_ctx()
             new_node_schema = zarr_schema.NodeSchema(
                 null_address,
                 self.schema,
@@ -520,8 +523,8 @@ class Node:
         try:
             old_schema = self.schema
         except KeyError:
-            null_address = zarr_schema.SchemaAddress([], file=None)
-            old_schema = zarr_schema.DatasetSchema(null_address, {}, {}, {})
+            cfg = zarr_schema.ContextCfg(dict(attrs={}, vars={}, coords={}), self._make_null_ctx())
+            old_schema = zarr_schema.DatasetSchema(cfg['attrs'], cfg['vars'], cfg['coords'])
 
         if old_schema.is_empty():
             # Initialize new dataset.
@@ -785,7 +788,8 @@ class Node:
             # come from the store (i.e. the full arrays). This ensures consistency.
             # (This constructs an indexers dict using the existing merged coordinates.)
             indexers = {d: merged_coords[d] for d in dim_coord.dims if d != dim}
-            ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=np.nan)
+            na_value = ds_update.attrs.get('na_value', np.nan)
+            ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=na_value)
 
             # Append the extension subset along the current dimension.
             last_written_ds = self.write_ds(ds_ext_reindexed, mode="a", append_dim=dim)
@@ -975,16 +979,18 @@ def get_df_col(df, var:zarr_schema.Variable, logger: logging.Logger):
         col_series = df[var.df_col].to_numpy()
     except pl.exceptions.ColumnNotFoundError:
         logger.error(f"Source column '{var.df_col}' not found in the input DataFrame:\n{df.head()}")
-        return np.full(df.shape[0], np.nan)
+        return np.full(df.shape[0], var.na_value)
     try:
-        q_new = units.create_quantity(col_series, from_unit=var.source_unit, to_unit=var.unit)
+        q_new = var.convert_values(col_series)
     except ValueError as e:
+        # TODO: better test of the var.convert_values and treatment of possible conversion error there
+        # reporting detailed variable info.
         print(col_series)
         logger.error(f"Failed to parse values of column '{var.df_col}' with\n"
                      f"unit/format specification:{var.source_unit}\n"
                      f"values:\n{df.head()}")
-        return np.full(df.shape[0], np.nan)
-    return q_new.magnitude
+        return np.full(df.shape[0], var.na_value)
+    return q_new
 
         # TODO: log missing column
 
@@ -1020,6 +1026,8 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     Returns:
         xr.Dataset: The pivoted dataset with data variables defined on the new N-dim grid,
                     and with coordinates for each dimension.
+
+    TODO: Review and simplify for clearly separated vars and coords.
     """
     # 1. DF -> dict of 1d arrays,
     data_vars = {
@@ -1028,11 +1036,15 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     }
     # 2. apply hash of tuple coords, input Dict: ds_name : [df_cols]
     for k, c in schema.COORDS.items():
+
         if (c.composed is not None) and (len(c.composed) > 1):
             # hash tuple coords
             tuple_list = zip( *(data_vars[c] for c in c.composed) )
             hash_list = [hash(tuple(t)) for t in tuple_list]
             data_vars[k] = np.array(hash_list)
+        else:
+            # mix vars and coord to be backward compatible with remaining code
+            data_vars[k] = get_df_col(df, c, logger)
 
     # 3. Extract coords
     idx_list = []
@@ -1062,9 +1074,9 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     def form_var_array(var_struc):
         column_vals = data_vars[var_struc.name]
         # Choose a dtype based on the column (floating or object)
-        dtype = column_vals.dtype if np.issubdtype(column_vals.dtype, np.floating) else object
+        #dtype = column_vals.dtype if np.issubdtype(column_vals.dtype, np.floating) else object
         # Create an empty output array with fill_value.
-        result = np.full(coord_sizes, np.nan, dtype=dtype)
+        result = np.full(coord_sizes, var_struc.na_value, dtype=column_vals.dtype)
         # Fill in the values; if duplicate keys occur, later values win.
         result.flat[flat_idx] = column_vals
         # eliminate inappropriate coordinates
@@ -1080,7 +1092,7 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
                  if k not in coords_dict}
 
     # Build and return the xarray.Dataset with the computed coordinates.
-    attrs = schema.ATTRS
+    attrs = schema.zarr_attrs()
     attrs['__structure__'] = zarr_schema.serialize(schema)
     ds_out = xr.Dataset(data_vars=data_vars, coords=coords_dict, attrs=attrs)
     return ds_out

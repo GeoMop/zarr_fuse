@@ -221,6 +221,35 @@ def _mk_coord(d: dict, *, logger=None):
 def _has(bag: list[str], needle: str) -> bool:
     return any(needle in s for s in bag)
 
+@pytest.mark.parametrize(
+    "token, expected_dtype, expected_str",
+    [
+        ("bool",    np.dtype("int8"),   "int8"),
+        ("int", np.dtype("int64"), "int64"),
+        ("int8",    np.dtype("int8"),   "int8"),
+        ("int32",   np.dtype("int32"),  "int32"),
+        ("int64",   np.dtype("int64"),  "int64"),
+        ("uint", np.dtype("uint64"), "uint64"),
+        ("uint64",   np.dtype("uint64"),  "uint64"),
+        ("float64", np.dtype("float64"),"float64"),
+        ("complex", np.dtype("complex64"), "complex"),
+        ("str[7]",  np.dtype("<U7"),    "str[7]"),
+    ],
+)
+def test_dtype_parse_and_serialize_roundtrip(token, expected_dtype, expected_str):
+    # Build cfg = ContextCfg(str) with a test logger so errors (if any) are captured but won't raise.
+    test_logger = _TestLogger()
+    cfg = schema.ContextCfg(token, schema.SchemaCtx(["VARS", "x", "type"], file="cfg.yaml", logger=test_logger))
+
+    # Deserialize
+    dt = schema.DType.from_cfg(cfg)
+    assert dt.dtype == expected_dtype
+
+    # Serialize back
+    s = dt.asdict(None, None)
+    assert s == expected_str
+
+
 def test_variable_logging_and_basics():
     # logs error on invalid unit
     _, log = _mk_var({"name": "v", "coords": [], "unit": "NOT_A_UNIT"})
@@ -264,9 +293,9 @@ def test_variable_logging_and_basics():
     assert v.range.unit == schema.units.Unit("cm")
 
     # discrete range
-    v, _ = _mk_var({"name": "v", "coords": [], "unit": None, "range": {"discrete": [1, 2, 3]}})
+    v, _ = _mk_var({"name": "v", "coords": [], "unit": None, "na_value": -1, "range": {"discrete": [1, 2, 3]}})
     assert isinstance(v.range, schema.DiscreteRange)
-    assert list(v.range.values) == [1, 2, 3]
+    assert list(v.range.codes_to_labels) == [-1,1, 2, 3]
 
     # conversion source_unit → unit
     #v, _ = _mk_var({"name": "v", "coords": [], "unit": "m", "source_unit": "cm"})
@@ -304,3 +333,42 @@ def test_coord_specific_attributes():
     assert c.sorted is True
     c, _ = _mk_coord({"name": "xy", "coords": [], "composed": ["x", "y"]})
     assert c.is_composed() and c.sorted is False
+
+
+def test_discrete_range_roundtrip_and_encode_decode(tmp_path):
+    # Prepare a ContextCfg that holds a simple list of labels (non-CSV path).
+    labels = ["red", "green", "blue"]
+    na = "<NA>"
+
+    ctx = schema.SchemaCtx(["VARS", "color", "range"], file=str(tmp_path / "cfg.yaml"))
+    cfg = schema.ContextCfg(labels, ctx)
+
+    # Build DiscreteRange from cfg (list path); source_col/convert_fn are unused here
+    dr = schema.DiscreteRange.from_cfg(
+        cfg, source_col="color", convert_fn=lambda s: s, na_value=na
+    )
+
+    # The constructed table should have NA in slot 0, followed by labels
+    assert list(dr.codes_to_labels) == [na, *labels]
+    assert dr.na_value == na
+
+    # Serialize to dict and ensure NA is omitted in the payload
+    serialized = dr.asdict(None, None)
+    assert serialized == {"discrete": labels}
+
+    # Deserialize by feeding the serialized payload back through ContextCfg + from_cfg
+    cfg2 = schema.ContextCfg(serialized["discrete"], ctx)
+    dr2 = schema.DiscreteRange.from_cfg(
+        cfg2, source_col="color", convert_fn=lambda s: s, na_value=na
+    )
+    # Roundtrip equality of the codes_to_labels array
+    assert np.array_equal(dr2.codes_to_labels, dr.codes_to_labels)
+
+    # Encode known + unknown values; unknown should map to code 0 (NA)
+    to_encode = [labels[0], labels[1], "unknown", labels[2], na]
+    encoded = dr2.encode(to_encode)
+    assert np.array_equal(encoded, np.array([1, 2, 0, 3, 0], dtype=np.int64))
+
+    # Decode should recover original labels with NA where appropriate
+    decoded = dr2.decode(encoded)
+    assert decoded.tolist() == [labels[0], labels[1], na, labels[2], na]

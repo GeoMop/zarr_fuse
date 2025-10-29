@@ -1,3 +1,5 @@
+import re
+from functools import cached_property
 from typing import *
 
 import pandas
@@ -9,6 +11,7 @@ from pathlib import Path
 
 from . import units
 from . import logger as zf_logger
+from . dtype_converter import to_typed_array
 
 """
 Classes to represent the store schema. It enables:
@@ -100,12 +103,20 @@ class SchemaCtx:
         addr = self.addr + list(path)
         return SchemaCtx(addr, self.file, self.logger)
 
-    def error(self, message: str, **kwargs) -> None:
+    def parent(self) -> "SchemaCtx":
+        """Return a new SchemaAddress for the parent path."""
+        if isinstance(self.addr, list) and len(self.addr) > 0:
+            addr = self.addr[:-1]
+        else:
+            addr = []
+        return SchemaCtx(addr, self.file, self.logger)
+
+    def error(self, message: str, **kwargs) -> SchemaError:
         err = SchemaError(message, self)
         self.logger.error(err, **kwargs)
         return err
 
-    def warning(self, message: str, **kwargs) -> None:
+    def warning(self, message: str, **kwargs) -> SchemaWarning:
         warn = SchemaWarning(message, self)
         self.logger.warning(warn, **kwargs)
         return warn
@@ -178,6 +189,125 @@ class AddressMixin:
   #           raise ValueError("Boolean dtype is not allowed when 'unit' is provided.")
   #       if str_len is not None:
   #           raise ValueError("Fixed-length string dtype 'str[n]' is not allowed when 'unit' is provided.")
+_STR_SPEC = re.compile(r"^str(?:\[(\d+)\])?$")
+type_mapping = {
+    "bool": np.int8,
+    "uint": np.uint64,
+    "int": np.int64,
+    "int8": np.int8,
+    "int32": np.int32,
+    "int64": np.int64,
+    "uint8": np.uint8,
+    "uint32": np.uint32,
+    "uint64": np.uint64,
+    "float": np.float64,
+    "float64": np.float64,
+    "complex": np.complex64,
+}
+_PREFERRED_NAME = {np.dtype(v): k for k,v in type_mapping.items()}
+
+
+def make_na(val, dt):
+    """
+    Parse NA sentinel value for given dtype.
+    :param val:
+    :param dt:
+    :return:
+    """
+    if dt is None:
+        return val
+
+    dtype = np.dtype(dt)
+    if isinstance(val, str):
+        if dtype.kind in  {"i", "u"}:
+            if val == "max_int":
+                return np.iinfo(dtype).max
+            if val == "min_int":
+                return np.iinfo(dtype).min
+        if dtype.kind in  {"U"}:
+            return np.asarray([val], dtype=dtype)[0]
+        raise ValueError(f"Unknown NA sentinel string: {val}")
+    else:
+        return np.asarray([val], dtype=dtype)[0]
+
+
+_list_of_defaults = [
+    [np.nan, "float32", "float64"],
+    [np.nan + 1j * np.nan, "complex64", "complex128"],
+    ["max_int", "uint8", "uint16", "uint32", "uint64"],
+    ["min_int", "int8", "int16", "int32", "int64"],
+    [np.datetime64("NaT"), "datetime64[ns]"],
+    [np.timedelta64("NaT"), "timedelta64[ns]"]
+]
+DEFAULT_NA_BY_DTYPE = {
+    np.dtype(dt): make_na(val_list[0], dt)
+    for val_list in _list_of_defaults
+    for dt in val_list[1:]
+}
+
+DEFAULT_STR_LEN = 32
+
+@attrs.define
+class DType:
+    dtype: Optional[np.dtype]
+
+    @classmethod
+    def from_cfg(cls, cfg: ContextCfg) -> 'DType':
+        _type, _ctx = cfg.value(), cfg.schema_ctx
+        if _type is None:
+            return cls(None)
+
+        _type = _type.strip()
+        m = _STR_SPEC.match(_type)
+        if m:
+            n = m.group(1)
+            if n is None:
+                _ctx.warning("Used type 'str' without length specification, assuming 'str[32]. Zarr-fuse only supports fixed string values in arrays.'", stacklevel=3)
+                n = DEFAULT_STR_LEN
+            n = int(n)
+            if n <= 0:
+                _ctx.warning(f"Invalid type 'str[{n}]',  n > 0 required. Using default length n={DEFAULT_STR_LEN}.", stacklevel=3)
+                n = DEFAULT_STR_LEN
+            return cls(np.dtype(f"<U{n}"))
+        _dtype = type_mapping.get(_type,  None)
+        if _dtype is None:
+            _ctx.error(f"Unsaported value type: {_type}")
+        return cls(np.dtype(_dtype))
+
+    def asdict(self, value_serializer, filter):
+        dt = self.dtype
+        if dt is None:
+            return None
+
+        # Special-case numpy Unicode dtype -> 'str[n]'
+        if dt.kind == "U":
+            # n chars = itemsize / itemsize_of('<U1')
+            n = dt.itemsize // np.dtype("<U1").itemsize
+            return f"str[{n}]"
+
+        # Simple dict lookup for known scalar dtypes
+        return _PREFERRED_NAME.get(dt, str(dt))
+
+    @property
+    def default_na(self):
+        """
+        Return the default NA sentinel for a NumPy dtype under the policy above.
+        - signed ints: ~0  (all bits set -> -1)
+        - unsigned ints: max_int
+        - unicode strings: U+FFFF repeated to the fixed width
+        Falls back to dict for floats/complex/bool/NaT families.
+        """
+        if self.dtype is None:
+            return None
+        dt = np.dtype(self.dtype)
+
+        # direct table lookups (floats, complex, bool, dt64/timedelta64)
+        if dt in DEFAULT_NA_BY_DTYPE:
+            return DEFAULT_NA_BY_DTYPE[dt]
+        if dt.kind == "U":
+            n_chars = dt.itemsize // np.dtype("<U1").itemsize  # = itemsize // 4
+            return "\uFFFF" * n_chars  # length == n_chars
+
 
 Scalar = bool | int | float | str
 Unit = str | units.DateTimeUnit
@@ -208,10 +338,10 @@ def unit_instance(cfg: ContextCfg) -> Unit:
 
 @attrs.define
 class DiscreteRange(AddressMixin):
-    values: List[Any] | str
+    codes_to_labels: np.ndarray
 
     @staticmethod
-    def from_cfg(cfg: ContextCfg, source_col: str, convert_fn):
+    def from_cfg(cfg: ContextCfg, source_col: str, convert_fn, na_value):
         if isinstance(cfg.value(), str):
             # read values from a CSV file
             # TODO: for large discrete value arrays we should store them as a zarr array not in attrs
@@ -220,29 +350,62 @@ class DiscreteRange(AddressMixin):
             values = convert_fn(df[source_col])
         else:
             values = np.array(cfg.value())
+        # Use index zero for na_value
+        values = np.concatenate(([[na_value], values]))
         return DiscreteRange(values)
 
-
+    @property
+    def na_value(self):
+        return self.codes_to_labels[0]
 
     def asdict(self, value_serializer, filter):
-        return {'discrete': list(self.values)}
+        return {'discrete': list(self.codes_to_labels[1:])}  # skip NaN
+
+    @cached_property
+    def labels_to_codes(self) -> dict[Any, int]:
+        return {lab: i for i, lab in enumerate(self.codes_to_labels)}  # NaN is code 0
+
+    def encode(self, values: Iterable[object]) -> np.ndarray:
+        # TODO: use Pndas to do encode fast
+        # single line: labels_to_codes.get(..., -1) in a comprehension
+        return np.asarray([self.labels_to_codes.get(v, 0) for v in values])
+
+    def decode(self, codes: Iterable[int]) -> np.ndarray:
+        # codes_to_labels has NaN at index 0; shift codes by +1 and index
+        c = np.asarray(codes, dtype=np.int64)
+        return self.codes_to_labels[c]
+
+class InfRange:
+    def encode(self, values: np.ndarray) -> np.ndarray:
+        return values
+
+    def decode(self, values: np.ndarray) -> np.ndarray:
+        return values
+
+    def asdict(self, value_serializer, filter):
+        return None
 
 @attrs.define
 class Interval(AddressMixin):
     """
     Start and end could be None to represent open intervals.
+    TODO: unit without type is inconsistent
     """
     start: Any
     end: Any
     unit: Unit
 
+
     @classmethod
     def from_list(cls, cfg: ContextCfg, default_unit):
         lst, schema_ctx = cfg.value(), cfg.schema_ctx
+        if lst is None:
+            return None
+
         if not isinstance(lst, list):
             lst = [lst]
         if len(lst) == 0:
-            lst = [None, None]
+            lst = cls(-np.inf, np.inf, default_unit)
         if len(lst) == 1:
             lst = 2 * lst
 
@@ -254,20 +417,72 @@ class Interval(AddressMixin):
         else:
             cfg.schema_ctx.error(f"Invalid interval specification: {lst}")
 
+    @classmethod
+    def step_limits(cls, cfg, default_unit):
+        # backward compatible
+        if cfg.cfg is None:
+            cfg.cfg = "no_new"
+        if isinstance(cfg.cfg, list) and len(cfg.cfg) == 0:
+            cfg.cfg = "any_new"
+
+        if isinstance(cfg.cfg, str):
+            if cfg.cfg == "no_new" :
+                return cls(np.nan, np.nan, default_unit)
+            elif cfg.cfg == "any_new":
+                return cls(-np.inf, np.inf, default_unit)
+            else:
+                cfg.schema_ctx.error(f"Invalid step_limits specification: {cfg.cfg}")
+        else:
+            return cls.from_list(cfg, default_unit)
+
+    def no_new(self):
+        return np.isnan(self.start) and np.isnan(self.end)
+
+    def any_new(self):
+        return self.start == -np.inf and self.end == np.inf
+
     def asdict(self, value_serializer, filter):
-        return [self.start, self.end, value_serializer(self, 2, self.unit)]
+        # Here we serialize set_limits, reproducing special strings.
+        if self.start == -np.inf and self.end == np.inf:
+            return "any_new"
+        elif np.isnan(self.start) and np.isnan(self.end):
+            return "no_new"
+        else:
+            return [self.start, self.end, value_serializer(self, 2, self.unit)]
+
+
 
 @attrs.define
 class IntervalRange(Interval):
     def asdict(self, value_serializer, filter):
         return {'interval': Interval.asdict(self, value_serializer, filter)}
 
+    def encode(self, values: np.ndarray) -> np.ndarray:
+        # single line: labels_to_codes.get(..., -1) in a comprehension
+
+        correct_mask = (self.start <= values)  &  (values <= self.end)
+        if np.all(correct_mask):
+            return values
+        raise ValueError(f"Values out of range [{self.start}, {self.end}]: {values[~correct_mask]}")
+
+    def decode(self, codes: np.ndarray) -> np.ndarray:
+        # codes_to_labels has NaN at index 0; shift codes by +1 and index
+        c = np.asarray(codes, dtype=np.int64)
+        return codes
+
+
 
 @attrs.define
 class Variable(AddressMixin):
+    """
+    Definition of a Variable in the zarr-fuse schema.
+    
+    TODO: 
+    - allow custom attrs for variables and coordinates
+    """
 
     def __init__(self, dict:ContextCfg):
-        self._address = dict.schema_ctx
+        self._address : SchemaCtx = dict.schema_ctx
         assert self._address is not None
 
         # Obligatory attributes
@@ -277,11 +492,11 @@ class Variable(AddressMixin):
             self.coords = [self.coords]
 
         # Optional attributes
-        self.type: Optional[str] = dict.get("type", None).value()
-
+        self.type: DType = DType.from_cfg(dict.get("type", None))
+        na_cfg = dict.get("na_value", self.type.default_na).cfg
+        self.na_value : Optional[Any] = make_na(na_cfg, self.type.dtype)
         unit_item = dict.get("unit", "")
         self.unit: Optional[Unit] = unit_instance(unit_item)
-
         self.description: Optional[str] = dict.get("description", None).value()
         self.df_col: Optional[str] = dict.get("df_col", self.name).value()
 
@@ -293,13 +508,14 @@ class Variable(AddressMixin):
             = self.range_instance(dict.get("range", None))
 
     @property
-    def attrs(self):
-        return dict(
-            unit=self.unit,
-            description=self.description,
-            df_col=self.df_col,
-            source_unit=self.source_unit,
-        )
+    def dtype(self):
+        return self.type.dtype
+
+    def _zarr_keys(self):
+        return ['unit', 'type', 'range', 'description', 'df_col', 'source_unit']
+
+    def zarr_attrs(self):
+        return { k:convert_value(getattr(self, k)) for k in self._zarr_keys()}
 
     def asdict(self, value_serializer, filter):
         """
@@ -314,22 +530,43 @@ class Variable(AddressMixin):
     def range_instance(self, dict_ctx: ContextCfg):
         range_dict, schema_ctx = dict_ctx.value(), dict_ctx.schema_ctx
         if range_dict is None:
-            return IntervalRange.from_list(ContextCfg([None, None], schema_ctx), self.unit)
+            return InfRange()
 
         if 'discrete' in range_dict:
-            return DiscreteRange.from_cfg(dict_ctx['discrete'], self.df_col, self.convert_values)
+            return DiscreteRange.from_cfg(dict_ctx['discrete'], self.df_col, self.convert_values, self.na)
         elif 'interval' in range_dict:
             return IntervalRange.from_list(dict_ctx['interval'], self.unit)
 
         schema_ctx.error(f"Invalid range specification: {range_dict}")
 
-    def convert_values(self, values):
+    def convert_values(self, values, from_unit=None, dtype = None, to_unit=None, range = None):
         """
         Convert from source units to the variable's unit, check type
         :param values:
         :return:
         """
-        return units.create_quantity(values, unit=self.source_unit, type=self.type).to(self.unit)
+        opt_arg = lambda arg, default : default if arg is None else arg
+        from_unit = opt_arg(from_unit, self.source_unit)
+        dtype = opt_arg(dtype, self.dtype)
+        to_unit = opt_arg(to_unit, self.unit)
+        range = opt_arg(range, self.range)
+
+        # DateTime specialization
+        if isinstance(from_unit, units.DateTimeUnit):
+            quantity = units._create_dt_quantity(values, from_unit)
+        else:
+            if dtype is not None:
+                values = to_typed_array(values, dtype, self._address)
+
+            # Pint specialization when a unit string is provided
+            assert isinstance(from_unit, units.pint.Unit)
+            quantity = units.ureg.Quantity(values, from_unit)
+
+        q_new = quantity.to(to_unit)
+        q_new = q_new.magnitude
+        q_new = range.encode(q_new)
+        return q_new
+
 
 class Coord(Variable):
 
@@ -348,30 +585,17 @@ class Coord(Variable):
         self.chunk_size : Optional[int] \
             = cfg.get("chunk_size", 1024).value()
 
-        step_item = cfg.get("step_limits", [])
-        if step_item.value() is  None:
-            self.step_limits = None
-        else:
-            default_step_unit = units.step_unit(self.unit) # For DateTimeUnit the incremental/step unit is a pint.Unit of time.
-            self.step_limits = Interval.from_list(step_item, default_step_unit)
+        step_item = cfg.get("step_limits", [])  # None value allowed
+        default_step_unit = units.step_unit(self.unit) # For DateTimeUnit the incremental/step unit is a pint.Unit of time.
+        self.step_limits = Interval.step_limits(step_item, default_step_unit)
 
         self.sorted : bool = cfg.get('sorted', not self.is_composed()).value()
 
         # May be explicit in the future. Namely, if we support interpolation of sparse coordinates.
         self._variables = None # set in DatasetSchema.__init__
 
-    @property
-    def attrs(self):
-        """
-        Coordinate attributes set as attribute of rthe esulting Dataset variable.
-        Does not affect serialization.
-        :return: dict of exported attributes
-        """
-        return dict(
-            composed=self.composed,
-            description=f"\n\n{self.description}",
-            chunk_size=self.chunk_size,
-        )
+    def _zarr_keys(self):
+        return super()._zarr_keys() + ['composed', 'chunk_size', 'step_limits', 'sorted']
 
     def is_composed(self):
         return len(self.composed) > 1
@@ -398,9 +622,8 @@ class DatasetSchema(AddressMixin):
     COORDS: Dict[str, Coord] = attrs_field(factory=dict)
     VARS: Dict[str, Variable] = attrs_field(factory=dict)
 
-    def __init__(self, _address: SchemaCtx, attrs: ContextCfg,
-                 vars: ContextCfg, coords: ContextCfg):
-        self._address = _address
+    def __init__(self, attrs: ContextCfg, vars: ContextCfg, coords: ContextCfg):
+        self._address = attrs.schema_ctx.parent()
         self.ATTRS = attrs.value()
 
         # Backward compatible definition of coords as VARS.
@@ -410,7 +633,7 @@ class DatasetSchema(AddressMixin):
                     f"OBSOLETE. Coordinate '{coord}' is defined both in VARS and COORDS. ",
                     subkeys=["COORDS", coord],
                 )
-                coords[coord].value().update(vars[coord])
+                coords[coord].value().update(vars[coord].cfg)
                 del vars.value()[coord]
 
         self.VARS = self.safe_instance(Variable, vars)
@@ -449,6 +672,10 @@ class DatasetSchema(AddressMixin):
         return not self.ATTRS and not self.COORDS and not self.VARS
 
 
+    def zarr_attrs(self):
+        attrs = { k:convert_value(v) for k,v in self.ATTRS.items()}
+        return attrs
+
 @attrs.define
 class NodeSchema(AddressMixin):
     _address: SchemaCtx = attrs.field(alias="_address", repr=False, eq=False)
@@ -480,7 +707,6 @@ def dict_deserialize(content: ContextCfg) -> NodeSchema:
     TODO: report path to error key
     """
     ds_schema = DatasetSchema(
-        _address=content.schema_ctx,
         attrs = content.pop('ATTRS', {}),
         vars=content.pop('VARS', {}),
         coords = content.pop('COORDS', {})
