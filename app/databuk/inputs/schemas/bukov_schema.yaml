@@ -29,37 +29,14 @@ bukov:
             df_col: "air_temp"
             coords: [ "date_time", "borehole", "depth" ]
 
-        #longitude:
-        #   unit: "deg"
-        #  description: "Signed Earth longitude."
-        #    coords: "lat_lon"
 
-        #latitude:
-        #    unit: "deg"
-        #    description: "Signed Earth longitude."
-        #    coords: "lat_lon"
-        #    # df_col = <vars name is default source data frame column>
-        #    # coords = <vars name is self coordinated variable>
-
-        date_time:
+    COORDS:
+        date_time: # Defines coord from the variable of the same name.
             unit: { tick: "h", tz: "UTC" }
             description: "Time coordinate, UTC time zone, 15 min resolution"
             source_unit: { tick: "h", tz: "UTC" }
             df_col: "date_time"
 
-        depth:
-            unit: "m"
-            description: "Relative position of the sensor in the borehole."
-            df_col: "depth"
-
-        borehole:
-            unit: "str"
-            description: "Site/borehole name."
-            df_col: "borehole"
-
-
-    COORDS:
-        date_time: # Defines coord from the variable of the same name.
             chunk_size: 1024
             merge: # configuration of merging existing and new coordinates and transfer (interpolation) of the data arrays
                 #allow_inserts: False  # This is currently only supported and default value.
@@ -69,16 +46,21 @@ bukov:
                 # scalar - regular grid with this step size (use units to convert string values
                 # [min, max] - regular grid with this step size (TODO)
         
-        #lat_lon:
-        #    # Secondary description valid for composed coordinates.
-        #    description: "Example of coordinate indexed uniquely by a tuple of values. The source columns are converted to the 1D list of tuples."
-        #    composed: ["latitude", "longitude"]
-        #    chunk_size: 64
 
         borehole:
+            type: "str"
+            unit: ""        # dimansionless
+            description: "Site/borehole name."
+            df_col: "borehole"
+            sorted: False
             chunk_size: 64
 
         depth:
+            type: "float"
+            unit: "m"
+            description: "Relative position of the sensor in the borehole."
+            df_col: "depth"
+
             chunk_size: 64
 
     ATTRS:
