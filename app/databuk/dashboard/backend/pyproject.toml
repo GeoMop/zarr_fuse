@@ -13,7 +13,7 @@ authors = [{ name = "Databuk", email = "dev@example.com" }]
 # Dashboard backend dependencies
 dependencies = [
   # Core zarr_fuse dependency for dashboard functionality
-  "zarr_fuse>=1.0.0",
+  "zarr_fuse",
   # S3/Zarr ecosystem
   "aiobotocore>=2.18.0",
   "PyYAML",
