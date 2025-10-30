@@ -46,10 +46,10 @@ spec:
           volumeMounts:
             - name: dashboard-tmp
               mountPath: /tmp
-            - name: dashboard-config
-              mountPath: /app/config/endpoints.yaml
-              subPath: endpoints.yaml
-              readOnly: true
+            #- name: dashboard-config
+            #  mountPath: /app/config/endpoints.yaml
+            #  subPath: endpoints.yaml
+            #  readOnly: true
           startupProbe:
             httpGet:
               path: /health

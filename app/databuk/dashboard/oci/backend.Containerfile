@@ -15,26 +15,19 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 
-RUN groupadd -r dashboard && useradd -r -g dashboard -u 11233 -m -d /app dashboard
-
-# --- Install dashboard server ---
+USER root
 WORKDIR /app
 
-COPY --chown=dashboard:dashboard backend/ /app/
+COPY backend/ /app/
 
-# Need for github dependency of backend on the zarr_fuse
-RUN apt-get update && apt-get install -y --no-install-recommends git \
- && rm -rf /var/lib/apt/lists/*
- 
-RUN python -m pip install --upgrade pip && \
-    pip install .
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git=1:2.30.2-1+deb11u2 && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir /app
 
-RUN pip install --no-cache-dir /app
+RUN chown -R 1000:1000 /app
 
-RUN chown -R dashboard:dashboard /app
-
-USER dashboard
-WORKDIR /app
+USER 1000
 EXPOSE 8000
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

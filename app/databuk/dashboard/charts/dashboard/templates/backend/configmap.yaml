@@ -6,24 +6,19 @@ metadata:
     app.kubernetes.io/name: {{ .Values.backend.name }}
 data:
   endpoints.yaml: |-
-    "production_s3_endpoint":
-      # Reload settings
-      Reload_interval: 300 # 5 minutes in seconds
+    "bukov_endpoint":
+      reload_interval: 300  # Cache TTL in seconds (5 minutes)
+      schema_file: "schemas/test_schema.yaml"
+      store_url: "s3://${S3_BUCKET_NAME}/bukov.zarr"
+      description: "bukov_endpoint"
+      store_type: "zarr"
+      version: "1.0.0"
 
-      # Schema configuration
-      Schema_file: "schemas/production_schema.yaml"
-
-      # S3 Store configuration - Using new credentials
-      STORE_URL: "{{ .Values.backend.s3.storeUrl }}"
-
-      S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
-      S3_access_key: "{{ .Values.backend.s3.secrets.accessKey }}"
-      S3_secret_key: "{{ .Values.backend.s3.secrets.secretKey }}"
-
-      S3_region: "us-east-1"
-      S3_use_ssl: true
-      S3_verify_ssl: true
-
-      Description: "Surface Zarr store with weather data (CESNET)"
-      Store_type: "zarr"
-      Version: "1.0.0"
+    # Endpoint 2:
+    "surface_data_endpoint":
+      reload_interval: 300  # Cache TTL in seconds (5 minutes)
+      schema_file: "schemas/test_schema.yaml"
+      store_url: "s3://${S3_BUCKET_NAME}/surface.zarr"
+      description: "surface_data_endpoint"
+      store_type: "zarr"
+      version: "1.0.0"
