@@ -67,7 +67,7 @@ jobs:
         with:
           repository: jbrezmorf/zarr-fuse-dashboard-backend
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
-          containerfile-path: oci/Containerfile.backend
+          containerfile-path: oci/backend.Containerfile
           push: true
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
@@ -128,7 +128,7 @@ jobs:
         with:
           repository: jbrezmorf/zarr-fuse-dashboard-frontend
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
-          containerfile-path: oci/Containerfile.frontend
+          containerfile-path: oci/frontend.Containerfile
           push: true
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
