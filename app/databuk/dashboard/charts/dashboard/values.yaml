@@ -22,7 +22,9 @@ backend:
       name: http
 
   s3:
-    storeUrl: ""
+    bucketName: ""
+    endpointUrl: "https://s3.cl4.du.cesnet.cz"
+    addressingStyle: "path"
     secrets:
       accessKey: "your-access-key"
       secretKey: "your-secret-key"

@@ -20,10 +20,11 @@ on:
         description: The Helm release name
         required: true
         type: string
-      s3-store-url:
-        description: The S3 store URL for the backend
+      s3-bucket-name:
+        description: The S3 bucket name for the backend
         required: false
         type: string
+        default: "app-databuk-release-service"
 jobs:
   get-version-tag:
     name: Get version tag
@@ -186,4 +187,4 @@ jobs:
           --set frontend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
           --set backend.s3.secrets.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
           --set backend.s3.secrets.secretKey="${{ secrets.S3_SECRET_KEY }}" \
-          --set backend.s3.storeUrl="${{ inputs.s3-store-url }}"
+          --set backend.s3.bucketName="${{ inputs.s3-bucket-name }}"
