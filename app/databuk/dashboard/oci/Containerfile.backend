@@ -22,6 +22,10 @@ WORKDIR /app
 
 COPY --chown=dashboard:dashboard backend/ /app/
 
+# Need for github dependency of backend on the zarr_fuse
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+ && rm -rf /var/lib/apt/lists/*
+ 
 RUN python -m pip install --upgrade pip && \
     pip install .
 
