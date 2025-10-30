@@ -61,6 +61,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: packages
+        run: |
+            sudo apt install git            
       - name: Containerize
         uses: ./.github/actions/containerize
         with:
