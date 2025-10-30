@@ -2,7 +2,7 @@ name: Ingress server - pull request
 on:
   pull_request:
     branches:
-      - "*"
+      - "**"
 jobs:
   get-changed-files:
     name: Get changed file
@@ -10,7 +10,7 @@ jobs:
     outputs:
       any-changed: ${{ steps.changed.outputs.any_changed }}
     concurrency:
-      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-changed-files
+      group: ${{ github.workflow }}-${{ github.ref }}-get-changed-files
       cancel-in-progress: true
     steps:
       - name: Checkout
@@ -20,7 +20,6 @@ jobs:
         uses: tj-actions/changed-files@v45
         with:
           files: |
-            charts/ingress-server/**
             app/databuk/ingress_server/**
   build:
     name: Build and deploy ingress server
@@ -29,8 +28,7 @@ jobs:
     if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     with:
-      push-container: true
-      deploy-helm-chart: true
+      deploy: true
       tag: generate
       namespace: ingress-server-development
       release-name: ingress-server-development

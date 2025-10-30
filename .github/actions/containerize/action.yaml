@@ -1,0 +1,52 @@
+name: Containerize application
+description: Build and optionally push a container image
+inputs:
+  registry:
+    description: Container registry (e.g., docker.io, ghcr.io, etc.)
+    required: false
+    default: docker.io
+  repository:
+    description: Container repository (e.g., username/repo)
+    required: true
+  tag:
+    description: Tag for the container image
+    required: true
+  containerfile-path:
+    description: Path to the Dockerfile
+    required: false
+    default: oci/Containerfile
+  push:
+    description: Whether to push the container image
+    required: false
+    default: "false"
+  extra-build-args:
+    description: Build arguments for the container build (key=value pairs, comma-separated)
+    required: false
+    default: ""
+  registry-username:
+    description: Username for the container registry (if pushing)
+    required: true
+  registry-password:
+    description: Password for the container registry (if pushing)
+    required: true
+  working-directory:
+    description: The working directory to run the action in
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Login to registry
+      shell: bash
+      if: ${{ inputs.push }} == 'true'
+      run: buildah login -u ${{ inputs.registry-username }} -p "${{ inputs.registry-password }}" ${{ inputs.registry }}
+    - name: Build container file
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: buildah build -t ${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }} ${{ inputs.extra-build-args }} -f ${{ inputs.containerfile-path }} .
+    - name: Push container image
+      shell: bash
+      if: ${{ inputs.push }} == 'true'
+      run: |
+        buildah push ${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }} docker://${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }}
+        buildah logout ${{ inputs.registry }}

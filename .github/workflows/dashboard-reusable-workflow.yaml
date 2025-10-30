@@ -1,0 +1,189 @@
+name: Dashboard - reusable workflow
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to use for the container image
+        required: false
+        type: string
+        default: generate
+      deploy:
+        description: Whether to deploy the Helm chart
+        required: false
+        type: boolean
+        default: false
+      namespace:
+        description: The Kubernetes namespace to use
+        required: true
+        type: string
+      release-name:
+        description: The Helm release name
+        required: true
+        type: string
+      s3-store-url:
+        description: The S3 store URL for the backend
+        required: false
+        type: string
+jobs:
+  get-version-tag:
+    name: Get version tag
+    runs-on: ubuntu-latest
+    outputs:
+      version-tag: ${{ steps.get_version_tag.outputs.version-tag }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-get-version-tag
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Get version tag
+        id: get_version_tag
+        run: |
+          if [[ ${{ inputs.tag }} == "generate" ]]; then
+            echo "version-tag=ci-$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+          else
+            echo "version-tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          fi
+  containerize-backend:
+    name: Containerize backend
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/buildah/stable:v1.35.4
+      options: --privileged
+    needs:
+      - get-version-tag
+    defaults:
+      run:
+        working-directory: app/databuk/dashboard
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-containerize-backend"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Containerize
+        uses: ./.github/actions/containerize
+        with:
+          repository: jbrezmorf/zarr-fuse-dashboard-backend
+          tag: ${{ needs.get-version-tag.outputs.version-tag }}
+          containerfile-path: oci/Containerfile.backend
+          push: true
+          registry-username: ${{ vars.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
+          working-directory: app/databuk/dashboard
+  build-frontend:
+    name: Build frontend
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/node:24.8.0-trixie-slim
+    needs:
+      - get-version-tag
+    defaults:
+      run:
+        working-directory: app/databuk/dashboard
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-build-frontend"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: npm ci
+      - name: Build frontend
+        env:
+          VITE_API_URL: "https://zarr-fuse-${{ inputs.release-name }}.dyn.cloud.e-infra.cz"
+        run: npm run build
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-frontend
+          path: app/databuk/dashboard/dist
+          if-no-files-found: error
+  containerize-frontend:
+    name: Containerize frontend
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/buildah/stable:v1.35.4
+      options: --privileged
+    needs:
+      - get-version-tag
+      - build-frontend
+    defaults:
+      run:
+        working-directory: app/databuk/dashboard
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-containerize-frontend"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-frontend
+          path: app/databuk/dashboard/dist
+      - name: Containerize
+        uses: ./.github/actions/containerize
+        with:
+          repository: jbrezmorf/zarr-fuse-dashboard-frontend
+          tag: ${{ needs.get-version-tag.outputs.version-tag }}
+          containerfile-path: oci/Containerfile.frontend
+          push: true
+          registry-username: ${{ vars.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
+          working-directory: app/databuk/dashboard
+  lint-helm-chart:
+    name: Lint dashboard Helm chart
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/alpine/k8s:1.29.14
+    defaults:
+      run:
+        working-directory: app/databuk/dashboard/charts/dashboard
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-lint-helm-chart"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Lint helm chart
+        uses: ./.github/actions/helm-lint
+        with:
+          working-directory: app/databuk/dashboard/charts/dashboard
+  deploy:
+    name: Deploy dashboard to e-infra rancher
+    runs-on: ubuntu-latest
+    if: ${{ inputs.deploy }}
+    container:
+      image: docker.io/alpine/k8s:1.29.14
+    needs:
+      - lint-helm-chart
+      - get-version-tag
+      - containerize-backend
+      - containerize-frontend
+    env:
+      KUBECONFIG: ./kubeconfig.yaml
+    defaults:
+      run:
+        working-directory: app/databuk/dashboard/charts
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-deploy"
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Decode kubeconfig
+        run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
+      - name: Ensure that the namespace exists
+        run: kubectl create namespace --dry-run=client -o yaml ${{ inputs.namespace }} | kubectl apply -f -
+      - name: Set context
+        run: kubectl config set-context --current --namespace=${{ inputs.namespace }}
+      - name: Deploy app
+        run: |
+          helm upgrade ${{ inputs.release-name }} dashboard \
+          --install --atomic --timeout 10m --namespace ${{ inputs.namespace }} \
+          --set backend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
+          --set frontend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
+          --set backend.s3.secrets.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
+          --set backend.s3.secrets.secretKey="${{ secrets.S3_SECRET_KEY }}" \
+          --set backend.s3.storeUrl="${{ inputs.s3-store-url }}"

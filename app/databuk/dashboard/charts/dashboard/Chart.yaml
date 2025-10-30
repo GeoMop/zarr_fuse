@@ -1,0 +1,12 @@
+apiVersion: v2
+name: dashboard
+description: Zarr fuse dashboard to visualize and manage Zarr stores
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://github.com/geomop/zarr_fuse
+sources:
+  - https://github.com/geomop/zarr_fuse
+maintainers:
+  - name: Stepan Moc
+    email: stepan.mocik@gmail.com

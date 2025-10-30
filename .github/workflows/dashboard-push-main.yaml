@@ -1,0 +1,19 @@
+name: Dashboard - push main
+on:
+  push:
+    branches:
+      - dashboard-main
+      - JB-dashboard-deploy
+    paths:
+      - app/databuk/dashboard/**
+  workflow_dispatch:
+jobs:
+  build-and-deploy:
+    uses: ./.github/workflows/dashboard-reusable-workflow.yaml
+    with:
+      tag: generate
+      deploy: true
+      namespace: zarr-fuse-dashboard
+      release-name: dashboard
+      s3-store-url: s3://app-databuk-release-service/bukov.zarr
+    secrets: inherit
