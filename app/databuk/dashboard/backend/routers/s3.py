@@ -1,14 +1,15 @@
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 from services.s3_service import s3_service
-from core.config_manager import config_manager
+from core.config_manager import get_first_endpoint
+from core.config_manager import load_endpoints
 
 router = APIRouter(prefix="/s3", tags=["s3"])
 
 async def ensure_connected():
     """Ensure S3 service is connected, connect if not"""
     if not s3_service._fs:
-        endpoint_config = config_manager.get_first_endpoint()
+        endpoint_config = get_first_endpoint()
         if not endpoint_config:
             raise HTTPException(status_code=400, detail="No endpoint configuration found")
         
@@ -20,7 +21,7 @@ async def ensure_connected():
 async def connect_to_s3():
     """Connect to S3 using the current configuration"""
     try:
-        endpoint_config = config_manager.get_first_endpoint()
+        endpoint_config = get_first_endpoint()
         if not endpoint_config:
             raise HTTPException(status_code=400, detail="No endpoint configuration found")
         
@@ -34,13 +35,21 @@ async def connect_to_s3():
         raise HTTPException(status_code=500, detail=f"Connection error: {str(e)}")
 
 @router.get("/structure")
-async def get_store_structure():
-    """Get the structure of the Zarr store with sample data"""
+
+
+@router.get("/structure")
+async def get_store_structure(endpoint: str = None):
+    """Get the structure of the Zarr store for a specific endpoint"""
+    endpoints = load_endpoints()
+    if not endpoint or endpoint not in endpoints:
+        raise HTTPException(status_code=400, detail="Invalid or missing endpoint parameter")
     try:
-        await ensure_connected()
+        endpoint_config = endpoints[endpoint]
+        success = s3_service.connect(endpoint_config)
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Failed to connect to S3 for endpoint '{endpoint}'")
         structure = s3_service.get_store_structure()
         return {"status": "success", "structure": structure}
-    
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=f"Store not found: {str(e)}")
     except Exception as e:

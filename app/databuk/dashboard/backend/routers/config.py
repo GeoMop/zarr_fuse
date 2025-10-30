@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from core.config_manager import config_manager, EndpointConfig
+from core.config_manager import load_endpoints, get_first_endpoint, EndpointConfig
 from typing import Dict, Any
 
 router = APIRouter(prefix="/config", tags=["configuration"])
@@ -8,7 +8,7 @@ router = APIRouter(prefix="/config", tags=["configuration"])
 async def get_endpoints() -> Dict[str, Any]:
     """Get all configured endpoints"""
     try:
-        endpoints = config_manager.get_endpoints()
+        endpoints = load_endpoints()
         return {
             "status": "success",
             "endpoints": {name: endpoint.dict() for name, endpoint in endpoints.items()}
@@ -20,7 +20,8 @@ async def get_endpoints() -> Dict[str, Any]:
 async def get_endpoint(endpoint_name: str) -> Dict[str, Any]:
     """Get specific endpoint configuration"""
     try:
-        endpoint = config_manager.get_endpoint(endpoint_name)
+        endpoints = load_endpoints()
+        endpoint = endpoints.get(endpoint_name)
         if endpoint is None:
             raise HTTPException(status_code=404, detail=f"Endpoint '{endpoint_name}' not found")
         
@@ -37,7 +38,7 @@ async def get_endpoint(endpoint_name: str) -> Dict[str, Any]:
 async def get_current_endpoint() -> Dict[str, Any]:
     """Get the current (first) endpoint configuration"""
     try:
-        endpoint = config_manager.get_first_endpoint()
+        endpoint = get_first_endpoint()
         if endpoint is None:
             raise HTTPException(status_code=404, detail="No endpoints configured")
         
@@ -52,12 +53,14 @@ async def get_current_endpoint() -> Dict[str, Any]:
 
 @router.post("/reload")
 async def reload_config() -> Dict[str, Any]:
-    """Reload configuration from file"""
+    """Reload configuration from file (pure function approach - always fresh)"""
     try:
-        config_manager.reload_config()
+        # Pure function approach - always loads fresh from file
+        endpoints = load_endpoints()
         return {
             "status": "success",
-            "message": "Configuration reloaded successfully"
+            "message": "Configuration reloaded successfully",
+            "endpoints_count": len(endpoints)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reload configuration: {str(e)}")

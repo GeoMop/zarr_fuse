@@ -32,7 +32,42 @@ const Sidebar: React.FC<SidebarProps> = ({
   onNodeClick,
   onLogClick
 }) => {
+  // Endpoint options state (fetched from backend)
+  const [endpointOptions, setEndpointOptions] = useState<
+    { key: string; label: string; url: string; description: string }[]
+  >([]);
 
+  // Selected endpoint state
+  const [selectedEndpoint, setSelectedEndpoint] = useState<string>('');
+
+  // Find selected endpoint details
+  const selectedEndpointObj = endpointOptions.find(e => e.key === selectedEndpoint);
+
+  // Fetch endpoint list from backend on mount
+  useEffect(() => {
+    async function fetchEndpoints() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/config/endpoints`);
+        const data = await response.json();
+        if (data.status === 'success' && data.endpoints) {
+          const options = Object.entries(data.endpoints).map(([key, value]) => {
+            const endpoint = value as { description?: string; store_url: string };
+            return {
+              key,
+              label: endpoint.description || key,
+              url: endpoint.store_url,
+              description: endpoint.description ?? "",
+            };
+          });
+          setEndpointOptions(options);
+          if (options.length > 0) setSelectedEndpoint(options[0].key);
+        }
+      } catch (err) {
+        // Optionally handle error
+      }
+    }
+    fetchEndpoints();
+  }, []);
   // S3 data state
   const [s3Data, setS3Data] = useState<S3Response | null>(null);
   const [s3Loading, setS3Loading] = useState(false);
@@ -44,6 +79,28 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   // Tree expand/collapse state (paths of expanded groups)
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set(['root']));
+
+  // Fetch config and S3 data when selectedEndpoint changes
+  useEffect(() => {
+    if (!selectedEndpointObj) return;
+    const fetchS3Data = async () => {
+      setS3Loading(true);
+      setS3Error(null);
+      try {
+        // Example: fetch S3 structure for selected endpoint
+        const response = await fetch(`${API_BASE_URL}/api/s3/structure?endpoint=${encodeURIComponent(selectedEndpointObj.key)}`);
+        const data = await response.json();
+        setS3Data(data);
+        setLastFetchAt(Date.now());
+      } catch (err) {
+        setS3Error('Failed to fetch S3 data');
+        setS3Data(null);
+      } finally {
+        setS3Loading(false);
+      }
+    };
+    fetchS3Data();
+  }, [selectedEndpointObj, API_BASE_URL]);
   const toggleExpand = useCallback((path: string) => {
     setExpandedPaths((prev) => {
       const next = new Set(prev);
@@ -52,14 +109,16 @@ const Sidebar: React.FC<SidebarProps> = ({
     });
   }, []);
 
-  const reloadIntervalSec = configData?.endpoint?.Reload_interval ?? 60;
+  const reloadIntervalSec = configData?.endpoint?.reload_interval ?? 60;
 
   // Fetch S3 data (refactored to component scope)
   const fetchS3Data = useCallback(async () => {
     setS3Loading(true);
     setS3Error(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/s3/structure`);
+      // Always use selectedEndpoint for fetch
+      if (!selectedEndpointObj) throw new Error('No endpoint selected');
+      const response = await fetch(`${API_BASE_URL}/api/s3/structure?endpoint=${encodeURIComponent(selectedEndpointObj.key)}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -72,7 +131,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       setLastFetchAt(Date.now());
       setProgress(0);
     }
-  }, []);
+  }, [selectedEndpointObj, API_BASE_URL]);
 
   // Initial fetch on mount
   useEffect(() => {
@@ -182,12 +241,24 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Store URL and Description */}
         {configData && (
-          <div className="mt-3 pt-3 border-t border-blue-500/30">
-            <div className="text-sm">
-              <div className="font-medium mb-1">{configData.endpoint.STORE_URL}</div>
-              <div className="text-blue-100">{configData.endpoint.Description}</div>
+            <div className="mt-3 pt-3 border-t border-blue-500/30">
+              <div className="text-sm">
+                <label htmlFor="endpoint-select" className="font-medium mb-1 block">Store Name</label>
+                <select
+                  id="endpoint-select"
+                  value={selectedEndpoint}
+                  onChange={e => setSelectedEndpoint(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-blue-600 text-blue-100 border border-blue-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-150 font-semibold hover:bg-blue-700"
+                  style={{ minHeight: 44 }}
+                >
+                  {endpointOptions.map(opt => (
+                    <option key={opt.key} value={opt.key}>{opt.label}</option>
+                  ))}
+                </select>
+                <div className="font-medium mt-2 text-blue-100">{selectedEndpointObj?.url}</div>
+                <div className="text-blue-100">{selectedEndpointObj?.description}</div>
+              </div>
             </div>
-          </div>
         )}
 
         {/* Progress Bar - Clickable for reload */}

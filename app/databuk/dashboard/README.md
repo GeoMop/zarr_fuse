@@ -32,20 +32,14 @@ src/
 ### Backend (FastAPI + Python)
 ```
 backend/
-├── services/
-│   └── s3_service.py     # Core S3 and Zarr operations
-├── routers/
-│   ├── s3.py             # S3 API endpoints
-│   ├── logs.py           # Logs endpoint
-│   └── config.py         # Configuration management
-├── core/
-│   ├── config_manager.py # YAML configuration handling
-│   └── config.py         # Settings (loads backend/.env)
-├── config/
-│   └── endpoints.yaml    # S3 endpoint configuration
-├── pyproject.toml        # Backend packaging and deps
-├── env.example           # Example env (copy to .env)
-└── main.py               # FastAPI application
+├── core/            # Configuration and utilities
+├── services/        # Business logic (Zarr operations)
+├── routers/         # HTTP API endpoints (s3, logs, config)
+├── config/          # YAML endpoint configs (endpoints.yaml)
+├── main.py          # FastAPI application
+├── run.py           # Server startup script
+├── pyproject.toml   # Packaging and dependencies
+└── env.example      # Example env vars (copy to .env)
 ```
 
 ## Quick Start

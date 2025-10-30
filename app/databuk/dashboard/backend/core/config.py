@@ -31,8 +31,14 @@ class Settings:
         "http://localhost:5173",  # Vite dev server
         "http://localhost:3000",  # Alternative dev port
     ]
-    
-    # Feature flags
-    ENABLE_TEST_STORES: bool = True
+
+def has_test_endpoints() -> bool:
+    """Check if test endpoints exist in config - derived from endpoints config file"""
+    try:
+        from .config_manager import load_endpoints
+        endpoints = load_endpoints()
+        return any('test' in name.lower() for name in endpoints.keys())
+    except Exception:
+        return False
 
 settings = Settings()
