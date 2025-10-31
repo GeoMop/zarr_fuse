@@ -17,4 +17,4 @@ except ModuleNotFoundError as e:
 
 # What is allowed to be imported by
 # from zarr_fuse import *
-__all__ = ['schema', 'Node', 'open_store']
+__all__ = ['schema', 'Node', 'open_store', 'remove_store', 'units']

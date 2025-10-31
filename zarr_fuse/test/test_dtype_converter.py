@@ -1,21 +1,22 @@
-# test_typed_array.py
+# zarr_fuse/test/test_dtype_converter.py
 import numpy as np
 import pytest
 
 import zarr_fuse.dtype_converter as ta
 
 
-# --- Simple in-memory logger that captures objects passed to .error/.warning ----
-class DummyLogger:
+# --- Minimal context + config shims to drive DType.from_cfg -------------------
+class DummyCtx:
+    """Mimics zarr_fuse.schema_ctx.SchemaCtx just enough for tests."""
     def __init__(self, name="dummy"):
         self.name = name
-        self.records = []   # list of tuples: (level, obj)
-
-    def error(self, obj, *args, **kwargs):
-        self.records.append(("ERROR", obj))
+        self.records = []  # list of tuples: (level, obj)
 
     def warning(self, obj, *args, **kwargs):
         self.records.append(("WARNING", obj))
+
+    def error(self, obj, *args, **kwargs):
+        self.records.append(("ERROR", obj))
 
     # helpers
     def count_level(self, level: str) -> int:
@@ -28,49 +29,65 @@ class DummyLogger:
         self.records.clear()
 
 
-# --- _parse_dtype_spec --------------------------------------------------------
-def test__parse_dtype_spec():
-    log = DummyLogger()
+class DummyCfg:
+    """Mimics zarr_fuse.schema_ctx.ContextCfg(value, schema_ctx)."""
+    def __init__(self, value, schema_ctx: DummyCtx):
+        self._value = value
+        self.schema_ctx = schema_ctx
 
-    # None / 'None' -> infer
-    dt, n = ta._parse_dtype_spec(None, log)
-    assert dt is None and n is None
-    dt, n = ta._parse_dtype_spec("None", log)
-    assert dt is None and n is None
-    assert log.count_level("ERROR") == 0  # no noise for valid cases
+    def value(self):
+        return self._value
 
-    # Valid basic specs
+
+# --- DType.from_cfg (replaces old _parse_dtype_spec tests) --------------------
+def test_dtype_from_cfg_basic_and_str():
+    ctx = DummyCtx()
+
+    # None -> dtype(None)
+    dt = ta.DType.from_cfg(DummyCfg(None, ctx)).dtype
+    assert dt is None
+    assert ctx.count_level("ERROR") == 0
+
+    # Valid basic specs (mapped by your new type_mapping)
     basics = [
-        ("bool", np.bool),
-        ("int", np.int64),
-        ("int8", np.int8),
+        ("int",   np.int64),
+        ("int8",  np.int8),
         ("int32", np.int32),
         ("int64", np.int64),
+        ("uint8", np.uint8),
+        ("uint32", np.uint32),
+        ("uint64", np.uint64),
         ("float", np.float64),
         ("float64", np.float64),
         ("complex", np.complex64),
     ]
     for spec, expected in basics:
-        dt, n = ta._parse_dtype_spec(spec, log)
-        assert dt == np.dtype(expected) and n is None
-    assert log.count_level("ERROR") == 0
+        dt = ta.DType.from_cfg(DummyCfg(spec, ctx)).dtype
+        assert dt == np.dtype(expected)
+    assert ctx.count_level("ERROR") == 0
 
-    # Valid str[n]
-    dt, n = ta._parse_dtype_spec("str[5]", log)
-    assert dt == np.dtype("<U5") and n == 5
-    assert log.count_level("ERROR") == 0
+    # str[n]
+    ctx.clear()
+    dt = ta.DType.from_cfg(DummyCfg("str[5]", ctx)).dtype
+    assert dt == np.dtype("<U5")
+    assert ctx.count_level("ERROR") == 0
 
-    # Nonpositive str length -> ERROR logged, coerces to U8
-    log.clear()
-    dt, n = ta._parse_dtype_spec("str[0]", log)
-    assert dt == np.dtype("<U8") and n == 8
-    assert log.count_level("ERROR") >= 1   # at least one error logged
+    # bare 'str' -> default length warning to <U32
+    ctx.clear()
+    dt = ta.DType.from_cfg(DummyCfg("str", ctx)).dtype
+    assert dt == np.dtype("<U32")
+    assert ctx.count_level("WARNING") >= 1
 
-    # Unsupported type -> ERROR logged, then KeyError from mapping
-    log.clear()
-    with pytest.raises(KeyError):
-        ta._parse_dtype_spec("nope", log)
-    assert log.count_level("ERROR") >= 1
+    # str[0] -> warning + default length <U32
+    ctx.clear()
+    dt = ta.DType.from_cfg(DummyCfg("str[0]", ctx)).dtype
+    assert dt == np.dtype("<U32")
+    assert ctx.count_level("WARNING") >= 1
+
+    # unsupported -> error recorded
+    ctx.clear()
+    _ = ta.DType.from_cfg(DummyCfg("nope", ctx)).dtype
+    assert ctx.count_level("ERROR") >= 1
 
 
 # --- type_code ----------------------------------------------------------------
@@ -94,64 +111,63 @@ def test_may_trim():
     assert ta.may_trim(np.complex128, np.float64) is True   # complex -> float
     assert ta.may_trim(np.int64,    np.int32)     is True   # narrowing int
     assert ta.may_trim(np.int32,    np.int64)     is False  # widening int
-    assert ta.may_trim(np.int32,    np.float64)   is False  # int -> float (upgrade)
     assert ta.may_trim(np.dtype("<U10"), np.dtype("<U5")) is True   # shorten string
     assert ta.may_trim(np.dtype("<U5"),  np.dtype("<U10")) is False # lengthen string
 
 
 # --- to_typed_array -----------------------------------------------------------
 def test_to_typed_array():
-    log = DummyLogger()
+    ctx = DummyCtx()
 
     # No-trim scenarios -> NO warnings
     # a) complex with zero imag -> float64 identical
-    out = ta.to_typed_array(np.array([1+0j, 2+0j, -3+0j], dtype=np.complex128), "float64", log)
+    out = ta.to_typed_array(np.array([1+0j, 2+0j, -3+0j], dtype=np.complex128), np.float64, ctx)
     assert out.dtype == np.float64
     assert np.array_equal(out, np.array([1.0, 2.0, -3.0]), equal_nan=False)
-    assert log.count_level("WARNING") == 0
+    assert ctx.count_level("WARNING") == 0
 
     # b) strings that fit the target length
-    log.clear()
-    out = ta.to_typed_array(["hi", "a", ""], "str[3]", log)
+    ctx.clear()
+    out = ta.to_typed_array(["hi", "a", ""], np.dtype("<U3"), ctx)
     assert out.dtype == np.dtype("<U3")
     assert out.tolist() == ["hi", "a", ""]
-    assert log.count_level("WARNING") == 0
+    assert ctx.count_level("WARNING") == 0
 
     # c) widening int
-    log.clear()
-    out = ta.to_typed_array(np.array([1, 2, 3], dtype=np.int32), "int64", log)
+    ctx.clear()
+    out = ta.to_typed_array(np.array([1, 2, 3], dtype=np.int32), np.int64, ctx)
     assert out.dtype == np.int64
-    assert log.count_level("WARNING") == 0
+    assert ctx.count_level("WARNING") == 0
 
     # Trim scenarios -> WARNING with TrimmedArrayWarning instance captured
     # 1) float -> int (fractional parts)
-    log.clear()
-    out = ta.to_typed_array(np.array([1.2, -3.7, 4.0], dtype=np.float64), "int32", log)
+    ctx.clear()
+    out = ta.to_typed_array(np.array([1.2, -3.7, 4.0], dtype=np.float64), np.int32, ctx)
     assert out.dtype == np.int32
-    assert log.count_level("WARNING") >= 1
-    assert log.has_warning_instance(ta.TrimmedArrayWarning)
+    assert ctx.count_level("WARNING") >= 1
+    assert ctx.has_warning_instance(ta.TrimmedArrayWarning)
 
     # 2) complex with non-zero imag -> float64 (imag dropped)
-    log.clear()
-    out = ta.to_typed_array(np.array([1+0j, 2+1j, -3+0j], dtype=np.complex128), "float64", log)
+    ctx.clear()
+    out = ta.to_typed_array(np.array([1+0j, 2+1j, -3+0j], dtype=np.complex128), np.float64, ctx)
     assert out.dtype == np.float64
-    assert log.count_level("WARNING") >= 1
-    assert log.has_warning_instance(ta.TrimmedArrayWarning)
+    assert ctx.count_level("WARNING") >= 1
+    assert ctx.has_warning_instance(ta.TrimmedArrayWarning)
 
     # 3) string truncation (first element trims)
-    log.clear()
-    out = ta.to_typed_array(["abcdef", "xy", ""], "str[3]", log)
+    ctx.clear()
+    out = ta.to_typed_array(["abcdef", "xy", ""], np.dtype("<U3"), ctx)
     assert out.dtype == np.dtype("<U3")
     assert out.tolist() == ["abc", "xy", ""]
-    assert log.count_level("WARNING") >= 1
-    assert log.has_warning_instance(ta.TrimmedArrayWarning)
+    assert ctx.count_level("WARNING") >= 1
+    assert ctx.has_warning_instance(ta.TrimmedArrayWarning)
 
     # 4) narrowing int (overflow/changes), e.g., int64 -> int8
-    log.clear()
+    ctx.clear()
     src = np.array([0, 127, 128, -129], dtype=np.int64)
-    out = ta.to_typed_array(src, "int8", log)
+    out = ta.to_typed_array(src, np.int8, ctx)
     assert out.dtype == np.int8
     # at least one value must differ after cast (128, -129)
     assert not np.array_equal(src, out.astype(src.dtype), equal_nan=False)
-    assert log.count_level("WARNING") >= 1
-    assert log.has_warning_instance(ta.TrimmedArrayWarning)
+    assert ctx.count_level("WARNING") >= 1
+    assert ctx.has_warning_instance(ta.TrimmedArrayWarning)

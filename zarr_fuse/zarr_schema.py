@@ -6,12 +6,12 @@ import pandas
 import yaml
 import attrs
 import numpy as np
-import warnings
 from pathlib import Path
 
 from . import units
 from . import logger as zf_logger
-from . dtype_converter import to_typed_array
+from . dtype_converter import to_typed_array, DType, make_na
+from .schema_ctx import SchemaCtx, ContextCfg, default_logger, AddressMixin, SchemaError, SchemaWarning
 
 """
 Classes to represent the store schema. It enables:
@@ -29,284 +29,11 @@ TODO:
 """
 
 
-class RaisingLogger(zf_logger.Logger):
-    def error(self, exc, *args, **kwargs):
-        super().error(exc, *args, **kwargs)
-        if not isinstance(exc, BaseException):
-            exc = RuntimeError(str(exc))
-        raise exc # fallback if a plain message was passed
-
-
-def default_logger():
-    return RaisingLogger("default schema logger")
-
-
-class SchemaErrBase:
-    """
-    Mixin that holds message and its origincontext for both
-    the Exception and the Warning classes.
-    """
-    def __init__(self, message: str, ctx: 'SchemaCtx'):
-        self.message = message
-        self.address = ctx
-
-    def __str__(self) -> str:
-        return f"{self.message}  (at {self.address})"
-
-
-class SchemaError(SchemaErrBase, Exception):
-    """Raise when the config problem should be fatal."""
-    pass
-
-
-class SchemaWarning(SchemaErrBase, UserWarning):
-    """Emit when the problem should be non-fatal."""
-    pass
-
-
-
-
-
-
-
-SchemaKey = Union[str, int]
-SchemaPath = SchemaKey | List[SchemaKey]
-@attrs.define(frozen=True)
-class SchemaCtx:
-    """
-    Represents a single value in the schema file.
-    Holds the source file name (or empty string for an anonymous stream)
-    and a list of path components locating the value within the YAML tree.
-
-    Path components are stored as provided (str or int) and converted to
-    strings only when rendering.
-    """
-    addr: SchemaPath
-    file: str = attrs.field(default=None, eq=False)
-    logger: zf_logger.Logger = attrs.field(factory=default_logger)
-
-    @property
-    def path(self) -> str:
-        """Return the path as a string."""
-        return self._join(self.addr)
-
-    @staticmethod
-    def _join(addr):
-        return '/'.join(map(str, addr))
-
-    def __str__(self) -> str:
-        file_repr = self.file if self.file else "<SCHEMA STREAM>"
-        return f"{file_repr}:{self.path}"
-
-    def dive(self, *path) -> "SchemaCtx":
-        """Return a new SchemaAddress with an extra path component."""
-        addr = self.addr + list(path)
-        return SchemaCtx(addr, self.file, self.logger)
-
-    def parent(self) -> "SchemaCtx":
-        """Return a new SchemaAddress for the parent path."""
-        if isinstance(self.addr, list) and len(self.addr) > 0:
-            addr = self.addr[:-1]
-        else:
-            addr = []
-        return SchemaCtx(addr, self.file, self.logger)
-
-    def error(self, message: str, **kwargs) -> SchemaError:
-        err = SchemaError(message, self)
-        self.logger.error(err, **kwargs)
-        return err
-
-    def warning(self, message: str, **kwargs) -> SchemaWarning:
-        warn = SchemaWarning(message, self)
-        self.logger.warning(warn, **kwargs)
-        return warn
-
-@attrs.define
-class ContextCfg:
-    cfg: Dict[str, Any] | List[Any]
-    schema_ctx: SchemaCtx
-
-    def __getitem__(self, key: str| int) -> Any:
-        return ContextCfg(self.cfg[key], self.schema_ctx.dive(key))
-
-    def __setitem__(self, key: str| int, value: Any) -> None:
-        self.cfg[key] = value
-
-    def __contains__(self, item):
-        return item in self.cfg
-
-    def value(self) -> Any:
-        return self.cfg
-
-    def pop(self, key: str| int, default=None) -> Any:
-        value = self.cfg.pop(key, default)
-        return ContextCfg(value, self.schema_ctx.dive(key))
-
-    def keys(self):
-        return self.cfg.keys()
-
-    def get(self, key: str| int, default=None) -> Any:
-        value = self.cfg.get(key, default)
-        return ContextCfg(value, self.schema_ctx.dive(key))
-
-
-
-class AddressMixin:
-    """
-    Mixin for schema objects that keeps their source SchemaAddress and
-    provides convenience helpers to raise errors / emit warnings bound
-    to that address.
-
-    The helpers accept an optional list of `subkeys` to append to the
-    stored address. This is useful when the message refers to a nested
-    attribute/key (e.g., a field inside ATTRS/VARS/COORDS).
-    """
-    _address: SchemaCtx  # subclasses provide this via attrs field
-
-    def _extend_address(self, subkeys: List[Union[str, int]] = []) -> SchemaCtx:
-        addr = self._address
-        for k in subkeys:
-            addr = addr.dive(k)
-        return addr
-
-    def error(self, message: str, subkeys: Optional[List[Union[str, int]]] = []) -> None:
-        # Deprecated: use self._address.error() directly
-        addr = self._extend_address(subkeys)
-        addr.error(message)
-
-    def warn(self, message: str, subkeys: Optional[List[Union[str, int]]] = [], *, stacklevel: int = 2) -> None:
-        # deprecated: use self._address.warning() directly
-        addr = self._extend_address(subkeys)
-        addr.warning(message, stacklevel=stacklevel,)
 
 
 # ----------------------- Converters & core classes ----------------------- #
 
 
-  # # Enforce unit constraint: when unit is provided, bool and str[n] are not allowed.
-  #   if unit is not None and target_dtype is not None:
-  #       if target_dtype == np.dtype(bool):
-  #           raise ValueError("Boolean dtype is not allowed when 'unit' is provided.")
-  #       if str_len is not None:
-  #           raise ValueError("Fixed-length string dtype 'str[n]' is not allowed when 'unit' is provided.")
-_STR_SPEC = re.compile(r"^str(?:\[(\d+)\])?$")
-type_mapping = {
-    "bool": np.int8,
-    "uint": np.uint64,
-    "int": np.int64,
-    "int8": np.int8,
-    "int32": np.int32,
-    "int64": np.int64,
-    "uint8": np.uint8,
-    "uint32": np.uint32,
-    "uint64": np.uint64,
-    "float": np.float64,
-    "float64": np.float64,
-    "complex": np.complex64,
-}
-_PREFERRED_NAME = {np.dtype(v): k for k,v in type_mapping.items()}
-
-
-def make_na(val, dt):
-    """
-    Parse NA sentinel value for given dtype.
-    :param val:
-    :param dt:
-    :return:
-    """
-    if dt is None:
-        return val
-
-    dtype = np.dtype(dt)
-    if isinstance(val, str):
-        if dtype.kind in  {"i", "u"}:
-            if val == "max_int":
-                return np.iinfo(dtype).max
-            if val == "min_int":
-                return np.iinfo(dtype).min
-        if dtype.kind in  {"U"}:
-            return np.asarray([val], dtype=dtype)[0]
-        raise ValueError(f"Unknown NA sentinel string: {val}")
-    else:
-        return np.asarray([val], dtype=dtype)[0]
-
-
-_list_of_defaults = [
-    [np.nan, "float32", "float64"],
-    [np.nan + 1j * np.nan, "complex64", "complex128"],
-    ["max_int", "uint8", "uint16", "uint32", "uint64"],
-    ["min_int", "int8", "int16", "int32", "int64"],
-    [np.datetime64("NaT"), "datetime64[ns]"],
-    [np.timedelta64("NaT"), "timedelta64[ns]"]
-]
-DEFAULT_NA_BY_DTYPE = {
-    np.dtype(dt): make_na(val_list[0], dt)
-    for val_list in _list_of_defaults
-    for dt in val_list[1:]
-}
-
-DEFAULT_STR_LEN = 32
-
-@attrs.define
-class DType:
-    dtype: Optional[np.dtype]
-
-    @classmethod
-    def from_cfg(cls, cfg: ContextCfg) -> 'DType':
-        _type, _ctx = cfg.value(), cfg.schema_ctx
-        if _type is None:
-            return cls(None)
-
-        _type = _type.strip()
-        m = _STR_SPEC.match(_type)
-        if m:
-            n = m.group(1)
-            if n is None:
-                _ctx.warning("Used type 'str' without length specification, assuming 'str[32]. Zarr-fuse only supports fixed string values in arrays.'", stacklevel=3)
-                n = DEFAULT_STR_LEN
-            n = int(n)
-            if n <= 0:
-                _ctx.warning(f"Invalid type 'str[{n}]',  n > 0 required. Using default length n={DEFAULT_STR_LEN}.", stacklevel=3)
-                n = DEFAULT_STR_LEN
-            return cls(np.dtype(f"<U{n}"))
-        _dtype = type_mapping.get(_type,  None)
-        if _dtype is None:
-            _ctx.error(f"Unsaported value type: {_type}")
-        return cls(np.dtype(_dtype))
-
-    def asdict(self, value_serializer, filter):
-        dt = self.dtype
-        if dt is None:
-            return None
-
-        # Special-case numpy Unicode dtype -> 'str[n]'
-        if dt.kind == "U":
-            # n chars = itemsize / itemsize_of('<U1')
-            n = dt.itemsize // np.dtype("<U1").itemsize
-            return f"str[{n}]"
-
-        # Simple dict lookup for known scalar dtypes
-        return _PREFERRED_NAME.get(dt, str(dt))
-
-    @property
-    def default_na(self):
-        """
-        Return the default NA sentinel for a NumPy dtype under the policy above.
-        - signed ints: ~0  (all bits set -> -1)
-        - unsigned ints: max_int
-        - unicode strings: U+FFFF repeated to the fixed width
-        Falls back to dict for floats/complex/bool/NaT families.
-        """
-        if self.dtype is None:
-            return None
-        dt = np.dtype(self.dtype)
-
-        # direct table lookups (floats, complex, bool, dt64/timedelta64)
-        if dt in DEFAULT_NA_BY_DTYPE:
-            return DEFAULT_NA_BY_DTYPE[dt]
-        if dt.kind == "U":
-            n_chars = dt.itemsize // np.dtype("<U1").itemsize  # = itemsize // 4
-            return "\uFFFF" * n_chars  # length == n_chars
 
 
 Scalar = bool | int | float | str
@@ -400,12 +127,12 @@ class Interval(AddressMixin):
     def from_list(cls, cfg: ContextCfg, default_unit):
         lst, schema_ctx = cfg.value(), cfg.schema_ctx
         if lst is None:
-            return None
+            return cls(-np.inf, -np.inf, default_unit)
 
         if not isinstance(lst, list):
             lst = [lst]
         if len(lst) == 0:
-            lst = cls(-np.inf, np.inf, default_unit)
+            return cls(-np.inf, np.inf, default_unit)
         if len(lst) == 1:
             lst = 2 * lst
 
@@ -427,7 +154,7 @@ class Interval(AddressMixin):
 
         if isinstance(cfg.cfg, str):
             if cfg.cfg == "no_new" :
-                return cls(np.nan, np.nan, default_unit)
+                return cls(-np.inf, -np.inf, default_unit)
             elif cfg.cfg == "any_new":
                 return cls(-np.inf, np.inf, default_unit)
             else:
@@ -436,16 +163,16 @@ class Interval(AddressMixin):
             return cls.from_list(cfg, default_unit)
 
     def no_new(self):
-        return np.isnan(self.start) and np.isnan(self.end)
+        return self.start == -np.inf and self.end == -np.inf
 
     def any_new(self):
         return self.start == -np.inf and self.end == np.inf
 
     def asdict(self, value_serializer, filter):
         # Here we serialize set_limits, reproducing special strings.
-        if self.start == -np.inf and self.end == np.inf:
+        if self.any_new():
             return "any_new"
-        elif np.isnan(self.start) and np.isnan(self.end):
+        elif self.no_new():
             return "no_new"
         else:
             return [self.start, self.end, value_serializer(self, 2, self.unit)]
@@ -533,7 +260,7 @@ class Variable(AddressMixin):
             return InfRange()
 
         if 'discrete' in range_dict:
-            return DiscreteRange.from_cfg(dict_ctx['discrete'], self.df_col, self.convert_values, self.na)
+            return DiscreteRange.from_cfg(dict_ctx['discrete'], self.df_col, self.convert_values, self.na_value)
         elif 'interval' in range_dict:
             return IntervalRange.from_list(dict_ctx['interval'], self.unit)
 

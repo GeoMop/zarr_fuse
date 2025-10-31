@@ -109,10 +109,10 @@ def aux_read_struc(tmp_dir, struc_yaml):
     return node_schema
 
 
-@pytest.mark.parametrize("struc_yaml",
-        ["structure_weather.yaml",
-         "structure_tensors.yaml",
-         "structure_tree.yaml"])
+@pytest.mark.parametrize(
+    "struc_yaml",
+    ["structure_weather.yaml", "structure_tensors.yaml", "structure_tree.yaml"],
+)
 def test_schema_serialization(smart_tmp_path, struc_yaml):
     node_schema = aux_read_struc(smart_tmp_path, struc_yaml)
     fn_name = f"check_{(inputs_dir/struc_yaml).stem}"
@@ -224,16 +224,16 @@ def _has(bag: list[str], needle: str) -> bool:
 @pytest.mark.parametrize(
     "token, expected_dtype, expected_str",
     [
-        ("bool",    np.dtype("int8"),   "int8"),
+        ("bool", np.dtype("int8"), "int8"),
         ("int", np.dtype("int64"), "int64"),
-        ("int8",    np.dtype("int8"),   "int8"),
-        ("int32",   np.dtype("int32"),  "int32"),
-        ("int64",   np.dtype("int64"),  "int64"),
+        ("int8", np.dtype("int8"), "int8"),
+        ("int32", np.dtype("int32"), "int32"),
+        ("int64", np.dtype("int64"), "int64"),
         ("uint", np.dtype("uint64"), "uint64"),
-        ("uint64",   np.dtype("uint64"),  "uint64"),
-        ("float64", np.dtype("float64"),"float64"),
+        ("uint64", np.dtype("uint64"), "uint64"),
+        ("float64", np.dtype("float64"), "float64"),
         ("complex", np.dtype("complex64"), "complex"),
-        ("str[7]",  np.dtype("<U7"),    "str[7]"),
+        ("str[7]", np.dtype("<U7"), "str[7]"),
     ],
 )
 def test_dtype_parse_and_serialize_roundtrip(token, expected_dtype, expected_str):
@@ -267,9 +267,11 @@ def test_variable_logging_and_basics():
     v, _ = _mk_var({"name": "v", "coords": "x"})
     assert v.coords == ["x"]
 
-    # attrs expose expected keys
+    # attrs exist on the object and serialize via zarr_attrs()
     v, _ = _mk_var({"name": "v", "coords": []})
-    assert {"unit", "description", "df_col", "source_unit"} <= set(v.attrs.keys())
+    assert hasattr(v, "unit") and hasattr(v, "description") and hasattr(v, "df_col") and hasattr(v, "source_unit")
+    za = v.zarr_attrs()
+    assert {"unit", "description", "df_col", "source_unit"}.issubset(set(za.keys()))
 
     # warning path through logger
     v, log = _mk_var({"name": "v", "coords": []})
@@ -295,12 +297,7 @@ def test_variable_logging_and_basics():
     # discrete range
     v, _ = _mk_var({"name": "v", "coords": [], "unit": None, "na_value": -1, "range": {"discrete": [1, 2, 3]}})
     assert isinstance(v.range, schema.DiscreteRange)
-    assert list(v.range.codes_to_labels) == [-1,1, 2, 3]
-
-    # conversion source_unit → unit
-    #v, _ = _mk_var({"name": "v", "coords": [], "unit": "m", "source_unit": "cm"})
-    #q = v.convert_values([0, 100])
-    #assert str(q.units) in {"meter", "m"} and np.allclose(q.m, [0.0, 1.0])
+    assert list(v.range.codes_to_labels) == [-1, 1, 2, 3]
 
 
 def test_coord_specific_attributes():
@@ -322,11 +319,14 @@ def test_coord_specific_attributes():
     c, _ = _mk_coord({"name": "lat", "coords": [], "chunk_size": 64})
     assert c.chunk_size == 64
 
-    # step_limits default interval vs. explicit None
-    c, _ = _mk_coord({"name": "t", "coords": []})
-    assert c.step_limits == schema.Interval(None, None, pint.Unit(""))
-    c, _ = _mk_coord({"name": "t", "coords": [], "step_limits": None})
-    assert c.step_limits is None
+    # step_limits default and explicit None (match new semantics)
+    # missing -> "any_new" => [-inf, +inf]
+    c, _ = _mk_coord({"name": "t", "coords": []})   # default: "any_new"
+    assert c.step_limits == schema.Interval(-np.inf, np.inf, pint.Unit(""))
+
+    # explicit None -> "no_new" => [NaN, NaN]
+    c, _ = _mk_coord({"name": "t", "coords": [], "step_limits": "no_new"})
+    assert c.step_limits == schema.Interval(-np.inf, -np.inf, pint.Unit(""))
 
     # sorted default depends on composition
     c, _ = _mk_coord({"name": "x", "coords": []})
@@ -344,9 +344,7 @@ def test_discrete_range_roundtrip_and_encode_decode(tmp_path):
     cfg = schema.ContextCfg(labels, ctx)
 
     # Build DiscreteRange from cfg (list path); source_col/convert_fn are unused here
-    dr = schema.DiscreteRange.from_cfg(
-        cfg, source_col="color", convert_fn=lambda s: s, na_value=na
-    )
+    dr = schema.DiscreteRange.from_cfg(cfg, source_col="color", convert_fn=lambda s: s, na_value=na)
 
     # The constructed table should have NA in slot 0, followed by labels
     assert list(dr.codes_to_labels) == [na, *labels]
@@ -358,9 +356,8 @@ def test_discrete_range_roundtrip_and_encode_decode(tmp_path):
 
     # Deserialize by feeding the serialized payload back through ContextCfg + from_cfg
     cfg2 = schema.ContextCfg(serialized["discrete"], ctx)
-    dr2 = schema.DiscreteRange.from_cfg(
-        cfg2, source_col="color", convert_fn=lambda s: s, na_value=na
-    )
+    dr2 = schema.DiscreteRange.from_cfg(cfg2, source_col="color", convert_fn=lambda s: s, na_value=na)
+
     # Roundtrip equality of the codes_to_labels array
     assert np.array_equal(dr2.codes_to_labels, dr.codes_to_labels)
 
