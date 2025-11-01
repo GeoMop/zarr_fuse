@@ -1,0 +1,11 @@
+ingressService:
+  configuration:
+    s3:
+      endpointUrl: "endpointUrl"
+      storeUrl: "storeUrl"
+      secrets:
+        accessKey: "accessKey"
+        secretKey: "secretKey"
+    fastapi:
+      security:
+        usersJson: "{}"

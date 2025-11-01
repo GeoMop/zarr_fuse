@@ -1,6 +1,6 @@
 apiVersion: v2
-name: ingress-server
-description: Backend-only Flask ingress to upload CSV/JSON into an S3-backed Zarr store
+name: zarr-fuse-ingress
+description: A Helm chart for ingress service and Apache Airflow extractor service
 type: application
 version: 2.0.0
 appVersion: "2.0.0"
@@ -10,8 +10,12 @@ sources:
 maintainers:
   - name: Stepan Moc
     email: stepan.mocik@gmail.com
+keywords:
+  - Apache airflow
+  - Zarr_fuse
+  - FastAPI
 dependencies:
-  - name: apache-airflow
+  - name: airflow
     version: 1.18.0
     repository: https://airflow.apache.org
-    condition: apache-airflow.install
+    condition: apache-airflow.enabled

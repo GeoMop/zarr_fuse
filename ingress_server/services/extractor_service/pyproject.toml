@@ -14,6 +14,7 @@ keywords = ["Airflow", "Zarr", "s3"]
 dependencies = [
   "pydantic==2.12.3",
   "python-dotenv==1.2.1",
+  "pandas==2.3.3",
   "zarr_fuse @ git+https://github.com/GeoMop/zarr_fuse.git@main",
 ]
 

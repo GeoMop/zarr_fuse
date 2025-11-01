@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.ingressService.name }}
+  labels:
+    helm.sh/chart: "{{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}"
+spec:
+  replicas: {{ .Values.ingressService.replicaCount }}
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Values.ingressService.name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Values.ingressService.name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/version: {{ .Chart.AppVersion }}
+        app.kubernetes.io/part-of: {{ .Values.ingressService.partOf | default .Chart.Name }}
+        app.kubernetes.io/component: {{ .Values.ingressService.component | default .Chart.Name }}
+        app.kubernetes.io/managed-by: {{ .Release.Service }}
+      annotations:
+        github.com/run-id: "{{ .Values.runID }}"
+        checksum/config: '{{ include (print $.Template.BasePath "/ingress-service/secret.yaml") . | sha256sum }}'
+    spec:
+      securityContext:
+        {{- toYaml .Values.ingressService.securityContext.pod | nindent 8 }}
+      volumes:
+        - name: ingress-server-tmp
+          emptyDir: {}
+      restartPolicy: {{ .Values.ingressService.restartPolicy }}
+      containers:
+        - name: {{ .Values.ingressService.name }}
+          image: "{{ .Values.registry.host }}/{{ .Values.ingressService.image.name }}:{{ .Values.ingressService.image.tag }}"
+          imagePullPolicy: {{ .Values.ingressService.imagePullPolicy }}
+          ports:
+            - name: {{ .Values.ingressService.service.internalPort.name | quote }}
+              containerPort: {{ .Values.ingressService.service.internalPort.number | int }}
+          resources:
+            {{- toYaml .Values.ingressService.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.ingressService.securityContext.container | nindent 12 }}
+          env:
+            {{- toYaml .Values.ingressService.extraEnv | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: ingress-service-env-var-secrets
+          volumeMounts:
+            - name: ingress-server-tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.ingressService.service.internalPort.name | quote }}
+            periodSeconds: 5
+            successThreshold: 1
+            failureThreshold: 72
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.ingressService.service.internalPort.name | quote }}
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.ingressService.service.internalPort.name | quote }}
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 10

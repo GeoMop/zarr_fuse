@@ -1,26 +1,32 @@
 from __future__ import annotations
-import os, io, json, logging, posixpath
-from pathlib import Path
-from datetime import datetime
-from typing import List
+
+import os
+import io
+import json
+import logging
+import posixpath
 
 import pandas as pl
 import zarr_fuse as zf
-from pydantic import BaseModel
-from dotenv import load_dotenv
+
+from pathlib import Path
 
 from airflow import DAG
 from airflow.decorators import task
-
+from datetime import datetime
+from pydantic import BaseModel
+from dotenv import load_dotenv
 
 from packages.common.models import MetadataModel
 from packages.common import configuration, s3io, logging_setup
 
 LOG = logging.getLogger("dag_extractor")
+
 load_dotenv()
 
 S3_CONFIG = configuration.load_s3_config()
 S3_CLIENT = configuration.create_boto3_client()
+
 
 class S3Items(BaseModel):
     key: str
@@ -32,18 +38,24 @@ class Prefixes(BaseModel):
     processed: str
     failed: str
 
-def read_df_from_bytes(data: bytes, content_type: str):
+
+def read_df_from_bytes(data: bytes, content_type: str) -> tuple[pl.DataFrame | None, str | None]:
     ct = content_type.lower()
-    if "csv" in ct:  return pl.read_csv(io.BytesIO(data)), None
-    if "json" in ct: return pl.read_json(io.BytesIO(data)), None
-    return None, f"Unsupported content type: {content_type}. Use application/json or text/csv."
+    if "csv" in ct:
+        return pl.read_csv(io.BytesIO(data)), None
+    elif "json" in ct:
+        return pl.read_json(io.BytesIO(data)), None
+    else:
+        return None, f"Unsupported content type: {content_type}. Use application/json or text/csv."
 
 def open_root(schema_path: Path) -> zf.Node:
     opts = {
         "S3_ACCESS_KEY": S3_CONFIG.access_key,
         "S3_SECRET_KEY": S3_CONFIG.secret_key,
         "STORE_URL": S3_CONFIG.store_url,
-        "S3_OPTIONS": json.dumps({"config_kwargs": {"s3": {"addressing_style": "path"}}}),
+        "S3_OPTIONS": json.dumps({
+            "config_kwargs": {"s3": {"addressing_style": "path"}}
+        }),
     }
     return zf.open_store(schema_path, **opts)
 
@@ -60,12 +72,14 @@ def _prefixes(endpoint_name: str) -> Prefixes:
 def _list_accepted_oldest_first(bucket: str, accepted_prefix: str) -> list[S3Items]:
     paginator = S3_CLIENT.get_paginator("list_objects_v2")
     items: list[S3Items] = []
+
     for page in paginator.paginate(Bucket=bucket, Prefix=accepted_prefix + "/"):
         for obj in page.get("Contents", []):
             key = obj["Key"]
             if key.endswith(".meta.json"):
                 continue
             items.append(S3Items(key=key, last_modified=obj["LastModified"]))
+
     items.sort(key=lambda x: x.last_modified)
     return items
 
@@ -79,6 +93,7 @@ def _copy_then_delete(bucket: str, src_key: str, dst_key: str) -> None:
 def _move_pair(bucket: str, data_key: str, meta_key: str, target_prefix: str, accepted_prefix: str) -> None:
     rel = data_key[len(accepted_prefix):].lstrip("/")
     _copy_then_delete(bucket, data_key, posixpath.join(target_prefix, rel))
+
     try:
         rel_meta = meta_key[len(accepted_prefix):].lstrip("/")
         _copy_then_delete(bucket, meta_key, posixpath.join(target_prefix, rel_meta))
@@ -111,9 +126,31 @@ def _write_to_zarr(schema_name: str, node_path: str, df) -> None:
     else:
         root.update(df)
 
-# -----------------------
-# DAG
-# -----------------------
+def _process_single(prefixes: Prefixes, data_key: str) -> bool:
+    meta_key = data_key + ".meta.json"
+    payload = _read_bytes(prefixes.bucket, data_key)
+
+    meta = _load_meta(prefixes.bucket, meta_key)
+    if not meta:
+        _move_pair(prefixes.bucket, data_key, meta_key, prefixes.failed, prefixes.accepted)
+        LOG.warning("Missing meta for %s → moved to failed.", data_key)
+        return False
+
+    content_type = (meta.content_type or "application/json").lower()
+    node_path = (meta.node_path or "").strip()
+    schema_name = meta.schema_name
+    if not schema_name:
+        _move_pair(prefixes.bucket, data_key, meta_key, prefixes.failed, prefixes.accepted)
+        raise ValueError("Missing schema_name in meta")
+
+    df = _df_from_payload(payload, content_type)
+    _write_to_zarr(schema_name, node_path, df)
+
+    _move_pair(prefixes.bucket, data_key, meta_key, prefixes.processed, prefixes.accepted)
+    LOG.info("Processed %s", data_key)
+    return True
+
+
 with DAG(
     dag_id="ingress_processor",
     description="Process accepted objects and store to Zarr via zarr_fuse",
@@ -126,59 +163,41 @@ with DAG(
 ) as dag:
     logging_setup.setup_logging(os.getenv("LOG_LEVEL", "INFO"))
 
-    @task
-    def list_keys(endpoint_name: str, batch_size: int = 10) -> List[str]:
-        """Vrátí až batch_size nejstarších klíčů v accepted frontě."""
+    @task()
+    def process_endpoint(endpoint_name: str, batch_size: int = 10) -> str:
+        """Zpracuje až batch_size objektů pro daný endpoint."""
         pfx = _prefixes(endpoint_name)
+
         items = _list_accepted_oldest_first(pfx.bucket, pfx.accepted)
-        keys = [it.key for it in items][:batch_size]
-        LOG.info("Endpoint %s: listing %d key(s).", endpoint_name, len(keys))
-        return keys
+        if not items:
+            LOG.info("Endpoint %s: nic ke zpracování", endpoint_name)
+            return "Nothing to do."
 
-    @task
-    def process_key(endpoint_name: str, data_key: str) -> str:
-        """Zpracuje 1 objekt (lepší granularita logů/retry)."""
-        pfx = _prefixes(endpoint_name)
-        meta_key = data_key + ".meta.json"
-        payload = _read_bytes(pfx.bucket, data_key)
+        processed = 0
+        for item in items:
+            if processed >= batch_size:
+                break
 
-        meta = _load_meta(pfx.bucket, meta_key)
-        if not meta:
-            _move_pair(pfx.bucket, data_key, meta_key, pfx.failed, pfx.accepted)
-            LOG.warning("Missing meta for %s → moved to failed.", data_key)
-            return "failed:no-meta"
+            try:
+                if _process_single(pfx, item.key):
+                    processed += 1
+            except Exception:
+                # necháme job failnout = retry přes Airflow retries
+                raise
 
-        content_type = (meta.content_type or "application/json").lower()
-        node_path = (meta.node_path or "").strip()
-        schema_name = meta.schema_name
-        if not schema_name:
-            _move_pair(pfx.bucket, data_key, meta_key, pfx.failed, pfx.accepted)
-            raise ValueError("Missing schema_name in meta")
+        msg = f"{endpoint_name}: processed {processed} object(s)."
+        LOG.info(msg)
+        return msg
 
-        df = _df_from_payload(payload, content_type)
-        _write_to_zarr(schema_name, node_path, df)
+    # Vytvoř tasks pro všechny endpoints (z configu) a scrappery
+    for ep in configuration.load_endpoints_config():
+        process_endpoint.override(task_id=f"process_endpoint__{ep.name}")(
+            endpoint_name=ep.name,
+            batch_size=10,
+        )
 
-        _move_pair(pfx.bucket, data_key, meta_key, pfx.processed, pfx.accepted)
-        LOG.info("Processed %s", data_key)
-        return "ok"
-
-    # načti endpointy až při běhu (ne v parse-time) – lepší odolnost
-    @task
-    def get_endpoint_names() -> List[str]:
-        endpoints = [e.name for e in configuration.load_endpoints_config()]
-        scrappers = [s.name for s in configuration.load_scrappers_config()]
-        return endpoints + scrappers
-
-    endpoints = get_endpoint_names()
-
-    # Pro každý endpoint samostatná skupina s přehlednými logy
-    def endpoint_group(endpoint_name: str):
-        with TaskGroup(group_id=f"{endpoint_name}") as tg:
-            keys = list_keys.override(task_id="list")(endpoint_name=endpoint_name, batch_size=10)
-            process_key.partial(endpoint_name=endpoint_name).expand(data_key=keys)
-        return tg
-
-    # Dynamicky rozbal TaskGroup pro každý endpoint
-    # (Airflow 2.10 umí mapovat přes XCom ze seznamu jmen)
-    from airflow.models.xcom_arg import XComArg
-    _ = endpoint_group.expand(endpoint_name=XComArg(endpoints))
+    for scr in configuration.load_scrappers_config():
+        process_endpoint.override(task_id=f"process_scrapper__{scr.name}")(
+            endpoint_name=scr.name,
+            batch_size=10,
+        )

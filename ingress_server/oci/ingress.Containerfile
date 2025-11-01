@@ -12,19 +12,23 @@ LABEL org.opencontainers.image.authors="Geomop / Stepan Moc <stepan.mocik@gmail.
 LABEL maintainer="Geomop / Stepan Moc <stepan.mocik@gmail.com>"
 
 WORKDIR /app
-COPY packages/common /app/packages/common
-COPY services/ingress_service /app/services/ingress_service
-COPY inputs /app/inputs
+
+COPY packages/common packages/common
+COPY services/ingress_service services/ingress_service
+COPY inputs inputs
 
 ENV PIP_NO_CACHE_DIR=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-RUN pip install --no-cache-dir -e /app/packages/common -e /app/services/ingress_service
+RUN pip install --no-cache-dir -e packages/common -e services/ingress_service
 
 ENV PYTHONUNBUFFERED=1
 ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
 ENV PYTHONPATH=/app
+
+RUN adduser --disabled-password --gecos "" --uid 1000 ingress
+USER ingress
 
 WORKDIR /app/services
 ENV PORT=8000
