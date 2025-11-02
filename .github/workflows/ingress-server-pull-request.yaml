@@ -18,5 +18,5 @@ jobs:
       tag: generate
       namespace: ingress-server-development
       extra-helm-values: |
-        --values ${{ github.workspace }}/.github/values/ingress-server/pull-request.yaml
+        --values .github/values/ingress-server/pull-request.yaml
     secrets: inherit

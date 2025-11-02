@@ -19,5 +19,5 @@ jobs:
       tag: generate
       namespace: ingress-server-latest
       extra-helm-values: |
-        --values ${{ github.workspace }}/.github/values/ingress-server/main.yaml
+        --values .github/values/ingress-server/main.yaml
     secrets: inherit

@@ -149,7 +149,7 @@ jobs:
         run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
       - name: Deploy app
         run: |
-          helm upgrade zarr-fuse-ingress zarr-fuse-ingress \
+          helm upgrade zarr-fuse-ingress ingress_server/charts/zarr-fuse-ingress \
           --install --atomic --timeout 10m --namespace "${{ inputs.namespace }}" \
           --set ingressService.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
           --set airflow.defaultAirflowTag="${{ needs.get-version-tag.outputs.version-tag }}" \
@@ -157,5 +157,5 @@ jobs:
           --set ingressService.configuration.s3.secrets.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
           --set ingressService.configuration.s3.secrets.secretKey="${{ secrets.S3_SECRET_KEY }}" \
           --set ingressService.configuration.fastapi.secrets.usersJson='${{ secrets.BASIC_AUTH_USERS_JSON }}' \
-          --values ${{ github.workspace }}/.github/values/ingress-server/defaults.yaml \
+          --values .github/values/ingress-server/defaults.yaml \
           ${{ inputs.extra-helm-values }}
