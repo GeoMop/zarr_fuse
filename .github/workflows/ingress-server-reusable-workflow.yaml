@@ -74,7 +74,7 @@ jobs:
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
           push: true
-          extra-build-args: >
+          extra-build-args: >-
             --build-arg APP_VERSION=${{ needs.get-version-tag.outputs.version-tag }}
   lint-extractor-service-containerfile:
     name: Lint extractor service Containerfile
@@ -108,7 +108,7 @@ jobs:
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
           push: true
-          extra-build-args: >
+          extra-build-args: >-
             --build-arg APP_VERSION=${{ needs.get-version-tag.outputs.version-tag }}
   validate-helm-chart:
     name: Validate ingress server Helm chart
