@@ -69,7 +69,7 @@ jobs:
           registry: docker.io
           repository: jbrezmorf/zarr-fuse-ingress-service
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
-          containerfile-path: oci/Containerfile
+          containerfile-path: oci/ingress.Containerfile
           working-directory: ingress_server
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
@@ -103,7 +103,7 @@ jobs:
           registry: docker.io
           repository: jbrezmorf/zarr-fuse-extractor-service
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
-          containerfile-path: oci/Containerfile
+          containerfile-path: oci/extractor.Containerfile
           working-directory: ingress_server
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
@@ -133,11 +133,13 @@ jobs:
     needs:
       - validate-helm-chart
       - get-version-tag
+      - containerize-ingress-service
+      - containerize-extractor-service
     env:
       KUBECONFIG: ./kubeconfig.yaml
     defaults:
       run:
-        working-directory: ingress_server
+        working-directory: ingress_server/charts
     steps:
       - name: Checkout
         uses: actions/checkout@v4
