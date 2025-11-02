@@ -144,6 +144,10 @@ jobs:
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
       - name: Set context
         run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
+      - name: Add dependencies
+        run: helm repo add apache-airflow https://airflow.apache.org
+      - name: Build Helm dependencies
+        run: helm dependency build ingress_server/charts/zarr-fuse-ingress
       - name: Deploy app
         run: |
           helm upgrade zarr-fuse-ingress ingress_server/charts/zarr-fuse-ingress \
