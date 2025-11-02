@@ -16,7 +16,7 @@ jobs:
       push-container: true
       deploy-helm-chart: true
       tag: generate
-      namespace: ingress-server-development
+      namespace: testing-moc-airflow # TODO: change back ingress-server-development
       extra-helm-values: |
         --values .github/values/ingress-server/pull-request.yaml
     secrets: inherit

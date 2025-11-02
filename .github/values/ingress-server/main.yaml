@@ -11,3 +11,11 @@ ingressService:
         tls:
           enabled: true
           secretName: zarr-fuse-ingress-server-latest-dyn-cloud-e-infra-cz-tls
+airflow:
+  ingress:
+    web:
+      hosts:
+        - name: "zarr-fuse-extractor-service-latest.dyn.cloud.e-infra.cz"
+          tls:
+            enabled: true
+            secretName: "zarr-fuse-extractor-service-latest-dyn-cloud-e-infra-cz-tls"
