@@ -1,19 +1,51 @@
-# ZarrFuse Ingress – Backend & Docker/OCI
+# Ingress System
 
-Backend-only FastAPI service running in a container with **gunicorn**.
-The image contains both the `zarr_fuse` library and the ingress server code.
-The service accepts CSV/JSON uploads and merges them into an S3-backed Zarr store using `zarr-fuse`.
-There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
+The **Ingress System** provides a backend pipeline for collecting, queuing, and processing data into **S3-backed Zarr datasets**.
+
+It is composed of two deployable services:
+
+1. 🌀 **Ingress Service** – A FastAPI-based data collector
+   - Accepts **passive uploads** via HTTP endpoints
+   - Runs **active scrappers** to periodically fetch remote data
+   - Stores data + metadata into an **S3 queue**
+
+2. ⚙️ **Extractor Service** – An Apache Airflow DAG for data processing
+   - Reads queued data and metadata from S3
+   - Merges them into Zarr datasets using [`zarr-fuse`](https://github.com/GeoMop/zarr_fuse)
+   - Moves processed or failed items into `queue/processed/` or `queue/failed/`
+
+Together, these components form a complete ingestion-to-processing workflow.
 
 ---
 
-## Overview
+## Architecture
 
-- **Purpose:** Ingest tabular data (CSV/JSON) and merge it into a Zarr dataset on S3.
-- **Where to write:** S3 endpoint and path are defined in the *schema* (`ATTRS.s3_url`, `ATTRS.store_path`).
-- **How endpoints are defined:** via `config.yaml`.
-- **Auth:** Basic HTTP authentication (fastapi.security) is enabled; credentials via environment variables. S3 credentials also come from environment.
-- **Swagger/OpenAPI:** localhost:8000/docs or **/docs**
+       ┌──────────────────────────┐
+       │      External Sources    │
+       └─────────────┬────────────┘
+                     │  HTTP POST / Scheduled Scrappers
+                     ▼
+        ┌────────────────────────┐
+        │   Ingress Service      │
+        │ (FastAPI + APScheduler)│
+        ├────────────────────────┤
+        │ Endpoints + Auth       │
+        │ Upload                 │
+        └───────┬────────────────┘
+                │  S3 Put (data + metadata)
+                ▼
+        ┌────────────────────────┐
+        │        S3 Queue        │
+        │ queue/accepted/...     │
+        └────────┬───────────────┘
+                 │  Airflow reads + writes
+                 ▼
+        ┌────────────────────────┐
+        │   Extractor Service    │
+        │ (Airflow DAG + Zarr)   │
+        ├────────────────────────┤
+        │ Data merge + move      │
+        └────────────────────────┘
 
 ---
 
@@ -21,56 +53,80 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 
 ```
 .
-├─ ingress_server/
-│  ├─ src/
-│  │  ├─ main.py                  # FastAPI backend server
-│  │  ├─ config.yaml              # List of API endpoints and their schema paths
-│  │  └─ schemas/                 # Schema files (prod/ci_test)
-│  ├─ tools/
-│  │  └─ request_example.py       # Makes example request
-│  ├─ oci/
-│  │  ├─ Dockerfile               # Container build
-│  └─ pyproject.toml              # Project metadata & dependencies
+├── packages/                         # Common shared Python package
+│   ├── common/
+│   │   ├── configuration.py          # Loads S3 and endpoint/scrapper configs
+│   │   ├── s3io.py                   # Uploads payloads and metadata to S3
+│   │   ├── validation.py             # Validates JSON/CSV payloads
+│   │   ├── logging_setup.py          # UTC logging
+│   │   └── models/
+│   │       ├── configuration_model.py
+│   │       └── metadata_model.py
+│   └── pyproject.toml
+
+├── services/
+│   ├── ingress_service/              # FastAPI ingress backend
+│   │   ├── main.py                   # Entry point, registers endpoints/scrappers
+│   │   ├── web/
+│   │   │   ├── api.py                # Upload endpoints
+│   │   │   └── auth.py               # HTTP Basic Auth
+│   │   ├── scrapper/
+│   │   │   ├── scheduler.py          # APScheduler setup
+│   │   │   └── jobs.py               # Scrapper job execution
+│   │   └── pyproject.toml
+│   │
+│   ├── extractor_service/            # Airflow DAG processor
+│       ├── dags/dag.py               # Airflow DAG: processes queue -> Zarr
+│       └── pyproject.toml
+│
+├── inputs/
+│   ├── configuration.yaml            # Endpoints and scrappers configuration
+│   └── schemas/
+│       └── bukov_schema_v1.yaml      # Zarr-fuse schema definitions
+│
+├── charts/zarr-fuse-ingress/         # Helm chart for Kubernetes deployment
+├── oci/                              # Container build definitions
+│   ├── ingress.Containerfile         # Containerfile for ingress service
+│   └── extractor.Containerfile       # Containerfile for extractor service
+├── docker-compose.yaml               # Local stack for development
+├── tools/request_example.py          # Example HTTP request sender
+└── pyproject.toml                    # Root project metadata
 ```
 
 ---
 
-## Configuration
+---
 
-### 1 Environment (.env)
+## 1. Ingress Service
 
+### Purpose
+Handles all data ingestion, both **passive (via API)** and **active (via scrappers)**, and writes payloads into S3 for later processing.
+
+### Configuration
+
+`.env example:`
 ```ini
-# Required
-S3_ACCESS_KEY=YOUR_ACCESS_KEY
-S3_SECRET_KEY=YOUR_SECRET_KEY
-S3_ENDPOINT_URL=S3_ENDPOINT_URL
-S3_STORE_URL=s3://...
-
-# Queue
-QUEUE_DIR=./data/zarr_fuse
-
-# Required for HTTP Basic Auth
-BASIC_AUTH_USERS_JSON={"alice":"password"}
-
+S3_ACCESS_KEY=your_access_key
+S3_SECRET_KEY=your_secret_key
+S3_ENDPOINT_URL=https://s3.endpoint
+S3_STORE_URL=s3://bucket/path/to/store.zarr
+LOG_LEVEL=INFO
+BASIC_AUTH_USERS_JSON={"user":"password"}
 ```
 
-The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.
-
-### 2 Endpoints (`src/config.yaml`)
-
+`inputs/configuration.yaml:`
 ```yaml
 endpoints:
-  - name: tree
-    endpoint: /api/v1/tree
-    schema_path: schemas/tree_schema_v1.yaml
-
   - name: weather
     endpoint: /api/v1/weather
-    schema_path: schemas/weather_schema_v1.yaml
+    schema_name: bukov_schema_v1.yaml
 
-  - name: sensor
-    endpoint: /api/v1/sensor
-    schema_path: schemas/sensor_schema_v1.yaml
+active_scrappers:
+  - name: meteo
+    url: https://example.com/data.csv
+    cron: "*/15 * * * *"
+    schema_name: bukov_schema_v1.yaml
+    method: GET
 ```
 
 Each entry creates two routes:
@@ -78,54 +134,44 @@ Each entry creates two routes:
 - `POST {endpoint}` — updates the root (`/`) of the Zarr tree
 - `POST {endpoint}/{node_path}` — updates a specific node (e.g. `/api/v1/tree/a/b/c`)
 
-### 3 Schema (example)
-
-```yaml
-ATTRS:
-  description: Weather schema
-  s3_url: https://s3.cl4.du.cesnet.cz
-  store_path: test/test.zarr  # bucket + filename (can include subdirs)
-```
-
-`store_path` is in the form `bucket_name/path_in_bucket`.
-
----
-
-## Running Locally (without Docker)
+### Running locally
 
 ```bash
-# Install latest pip & dependencies
-pip install -U pip
-pip install .
-
-# Run the server
-cd src
-python main.py
+pip install -e .
+python -m services.ingress_service.main
 ```
 
----
-
-## Build (Docker/OCI)
+### Running with Docker
 
 ```bash
-docker build -t zarr-fuse-ingress \
-  -t zarr-fuse-ingress
-  -f oci/Containerfile .
+docker build -t ingress-service -f oci/ingress.Containerfile .
+docker run --rm -p 8000:8000 --env-file .env ingress-service
 ```
 
----
 
-## Run (Docker, local)
+## 2. Extractor Service
 
-The image runs with **waitress** on port **8000**, as user **ingress** (UID `11233`).
+### Purpose
+
+Processes data previously uploaded to S3 by the Ingress Service and merges it into Zarr datasets.
+
+### Features
+
+- Periodically scans queue/accepted/
+- Validates data and metadata
+- Merges records into Zarr datasets
+- Moves processed/failed items
+
+
+### Running with Airflow
 
 ```bash
-docker run --rm -p 8000:8000 \
-  --env-file src/.env \
-  zarr-fuse-ingress:latest
+docker build -t extractor-service -f oci/extractor.Containerfile .
+docker compose up
 ```
 
-### Mounting schemas/config without rebuild
+
+## Mounting schemas/config without rebuild
 
 The container already includes `schemas/` and `config.yaml` from the build context.
 If you want to override them without rebuilding, mount them as read-only volumes:
@@ -191,11 +237,10 @@ curl -X POST http://localhost:8000/api/v1/sensor \
 
 ## Error Responses
 
-- `400 Bad Request` — missing file, unsupported type, schema misconfiguration, or update errors.
-- Response contains:
-  ```json
-  {
-    "error": "Error message",
-    "trace": "Stack trace"
-  }
-  ```
+| Code | Meaning                | Description                |
+| ---- | ---------------------- | -------------------------- |
+| 202  | Accepted               | Upload stored to S3        |
+| 400  | Bad Request            | Invalid request or schema  |
+| 401  | Unauthorized           | Wrong credentials          |
+| 406  | Not Acceptable         | Invalid CSV/JSON format    |
+| 415  | Unsupported Media Type | Content-Type not supported |

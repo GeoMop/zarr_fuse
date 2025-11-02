@@ -31,9 +31,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version-tag: ${{ steps.get_version_tag.outputs.version-tag }}
-    concurrency:
-      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-version-tag
-      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -51,9 +48,6 @@ jobs:
     defaults:
       run:
         working-directory: ingress_server
-    concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-lint-ingress-service-containerfile"
-      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -69,9 +63,6 @@ jobs:
     needs:
       - get-version-tag
       - lint-ingress-service-containerfile
-    concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-containerize"
-      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -94,9 +85,6 @@ jobs:
     defaults:
       run:
         working-directory: ingress_server
-    concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-lint-extractor-service-containerfile"
-      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -112,9 +100,6 @@ jobs:
     needs:
       - get-version-tag
       - lint-extractor-service-containerfile
-    concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-containerize-extractor"
-      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -136,9 +121,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: alpine/k8s:1.29.14
-    concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-lint-helm-chart"
-      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -162,9 +144,6 @@ jobs:
     defaults:
       run:
         working-directory: ingress_server
-    concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-deploy-helm-chart"
-      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4

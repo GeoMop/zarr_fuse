@@ -23,6 +23,9 @@ jobs:
     needs:
       - get-version
     if: needs.get-version.outputs.version != ''
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-build-and-deploy"
+      cancel-in-progress: true
     with:
       push-container: true
       deploy-helm-chart: true

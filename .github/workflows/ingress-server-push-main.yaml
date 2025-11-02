@@ -10,6 +10,9 @@ jobs:
   build-and-deploy:
     name: Build and deploy ingress server for pre-production
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-build-and-deploy"
+      cancel-in-progress: true
     with:
       push-container: true
       deploy-helm-chart: true

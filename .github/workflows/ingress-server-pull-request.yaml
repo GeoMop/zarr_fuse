@@ -9,6 +9,9 @@ jobs:
   build:
     name: Build and deploy ingress server for deve
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.event.number }}-build-and-deploy"
+      cancel-in-progress: true
     with:
       push-container: true
       deploy-helm-chart: true
