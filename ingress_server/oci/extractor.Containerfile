@@ -1,4 +1,4 @@
-FROM apache/airflow:2.10.2-python3.11
+FROM docker.io/apache/airflow:2.10.2-python3.11
 
 ARG APP_VERSION="0.1.0"
 
