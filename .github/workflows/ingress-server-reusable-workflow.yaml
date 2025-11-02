@@ -45,15 +45,12 @@ jobs:
   lint-ingress-service-containerfile:
     name: Lint ingress service Containerfile
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ingress_server
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - uses: hadolint/hadolint-action@v3.3.0
         with:
-          dockerfile: oci/ingress.Containerfile
+          dockerfile: ingress_server/oci/ingress.Containerfile
   containerize-ingress-service:
     name: Containerize ingress server
     runs-on: ubuntu-latest
@@ -82,15 +79,12 @@ jobs:
   lint-extractor-service-containerfile:
     name: Lint extractor service Containerfile
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ingress_server
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - uses: hadolint/hadolint-action@v3.3.0
         with:
-          dockerfile: oci/extractor.Containerfile
+          dockerfile: ingress_server/oci/extractor.Containerfile
   containerize-extractor-service:
     name: Containerize extractor service
     runs-on: ubuntu-latest
