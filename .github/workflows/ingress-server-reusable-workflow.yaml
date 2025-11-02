@@ -21,17 +21,10 @@ on:
         description: The Kubernetes namespace to use
         required: true
         type: string
-      release-name:
-        description: The Helm release name to use
-        required: true
+      extra-helm-values:
+        description: Extra Helm values to pass during deployment
+        required: false
         type: string
-      s3-store-url:
-        description: The S3 store URL (e.g., s3://bucket-name/path/to/store.zarr)
-        required: true
-        type: string
-env:
-  repository: jbrezmorf/zarr-fuse-ingress-server
-  registry: docker.io
 jobs:
   get-version-tag:
     name: Get version tag
@@ -52,7 +45,22 @@ jobs:
           else
             echo "version-tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
           fi
-  containerize:
+  lint-ingress-service-containerfile:
+    name: Lint ingress service Containerfile
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ingress_server
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-lint-ingress-service-containerfile"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.3.0
+        with:
+          dockerfile: oci/ingress.Containerfile
+  containerize-ingress-service:
     name: Containerize ingress server
     runs-on: ubuntu-latest
     container:
@@ -60,48 +68,86 @@ jobs:
       options: --privileged
     needs:
       - get-version-tag
-    defaults:
-      run:
-        working-directory: app/databuk/ingress_server
+      - lint-ingress-service-containerfile
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-containerize"
       cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Login to registry
-        if: ${{ inputs.push-container }}
-        run: buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ env.registry }}
-      - name: Build container file
-        run: |
-          buildah build -t ${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }} \
-          --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}" \
-          -f oci/Containerfile .
-      - name: Push container image
-        if: ${{ inputs.push-container }}
-        run: |
-          buildah push ${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }} docker://${{ env.registry }}/${{ env.repository }}:${{ needs.get-version-tag.outputs.version-tag }}
-          buildah logout ${{ env.registry }}
-  lint-helm-chart:
-    name: Lint ingress server Helm chart
+      - name: Containerize
+        uses: GeoMop/github-actions/.github/actions/containerize@v1
+        with:
+          registry: docker.io
+          repository: jbrezmorf/zarr-fuse-ingress-service
+          tag: ${{ needs.get-version-tag.outputs.version-tag }}
+          containerfile-path: oci/Containerfile
+          working-directory: ingress_server
+          registry-username: ${{ vars.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
+          push: true
+          extra-build-args: >
+            --build-arg APP_VERSION=${{ needs.get-version-tag.outputs.version-tag }}
+  lint-extractor-service-containerfile:
+    name: Lint extractor service Containerfile
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ingress_server
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-lint-extractor-service-containerfile"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.3.0
+        with:
+          dockerfile: oci/extractor.Containerfile
+  containerize-extractor-service:
+    name: Containerize extractor service
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/buildah/stable:v1.35.4
+      options: --privileged
+    needs:
+      - get-version-tag
+      - lint-extractor-service-containerfile
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-containerize-extractor"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Containerize
+        uses: GeoMop/github-actions/.github/actions/containerize@v1
+        with:
+          registry: docker.io
+          repository: jbrezmorf/zarr-fuse-extractor-service
+          tag: ${{ needs.get-version-tag.outputs.version-tag }}
+          containerfile-path: oci/Containerfile
+          working-directory: ingress_server
+          registry-username: ${{ vars.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
+          push: true
+          extra-build-args: >
+            --build-arg APP_VERSION=${{ needs.get-version-tag.outputs.version-tag }}
+  validate-helm-chart:
+    name: Validate ingress server Helm chart
     runs-on: ubuntu-latest
     container:
       image: alpine/k8s:1.29.14
-    needs:
-      - containerize
-    defaults:
-      run:
-        working-directory: app/databuk/ingress_server/charts/ingress-server
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-lint-helm-chart"
       cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Lint helm chart
-        run: helm lint --values values/minimal-required-values.yaml --strict > /dev/null
-      - name: Template helm chart
-        run: helm template ingress-server . --values values/minimal-required-values.yaml > /dev/null
+      - name: Lint Helm chart
+        uses: GeoMop/github-actions/.github/actions/helm-lint@v1
+        with:
+          working-directory: ingress_server/charts
+          chart: zarr-fuse-ingress
+          helm-dependencies: "apache-airflow=https://airflow.apache.org"
   deploy-helm-chart:
     name: Deploy ingress server to e-infra rancher
     runs-on: ubuntu-latest
@@ -109,13 +155,13 @@ jobs:
     container:
       image: alpine/k8s:1.29.14
     needs:
-      - lint-helm-chart
+      - validate-helm-chart
       - get-version-tag
     env:
       KUBECONFIG: ./kubeconfig.yaml
     defaults:
       run:
-        working-directory: app/databuk/ingress_server/charts
+        working-directory: ingress_server
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-deploy-helm-chart"
       cancel-in-progress: true
@@ -124,18 +170,17 @@ jobs:
         uses: actions/checkout@v4
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
-      - name: Ensure that the namespace exists
-        run: kubectl create namespace --dry-run=client -o yaml "${{ inputs.namespace }}"
       - name: Set context
         run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
       - name: Deploy app
         run: |
-          helm upgrade ${{ inputs.release-name }} ingress-server \
+          helm upgrade zarr-fuse-ingress zarr-fuse-ingress \
           --install --atomic --timeout 10m --namespace "${{ inputs.namespace }}" \
-          --set image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
-          --set deployment.secrets.s3.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
-          --set deployment.secrets.s3.secretKey="${{ secrets.S3_SECRET_KEY }}" \
-          --set deployment.secrets.s3.endpointUrl="${{ vars.S3_ENDPOINT_URL }}" \
-          --set deployment.secrets.s3.storeUrl='${{ inputs.s3-store-url }}' \
-          --set-json deployment.secrets.basicAuth.usersJson='${{ secrets.BASIC_AUTH_USERS_JSON }}' \
-          --set app.name="${{ inputs.release-name }}"
+          --set ingressService.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
+          --set airflow.defaultAirflowTag="${{ needs.get-version-tag.outputs.version-tag }}" \
+          --set ingressService.configuration.s3.endpointUrl="${{ vars.S3_ENDPOINT_URL }}" \
+          --set ingressService.configuration.s3.secrets.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
+          --set ingressService.configuration.s3.secrets.secretKey="${{ secrets.S3_SECRET_KEY }}" \
+          --set ingressService.configuration.fastapi.secrets.usersJson='${{ secrets.BASIC_AUTH_USERS_JSON }}' \
+          --values ${{ github.workspace }}/.github/values/ingress-server/defaults.yaml \
+          ${{ inputs.extra-helm-values }}

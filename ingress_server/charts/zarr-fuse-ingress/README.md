@@ -11,6 +11,7 @@ A Helm chart for ingress service and Apache Airflow extractor service
 | Name | Email | Url |
 | ---- | ------ | --- |
 | Stepan Moc | <stepan.mocik@gmail.com> |  |
+| Jan Brezmor | <jan.brezina@tul.cz> |  |
 
 ## Source Code
 
@@ -26,51 +27,52 @@ A Helm chart for ingress service and Apache Airflow extractor service
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| apache-airflow.enabled | bool | `true` |  |
-| ingressService.component | string | `"ingress-service"` |  |
-| ingressService.configuration.fastapi.security.usersJson | string | `""` |  |
-| ingressService.configuration.s3.endpointUrl | string | `""` |  |
-| ingressService.configuration.s3.secrets.accessKey | string | `""` |  |
-| ingressService.configuration.s3.secrets.secretKey | string | `""` |  |
-| ingressService.configuration.s3.storeUrl | string | `""` |  |
-| ingressService.extraEnv[0].name | string | `"LOG_LEVEL"` |  |
-| ingressService.extraEnv[0].value | string | `"DEBUG"` |  |
-| ingressService.extraEnv[1].name | string | `"PORT"` |  |
-| ingressService.extraEnv[1].value | int | `8000` |  |
-| ingressService.image.name | string | `"jbrezmorf/ingress-service"` |  |
-| ingressService.image.tag | string | `"latest"` |  |
-| ingressService.imagePullPolicy | string | `"Always"` |  |
-| ingressService.ingress.annotations."cert-manager.io/cluster-issuer" | string | `"letsencrypt-prod"` |  |
-| ingressService.ingress.annotations."kubernetes.io/tls-acme" | string | `"true"` |  |
-| ingressService.ingress.className | string | `"nginx"` |  |
-| ingressService.ingress.labels | object | `{}` |  |
-| ingressService.name | string | `"ingress-service"` |  |
-| ingressService.partOf | string | `""` |  |
-| ingressService.replicaCount | int | `1` |  |
-| ingressService.resources.limits.cpu | string | `"250m"` |  |
-| ingressService.resources.limits.memory | string | `"256Mi"` |  |
-| ingressService.resources.requests.cpu | string | `"125m"` |  |
-| ingressService.resources.requests.memory | string | `"128Mi"` |  |
-| ingressService.restartPolicy | string | `"Always"` |  |
-| ingressService.securityContext.container.allowPrivilegeEscalation | bool | `false` |  |
-| ingressService.securityContext.container.capabilities.drop[0] | string | `"ALL"` |  |
-| ingressService.securityContext.container.privileged | bool | `false` |  |
-| ingressService.securityContext.container.readOnlyRootFilesystem | bool | `true` |  |
-| ingressService.securityContext.container.runAsGroup | int | `1000` |  |
-| ingressService.securityContext.container.runAsNonRoot | bool | `true` |  |
-| ingressService.securityContext.container.runAsUser | int | `1000` |  |
-| ingressService.securityContext.pod.fsGroup | int | `1000` |  |
-| ingressService.securityContext.pod.runAsGroup | int | `1000` |  |
-| ingressService.securityContext.pod.runAsNonRoot | bool | `true` |  |
-| ingressService.securityContext.pod.runAsUser | int | `1000` |  |
-| ingressService.securityContext.pod.seccompProfile.type | string | `"RuntimeDefault"` |  |
-| ingressService.service.annotations | object | `{}` |  |
-| ingressService.service.externalPort.name | string | `"http"` |  |
-| ingressService.service.externalPort.number | int | `80` |  |
-| ingressService.service.internalPort.name | string | `"http"` |  |
-| ingressService.service.internalPort.number | int | `8000` |  |
-| ingressService.service.labels | object | `{}` |  |
-| ingressService.service.name | string | `"ingress_service"` |  |
-| ingressService.service.type | string | `"ClusterIP"` |  |
-| registry.host | string | `"docker.io"` |  |
-| runId | int | `0` |  |
+| airflow | object | ~ | Apache Airflow configuration Documentation: https://artifacthub.io/packages/helm/apache-airflow/airflow |
+| ingressService | object | ~ | Ingress Service configuration |
+| ingressService.component | string | .Chart.Name | Component name for label 'app.kubernetes.io/component' |
+| ingressService.configuration | object | ~ | Service configuration |
+| ingressService.configuration.fastapi | object | ~ | FastAPI configuration |
+| ingressService.configuration.fastapi.secrets | object | ~ | FastAPI secrets |
+| ingressService.configuration.fastapi.secrets.usersJson | string | "{}" | Must be provided as a JSON string. |
+| ingressService.configuration.s3 | object | ~ | S3 configuration |
+| ingressService.configuration.s3.endpointUrl | string | `"endpointUrl"` | S3 endpoint URL |
+| ingressService.configuration.s3.secrets | object | ~ | S3 secrets |
+| ingressService.configuration.s3.secrets.accessKey | string | `"accessKey"` | S3 access key |
+| ingressService.configuration.s3.secrets.secretKey | string | `"secretKey"` | S3 secret key |
+| ingressService.configuration.s3.storeUrl | string | `"storeUrl"` | S3 store URL |
+| ingressService.extraAnnotations | dict | `{}` | Extra annotations to add to all resources |
+| ingressService.extraEnv | list | `[]` | Each item is an object with {name, value}. |
+| ingressService.extraLabels | dict | `{}` | Extra labels to add to all resources |
+| ingressService.image | object | ~ | Image details |
+| ingressService.image.name | string | `"jbrezmorf/ingress-service"` | Image repository |
+| ingressService.image.tag | string | `"latest"` | Image tag |
+| ingressService.imagePullPolicy | string | `"Always"` | Image pull policy |
+| ingressService.ingress | object | ~ | Ingress configuration |
+| ingressService.ingress.annotations | dict | `{}` | Ingress annotations |
+| ingressService.ingress.className | string | `"nginx"` | Ingress class name |
+| ingressService.ingress.hosts | object | ~ | Hosts configuration |
+| ingressService.ingress.labels | dict | {} | Ingress labels |
+| ingressService.name | string | `"ingress-service"` | Application name |
+| ingressService.partOf | string | .Chart.Name | Part of label 'app.kubernetes.io/part-of' |
+| ingressService.replicaCount | int | `1` | Number of desired pods |
+| ingressService.resources | object | ~ | Resource requests and limits |
+| ingressService.resources.limits | object | {} | Resource limits for the container |
+| ingressService.resources.requests | object | {} | Resource requests for the container |
+| ingressService.restartPolicy | string | `"Always"` | Restart policy for the pod |
+| ingressService.securityContext | object | ~ | Security context settings |
+| ingressService.securityContext.container | object | {} | Container security context settings |
+| ingressService.securityContext.pod | object | {} | Pod security context settings |
+| ingressService.service | object | ~ | Service configuration |
+| ingressService.service.annotations | dict | `{}` | Service annotations |
+| ingressService.service.externalPort | object | ~ | External port configuration |
+| ingressService.service.externalPort.name | string | `"http"` | Port name |
+| ingressService.service.externalPort.number | int | `80` | Port number |
+| ingressService.service.internalPort | object | ~ | Internal port configuration |
+| ingressService.service.internalPort.name | string | `"http"` | Port name |
+| ingressService.service.internalPort.number | int | `8000` | Port number |
+| ingressService.service.labels | dict | `{}` | Service labels |
+| ingressService.service.name | string | `"ingress-service"` | Service name |
+| ingressService.service.type | string | `"ClusterIP"` | Service type |
+| registry | object | ~ | Registry definition |
+| registry.host | string | `"docker.io"` | Hostname of the container registry |
+| runId | int | `0` | Unique run identifier |

@@ -3,36 +3,17 @@ on:
   pull_request:
     branches:
       - "*"
+    paths:
+      - ingress_server/**
 jobs:
-  get-changed-files:
-    name: Get changed file
-    runs-on: ubuntu-latest
-    outputs:
-      any-changed: ${{ steps.changed.outputs.any_changed }}
-    concurrency:
-      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-changed-files
-      cancel-in-progress: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Check if Ingress Server files or Helm Charts were changed
-        id: changed
-        uses: tj-actions/changed-files@v45
-        with:
-          files: |
-            charts/ingress-server/**
-            app/databuk/ingress_server/**
   build:
-    name: Build and deploy ingress server
-    needs:
-      - get-changed-files
-    if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
+    name: Build and deploy ingress server for deve
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     with:
       push-container: true
       deploy-helm-chart: true
       tag: generate
       namespace: ingress-server-development
-      release-name: ingress-server-development
-      s3-store-url: s3://app-databuk-test-service/bukov-pull-request.zarr
+      extra-helm-values: |
+        --values ${{ github.workspace }}/.github/values/ingress-server/pull-request.yaml
     secrets: inherit

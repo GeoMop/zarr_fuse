@@ -1,0 +1,13 @@
+ingressService:
+  name: ingress-server
+  configuration:
+    s3:
+      storeUrl: "s3://app-databuk-release-service/bukov.zarr"
+  service:
+    name: ingress-server
+  ingress:
+    hosts:
+      - name: zarr-fuse-ingress-server.dyn.cloud.e-infra.cz
+        tls:
+          enabled: true
+          secretName: zarr-fuse-ingress-server-dyn-cloud-e-infra-cz-tls

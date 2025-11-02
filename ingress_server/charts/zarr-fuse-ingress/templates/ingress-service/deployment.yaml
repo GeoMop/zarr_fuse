@@ -20,9 +20,15 @@ spec:
         app.kubernetes.io/part-of: {{ .Values.ingressService.partOf | default .Chart.Name }}
         app.kubernetes.io/component: {{ .Values.ingressService.component | default .Chart.Name }}
         app.kubernetes.io/managed-by: {{ .Release.Service }}
+        {{- if .Values.ingressService.extraLabels }}
+        {{- toYaml .Values.ingressService.extraLabels | nindent 8 }}
+        {{- end }}
       annotations:
-        github.com/run-id: "{{ .Values.runID }}"
+        github.com/run-id: "{{ .Values.runId }}"
         checksum/config: '{{ include (print $.Template.BasePath "/ingress-service/secret.yaml") . | sha256sum }}'
+        {{- if .Values.ingressService.extraAnnotations }}
+        {{- toYaml .Values.ingressService.extraAnnotations | nindent 8 }}
+        {{- end }}
     spec:
       securityContext:
         {{- toYaml .Values.ingressService.securityContext.pod | nindent 8 }}
@@ -42,10 +48,12 @@ spec:
           securityContext:
             {{- toYaml .Values.ingressService.securityContext.container | nindent 12 }}
           env:
+            {{- if .Values.ingressService.extraEnv }}
             {{- toYaml .Values.ingressService.extraEnv | nindent 12 }}
+            {{- end }}
           envFrom:
             - secretRef:
-                name: ingress-service-env-var-secrets
+                name: ingress-service-env-secrets
           volumeMounts:
             - name: ingress-server-tmp
               mountPath: /tmp
