@@ -137,9 +137,6 @@ jobs:
       - containerize-extractor-service
     env:
       KUBECONFIG: ./kubeconfig.yaml
-    defaults:
-      run:
-        working-directory: ingress_server/charts
     steps:
       - name: Checkout
         uses: actions/checkout@v4
