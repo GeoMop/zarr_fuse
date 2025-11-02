@@ -3,7 +3,7 @@ ingressService:
     - name: LOG_LEVEL
       value: INFO
     - name: PORT
-      value: 8000
+      value: "8000"
   service:
     externalPort:
       number: 80

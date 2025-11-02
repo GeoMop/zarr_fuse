@@ -22,7 +22,7 @@ spec:
         {{- toYaml .Values.ingressService.extraLabels | nindent 8 }}
         {{- end }}
       annotations:
-        github.com/run-id: "{{ .Values.runId }}"
+        github.com/run-id: {{ .Values.runId | quote }}
         checksum/config: '{{ include (print $.Template.BasePath "/ingress-service/secret.yaml") . | sha256sum }}'
         {{- if .Values.ingressService.extraAnnotations }}
         {{- toYaml .Values.ingressService.extraAnnotations | nindent 8 }}

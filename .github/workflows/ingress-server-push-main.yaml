@@ -18,6 +18,6 @@ jobs:
       deploy-helm-chart: true
       tag: generate
       namespace: ingress-server-latest
-      extra-helm-values: |
+      extra-helm-values: >-
         --values .github/values/ingress-server/main.yaml
     secrets: inherit

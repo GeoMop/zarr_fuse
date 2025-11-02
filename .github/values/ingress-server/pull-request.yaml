@@ -1,16 +1,17 @@
+# TODO: change ingress-service-development to ingress-server-development
 ingressService:
-  name: ingress-server-development
+  name: ingress-service-development
   configuration:
     s3:
       storeUrl: "s3://app-databuk-test-service/bukov-pull-request.zarr"
   service:
-    name: ingress-server-development
+    name: ingress-service-development
   ingress:
     hosts:
-      - name: zarr-fuse-ingress-server-development.dyn.cloud.e-infra.cz
+      - name: zarr-fuse-ingress-service-development.dyn.cloud.e-infra.cz
         tls:
           enabled: true
-          secretName: zarr-fuse-ingress-server-development-dyn-cloud-e-infra-cz-tls
+          secretName: zarr-fuse-ingress-service-development-dyn-cloud-e-infra-cz-tls
 airflow:
   ingress:
     web:
