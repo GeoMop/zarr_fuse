@@ -57,47 +57,25 @@ class S3Service:
             }
         }
     
-    def _open_zarr_store(self, store_path: str) -> tuple:
-        """Open Zarr store and return (store_mapper, store_group)"""
-        storage_options = self._get_storage_options()
-        
-        bucket_name = self._current_config.store_url.split('/')[2]
-        # Normalize path and avoid duplicating bucket
-        normalized_path = store_path.lstrip('/')
-        if normalized_path.startswith(f"{bucket_name}/"):
-            mapper_url = f"s3://{normalized_path}"
+    def _open_zarr_store(self) -> tuple:
+        """Open Zarr store using zarr_fuse.open_store and deserialized schema from endpoint config."""
+        import os
+        schema_file = self._current_config.schema_file
+        # If schema_file is a relative path, resolve it relative to backend directory
+        if not os.path.isabs(schema_file):
+            schema_path = os.path.join(os.path.dirname(__file__), '..', schema_file)
         else:
-            mapper_url = f"s3://{bucket_name}/{normalized_path}"
-        store = fsspec.get_mapper(mapper_url, **storage_options)
-        
-        # Open the Zarr store - try different approaches
-        store_group = None
-        print(f"Attempting to open store: {store_path}")
-        
-        # Attempt 1: Try to open as Zarr group (preferred method)
-        try:
-            store_group = zarr.open_group(store)
-            return store, store_group
-        except Exception as zarr_error:
-            print(f"WARNING: Could not open as Zarr group: {zarr_error}")
-        
-        # Attempt 2: Fallback to minimal structure from store contents
-        try:
-            contents = list(store.list_dir(""))
-            if contents:
-                print(f"Creating minimal structure from {len(contents)} items")
-                minimal_structure = {
-                    'name': store_path.split('/')[-1],
-                    'path': store_path,
-                    'type': 'group',
-                    'children': [{'name': item, 'path': item, 'type': 'unknown'} for item in contents]
-                }
-                return store, minimal_structure
-        except Exception as fallback_error:
-            print(f"WARNING: Fallback method also failed: {fallback_error}")
-        
-        # Both attempts failed
-        raise Exception(f"Could not open store '{store_path}' in any format")
+            schema_path = schema_file
+        print(f"Attempting to open store with zarr_fuse using schema: {schema_path}")
+        import yaml
+        with open(schema_path, 'r', encoding='utf-8') as f:
+            raw_dict = yaml.safe_load(f)
+            from zarr_fuse.zarr_schema import SchemaAddress
+            address = SchemaAddress(addr=[], file=self._current_config.store_url)
+            schema = zarr_fuse.zarr_schema.dict_deserialize(raw_dict, address)
+        kwargs = {"S3_ENDPOINT_URL": os.getenv("S3_ENDPOINT_URL")}
+        node = zarr_fuse.open_store(schema, **kwargs)
+        return None, node
     
     def _find_group_variables(self, store, store_group, group_path: str = "") -> List[str]:
         """Find available variables in a group using multiple fallback approaches"""
@@ -328,50 +306,25 @@ class S3Service:
             raise ValueError(f"Failed to get store structure: {e}")
     
     def _get_store_structure_zarr_fuse(self) -> Dict[str, Any]:
-        """Temporary workaround using direct xarray instead of zarr_fuse"""
+        """Extract structure using zarr_fuse node only."""
         try:
-            # Get store configuration
             store_url = self._current_config.store_url
-            store_path = store_url[5:] if store_url.startswith('s3://') else store_url
-            store_name = store_path.split('/')[-1]
-            
-            print(f"Opening store with zarr (temporary workaround): {store_path}")
-            
-            # Direct zarr approach - bypass FsspecStore prototype issue
-            import zarr
-            
-            # Prepare S3 storage options for zarr (from environment variables)
-            storage_options = {
-                'endpoint_url': os.getenv('S3_ENDPOINT_URL'),
-                'key': os.getenv('S3_ACCESS_KEY'),
-                'secret': os.getenv('S3_SECRET_KEY')
-            }
-            
-            # Open with zarr directly using storage options
-            zarr_group = zarr.open_group(store_url, mode='r', storage_options=storage_options)
-            print(f"Zarr group opened successfully")
-            
-            # Build structure from zarr group
-            structure = self._build_structure_from_zarr_group(zarr_group, "")
-            
-            # Convert to legacy format
+            store_name = store_url.split('/')[-1]
+            print(f"Opening store with zarr_fuse: {store_url}")
+            # Open with zarr_fuse
+            _, node = self._open_zarr_store()
+            # Extract structure from node
+            # Assumption: node.to_dict() returns the expected structure
+            structure = node.to_dict() if hasattr(node, 'to_dict') else {}
             legacy_structure = self._convert_to_legacy_format(structure)
-            
-            # Format response to match legacy format
             zarr_stores = [{
                 'name': store_name,
-                'path': store_path,
+                'path': store_url,
                 'type': 'zarr_store',
                 'structure': legacy_structure
             }]
-            
-            # Debug: print structure to see what we're returning
-            print(f"DEBUG: zarr structure = {structure}")
-            import json
-            print(f"DEBUG: structure JSON = {json.dumps(structure, indent=2, default=str)}")
-            
-            bucket_name = store_path.split('/')[0]
-            
+            bucket_name = store_url.split('/')[2] if store_url.startswith('s3://') else store_url.split('/')[0]
+            print(f"DEBUG: zarr_fuse structure = {structure}")
             return {
                 'status': 'success',
                 'bucket_name': bucket_name,
@@ -379,10 +332,11 @@ class S3Service:
                 'total_stores': len(zarr_stores),
                 'stores': zarr_stores
             }
-            
         except Exception as e:
-            logger.error(f"Failed to get store structure with zarr: {e}")
-            raise ValueError(f"Failed to get store structure with zarr: {e}")
+            import traceback
+            logger.error(f"Failed to get store structure with zarr_fuse: {e}")
+            traceback.print_exc()
+            raise ValueError(f"Failed to get store structure with zarr_fuse: {e}")
     
     def _build_structure_from_xarray(self, ds) -> Dict[str, Any]:
         """Build structure from xarray dataset"""

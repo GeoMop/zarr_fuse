@@ -4,11 +4,12 @@
 # Endpoint 1: 
 "bukov_endpoint":
   reload_interval: 300  # Cache TTL in seconds (5 minutes)
-  schema_file: "schemas/test_schema.yaml"
+  schema_file: "schemas/tree.yaml"
   store_url: "s3://${S3_BUCKET_NAME}/bukov.zarr"
   description: "bukov_endpoint"
   store_type: "zarr"
   version: "1.0.0"
+
 
 # Endpoint 2:
 "surface_data_endpoint":
@@ -18,6 +19,8 @@
   description: "surface_data_endpoint"
   store_type: "zarr"
   version: "1.0.0"
+
+
 
 # Notes:
 # - S3 credentials are loaded from environment variables:
