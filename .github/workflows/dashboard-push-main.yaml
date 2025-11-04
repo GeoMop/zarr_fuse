@@ -18,5 +18,3 @@ jobs:
       release-name: dashboard
       s3-bucket-name: app-databuk-release-service
     secrets: inherit
-
-H
