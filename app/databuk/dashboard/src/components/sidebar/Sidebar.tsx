@@ -247,7 +247,12 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <select
                   id="endpoint-select"
                   value={selectedEndpoint}
-                  onChange={e => setSelectedEndpoint(e.target.value)}
+                  onChange={e => {
+                    setSelectedEndpoint(e.target.value);
+                    const params = new URLSearchParams(window.location.search);
+                    params.set('store', e.target.value);
+                    window.history.replaceState({}, '', `${window.location.pathname}?${params}`);
+                  }}
                   className="w-full px-3 py-2 rounded-xl bg-blue-600 text-blue-100 border border-blue-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-150 font-semibold hover:bg-blue-700"
                   style={{ minHeight: 44 }}
                 >
