@@ -24,7 +24,7 @@ on:
         description: The S3 bucket name for the backend
         required: false
         type: string
-        default: "app-databuk-release-service"
+        default: "hlavo-release"
 jobs:
   get-version-tag:
     name: Get version tag

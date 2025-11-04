@@ -16,5 +16,5 @@ jobs:
       deploy: true
       namespace: zarr-fuse-dashboard
       release-name: dashboard
-      s3-bucket-name: app-databuk-release-service
+      s3-bucket-name: hlavo-release
     secrets: inherit
