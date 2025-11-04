@@ -4,6 +4,7 @@ on:
     branches:
       - dashboard-main
       - JB-dashboard-deploy
+      - MF_dashboard-zarr-fuse-integration-v2
     paths:
       - app/databuk/dashboard/**
   workflow_dispatch:
@@ -17,3 +18,5 @@ jobs:
       release-name: dashboard
       s3-bucket-name: app-databuk-release-service
     secrets: inherit
+
+H

@@ -14,7 +14,7 @@
 # Endpoint 2:
 "surface_data_endpoint":
   reload_interval: 300  # Cache TTL in seconds (5 minutes)
-  schema_file: "schemas/surface_data_schema.yaml"
+  schema_file: "schemas/surface_schema.yaml"
   store_url: "s3://${S3_BUCKET_NAME}/surface.zarr"
   description: "surface_data_endpoint"
   store_type: "zarr"
