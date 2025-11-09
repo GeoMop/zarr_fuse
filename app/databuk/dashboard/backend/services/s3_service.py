@@ -315,8 +315,37 @@ class S3Service:
             _, node = self._open_zarr_store()
             # Extract structure from node
             # Assumption: node.to_dict() returns the expected structure
-            structure = node.to_dict() if hasattr(node, 'to_dict') else {}
-            legacy_structure = self._convert_to_legacy_format(structure)
+            def node_to_legacy(node, path=""):
+                # Her node için legacy children dizisini doldur
+                children = []
+                # Variables (arrays)
+                if hasattr(node, 'dataset') and node.dataset:
+                    ds = node.dataset
+                    if hasattr(ds, 'data_vars'):
+                        for var_name, var in ds.data_vars.items():
+                            children.append({
+                                'name': var_name,
+                                'path': f"{path}/{var_name}" if path else var_name,
+                                'type': 'array',
+                                'shape': list(var.shape),
+                                'dtype': str(var.dtype),
+                                'chunks': getattr(var, 'chunks', None),
+                                'size': getattr(var, 'size', None),
+                                'sample_data': []
+                            })
+                # Subgroups (children)
+                if hasattr(node, 'children') and node.children:
+                    for child_name, child_node in node.children.items():
+                        children.append(node_to_legacy(child_node, f"{path}/{child_name}" if path else child_name))
+                return {
+                    'name': node.name if hasattr(node, 'name') else 'root',
+                    'path': path,
+                    'type': 'group',
+                    'children': children
+                }
+
+            legacy_structure = node_to_legacy(node)
+            print(f"DEBUG: legacy_structure = {legacy_structure}")
             zarr_stores = [{
                 'name': store_name,
                 'path': store_url,
@@ -324,7 +353,6 @@ class S3Service:
                 'structure': legacy_structure
             }]
             bucket_name = store_url.split('/')[2] if store_url.startswith('s3://') else store_url.split('/')[0]
-            print(f"DEBUG: zarr_fuse structure = {structure}")
             return {
                 'status': 'success',
                 'bucket_name': bucket_name,
