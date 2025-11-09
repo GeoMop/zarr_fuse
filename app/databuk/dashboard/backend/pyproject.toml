@@ -33,7 +33,6 @@ dependencies = [
   "zarr",
   "dask",
   "xarray",
-  "python-dotenv",
   # Backend web framework
   "fastapi",
   "uvicorn[standard]",
