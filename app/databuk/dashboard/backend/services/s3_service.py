@@ -315,28 +315,22 @@ class S3Service:
             _, node = self._open_zarr_store()
             # Extract structure from node
             # Assumption: node.to_dict() returns the expected structure
-            def node_to_legacy(node, path=""):
-                # Her node için legacy children dizisini doldur
+            def node_to_legacy_minimal(node, path=""):
                 children = []
-                # Variables (arrays)
+                # Variables (arrays) - sadece isim ve path
                 if hasattr(node, 'dataset') and node.dataset:
                     ds = node.dataset
                     if hasattr(ds, 'data_vars'):
-                        for var_name, var in ds.data_vars.items():
+                        for var_name in ds.data_vars.keys():
                             children.append({
                                 'name': var_name,
                                 'path': f"{path}/{var_name}" if path else var_name,
-                                'type': 'array',
-                                'shape': list(var.shape),
-                                'dtype': str(var.dtype),
-                                'chunks': getattr(var, 'chunks', None),
-                                'size': getattr(var, 'size', None),
-                                'sample_data': []
+                                'type': 'array'
                             })
                 # Subgroups (children)
                 if hasattr(node, 'children') and node.children:
                     for child_name, child_node in node.children.items():
-                        children.append(node_to_legacy(child_node, f"{path}/{child_name}" if path else child_name))
+                        children.append(node_to_legacy_minimal(child_node, f"{path}/{child_name}" if path else child_name))
                 return {
                     'name': node.name if hasattr(node, 'name') else 'root',
                     'path': path,
@@ -344,7 +338,7 @@ class S3Service:
                     'children': children
                 }
 
-            legacy_structure = node_to_legacy(node)
+            legacy_structure = node_to_legacy_minimal(node)
             print(f"DEBUG: legacy_structure = {legacy_structure}")
             zarr_stores = [{
                 'name': store_name,
