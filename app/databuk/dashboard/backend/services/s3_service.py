@@ -41,9 +41,9 @@ class S3Service:
             raise ValueError("No configuration provided")
             
         return {
-            'key': os.getenv('S3_ACCESS_KEY'),
-            'secret': os.getenv('S3_SECRET_KEY'),
-            'client_kwargs': {'endpoint_url': os.getenv('S3_ENDPOINT_URL')},
+            'key': os.getenv('ZF_S3_ACCESS_KEY'),
+            'secret': os.getenv('ZF_S3_SECRET_KEY'),
+            'client_kwargs': {'endpoint_url': os.getenv('ZF_S3_ENDPOINT_URL')},
             'config_kwargs': {
                 's3': {
                     'payload_signing_enabled': False,
@@ -73,7 +73,7 @@ class S3Service:
             from zarr_fuse.zarr_schema import SchemaAddress
             address = SchemaAddress(addr=[], file=self._current_config.store_url)
             schema = zarr_fuse.zarr_schema.dict_deserialize(raw_dict, address)
-        kwargs = {"S3_ENDPOINT_URL": os.getenv("S3_ENDPOINT_URL")}
+        kwargs = {"S3_ENDPOINT_URL": os.getenv("ZF_S3_ENDPOINT_URL")}
         node = zarr_fuse.open_store(schema, **kwargs)
         return None, node
     
