@@ -29,11 +29,11 @@ namely S3 connection details.
 The VARS dictionary defines variables of the dataset stored in the node.
 Each variable is defined by its own dictionary of properties.
 
-### `coords`
+### `coords:`
 String or list of strings, name(s) of the coordinate(s) indexing the variable. 
 The variable is N dimensional tensor, where each of N axes corresponds to one named coordinate defined in COORDS.
 
-### `type` (optional)
+### `type:` (optional)
 Explicit data type of the variable in terms of Numpy dtype. 
 Default is 'None', meaning the dtype is determined by the first write. 
 We accept also following types for non-physical quantities:
@@ -44,12 +44,12 @@ We accept also following types for non-physical quantities:
 If  `unit` is provided, the `bool` and `str[n]` are not allowed.
 Explicit type specification is recommended.
 
-### `na_value` (optional)
+### `na_value:` (optional)
 Value used to represent missing or invalid data in the variable. Native NaN is used by default for float quantities.
 'max_int' and 'min_int' keywords are supported for integer types, representing the maximum and minimum 
 signed integer values of the variable type. Otherwise you have to provide the actual value compatible with the variable type.
 
-### `unit` 
+### `unit:` 
 Could be string or dictionary. The second case is used to define more complex variable values. 
 
 - **string** physical unit of the variable, [pint package](https://pint.readthedocs.io/en/stable/) 
@@ -68,7 +68,7 @@ Could be string or dictionary. The second case is used to define more complex va
   - `dayfirst` : bool, default = False; Interpret the first value as day (set to True), or as the month (set to False).
   - `yearfirst` : bool, default = True; If true YY is at the frist place, else it is at the last place. 
 
-### `range` (optional)
+### `range:` (optional)
   - `discrete`: If set, the variable could only take values from provided set. 
      The set could either be defined as a list of values, or as a string containing 
      path to a CSV file which would be used to populate the set of discrete values.
@@ -82,23 +82,23 @@ Could be string or dictionary. The second case is used to define more complex va
      E.g. to define allowed temperature range between -20C and 40C one could write:
      `interval: [-20, 40, 'degC']`
 
-### `description` (optional)
+### `description:` (optional)
 String description of the variable. Could describe: physical name, origin of the values, measurement environment, or its use.
 More formal metadata structure for the data origin are planed for future versions.
 
-### `df_col` (optional, deprecated)
+### `df_col:` (optional, soon deprecated)
 String with name of the source column in the updating data frames. Default is the variable name.
 The dataset is updated through the `zf.Node.update` to which the polars or pandas Data Frame is passed.
 To get the variable values the `df_col` column is taken, first interpreting the values as the `source_unit` and then 
 convert them to the variable `unit`.
 Will soon be deprecated in favor of Apache Air workflow conversion task.
-
-### `source_unit` (optional, deprecated)
+ 
+### `source_unit:` (optional, soon deprecated)
 String or dictionary defining the unit of the source data frame column.
 If not provided, the variable `unit` is assumed.
 Will soon be deprecated in favor of Apache Air workflow conversion task.
 
-### `attrs`
+### `attrs:`
 Dictionary of custom variable attributes.
 
 ## COORDS
@@ -107,19 +107,19 @@ Each coordinate is defined by its own dictionary of properties, that includes
 all properties of variables since each coordinate is also a 1D variable. 
 Therefore, only coordinate specific properties are described below.
 
-### `composed`
+### `composed:`
 List of variables forming a single tuple valued coordinate.
 This allows to have, e.g. sparse set of (longitude, latitude) coordinates to form a coordinate values. 
 The actual coordinated values are hashes of the tuples, while the values or the components are given by
 the respecting variables. 
 
-### `sorted`
+### `sorted:`
 If True, the coordinate values are always sorted in ascending order.
 
-### `chunk_size` (optional, 1024)
+### `chunk_size:` (optional, 1024)
 Controls underlaying chunking in the ZARR store. Need more work to support parallel writes with zarr fuse.
 
-### `step_limits`: (optional, obsolete) 
+### `step_limits:` (optional, obsolete) 
 Optional control over added values in the coordinate. This has to be redesigned as it 
 doesn't work in parallel updates. Zarr is not designed to appending to more coordinates than one.
 The mechanism also involve interpolation which leads to loss of original values. It will be replaced by Apache Air workflow.

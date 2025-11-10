@@ -94,10 +94,11 @@ def test_sort_by_coord_unsorted():
     assert np.all([5, 25, 6, 35] == new[idx_sort])
 
 
-def run_interp(old, new, step_limits, sort=True,  unit='', step_unit='hour'):
+def run_interp(old, new, step_limits, sort=True,  unit=''):
     cfg = dict(
         name='tst_coord',
-        unit= "s",
+        unit=unit,
+        sorted=sort,
         step_limits=step_limits
     )
     schema = zf_schema.Coord(_ctx(cfg))
@@ -110,34 +111,36 @@ def run_interp(old, new, step_limits, sort=True,  unit='', step_unit='hour'):
 def test_interpolate_coord_sorted():
     old = [0, 1, 2]
     # sorted, step_limits - no extension
-    merged, split = run_interp(old, [1, 1.5, 2.1], step_limits=None)
+    merged, split = run_interp(old, [1, 1.5, 2.1], step_limits="no_new")
     assert split == 2
     np.allclose(merged, [1, 2])
 
     new = [1, 1.5, 2.1, 3, 10]
-    merged, split = run_interp(old, new, step_limits=None)
+    merged, split = run_interp(old, new, step_limits="no_new")
     # apendend coordinates ignored. Non-fatal error.
     assert np.allclose(merged, [1, 2])
 
     # sorted, step_limits - full extension
-    merged, split = run_interp(old, new, step_limits=[])
+    merged, split = run_interp(old, new, step_limits="any_new")
     assert split == 2
     np.allclose(merged, [1, 2, 2.1, 3, 10])
 
     new = [1, 1.5, 2, 3, 10]
-    merged, split = run_interp(old, new, step_limits=[])
+    merged, split = run_interp(old, new, step_limits="any_new")
     assert split == 2
     np.allclose(merged, [1, 2, 3, 10])
 
     # sorted, step_limits - unexact step limits
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
+                    unit='h',
                     step_limits={'start':72, 'end':126, 'unit':'minutes'}) # 1.2 h, 2.1 h
     assert split == 2
     np.allclose(merged, [1, 2, 4, 5.75, 7.5, 8.75,  10])
 
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
+                    unit='h',
                     step_limits=dict(start=150, end=150, unit='minutes')) # 2.5 h
     assert split == 2
     np.allclose(merged, [1, 2, 3.5 + 1/3.0, 5 + 2/3.0, 7.5,  10])
@@ -320,9 +323,20 @@ def test_interpolate_ds():
         coords={"x": update_x,   "p": update_p},
     )
 
+    coord_schema = lambda x: zf_schema.Coord(_ctx(x))
     schema = {
-        "x": DummySchema(sorted=True,  step_limits=[], unit='h', step_unit='h'),
-        "p": DummySchema(sorted=False, step_limits=[], unit='deg', step_unit='deg'),
+        "x": coord_schema(dict(
+                name='x',
+                unit='h',
+                sorted=True,
+                step_limits=[]
+            )),
+        "p": coord_schema(dict(
+            name='p',
+            unit='deg',
+            sorted=False,
+            step_limits=[]
+        ))
     }
 
     # --- Run the interpolation under test ---

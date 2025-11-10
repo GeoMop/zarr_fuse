@@ -40,13 +40,15 @@ Scalar = bool | int | float | str
 Unit = str | units.DateTimeUnit
 RangeTuple = None | List[None] | Tuple[Scalar, Scalar] | Tuple[Scalar,Scalar, Unit]
 
-def unit_instance(cfg: ContextCfg) -> Unit:
+def unit_instance(cfg: ContextCfg, default_unit=None) -> Unit:
     """
     Create instance of pint.Unit for a string intput or
     instance of DateTimeUnit for the dict input.."""
     unit, schema_ctx = cfg.value(), cfg.schema_ctx
     if unit is None:
-        return None
+        if default_unit is None:
+            schema_ctx.error(f"Obligatory unit was not specified.")
+        return default_unit
     elif isinstance(unit, str):
         try:
             return units.Unit(unit)
@@ -57,10 +59,7 @@ def unit_instance(cfg: ContextCfg) -> Unit:
             return units.DateTimeUnit(**unit)
         except Exception as e:
             cfg.schema_ctx.error(f"Invalid DateTimeUnit dict: {unit}. Error: {e}")
-    else:
-        cfg.schema_ctx.error(f"Unsupported unit: {unit}")
-        pass
-    return ""
+    cfg.schema_ctx.error(f"Unsupported unit: {unit}")
 
 
 @attrs.define
@@ -112,6 +111,9 @@ class InfRange:
     def asdict(self, value_serializer, filter):
         return None
 
+
+
+
 @attrs.define
 class Interval(AddressMixin):
     """
@@ -126,23 +128,25 @@ class Interval(AddressMixin):
     @classmethod
     def from_list(cls, cfg: ContextCfg, default_unit):
         lst, schema_ctx = cfg.value(), cfg.schema_ctx
-        if lst is None:
+
+        if lst is None:     # empty interval
             return cls(-np.inf, -np.inf, default_unit)
 
         if not isinstance(lst, list):
             lst = [lst]
-        if len(lst) == 0:
+        if len(lst) == 0:   # full range
             return cls(-np.inf, np.inf, default_unit)
-        if len(lst) == 1:
+        if len(lst) == 1:   # single point
             lst = 2 * lst
 
-        if len(lst) == 2:
-            return cls(lst[0], lst[1], default_unit)
-        elif len(lst) == 3:
-            unit = unit_instance(cfg[2])
-            return cls(lst[0], lst[1], unit)
-        else:
-            cfg.schema_ctx.error(f"Invalid interval specification: {lst}")
+        if len(lst) > 3:
+            raise cfg.schema_ctx.error(f"Invalid interval specification: {lst}")
+        if len(lst) == 2:   # start, end
+            unit = default_unit
+        else: # len(lst) == 3: # start, end, unit
+            unit = unit_instance(cfg[2], default_unit)
+        return cls(lst[0], lst[1], unit)
+
 
     @classmethod
     def step_limits(cls, cfg, default_unit):
@@ -159,8 +163,12 @@ class Interval(AddressMixin):
                 return cls(-np.inf, np.inf, default_unit)
             else:
                 cfg.schema_ctx.error(f"Invalid step_limits specification: {cfg.cfg}")
-        else:
+        elif isinstance(cfg.cfg, list):
             return cls.from_list(cfg, default_unit)
+        else:
+            assert isinstance(cfg.cfg, dict)
+            unit = unit_instance(cfg.get("unit"), default_unit)
+            return cls(cfg.cfg["start"], cfg.cfg["end"], unit)
 
     def no_new(self):
         return self.start == -np.inf and self.end == -np.inf
@@ -312,7 +320,7 @@ class Coord(Variable):
         self.chunk_size : Optional[int] \
             = cfg.get("chunk_size", 1024).value()
 
-        step_item = cfg.get("step_limits", [])  # None value allowed
+        step_item = cfg.get("step_limits", "any_new")  # None value allowed
         default_step_unit = units.step_unit(self.unit) # For DateTimeUnit the incremental/step unit is a pint.Unit of time.
         self.step_limits = Interval.step_limits(step_item, default_step_unit)
 
