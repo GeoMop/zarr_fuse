@@ -42,7 +42,7 @@ def apply_extractor_if_any(
         raise ValueError("Empty JSON payload")
 
     try:
-        extracted_data = extractor(parsed_data, dataframe_row or {})
+        extracted_data = extractor(parsed_data, dataframe_row)
     except Exception as e:
         LOG.error("Extractor %s from %s failed for endpoint %s: %s", extract_fn, fn_module, endpoint_name, e)
         raise ValueError("Extractor function failed")
