@@ -25,6 +25,9 @@ jobs:
     needs:
       - get-version
     if: needs.get-version.outputs.version != ''
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
+      cancel-in-progress: false
     with:
       deploy: true
       tag: ${{ needs.get-version.outputs.version }}

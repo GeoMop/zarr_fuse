@@ -50,9 +50,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version-tag: ${{ steps.get_version_tag.outputs.version_tag }}
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.ref_name }}-get-version-tag
-      cancel-in-progress: true
     steps:
       - name: Get version tag
         id: get_version_tag
@@ -66,9 +63,6 @@ jobs:
     name: Prepare for containerization
     runs-on: ubuntu-latest
     if: ${{ inputs.configuration-dir-path != '' }}
-    concurrency:
-      group: "${{ github.workflow }}-${{ github.ref_name }}-pre-containerize"
-      cancel-in-progress: true
     steps:
       - name: Checkout caller repository
         uses: actions/checkout@v4
@@ -100,9 +94,6 @@ jobs:
     container:
       image: quay.io/buildah/stable:v1.35.4
       options: --privileged
-    concurrency:
-      group: "${{ github.workflow }}-${{ github.ref_name }}-containerize"
-      cancel-in-progress: true
     steps:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
@@ -139,9 +130,6 @@ jobs:
       image: docker.io/alpine/k8s:1.29.14
     needs:
       - containerize
-    concurrency:
-      group: "${{ github.workflow }}-${{ github.ref_name }}-lint-helm-chart"
-      cancel-in-progress: true
     steps:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
@@ -166,9 +154,6 @@ jobs:
     defaults:
       run:
         working-directory: ingress_server/charts
-    concurrency:
-      group: "${{ github.workflow }}-${{ github.ref_name }}-deploy"
-      cancel-in-progress: false
     steps:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
