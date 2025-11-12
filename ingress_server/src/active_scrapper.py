@@ -1,82 +1,157 @@
-import time
-import json
 import logging
 import requests
-
 import logging
 
-from io_utils import validate_content_type, atomic_write, new_msg_path, validate_data
-from configs import ACCEPTED_DIR
+import polars as pl
+
+from io_utils import validate_response, save_data
+from models import ActiveScrapperConfig
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-BG_SCHEDULER = BackgroundScheduler()
 LOG = logging.getLogger("active-scrapper")
 
-def _call_method(url: str, method: str) -> requests.Response:
-    if method.upper() == "GET":
-        return requests.get(url, timeout=30)
-    elif method.upper() == "POST":
-        return requests.post(url, timeout=30)
-    else:
-        raise ValueError(f"Unsupported HTTP method: {method}")
-
-def run_job(name: str, url: str, method: str, schema_path: str, extract_fn: str = None, fn_module: str = None):
+def request_caller(
+    name: str,
+    url: str,
+    headers: dict | None = None,
+    params: dict | None = None,
+) -> tuple[requests.Response | None, str | None]:
     try:
-        response = _call_method(url, method)
+        response = requests.get(
+            url=url,
+            params=params,
+            headers=headers,
+            timeout=30
+        )
         response.raise_for_status()
+
+        err = validate_response(
+            response.content,
+            response.headers.get("Content-Type", "")
+        )
+        if err:
+            return None, f"Scrapper job {name} received invalid response from {url}: {err}"
+
+        return response, None
     except Exception as e:
-        LOG.warning("Scrapper job %s failed to fetch %s: %s", name, url, e)
+        return None, f"Scrapper job {name} failed to fetch {url}: {e}"
+
+def process_job_with_dataframe(scrapper_config: ActiveScrapperConfig):
+    try:
+        df = pl.read_csv(scrapper_config.dataframe_path, has_header=scrapper_config.dataframe_has_header)
+    except Exception as e:
+        LOG.error(
+            "Scrapper job %s failed to read dataframe from %s: %s",
+            scrapper_config.name,
+            scrapper_config.dataframe_path,
+            e,
+        )
         return
 
-    content_type = response.headers.get("Content-Type", "application/json")
-
-    ok, err = validate_content_type(content_type)
-    if not ok:
-        LOG.warning("Validation content type failed for %s: %s", content_type, err)
-        return
-
-    payload = response.content
-    ok, err = validate_data(payload, content_type)
-    if not ok:
-        LOG.warning("Validating data failed for %s", err)
-        return
-
-    base = (ACCEPTED_DIR / name)
-    suffix = ".csv" if "csv" in content_type else ".json"
-    msg_path = new_msg_path(base, suffix)
-
-    atomic_write(msg_path, payload)
-
-    meta_data = {
-        "extract_fn": extract_fn,
-        "fn_module": fn_module,
-        "content_type": content_type,
-        "node_path": "",
-        "endpoint_name": name,
-        "username": f"scrapper-{name}",
-        "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "schema_path": schema_path,
+    headers_dict = {
+        h.header_name: h.header_value
+        for h in scrapper_config.headers or []
     }
 
-    atomic_write(msg_path.with_suffix(msg_path.suffix + ".meta.json"), json.dumps(meta_data).encode("utf-8"))
+    for row in df.iter_rows(named=True):
+        params_dict = {
+            p.param_name: row.get(p.column_name)
+            for p in scrapper_config.url_params or []
+        }
 
-    LOG.info("Scrapper accepted name=%s loc=%s", name, msg_path)
+        if None in params_dict.values():
+            LOG.info(
+                "Scrapper job %s skipping row %s due to missing parameter values",
+                scrapper_config.name,
+                row,
+            )
+            continue
 
-def add_scrapper_job(name: str, url: str, cron: str, schema_path: str, method: str = "GET", extract_fn: str = None, fn_module: str = None):
-    minute, hour, day, month, dow = cron.split()
-    BG_SCHEDULER.add_job(
-        run_job,
-        "cron",
-        args=[
-            name,
-            url,
-            method,
-            schema_path,
-            extract_fn,
-            fn_module,
-        ],
-        minute=minute, hour=hour, day=day, month=month, day_of_week=dow,
-        id=f"scrapper-{name}", replace_existing=True,
-        name=name,
+        LOG.debug("Scrapper job %s processing with param %s", scrapper_config.name, params_dict)
+
+        response, err = request_caller(
+            name=scrapper_config.name,
+            url=scrapper_config.url,
+            headers=headers_dict,
+            params=params_dict
+        )
+        if err:
+            LOG.error(err)
+            continue
+
+        err = save_data(
+            name=scrapper_config.name,
+            payload=response.content,
+            content_type=response.headers.get("Content-Type", "application/json"),
+            schema_path=scrapper_config.schema_path,
+            extract_fn=scrapper_config.extract_fn,
+            fn_module=scrapper_config.fn_module,
+            dataframe_row=row,
+            username=f"scrapper-{scrapper_config.name}",
+        )
+        if err:
+            LOG.error("Scrapper job %s failed to save data for row %s: %s", scrapper_config.name, row, err)
+            continue
+
+
+def process_job_without_dataframe(scrapper_config: ActiveScrapperConfig):
+    headers_dict = {
+        h.header_name: h.header_value
+        for h in scrapper_config.headers or []
+    }
+    params_dict = {
+        p.param_name: p.column_name
+        for p in scrapper_config.url_params or []
+    }
+
+    response, err = request_caller(
+        name=scrapper_config.name,
+        url=scrapper_config.url,
+        headers=headers_dict,
+        params=params_dict
     )
+    if err:
+        LOG.error(err)
+        return
+
+    err = save_data(
+        name=scrapper_config.name,
+        payload=response.content,
+        content_type=response.headers.get("Content-Type", "application/json"),
+        schema_path=scrapper_config.schema_path,
+        extract_fn=scrapper_config.extract_fn,
+        fn_module=scrapper_config.fn_module,
+        username=f"scrapper-{scrapper_config.name}",
+    )
+    if err:
+        LOG.error("Scrapper job %s failed to save data: %s", scrapper_config.name, err)
+        return
+
+    LOG.info("Scrapper accepted name=%s", scrapper_config.name)
+
+
+def run_job(scrapper_config: ActiveScrapperConfig):
+    if scrapper_config.dataframe_path:
+        process_job_with_dataframe(scrapper_config)
+    else:
+        process_job_without_dataframe(scrapper_config)
+
+def add_scrapper_job(scrapper_config: ActiveScrapperConfig, scheduler: BackgroundScheduler):
+    cron_job_id = 1
+    for cron in scrapper_config.crons:
+        minute, hour, day, month, dow = cron.split()
+        scheduler.add_job(
+            run_job,
+            "cron",
+            args=[scrapper_config],
+            minute=minute,
+            hour=hour,
+            day=day,
+            month=month,
+            day_of_week=dow,
+            id=f"scrapper-{scrapper_config.name}-{cron_job_id}",
+            replace_existing=True,
+            name=scrapper_config.name,
+        )
+        cron_job_id += 1
