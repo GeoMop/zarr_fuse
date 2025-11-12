@@ -178,7 +178,19 @@ def process_payload(
     if err:
         return False, err
 
-    return True, None
+    return None
+
+def validate_response(payload: bytes, content_type: str) -> str | None:
+    ok, err = validate_content_type(content_type)
+    if not ok:
+        return f"Unsupported Content-Type: {content_type}. Error: {err}"
+
+    payload = payload
+    err = validate_data(payload, content_type)
+    if err:
+        return f"Data validation failed: {err}"
+
+    return None
 
 
 # =========================
