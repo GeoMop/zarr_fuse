@@ -21,6 +21,7 @@ def apply_extractor_if_any(
     payload: bytes,
     extract_fn: str,
     fn_module: str,
+    dataframe_row: dict | None,
 ) -> pl.DataFrame:
     extractor = resolve_extractor(fn_module, extract_fn)
     if not extractor:
@@ -41,7 +42,7 @@ def apply_extractor_if_any(
         raise ValueError("Empty JSON payload")
 
     try:
-        extracted_data = extractor(parsed_data)
+        extracted_data = extractor(parsed_data, dataframe_row or {})
     except Exception as e:
         LOG.error("Extractor %s from %s failed for endpoint %s: %s", extract_fn, fn_module, endpoint_name, e)
         raise ValueError("Extractor function failed")

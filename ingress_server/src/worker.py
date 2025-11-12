@@ -1,5 +1,4 @@
 import os
-import json
 import signal
 import shutil
 import logging
@@ -7,6 +6,7 @@ import logging
 from pathlib import Path
 from configs import ACCEPTED_DIR, FAILED_DIR, SUCCESS_DIR, STOP
 from io_utils import open_root, read_df_from_bytes
+from models import MetadataModel
 
 LOG = logging.getLogger("worker")
 
@@ -49,47 +49,45 @@ def _iter_accepted_files():
             yield Path(root) / name
 
 
-def _load_meta(data_path: Path) -> tuple[dict, str | None]:
+def _load_metadata(data_path: Path) -> tuple[MetadataModel, str | None]:
     LOG.info("Loading meta for %s", data_path)
     meta_path = data_path.with_suffix(data_path.suffix + ".meta.json")
     try:
-        return json.loads(meta_path.read_text(encoding="utf-8")), None
+        return MetadataModel.model_validate_json(meta_path.read_text(encoding="utf-8")), None
     except Exception as e:
-        return {}, f"Failed to load meta: {e}"
-
+        return None, f"Failed to load meta: {e}"
 
 def _target_dirs_for(data_path: Path) -> tuple[Path, Path]:
     rel = data_path.relative_to(ACCEPTED_DIR)
     return (SUCCESS_DIR / rel).parent, (FAILED_DIR / rel).parent
 
-
 def _process_one(data_path: Path) -> str | None:
-    meta, err = _load_meta(data_path)
+    metadata, err = _load_metadata(data_path)
     if err:
         return err
 
-    extract_fn = meta.get("extract_fn", "")
-    fn_module = meta.get("fn_module", "")
-    endpoint_name = meta.get("endpoint_name", "")
-    node_path = meta.get("node_path", "")
-    content_type = meta.get("content_type", "application/json")
-    schema_path = meta.get("schema_path")
-    if not schema_path:
-        return f"No schema for endpoint {endpoint_name}"
+    if not metadata.schema_path:
+        return f"No schema for endpoint {metadata.endpoint_name}"
 
-    payload = data_path.read_bytes()
-    df, err = read_df_from_bytes(payload, content_type, extract_fn, fn_module, endpoint_name)
-    if err or df.height == 0:
+    df, err = read_df_from_bytes(
+        payload= data_path.read_bytes(),
+        content_type=metadata.content_type,
+        extract_fn=metadata.extract_fn,
+        fn_module=metadata.fn_module,
+        endpoint_name=metadata.endpoint_name,
+        dataframe_row=metadata.dataframe_row
+    )
+    if err:
         return f"Failed to read DataFrame: {err}"
 
-    root, err = open_root(schema_path)
+    root, err = open_root(Path(metadata.schema_path))
     if err:
         return f"Failed to open root: {err}"
 
-    if not node_path:
+    if not metadata.node_path:
         root.update(df)
     else:
-        root[node_path].update(df)
+        root[metadata.node_path].update(df)
     return None
 
 
