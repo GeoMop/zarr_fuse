@@ -30,6 +30,9 @@ jobs:
       - get-changed-files
     if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
+      cancel-in-progress: false
     with:
       deploy: true
       tag: generate
