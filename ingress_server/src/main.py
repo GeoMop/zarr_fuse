@@ -55,16 +55,12 @@ def _upload_node(endpoint_config: EndpointConfig, node_path: str = ""):
             username=AUTH.current_user(),
         )
     except Exception as e:
-        err = f"Exception during saving data: {e}"
-
-    if err:
-        LOG.warning("Saving data failed for endpoint=%s node_path=%s: %s", endpoint_config.name, node_path, err)
-        return jsonify({"error": err}), 400
+        LOG.warning("Saving data failed for endpoint=%s node_path=%s: %s", endpoint_config.name, node_path, e)
+        return jsonify({"error": str(e)}), 400
 
     LOG.info(f"""Successfully accepted data for endpoint: {endpoint_config.name},
             node_path: {node_path}, user: {AUTH.current_user()},
             content_type: {content_type}, bytes: {len(data)}""")
-
     return jsonify({"status": "accepted"}), 202
 
 

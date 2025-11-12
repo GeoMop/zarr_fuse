@@ -1,6 +1,5 @@
 # Configuration of the ZARR-FUSE storage
 ATTRS:
-  S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
   STORE_URL: "bukov.zarr"
   #store_type: 'local'                 # 'guess' type is default
   location_file: &loc_file bukov_locations.csv
