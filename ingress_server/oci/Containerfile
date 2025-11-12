@@ -17,10 +17,10 @@ ENV PIP_NO_CACHE_DIR=1
 ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
 
-RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server ingress
-RUN apt-get update && apt-get install -y --no-install-recommends git
+RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server ingress && \
+    apt-get update && apt-get install -y --no-install-recommends git && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@main"
 
 # --- Install ingress server ---
@@ -31,6 +31,14 @@ COPY --chown=ingress:ingress src/ /ingress-server/
 
 RUN pip install --no-cache-dir /ingress-server \
     && pip install --no-cache-dir waitress
+
+RUN set -eux; \
+    if [ -f /ingress-server/inputs/requirements.txt ]; then \
+        pip install --no-cache-dir -r /ingress-server/inputs/requirements.txt; \
+    fi; \
+    if [ -f /ingress-server/inputs/pyproject.toml ]; then \
+        pip install --no-cache-dir /ingress-server/inputs; \
+    fi
 
 RUN chown -R ingress:ingress /ingress-server
 
