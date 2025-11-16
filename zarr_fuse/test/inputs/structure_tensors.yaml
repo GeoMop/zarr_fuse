@@ -27,3 +27,4 @@ COORDS:
 ATTRS:
     description: "Flow123d simulation result."
     flow123d_release: "3.9.0"
+    VERSION: 0.3.0

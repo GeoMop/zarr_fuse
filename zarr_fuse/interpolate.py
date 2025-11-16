@@ -40,6 +40,8 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
     # Both pivot_nd and dataset_from_np use that function to form coordinates.
     # We assert here just for code consistency.
     assert np.unique(new_values).size == new_values.size, f"Code consistency error. New coordinates must be unique, got {new_values}"
+    new_values = schema.decode(new_values).magnitude
+    old_values = schema.decode(old_values).magnitude
 
     sorted = schema.sorted
     if sorted:
@@ -78,6 +80,9 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     3. for step_limit modify part after split index
     """
     idx_sort, idx_split = idx_sorter
+    new_values = schema.decode(new_values).magnitude
+    old_values = schema.decode(old_values).magnitude
+
     new_sorted = new_values[idx_sort]
     if len(new_sorted) == 0:
         return np.array([]), 0
@@ -127,7 +132,12 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
         # Construct adjusted coordinates grid.
         step_range = schema.step_limits
         range_array = np.array([step_range.start, step_range.end])
-        step_range = schema.convert_values(range_array, from_unit = step_range.unit, to_unit = schema.step_unit())
+        to_unit = schema.unit.delta_unit()
+        step_range = schema._make_quantity(range_array, from_unit = step_range.unit) \
+                    .to(to_unit).magnitude
+        # Have compatible dtype for DateTime base unit.
+        step_range = np.array(step_range, dtype=schema.unit.delta_dtype(schema.dtype))
+
 
         if last_old < new_append[0]:
             extension_part = np.concatenate(
@@ -141,6 +151,8 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
 
     idx_split = len(update_old_part)
     merged_coord_values = np.concatenate((update_old_part, update_new_part))
+
+    merged_coord_values = schema.encode(merged_coord_values)
     return merged_coord_values, idx_split
 
 
@@ -193,11 +205,11 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
         assume_sorted=True
     )
     # then nearest-neighbor fallback to fill any NaNs
-    ds_nearest = ds_sorted.interp(
-        interp_coords,
-        method='nearest',
-        assume_sorted=True
-    )
+    # ds_nearest = ds_sorted.interp(
+    #     interp_coords,
+    #     method='nearest',
+    #     assume_sorted=True
+    # )
     # combine: use linear where available, else nearest
     #ds_interpolated = ds_linear.combine_first(ds_nearest)
     ds_interpolated = ds_linear

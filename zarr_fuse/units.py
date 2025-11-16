@@ -4,6 +4,7 @@ from typing import Iterable, Any
 
 import numpy as np
 import pint
+from pint import UndefinedUnitError
 import datetime
 import dateutil
 import attrs
@@ -61,6 +62,12 @@ class Unit(pint.Unit):
     def asdict(self, value_serializer, filter):
         return str(self)
 
+    def delta_unit(self):
+        return self
+
+    def delta_dtype(self, dtype):
+        return dtype
+
 @attrs.define
 class DateTimeUnit:
     """
@@ -104,6 +111,12 @@ class DateTimeUnit:
             return 0.0
         offset = tzinfo.utcoffset(datetime.datetime.now())
         return offset.total_seconds() / 3600.0
+
+    def delta_unit(self):
+        return Unit(self.tick)  # TODO: change from 'str' to pint.Unit in DataTimeUnit
+
+    def delta_dtype(self, dtype):
+        return np.dtype(f'timedelta64[{self.tick}]')
 
 class DateTimeQuantity:
     """
@@ -197,237 +210,6 @@ def _create_dt_quantity(values, dt_unit):
     return DateTimeQuantity(np_dates, dt_unit)
 
 
-# @attrs.define
-# class CategoricalUnit:
-#     categories: list[str] = attrs.field(converter=np.unique)
-#     nan_label: str = "NaN"
 
 
-
-    # def __repr__(self) -> str:
-    #     return f"<CategoricalUnit n={len(self.categories)} nan_label={self.nan_label!r}>"
-
-
-# ---------- Quantity ----------
-#
-# class CategoricalQuantity:
-#     """
-#     Stores categorical data as integer codes (np.int64); -1 denotes NaN.
-#     """
-#     def __init__(self, values: Iterable[object], cat_unit: CategoricalUnit):
-#         self._unit = cat_unit
-#         arr = np.asarray(values)
-#         if arr.dtype.kind in ('i', 'u'):
-#             self._codes = arr.astype(np.int64, copy=False)
-#         else:
-#             self._codes = cat_unit.arr_to_codes(values).astype(np.int64, copy=False)
-#
-#     @property
-#     def magnitude(self) -> np.ndarray:
-#         return self._codes
-#
-#     # @property
-#     # def units(self) -> tuple[str, ...]:
-#     #     return self._unit.index_to_label
-#
-#     def to(self, target: CategoricalUnit | str):
-#         if target is str:
-#             return self._unit.arr_from_codes(self._codes)
-#            # remap via labels -> target codes (unknowns map to -1)
-#         labels = self._from_codes(self._codes, self._unit)
-#         new_codes = self._to_codes(labels, target)
-#         return CategoricalQuantity(new_codes, target)
-#
-#     def __len__(self) -> int:
-#         return self._codes.shape[0]
-#
-#     def __repr__(self) -> str:
-#         return f"<CategoricalQuantity n={len(self)} unit={self._unit!r}>"
-
-
-# class RawQuantity:
-#     """
-#     Simple wrapper around a numpy array, mimicking pint.Quantity's basic API.
-#
-#     A RawQuantity holds raw data without attaching any physical units. It exposes
-#     a `.magnitude` attribute for the underlying numpy array and a `.to()` method
-#     for converting the data into various representations.
-#
-#     The `.to()` method supports:
-#
-#     * Converting to primitive Python/numpy types via the strings 'float', 'int', 'bool', 'str'.
-#     * Converting numeric arrays to pint.Quantity by specifying a unit string (e.g. 'kg', 'm').
-#     * Converting numeric arrays to DateTimeQuantity by providing a DateTimeUnit. The numeric
-#       values are interpreted as offsets from the Unix epoch in the target unit's tick.
-#     * Converting integer or string arrays to CategoricalQuantity by providing a CategoricalUnit.
-#     * Returning the underlying magnitude if the target is None or is RawQuantity.
-#     """
-#
-#     def __init__(self, values: Iterable[Any], dtype: Any | None = None):
-#         """
-#         Construct a RawQuantity from an iterable of values.
-#
-#         Parameters
-#         ----------
-#         values : Iterable[Any]
-#             Input values to store.
-#         dtype : Any | None
-#             Optional numpy dtype. If provided, values are coerced with
-#             `np.asarray(values, dtype=dtype)`. If omitted, dtype is inferred.
-#         """
-#         # Store underlying data as a numpy array with an optional explicit dtype
-#         self._values = np.asarray(values)
-#
-#     @property
-#     def magnitude(self) -> np.ndarray:
-#         """Return the underlying numpy array."""
-#         return self._values
-#
-#     def to(self, target_unit):
-#         """
-#         Convert from non unit to given unit.
-#         """
-#         # Identity conversion
-#         if target is None or isinstance(target, RawQuantity):
-#             return self
-#
-#         # Convert to basic python/numpy types using type-name strings
-#         type_name = _normalize_type_name(target)
-#         if type_name is not None:
-#             return _TO_CONVERTER[type_name](self._values)
-#
-#         # Convert to a DateTimeQuantity
-#         if isinstance(target, DateTimeUnit):
-#             arr = self._values
-#             # Already datetime64: coerce to target tick and wrap
-#             if np.issubdtype(arr.dtype, np.datetime64):
-#                 # Cast to target tick and wrap into DateTimeQuantity
-#                 coerced = arr.astype(f'datetime64[{target.tick}]')
-#                 return DateTimeQuantity(coerced, target)
-#             # Numeric: interpret as offsets from epoch in target.tick units
-#             if np.issubdtype(arr.dtype, np.integer) or np.issubdtype(arr.dtype, np.floating):
-#                 # Cast numeric values to int64 representing counts of the target tick
-#                 # For floating values, truncation towards zero is used (consistent with numpy casting)
-#                 counts = arr.astype('int64', copy=False)
-#                 dt_arr = counts.astype(f'datetime64[{target.tick}]')
-#                 return DateTimeQuantity(dt_arr, target)
-#             # Strings: parse using _create_dt_quantity and dt_unit tick/zone
-#             parsed = np.asarray(arr, dtype=object)
-#             return _create_dt_quantity(parsed, target)
-#
-#         # Convert to a CategoricalQuantity
-#         if isinstance(target, CategoricalUnit):
-#             return CategoricalQuantity(self._values, target)
-#
-#         # Convert to a pint.Quantity by interpreting target as a unit specifier
-#         if isinstance(target, str):
-#             return ureg.Quantity(self._values, target)
-#
-#         # If we reach here, the target is not recognized
-#         raise TypeError(f"Cannot convert RawQuantity to {target!r}")
-#
-#
-# # def create_quantity(values, from_unit, to_unit):
-# #     """
-# #     Create pint.Quantity for numeric or DateTimeQuantity for datetime strings.
-# #     """
-# #     arr = np.asarray(values)
-# #     if isinstance(from_unit, DateTimeUnit):
-# #         return _create_dt_quantity(arr, from_unit).to(to_unit)
-# #
-# #     if arr.dtype.kind in ('f', 'U', 'S', 'O'):
-# #         arr = arr.astype(float)
-# #     if arr.dtype.kind in ('O')
-# #
-# #         q_new = source_quantity_arr.to(var.unit)
-# #
-# #     return ureg.Quantity(arr, from_unit).to(to_unit)
-#
-# _TRUE = {"true", "1", "t", "yes", "y"}
-# _FALSE = {"false", "0", "f", "no", "n", ""}
-#
-# # ---- base converters (dict-dispatched) --------------------------------
-#
-# def _to_float(values):
-#     return np.asarray(values, dtype=float)
-#
-# def _to_int(values):
-#     # tolerant of "3.0" strings: float→int
-#     return _to_float(values).astype(int)
-#
-# def _to_bool(values):
-#     a = np.asarray(values, dtype=object)
-#     out = []
-#     for v in a:
-#         if isinstance(v, (int, float, np.number)):
-#             out.append(bool(v))
-#         elif isinstance(v, str):
-#             s = v.strip().lower()
-#             if s in _TRUE: out.append(True)
-#             elif s in _FALSE: out.append(False)
-#             else: raise ValueError(f"Cannot parse bool from '{v}'")
-#         else:
-#             out.append(bool(v))
-#     return np.asarray(out, dtype=bool)
-#
-# def _to_str(values):
-#     return np.asarray(values, dtype=object).astype(str)
-#
-# _TO_CONVERTER = {
-#     "float": _to_float,
-#     "int":   _to_int,
-#     "bool":  _to_bool,
-#     "str":   _to_str,
-# }
-#
-# def _normalize_type_name(name):
-#     if not isinstance(name, str):
-#         return None
-#     key = name.strip().lower()
-#     return key if key in _TO_CONVERTER else None
-#
-#
-# # ---- public API: keep original signature ------------------------------
-#
-# def create_quantity(values, from_unit, to_unit):
-#     """
-#     Create pint.Quantity for numeric -> unit conversion,
-#     DateTimeQuantity for DateTimeUnit conversions,
-#     or do base type conversion when `to_unit` is a type name:
-#       'bool' | 'int' | 'float' | 'str'
-#     """
-#     # DateTime path
-#     if isinstance(to_unit, DateTimeUnit):
-#         # assume to_unit is a DateTimeUnit-compatible target
-#         arr = np.asarray(values)
-#         return _create_dt_quantity(arr, from_unit).to(to_unit)
-#
-#
-#     # Primary resolution by to_unit-as-type
-#     target_type = _normalize_type_name(to_unit)
-#     if target_type is not None:
-#         return _TO_CONVERTER[target_type](values)
-#
-#     # Pint path (float arrays)
-#     # Only when both from_unit and to_unit are provided as pint units/strings.
-#     if from_unit is not None and to_unit is not None:
-#         payload = _to_float(values)
-#         return ureg.Quantity(payload, from_unit).to(to_unit)
-#
-#     # 4) Fallback: just float array (keeps behavior sane if only from_unit given)
-#     return _to_float(values)
-
-
-
-
-def step_unit(unit: pint.Unit | DateTimeUnit):
-    """
-    Return the step unit for a given unit. For DataTimeUnit the increments has
-    a clasical unit of time representable by pint.Unit.
-    """
-    if isinstance(unit, DateTimeUnit):
-        return Unit(unit.tick) # TODO: change from 'str' to pint.Unit in DataTimeUnit
-    else:
-        assert isinstance(unit, pint.Unit), f"Invalid unit: {unit})"
-        return unit
 

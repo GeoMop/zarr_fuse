@@ -1,5 +1,9 @@
 import numpy as np
 
+from functools import wraps
+import logging
+import time
+
 def adjust_grid(x:np.ndarray, step_range:np.array) -> np.ndarray:
     """
     Given a 1D array `x` (irregular grid), return a new 1D array
@@ -8,7 +12,6 @@ def adjust_grid(x:np.ndarray, step_range:np.array) -> np.ndarray:
     inserting evenly-spaced points whenever a step > max_step.
     """
     min_step, max_step = step_range
-    x = np.asarray(x, float)
     if x.ndim != 1:
         raise ValueError("`x` must be 1D")
     xs = np.unique(x)  # sort & remove duplicates
@@ -42,3 +45,21 @@ def recursive_update(d, u):
         else:
             d[k] = v
     return d
+
+
+
+__report_indent_level = 0
+
+def report(fn):
+    @wraps(fn)
+    def do_report(*args, **kwargs):
+        global __report_indent_level
+        __report_indent_level += 1
+        init_time = time.perf_counter()
+        result = fn(*args, **kwargs)
+        duration = time.perf_counter() - init_time
+        __report_indent_level -= 1
+        indent = (__report_indent_level * 2) * " "
+        logging.info(f"{indent}DONE {fn.__module__}.{fn.__name__} @ {duration}")
+        return result
+    return do_report

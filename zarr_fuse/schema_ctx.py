@@ -62,6 +62,7 @@ class SchemaCtx:
     """
     addr: SchemaPath
     file: str = attrs.field(default=None, eq=False)
+    version: str = attrs.field(default="0.2.0")
     logger: zf_logger.Logger = attrs.field(factory=default_logger)
 
     @property
@@ -79,8 +80,7 @@ class SchemaCtx:
 
     def dive(self, *path) -> "SchemaCtx":
         """Return a new SchemaAddress with an extra path component."""
-        addr = self.addr + list(path)
-        return SchemaCtx(addr, self.file, self.logger)
+        return attrs.evolve(self, addr=self.addr + list(path))
 
     def parent(self) -> "SchemaCtx":
         """Return a new SchemaAddress for the parent path."""
@@ -88,7 +88,7 @@ class SchemaCtx:
             addr = self.addr[:-1]
         else:
             addr = []
-        return SchemaCtx(addr, self.file, self.logger)
+        return attrs.evolve(self, addr=addr)
 
     def error(self, message: str, **kwargs) -> SchemaError:
         err = SchemaError(message, self)
@@ -125,7 +125,10 @@ class ContextCfg:
         return self.cfg.keys()
 
     def get(self, key: str| int, default=None) -> Any:
-        value = self.cfg.get(key, default)
+        try:
+            value = self.cfg[key]
+        except (IndexError, KeyError):
+            value = default
         return ContextCfg(value, self.schema_ctx.dive(key))
 
 

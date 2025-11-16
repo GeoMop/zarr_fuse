@@ -1,3 +1,10 @@
+from importlib.metadata import version, PackageNotFoundError  # Python 3.8+
+try:
+    __version__ = version("my-package-name")   # this is the *distribution* name from pyproject.toml
+except PackageNotFoundError:
+    __version__ = "0.0.0"  # or whatever makes sense when not installed (e.g. in source tree)
+
+
 from pint import UnitRegistry, set_application_registry
 ureg = UnitRegistry()
 set_application_registry(ureg)
@@ -7,6 +14,7 @@ from . import zarr_schema as schema
 from . import units
 from .zarr_storage import Node, open_store, remove_store
 
+
 try:
     from . import plot
 except ModuleNotFoundError as e:
@@ -14,6 +22,9 @@ except ModuleNotFoundError as e:
         pass
     else:
         raise e
+
+
+
 
 # What is allowed to be imported by
 # from zarr_fuse import *

@@ -15,6 +15,8 @@ import polars as pl
 import xarray as xr
 import numpy as np
 import zarr
+from zarr.errors import ZarrUserWarning, GroupNotFoundError
+
 import fsspec
 import asyncio
 from pathlib import Path
@@ -137,7 +139,13 @@ def _zarr_store_open(store_options: Dict[str, Any]) -> zarr.storage.StoreLike:
         fs = fsspec.filesystem('s3', **s3_opts)
         # Remove s3:// scheme from path for FsspecStore
         clean_path = store_url.replace('s3://', '')
-        return zarr.storage.FsspecStore(fs, path=clean_path)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=".*fs .* was not created with `asynchronous=True`.*",
+                category=ZarrUserWarning,
+            )
+            return zarr.storage.FsspecStore(fs, path=clean_path)
     elif re.match(r'^zip://', store_url):
         return zarr.storage.ZipStore(store_url)
     else:
@@ -522,7 +530,7 @@ class Node:
         """
         try:
             old_schema = self.schema
-        except KeyError:
+        except (KeyError,GroupNotFoundError):
             cfg = zarr_schema.ContextCfg(dict(attrs={}, vars={}, coords={}), self._make_null_ctx())
             old_schema = zarr_schema.DatasetSchema(cfg['attrs'], cfg['vars'], cfg['coords'])
 
@@ -582,7 +590,7 @@ class Node:
         """
         rel_path = self.group_path #+ self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
-        ds = xr.open_zarr(self.store, group=rel_path)
+        ds = xr.open_zarr(self.store, group=rel_path, consolidated=False)
         for coord in ds.coords:
             assert  'composed' in ds.coords[coord].attrs
         return ds
@@ -629,7 +637,7 @@ class Node:
         dup_dict = check_unique_coords(written_ds)
         if  dup_dict:
             self.logger.error(dup_dict)
-        return written_ds
+        #return written_ds
 
     def update_dense(self, vars):
         # TODO:
@@ -647,7 +655,7 @@ class Node:
         dup_dict = check_unique_coords(written_ds)
         if dup_dict:
             self.logger.error(dup_dict)
-        return written_ds
+        #return written_ds
 
     def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode
         rel_path = self.group_path  # + self.PATH_SEP + "dataset"

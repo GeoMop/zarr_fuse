@@ -37,7 +37,11 @@ class DummySchema:
 # -- low‐level tests for sort_by_coord & interpolate_coord --
 
 def test_sort_by_coord_sorted():
-    schema = DummySchema(sorted=True)
+    cfg = dict(
+        name='tst_coord',
+        sorted=True
+    )
+    schema = zf_schema.Coord(_ctx(cfg))
     old = np.array([0, 10, 20, 30])
     new_ref = np.array([15, 25, 30, 35, 40, 50])
     new = new_ref.copy()
@@ -61,7 +65,11 @@ def test_sort_by_coord_sorted():
 
 
 def test_sort_by_coord_unsorted():
-    schema = DummySchema(sorted=False)
+    cfg = dict(
+        name='tst_coord',
+        sorted=False,
+        )
+    schema = zf_schema.Coord(_ctx(cfg))
     # empty extension
     old = np.array([5, 15, 25])
     new = np.array([25, 5, 15])

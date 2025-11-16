@@ -77,6 +77,8 @@ Moreover these coordinates types are clearly independent
 - location in space
 - multiscale like time, can have more then 3D, e.g. XYZ of borehole head + position of sensor in hte borehole
 - use of "composed" coordinate, ( ?? possible problems of  unstable hashing due to rounding errors)
+  See also [new indices developments](https://xarray-indexes.readthedocs.io/#xarray-diagram-wild) in XArray. Possibly
+  these will serve better to our purpose.
 - could be modeld either as xarray coord or as ZARR folder
 
 **Realization**

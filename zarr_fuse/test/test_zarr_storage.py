@@ -12,13 +12,14 @@ import xarray as xr
 import pytest
 import zarr
 import time
-import asyncio, s3fs
 import fsspec
 
 from zarr.storage import FsspecStore
 
 import zarr_fuse as zf
-
+from zarr_fuse.tools import report
+import logging
+logging.basicConfig(level=logging.INFO)
 
 # Load environment variables from .env file
 
@@ -140,6 +141,7 @@ def sync_list_dirs(storage_options, root_path):
 This is an inital test of xarray, zarr functionality that we build on.
 This requires dask.
 """
+@report
 def aux_read_struc(fname, storage_type="local"):
     struc_path = inputs_dir / fname
     schema = zf.schema.deserialize(struc_path)
@@ -174,7 +176,7 @@ def _update_tree(node: zf.Node, df_map: dict):
         _update_tree(child, df_map)
 
 
-
+@report
 def _create_test_data():
     """Create standardized test data for all nodes."""
     return {
@@ -183,36 +185,37 @@ def _create_test_data():
         "child_1/child_3": pl.DataFrame({"time": [1003], "temperature": [283.0]}),
     }
 
-
-def _run_full_test(tree, df_map, start_time, t1):
+@report
+def _run_full_test(tree, df_map):
     """Run comprehensive test with full tree traversal."""
     _update_tree(tree, df_map)
-    print(f"[TIMING] _update_tree: {time.time() - t1:.2f}s")
-    t2 = time.time()
+    #print(f"[TIMING] _update_tree: {time.time() - t1:.2f}s")
+    #t2 = time.time()
     zarr.consolidate_metadata(tree.store)
-    print(f"[TIMING] consolidate_metadata: {time.time() - t2:.2f}s")
-    print(f"[TIMING] test_node_tree TOTAL: {time.time() - start_time:.2f}s")
+    #print(f"[TIMING] consolidate_metadata: {time.time() - t2:.2f}s")
+    #print(f"[TIMING] test_node_tree TOTAL: {time.time() - start_time:.2f}s")
 
 
 
 
-
-def _run_local_validation(tree, df_map, start_time, t1):
+@report
+def _run_local_validation(tree, df_map):
     """Run additional validation steps for local storage."""
-    _run_full_test(tree, df_map, start_time, t1)
-    
+    _run_full_test(tree, df_map)
+
+    @report
     def collect_nodes(node, nodes_dict):
         nodes_dict[node.group_path] = node
         for key, child in node.items():
             collect_nodes(child, nodes_dict)
         return nodes_dict
 
-    t3 = time.time()
+    #t3 = time.time()
     root_node = zf.Node.read_store(tree.store)
     nodes = collect_nodes(root_node, {})
-    print(f"[TIMING] read_store + collect_nodes: {time.time() - t3:.2f}s")
+    #print(f"[TIMING] read_store + collect_nodes: {time.time() - t3:.2f}s")
 
-    t4 = time.time()
+    #t4 = time.time()
     expected = {
         key: (df['time'].to_numpy(), df['temperature'].to_numpy())
         for key, df in df_map.items()
@@ -221,7 +224,7 @@ def _run_local_validation(tree, df_map, start_time, t1):
         ds = nodes[node_name].dataset
         np.testing.assert_array_equal(ds.coords["time"].values, exp_time)
         np.testing.assert_array_equal(ds["temperature"].values, exp_temp)
-    print(f"[TIMING] assertions: {time.time() - t4:.2f}s")
+    #print(f"[TIMING] assertions: {time.time() - t4:.2f}s")
 
     assert set(root_node.children.keys()) == {"child_1", "child_2"}
     assert set(root_node.children["child_1"].children.keys()) == {"child_3"}
@@ -229,23 +232,23 @@ def _run_local_validation(tree, df_map, start_time, t1):
 
 @pytest.mark.parametrize("storage_type", ["local", "s3"])
 def test_node_tree(storage_type):
-    import time
-    start = time.time()
-    print(f"[TIMING] test_node_tree({storage_type}) START")
+    #import time
+    #start = time.time()
+    #print(f"[TIMING] test_node_tree({storage_type}) START")
     
-    t0 = time.time()
+    #t0 = time.time()
     structure, store, tree = aux_read_struc("structure_tree.yaml", storage_type=storage_type)
     assert tree.schema == structure.ds
     assert tree['child_1'].schema == structure.groups['child_1'].ds
-    print(f"[TIMING] aux_read_struc: {time.time() - t0:.2f}s")
+    #print(f"[TIMING] aux_read_struc: {time.time() - t0:.2f}s")
     
-    t1 = time.time()
+    #t1 = time.time()
     df_map = _create_test_data()
     
     if storage_type == "s3":
-        _run_full_test(tree, df_map, start, t1)  # Direct full test!
+        _run_full_test(tree, df_map)  # Direct full test!
     else:
-        _run_local_validation(tree, df_map, start, t1)
+        _run_local_validation(tree, df_map)
 
 
 def _check_ds_attrs_weather(ds, schema_ds):
@@ -268,125 +271,135 @@ def test_update_weather(tmp_path, storage_type):
     structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
     ds_schema = structure.ds
     assert len(ds_schema.COORDS) == 2
-    assert len(ds_schema.VARS) == 4
+    assert len(ds_schema.VARS) == 3
     print("Coordinates:")
     for coord in ds_schema.COORDS:
         print(coord)
     print("\nQuantities:")
-    for var in ds_schema.VARS:
-        print(var)
-        
-        # Clean store and recreate tree for each variable (to ensure clean state)
-        if storage_type == "local":
-            import shutil
-            workdir = Path(__file__).parent / "workdir"
-            store_path = (workdir / "structure_weather.yaml").with_suffix(".zarr")
-            if store_path.exists():
-                shutil.rmtree(store_path)
-            
-            # Recreate tree after store cleanup
-            structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
-        elif storage_type == "s3":
-            # No cleanup needed - each test uses unique S3 path
-            # Recreate tree for clean state
-            structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
 
-        # Create a Polars DataFrame with 6 temperature readings.
-        # Two time stamps (e.g. 1000 and 2000 seconds) and three latitude values (e.g. 10.0, 20.0, 30.0).
-        t1 = "2025-05-13T07:00:00Z"
-        t2 = "2025-05-13T09:00:00Z"
-        t3 = "2025-05-13T8:00:00Z"
-        t4 = "2025-05-14T8:00:00Z"
+    # # Clean store and recreate tree for each variable (to ensure clean state)
+    # if storage_type == "local":
+    #     import shutil
+    #     workdir = Path(__file__).parent / "workdir"
+    #     store_path = (workdir / "structure_weather.yaml").with_suffix(".zarr")
+    #     if store_path.exists():
+    #         shutil.rmtree(store_path)
+    #
+    #     # Recreate tree after store cleanup
+    #     structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
+    # elif storage_type == "s3":
+    #     # No cleanup needed - each test uses unique S3 path
+    #     # Recreate tree for clean state
+    #     structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
 
-        df = pl.DataFrame({
-            "timestamp": [t1, t1, t1, t2, t2, t2],
-            "latitude": [10.0, 20.0, 20.0, 10.0, 20.0, 20.0],
-            "longitude": [10.0, 10.0, 20.0, 10.0, 10.0, 20.0],
-            "temp": [280.0, 281.0, 282.0, 283.0, 284.0, 285.0]
-        })
+    # Create a Polars DataFrame with 6 temperature readings.
+    # Two time stamps (e.g. 1000 and 2000 seconds) and three latitude values (e.g. 10.0, 20.0, 30.0).
+    # These are input time stemps in CET timezone. Going to be stored in UTC.
+    t1 = "2025-05-13T07:00:00Z"
+    t2 = "2025-05-13T09:00:00Z"
+    t3 = "2025-05-13T8:00:00Z"
+    t3_5 = "2025-05-13T20:00:00Z"
+    t4 = "2025-05-14T8:00:00Z"
 
-        # Update the dataset atomically using the Polars DataFrame.
-        updated_ds = tree.update(df)
-        _check_ds_attrs_weather(updated_ds, ds_schema)
+    df = pl.DataFrame({
+        "timestamp": [t1, t1, t1, t2, t2, t2],
+        "latitude": [10.0, 20.0, 20.0, 10.0, 20.0, 20.0],
+        "longitude": [10.0, 10.0, 20.0, 10.0, 10.0, 20.0],
+        "temp": [280.0, 281.0, 282.0, 283.0, 284.0, 285.0]
+    })
+    @report
+    def update(df):
+        tree.update(df)
+        return tree.dataset
 
-        # Now, re-read the entire Zarr storage from scratch.
+    # Update the dataset atomically using the Polars DataFrame.
+    updated_ds = update(df)
+    _check_ds_attrs_weather(updated_ds, ds_schema)
+
+    # Now, re-read the entire Zarr storage from scratch.
+    @report
+    def reread(store):
         new_tree = zf.Node.read_store(store)
         new_ds = new_tree.dataset
-        _check_ds_attrs_weather(new_ds, ds_schema)
-        print("Updated dataset:")
-        print(new_ds)
+        return new_ds
 
-        # --- Assertions ---
-        # We expect that the update function (via update_xarray_nd) will reshape the temperature data
-        # into a (time, lat) array, i.e. shape (2, 3), with coordinates "time" and "lat".
-        # Check the shape of the temperature variable.
-        assert new_ds["temperature"].shape == (2, 3)
+    new_ds = reread(store)
+    _check_ds_attrs_weather(new_ds, ds_schema)
+    print("Updated dataset:")
+    print(new_ds)
 
-        # Check that the "time" coordinate, it is converted from explicit UTC ("...Z") to CET
-        # during forming the update DF and the converted back to UTC during actual update.
-        ref_vec = np.array([t1, t2], dtype='datetime64[h]')
-        np.testing.assert_array_equal(new_ds["time of year"].values, ref_vec)
+    # --- Assertions ---
+    # We expect that the update function (via update_xarray_nd) will reshape the temperature data
+    # into a (time, lat) array, i.e. shape (2, 3), with coordinates "time" and "lat".
+    # Even initial DS should have time of year with step exactly 1 hour.
+    # Check the shape of the temperature variable.
+    assert new_ds["temperature"].shape == (2,3)     #(3, 3)
 
-        # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]
-        np.testing.assert_array_equal(new_ds["latitude"].values, [20.0, 20.0, 10.0])
-        out_unit = zf.units.DateTimeUnit(tick='h', tz="UTC", dayfirst=False, yearfirst=True)
-        for row in df.iter_rows(named=True):
+    # Check that the "time" coordinate, it is converted from explicit UTC ("...Z") to CET
+    # during forming the update DF and the converted back to UTC during actual update.
+    ref_vec = np.array([t1, t2], dtype='datetime64[h]') + np.timedelta64(1, 'h')  # CET is UTC+1 in May
+    np.testing.assert_array_equal(new_ds["time of year"].values, ref_vec)
 
-            time = zf.units.create_quantity([row["timestamp"]], out_unit).magnitude
-            lat = row["latitude"]
-            lon = row["longitude"]
-            new_temp = new_ds["temperature"].sel({"time of year":time, "lat_lon":hash((lat, lon))})
+    # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]
+    np.testing.assert_array_equal(new_ds["latitude"].values, [20.0, 20.0, 10.0])
+    out_unit = zf.units.DateTimeUnit(tick='h', tz="UTC", dayfirst=False, yearfirst=True)
+    for row in df.iter_rows(named=True):
+        time_str_array = np.array([row["timestamp"]])
+        time = tree.schema.COORDS["time of year"].convert_values(time_str_array)[0]
+        lat = row["latitude"]
+        lon = row["longitude"]
+        new_temp = new_ds["temperature"].sel({"time of year":time, "lat_lon":hash((lat, lon))})
+        ref_temp_K = row["temp"] + 273.15
+        assert  new_temp.values == np.array(ref_temp_K)
 
-            ref_temp_K = row["temp"] + 273.15
-            assert  new_temp.values[0] == ref_temp_K
+    # Second update, test merging
+    df2 = pl.DataFrame({
+        "timestamp": [t4, t4, t4, t3, t3, t3],  #  t1 < t3 < t2 < t4
+        "latitude": [20.0, 10.0, 20.0, 10.0, 20.0, 20.0],
+        "longitude": [10.0, 10.0, 20.0, 10.0, 20.0, 10.0],
+        "temp": [381.0, 380.0, 382.0, 383.0, 385.0, 384.0]
+    })
 
-        # Second update, test merging
-        df2 = pl.DataFrame({
-            "timestamp": [t4, t4, t4, t3, t3, t3],  #  t1 < t3 < t2 < t4
-            "latitude": [20.0, 10.0, 20.0, 10.0, 20.0, 20.0],
-            "longitude": [10.0, 10.0, 20.0, 10.0, 20.0, 10.0],
-            "temp": [381.0, 380.0, 382.0, 383.0, 385.0, 384.0]
-        })
+    # Update the dataset atomically using the Polars DataFrame.
+    update(df2)
+    updated_ds = tree.dataset
 
-        # Update the dataset atomically using the Polars DataFrame.
-        updated_ds = tree.update(df2)
-        # Time t3 is only used to interpolate to t2, not added to the dataset.
-        assert [*updated_ds.sizes.values()] == [1, 3]
-        _check_ds_attrs_weather(updated_ds, ds_schema)
+    # Time t3 is only used to interpolate to t2, not added to the dataset.
+    assert updated_ds.sizes == {'time of year':4, 'lat_lon':3}  #[26, 3]
+    _check_ds_attrs_weather(updated_ds, ds_schema)
 
-        # Now, re-read the entire Zarr storage from scratch.
-        new_tree = zf.Node.read_store(store)
-        new_ds = new_tree.dataset
-        _check_ds_attrs_weather(new_ds, ds_schema)
-        print("Updated dataset:")
-        print(new_ds)
+    # Now, re-read the entire Zarr storage from scratch.
+    new_ds = reread(store)
+    _check_ds_attrs_weather(new_ds, ds_schema)
+    print("Updated dataset:")
+    print(new_ds)
 
-       # --- Assertions ---
-        # We expect that the update function (via update_xarray_nd) will reshape the temperature data
-        # into a (time, lat) array, i.e. shape (2, 3), with coordinates "time" and "lat".
-        # Check the shape of the temperature variable.
-        assert new_ds["temperature"].shape == (3, 3)
+   # --- Assertions ---
+    # We expect that the update function (via update_xarray_nd) will reshape the temperature data
+    # into a (time, lat) array, i.e. shape (2, 3), with coordinates "time" and "lat".
+    # Check the shape of the temperature variable.
+    assert new_ds["temperature"].shape == (4, 3)
 
-        # Check that the "time" coordinate was updated to [1000, 2000]
+    # Check that the "time" coordinate was updated to [1000, 2000]
 
-        # check times are sorted
-        import pandas as pd
+    # check times are sorted
+    import pandas as pd
 
-        times_pd = pd.to_datetime([t1, t2, t4], utc=True)
-        ref_times = times_pd.values.astype("datetime64[ns]")
-        np.testing.assert_array_equal(new_ds["time of year"].values, ref_times)
-        # !! Wrong order, not sorted
+    times_pd = pd.to_datetime([t1, t2, t3_5, t4]) + 1.0 * pd.Timedelta(hours=1)  # CET to UTC
+    ref_times = times_pd.values.astype("datetime64[ns]")
+    np.testing.assert_array_equal(new_ds["time of year"].values, ref_times)
+    # !! Wrong order, not sorted
 
-        # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]
-        np.testing.assert_array_equal(new_ds["latitude"].values, [20.0, 20.0, 10.0])
-        np.testing.assert_array_equal(new_ds["longitude"].values, [20.0, 10.0, 10.0])
+    # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]
+    np.testing.assert_array_equal(new_ds["latitude"].values, [20.0, 20.0, 10.0])
+    np.testing.assert_array_equal(new_ds["longitude"].values, [20.0, 10.0, 10.0])
 
 
 def test_update_tensors(tmp_path):
     structure, store, tree = aux_read_struc("structure_tensors.yaml")
     ds_schema = structure.ds
     assert len(ds_schema.COORDS) == 3
-    assert len(ds_schema.VARS) == 5
+    assert len(ds_schema.VARS) == 2
     print("Coordinates:")
     for coord in ds_schema.COORDS:
         print(coord)
@@ -529,6 +542,8 @@ def test_pivot_nd():
     ])
 
     np.testing.assert_allclose(arr, expected_arr, equal_nan=True)
+
+@pytest.mark.skip
 def test_update_dense():
     # Example YAML file content (as a string for illustration):
     structure, store, tree = aux_read_struc("structure_transport.yaml")

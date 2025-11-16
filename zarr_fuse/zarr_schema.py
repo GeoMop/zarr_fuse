@@ -8,6 +8,7 @@ import attrs
 import numpy as np
 from pathlib import Path
 
+from . import __version__
 from . import units
 from . import logger as zf_logger
 from . dtype_converter import to_typed_array, DType, make_na
@@ -124,7 +125,6 @@ class Interval(AddressMixin):
     end: Any
     unit: Unit
 
-
     @classmethod
     def from_list(cls, cfg: ContextCfg, default_unit):
         lst, schema_ctx = cfg.value(), cfg.schema_ctx
@@ -163,12 +163,18 @@ class Interval(AddressMixin):
                 return cls(-np.inf, np.inf, default_unit)
             else:
                 cfg.schema_ctx.error(f"Invalid step_limits specification: {cfg.cfg}")
-        elif isinstance(cfg.cfg, list):
-            return cls.from_list(cfg, default_unit)
+        if isinstance(cfg.cfg, list):
+            start = cfg.cfg[0]
+            end = cfg.cfg[1]
+            unit = unit_instance(cfg.get(2), default_unit)
         else:
             assert isinstance(cfg.cfg, dict)
+            start = cfg.cfg['start']
+            end = cfg.cfg['end']
             unit = unit_instance(cfg.get("unit"), default_unit)
-            return cls(cfg.cfg["start"], cfg.cfg["end"], unit)
+        if start > end:
+            cfg.schema_ctx.error(f"Invalid step_limits specification: start {start} > end {end}")
+        return cls(start, end, unit)
 
     def no_new(self):
         return self.start == -np.inf and self.end == -np.inf
@@ -205,6 +211,8 @@ class IntervalRange(Interval):
         c = np.asarray(codes, dtype=np.int64)
         return codes
 
+
+Quantity = units.pint.Quantity | units.DateTimeQuantity
 
 
 @attrs.define
@@ -268,11 +276,16 @@ class Variable(AddressMixin):
             return InfRange()
 
         if 'discrete' in range_dict:
-            return DiscreteRange.from_cfg(dict_ctx['discrete'], self.df_col, self.convert_values, self.na_value)
+            convert_fn = lambda vals: self.make_quantity(vals).magnitude
+            return DiscreteRange.from_cfg(dict_ctx['discrete'], self.df_col, convert_fn, self.na_value)
         elif 'interval' in range_dict:
             return IntervalRange.from_list(dict_ctx['interval'], self.unit)
 
         schema_ctx.error(f"Invalid range specification: {range_dict}")
+
+    @staticmethod
+    def _opt_arg(arg, default):
+        return default if arg is None else arg
 
     def convert_values(self, values, from_unit=None, dtype = None, to_unit=None, range = None):
         """
@@ -280,14 +293,24 @@ class Variable(AddressMixin):
         :param values:
         :return:
         """
-        opt_arg = lambda arg, default : default if arg is None else arg
-        from_unit = opt_arg(from_unit, self.source_unit)
-        dtype = opt_arg(dtype, self.dtype)
-        to_unit = opt_arg(to_unit, self.unit)
-        range = opt_arg(range, self.range)
+        quantity = self._make_quantity(values, from_unit=from_unit, dtype=dtype)
+        to_unit = self._opt_arg(to_unit, self.unit)
+        range = self._opt_arg(range, self.range)
 
-        # DateTime specialization
+        q_new = quantity.to(to_unit)
+        q_new = q_new.magnitude
+        q_new = range.encode(q_new)
+        return q_new
+
+    def _make_quantity(self, values: np.ndarray, from_unit=None, dtype = None):
+        """
+        Convert raw values to a pint.Quantity or DateTimeQuantity in the variable's unit.
+        """
+        from_unit = self._opt_arg(from_unit, self.source_unit)
+        dtype = self._opt_arg(dtype, self.dtype)
+
         if isinstance(from_unit, units.DateTimeUnit):
+            # DateTime specialization
             quantity = units._create_dt_quantity(values, from_unit)
         else:
             if dtype is not None:
@@ -296,12 +319,32 @@ class Variable(AddressMixin):
             # Pint specialization when a unit string is provided
             assert isinstance(from_unit, units.pint.Unit)
             quantity = units.ureg.Quantity(values, from_unit)
+        return quantity
 
-        q_new = quantity.to(to_unit)
-        q_new = q_new.magnitude
-        q_new = range.encode(q_new)
-        return q_new
+    def magnitude(self, q: np.ndarray | Quantity) -> np.ndarray:
+        """
+        Return the magnitude of the provided quantity, converting to the variable's unit if needed.
+        """
+        if isinstance(q, (units.pint.Quantity, units.DateTimeQuantity)):
+            return q.magnitude
+        else:
+            return q
 
+    def quantity(self, q: np.ndarray | Quantity) \
+            -> Quantity:
+        """
+        Return the provided quantity, converting to the variable's unit if needed.
+        """
+        if isinstance(q, (units.pint.Quantity, units.DateTimeQuantity)):
+            return q.to(self.unit)
+        else:
+            return self._make_quantity(q, from_unit=self.unit)
+
+    def encode(self, values: np.ndarray | Quantity) -> np.ndarray:
+        return self.range.encode(self.magnitude(values))
+
+    def decode(self, values: np.ndarray) -> Quantity:
+        return self.quantity(self.range.decode(values))
 
 class Coord(Variable):
 
@@ -321,7 +364,7 @@ class Coord(Variable):
             = cfg.get("chunk_size", 1024).value()
 
         step_item = cfg.get("step_limits", "any_new")  # None value allowed
-        default_step_unit = units.step_unit(self.unit) # For DateTimeUnit the incremental/step unit is a pint.Unit of time.
+        default_step_unit = self.unit.delta_unit() # For DateTimeUnit the incremental/step unit is a pint.Unit of time.
         self.step_limits = Interval.step_limits(step_item, default_step_unit)
 
         self.sorted : bool = cfg.get('sorted', not self.is_composed()).value()
@@ -334,15 +377,6 @@ class Coord(Variable):
 
     def is_composed(self):
         return len(self.composed) > 1
-
-    def step_unit(self):
-        """
-        Return the unit of the step_limits.
-        """
-        coord_unit = self.unit
-        step_unit = units.step_unit(coord_unit)
-        return step_unit
-
 
 Attrs = Dict[str, Any]
 attrs_field = attrs.field
@@ -360,6 +394,7 @@ class DatasetSchema(AddressMixin):
     def __init__(self, attrs: ContextCfg, vars: ContextCfg, coords: ContextCfg):
         self._address = attrs.schema_ctx.parent()
         self.ATTRS = attrs.value()
+        self.ATTRS['VERSION'] = __version__
 
         # Backward compatible definition of coords as VARS.
         for coord in coords.keys():
@@ -404,7 +439,10 @@ class DatasetSchema(AddressMixin):
         return out
 
     def is_empty(self):
-        return not self.ATTRS and not self.COORDS and not self.VARS
+        return (
+                self.ATTRS == {'VERSION':__version__}
+                and not self.COORDS
+                and not self.VARS)
 
 
     def zarr_attrs(self):
@@ -497,7 +535,9 @@ def deserialize(source: Union[IO, str, bytes, Path],
     raw_dict = yaml.safe_load(content) or {}
     if log is None:
         log = default_logger()
-    root_address = SchemaCtx(addr=[], file=file_name, logger=log)
+    attrs = raw_dict.get('ATTRS', {})
+    version = attrs.get('VERSION', '0.2.0')  # currently unused
+    root_address = SchemaCtx(addr=[], version=version, file=file_name, logger=log)
     root = ContextCfg(raw_dict, root_address)
     return dict_deserialize(root)
 
@@ -543,8 +583,9 @@ def serialize(node_schema: NodeSchema, path: Union[str, Path]=None) -> str:
     The conversion is performed by the merged convert_value function which uses a
     custom value serializer for attrs.asdict.
     """
-    converted = convert_value(node_schema)
-    content = yaml.safe_dump(converted, sort_keys=False)
+    root_node_dict = convert_value(node_schema)
+    #root_node_dict['ATTRS']['VERSION'] = __version__
+    content = yaml.safe_dump(root_node_dict, sort_keys=False)
     if path is None:
         return content
     else:

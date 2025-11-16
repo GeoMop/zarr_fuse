@@ -148,7 +148,7 @@ def check_structure_weather(node_schema):
     for coord_name, coord_details in coords.items():
         print(f"{coord_name}: {coord_details}")
 
-    assert ds_schema.COORDS["time of year"].step_limits == schema.Interval(1, 1, units.Unit('h'))
+    assert ds_schema.COORDS["time of year"].step_limits == schema.Interval(1, 12, units.Unit('h'))
 
     # Print primary variable(s).
     print("\nQuantities:")

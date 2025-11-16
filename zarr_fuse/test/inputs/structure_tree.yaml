@@ -5,6 +5,7 @@ COORDS:
     # TODO: allow None values for coord keywords ?
     time: {}
 
+ATTRS: {VERSION: 0.3.0}
 child_1:
     VARS:
         temperature:
