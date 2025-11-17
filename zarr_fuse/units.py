@@ -51,7 +51,7 @@ def build_tzinfos():
                 if existing != new:
                     inconsistent.add(abbr)
             tzinfos[abbr] = tzobj
-    print("Removing inconsistent TZ codes:", inconsistent)
+    #print("Removing inconsistent TZ codes:", inconsistent)
     for code in inconsistent:
         tzinfos.pop(code)
     return tzinfos

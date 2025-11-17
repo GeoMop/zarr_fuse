@@ -657,6 +657,95 @@ class Node:
             self.logger.error(dup_dict)
         #return written_ds
 
+    def _validate_ds_against_schema(self, ds: xr.Dataset):
+        """
+        Ensure that a provided xarray.Dataset is compatible with this node's schema:
+        - all schema coordinates are present,
+        - all schema variables are present,
+        - variable dims match the schema's coord list.
+
+        Extra coordinates/variables in `ds` are allowed but logged as a warning.
+        """
+        schema = self.schema
+        path_str = self.group_path or "/"
+
+        # --- Coordinates ---
+        for cname, c_schema in schema.COORDS.items():
+            c_schema.validate_ds_coord(ds.coords.get(cname, None), path_str, self.logger)
+            if cname not in ds.coords:
+                self.logger.error(
+                    KeyError(f"Source dataset is missing coordinate '{cname}'."))
+
+            coord = ds.coords[cname]
+            # In your own code you always create coords as 1D with dim == name
+            if coord.ndim != 1 or coord.dims != (cname,):
+                raise ValueError(
+                    f"Coordinate '{cname}' for node '{path_str}' must be 1D with "
+                    f"dimension '{cname}', got dims={coord.dims}."
+                )
+
+        # --- Variables ---
+        for vname, vschema in schema.VARS.items():
+            if vname not in ds.data_vars:
+                raise ValueError(
+                    f"Dataset for node '{path_str}' is missing variable '{vname}' "
+                    f"required by schema."
+                )
+
+            da = ds[vname]
+            expected_dims = tuple(vschema.coords)
+            if tuple(da.dims) != expected_dims:
+                raise ValueError(
+                    f"Variable '{vname}' in node '{path_str}' has dims {da.dims}, "
+                    f"but schema expects {expected_dims}."
+                )
+
+            # ensure all dims exist as coordinates in schema
+            for dim in da.dims:
+                if dim not in schema.COORDS:
+                    raise ValueError(
+                        f"Variable '{vname}' in node '{path_str}' uses dimension "
+                        f"'{dim}' which is not declared as a coordinate in schema."
+                    )
+
+        # --- Warn about extras (but allow them) ---
+        extra_vars = set(ds.data_vars) - set(schema.VARS)
+        if extra_vars:
+            self.logger.warning(
+                f"Node '{path_str}': dataset has variables not present in schema: "
+                f"{sorted(extra_vars)}. They will still be written."
+            )
+
+        extra_coords = set(ds.coords) - set(schema.COORDS)
+        if extra_coords:
+            self.logger.warning(
+                f"Node '{path_str}': dataset has coordinates not present in schema: "
+                f"{sorted(extra_coords)}. They will still be written."
+            )
+
+    def update_from_ds(self, ds: xr.Dataset):
+        """
+        Alternative to `update_dense` that accepts a fully-formed xarray.Dataset.
+
+        - Verifies that `ds` is compatible with this node's schema
+          (coordinates + variables).
+        - Then merges it into the underlying zarr store via `merge_ds`.
+
+        This is intended for use by higher-level tools (e.g. `zf cp`) that
+        already have an xarray.Dataset and don't need the Polars/NumPy path.
+        """
+        # Validate compatibility with the current node schema
+        self._validate_ds_against_schema(ds)
+
+        # Merge/write to the store using existing logic
+        written_ds, merged_coords = self.merge_ds(ds)
+
+        # Optional: still check for duplicated coordinates and log them
+        dup_dict = check_unique_coords(written_ds)
+        if dup_dict:
+            self.logger.error(dup_dict)
+
+        return written_ds
     def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode
         rel_path = self.group_path  # + self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
