@@ -44,6 +44,11 @@ on:
         required: false
         type: string
         default: ""
+      zarr-fuse-ref:
+        description: "Ref/branch/tag repozitáře GeoMop/zarr_fuse"
+        required: false
+        type: string
+        default: main
 jobs:
   get-version-tag:
     name: Get version tag
@@ -99,6 +104,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: GeoMop/zarr_fuse
+          ref: ${{ inputs.zarr-fuse-ref }}
 
       - name: Remove existing configuration files
         if: ${{ inputs.configuration-dir-path != '' }}
@@ -112,7 +118,7 @@ jobs:
           path: ingress_server/src/inputs/
 
       - name: Containerize
-        uses: ./.github/actions/containerize # GeoMop/github-actions/.github/actions/containerize@v1
+        uses: GeoMop/github-actions/.github/actions/containerize@v1
         with:
           registry: ${{ inputs.docker-registry }}
           repository: ${{ inputs.docker-repository }}
@@ -135,8 +141,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: GeoMop/zarr_fuse
+          ref: ${{ inputs.zarr-fuse-ref }}
       - name: Lint helm chart
-        uses: ./.github/actions/helm-lint # GeoMop/github-actions/.github/actions/helm-lint@v1
+        uses: GeoMop/github-actions/.github/actions/helm-lint@v1
         with:
           working-directory: ingress_server/charts/ingress-server
           values: --values values/minimal-required-values.yaml
@@ -159,6 +166,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: GeoMop/zarr_fuse
+          ref: ${{ inputs.zarr-fuse-ref }}
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
       - name: Set context
