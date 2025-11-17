@@ -34,4 +34,5 @@ jobs:
       namespace: ingress-server-latest
       release-name: ingress-server-latest
       s3-store-url: s3://app-databuk-test-service/bukov-main.zarr
+      zarr-fuse-ref: main
     secrets: inherit

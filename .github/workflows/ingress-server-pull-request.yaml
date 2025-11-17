@@ -39,4 +39,5 @@ jobs:
       namespace: ingress-server-development
       release-name: ingress-server-development
       s3-store-url: s3://app-databuk-test-service/bukov-pull-request.zarr
+      zarr-fuse-ref: ${{ github.head_ref }}
     secrets: inherit
