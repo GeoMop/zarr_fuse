@@ -96,6 +96,9 @@ jobs:
     container:
       image: quay.io/buildah/stable:v1.35.4
       options: --privileged
+    defaults:
+      run:
+        working-directory: ingress_server
     steps:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
@@ -104,14 +107,14 @@ jobs:
 
       - name: Remove existing configuration files
         if: ${{ inputs.configuration-dir-path != '' }}
-        run: rm -rf ingress_server/src/inputs/*
+        run: rm -rf src/inputs/*
 
       - name: Download configuration files artifact
         if: ${{ inputs.configuration-dir-path != '' }}
         uses: actions/download-artifact@v4
         with:
           name: ingress-server-configuration
-          path: ingress_server/src/inputs/
+          path: src/inputs/
 
       - name: Containerize
         uses: GeoMop/github-actions/.github/actions/containerize@v1
