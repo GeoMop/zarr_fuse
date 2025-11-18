@@ -652,178 +652,82 @@ class S3Service:
     
 
     def get_node_details(self, store_name: str, node_path: str) -> Dict[str, Any]:
-        """Get detailed information about a specific node in a Zarr store"""
-        if not self._fs or not self._current_config:
-            raise ValueError("Not connected to S3. Call connect() first.")
-        
-        # TODO: Implement zarr_fuse path for node details
-        # For now, use legacy implementation
-        print(f"Using legacy path for node details: {node_path}")
-        
-        '''
-        # LEGACY CODE BELOW - NO CHANGES TO EXISTING LOGIC
+        """Get detailed information about a specific node in a Zarr store (modern sidebar logic, dynamic children)"""
         try:
-            print(f"Getting details for node: {store_name}/{node_path}")
-            
-            # Use the store path from store_url directly
-            store_url = self._current_config.store_url
-            if store_url.startswith('s3://'):
-                store_path = store_url[5:]  # Remove 's3://' prefix
-            else:
-                store_path = store_url
-            
-            print(f"Using store path from store_url: {store_path}")
-            
-            # Open the store
-            storage_options = self._get_storage_options()
-            
-            # Use zarr_fuse approach: FsspecStore instead of get_mapper
-            fs = fsspec.filesystem('s3', asynchronous=False, **storage_options)
-            clean_path = store_path  # Already clean, no s3:// prefix
-            store = FsspecStore(fs, path=clean_path)
-            print(f"Created FsspecStore for node details: {clean_path}")
-            
-            # Try to open as group first
-            try:
-                # Remove 'root/' prefix if present
-                clean_node_path = node_path.replace('root/', '') if node_path.startswith('root/') else node_path
-                
-                # Special handling for root node
-                if clean_node_path == 'root' or clean_node_path == '':
-                    node = zarr.open_group(store, mode='r')
-                    node_type = 'group'
-                elif clean_node_path:
-                    # For FsspecStore, don't use path parameter - create new store with path
-                    node_fs = fsspec.filesystem('s3', asynchronous=False, **storage_options)
-                    node_store = FsspecStore(node_fs, path=f"{clean_path}/{clean_node_path}")
-                    node = zarr.open_group(node_store, mode='r')
-                    node_type = 'group'
-                else:
-                    node = zarr.open_group(store, mode='r')
-                    node_type = 'group'
-            except Exception as e:
-                print(f"WARNING: Failed to open as group: {e}")
-                print(f"Now trying to open as array...")
-                try:
-                    # Remove 'root/' prefix if present
-                    clean_node_path = node_path.replace('root/', '') if node_path.startswith('root/') else node_path
-                    
-                    # Special handling for root node
-                    if clean_node_path == 'root' or clean_node_path == '':
-                        # Root should be opened as group, not array
-                        node = zarr.open_group(store, mode='r')
-                        node_type = 'group'
-                    elif clean_node_path:
-                        # For FsspecStore, don't use path parameter - create new store with path
-                        node_fs = fsspec.filesystem('s3', asynchronous=False, **storage_options)
-                        node_store = FsspecStore(node_fs, path=f"{clean_path}/{clean_node_path}")
-                        node = zarr.open_array(node_store, mode='r')
-                        node_type = 'array'
+            if not self._fs or not self._current_config:
+                raise ValueError("Not connected to S3. Call connect() first.")
+            # Open Zarr store
+            _, node = self._open_zarr_store()
+            # Split path into parts
+            parts = [p for p in node_path.split('/') if p]
+            print("Requested node_path:", node_path)
+            current = node
+            for idx, part in enumerate(parts):
+                if hasattr(current, 'children'):
+                    print(f"Step {idx}: Looking for part '{part}' in children: {list(current.children.keys())}")
+                    if part in current.children:
+                        current = current.children[part]
                     else:
-                        node = zarr.open_array(store, mode='r')
-                        node_type = 'array'
-                except Exception as e2:
-                    print(f"WARNING: Failed to open as array: {e2}")
-                    print(f"ERROR: Both group and array attempts failed")
-                    raise FileNotFoundError(f"Node not found: {node_path}")
-            
-            # Extract node details
-            details = {
-                'name': node_path.split('/')[-1] if node_path else store_name,
-                'path': node_path,
-                'type': node_type,
-                'store_name': store_name,
-                'attrs': {},
-                'coords': {},
-                'vars': {}
-            }
-            
-            if node_type == 'group':
-                # Get attributes
-                try:
-                    details['attrs'] = dict(node.attrs)
-                except Exception as e:
-                    print(f"WARNING: Failed to get attributes: {e}")
-                
-                # Special handling for yr.no group
-                if clean_node_path == 'yr.no':
-                    print(f"Special handling for yr.no group in get_node_details")
+                        print(f"Part '{part}' not found at step {idx}!")
+                        return None
+                else:
+                    print(f"No children attribute at step {idx} for part '{part}'!")
+                    return None
+            # Build children dynamically: groups and arrays
+            children = []
+            # Add subgroups (recursive)
+            if hasattr(current, 'children') and current.children:
+                for child_name, child_node in current.children.items():
+                    children.append({
+                        'name': child_name,
+                        'type': 'group' if hasattr(child_node, 'children') and child_node.children else 'array',
+                        'path': f"{node_path}/{child_name}" if node_path else child_name
+                    })
+            # Add arrays from dataset
+            if hasattr(current, 'dataset') and current.dataset:
+                ds = current.dataset
+                if hasattr(ds, 'data_vars'):
+                    for var_name in ds.data_vars.keys():
+                        children.append({
+                            'name': var_name,
+                            'type': 'array',
+                            'path': f"{node_path}/{var_name}" if node_path else var_name
+                        })
+            # If array, return details
+            if hasattr(current, 'dataset') and current.dataset:
+                ds = current.dataset
+                if hasattr(ds, 'data_vars') and len(ds.data_vars) == 1:
+                    var_name = list(ds.data_vars.keys())[0]
+                    var = ds.data_vars[var_name]
                     try:
-                        # Use store.list_dir() to find weather variables
-                        store_keys = list(store.list_dir(""))
-                        yr_no_keys = [key for key in store_keys if key.startswith('yr.no/') and '/' in key[6:]]
-                        
-                        # Extract variable names
-                        variable_names = set()
-                        for key in yr_no_keys:
-                            parts = key.split('/')
-                            if len(parts) >= 2 and parts[0] == 'yr.no':
-                                var_name = parts[1]
-                                if var_name and not var_name.startswith('.'):
-                                    variable_names.add(var_name)
-                        
-                        print(f"Found yr.no variables in get_node_details: {list(variable_names)}")
-                        
-                        # Add variables to details (LIMITED INFO)
-                        for var_name in sorted(variable_names):
-                            details['vars'][var_name] = {
-                                'name': var_name,
-                                'path': f"{clean_node_path}/{var_name}",
-                                'type': 'array',
-                                'shape': 'Click to load...',
-                                'dtype': 'Loading...',
-                                'sample_data': '(Click variable to see data)'
-                            }
-                            print(f"📄 Added variable to details: {var_name}")
-                        
-                        print(f"SUCCESS: Extracted details for {node_path}")
-                        return clean_nan_values(details)
-                        
-                    except Exception as e:
-                        print(f"WARNING: yr.no fallback in get_node_details failed: {e}")
-                
-                # Get coordinates and variables
-                try:
-                    subgroups = list(getattr(node, 'group_keys')())
-                    arrays = list(getattr(node, 'array_keys')())
-                    
-                    # Process coordinates (usually groups with coordinate data)
-                    for name in subgroups:
-                        try:
-                            coord_group = node[name]
-                            coord_details = self._extract_coordinate_info(coord_group, name)
-                            details['coords'][name] = coord_details
-                        except Exception as e:
-                            print(f"WARNING: Failed to process coordinate {name}: {e}")
-                    
-                    # Process variables (arrays)
-                    for name in arrays:
-                        try:
-                            var_array = node[name]
-                            var_details = self._extract_variable_info(var_array, name)
-                            details['vars'][name] = var_details
-                        except Exception as e:
-                            print(f"WARNING: Failed to process variable {name}: {e}")
-                            
-                except Exception as e:
-                    print(f"WARNING: Failed to get group contents: {e}")
-                    
-            elif node_type == 'array':
-                # For arrays, treat as a variable
-                var_details = self._extract_variable_info(node, node_path.split('/')[-1] if node_path else store_name)
-                details['vars'][node_path.split('/')[-1] if node_path else store_name] = var_details
-            
-            print(f"SUCCESS: Extracted details for {node_path}")
-            return clean_nan_values(details)
-            
+                        if len(var.shape) == 1:
+                            sample_data = var[:10].tolist()
+                        elif len(var.shape) == 2:
+                            sample_data = var[:5, :5].tolist()
+                        else:
+                            sample_data = []
+                    except Exception:
+                        sample_data = []
+                    return {
+                        'name': var_name,
+                        'path': node_path,
+                        'type': 'array',
+                        'shape': list(var.shape),
+                        'dtype': str(var.dtype),
+                        'size': getattr(var, 'size', None),
+                        'attrs': dict(var.attrs) if hasattr(var, 'attrs') else {},
+                        'sample_data': sample_data
+                    }
+            # Return group node details
+            return {
+                'name': getattr(current, 'name', node_path.split('/')[-1]),
+                'path': node_path,
+                'type': 'group',
+                'children': children
+            }
         except Exception as e:
             logger.error(f"Failed to get node details for {store_name}/{node_path}: {e}")
             raise
-    '''
-    def _get_node_details_zarr_fuse(self, store_name: str, node_path: str) -> Dict[str, Any]:
-        """New implementation using zarr_fuse library"""
-        # TODO: Implement zarr_fuse integration
-        raise NotImplementedError("zarr_fuse node details integration not yet implemented")
     
     def get_variable_data(self, store_name: str, variable_path: str) -> Dict[str, Any]:
         """Get actual data for a specific variable (limited sample)"""
@@ -1007,4 +911,7 @@ class S3Service:
             return {'name': name, 'type': 'variable', 'error': str(e)}
 
 # Global S3 service instance
+                    # New implementation using zarr_fuse library
+                    # TODO: Implement zarr_fuse integration
+        raise NotImplementedError("zarr_fuse node details integration not yet implemented")
 s3_service = S3Service()
