@@ -5,7 +5,7 @@
 "bukov_endpoint":
   reload_interval: 300  # Cache TTL in seconds (5 minutes)
   schema_file: "schemas/test_schema.yaml"
-  rel_path: "bukov.zarr"
+  store_url: "s3://hlavo-release/bukov.zarr"
   description: "bukov_endpoint"
   store_type: "zarr"
   version: "1.0.0"
@@ -15,7 +15,7 @@
 "surface_data_endpoint":
   reload_interval: 300  # Cache TTL in seconds (5 minutes)
   schema_file: "schemas/surface_schema.yaml"
-  rel_path: "surface.zarr"
+  store_url: "s3://hlavo-release/surface.zarr"
   description: "surface_data_endpoint"
   store_type: "zarr"
   version: "1.0.0"

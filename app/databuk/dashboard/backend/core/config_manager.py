@@ -8,7 +8,6 @@ class EndpointConfig(BaseModel):
     """Pydantic model for endpoint configuration validation"""
     reload_interval: int = Field(..., gt=0, description="Reload interval in seconds")
     schema_file: str = Field(..., description="Path to schema file")
-    rel_path: str = Field(..., description="Relative path to Zarr store inside bucket")
     store_url: str = Field(..., description="Full S3 store URL")
     description: str = Field(..., description="Endpoint description")
     store_type: str = Field(default="zarr", description="Store type")
@@ -41,15 +40,8 @@ def load_endpoints(config_path: Optional[str] = None) -> Dict[str, EndpointConfi
         try:
             # Process environment variables
             processed_data = _process_environment_variables(endpoint_data)
-            # Compose store_url from S3_BUCKET_NAME and rel_path
-            s3_bucket = os.getenv("S3_BUCKET_NAME")
-            rel_path = processed_data.get("rel_path")
-            if not s3_bucket:
-                raise ValueError("Environment variable S3_BUCKET_NAME not found")
-            if not rel_path:
-                raise ValueError(f"rel_path not found for endpoint '{endpoint_name}'")
-            store_url = f"s3://{s3_bucket}/{rel_path}"
-            processed_data["store_url"] = store_url
+            if "store_url" not in processed_data:
+                raise ValueError(f"store_url not found for endpoint '{endpoint_name}'")
             endpoint_config = EndpointConfig(**processed_data)
             endpoints[endpoint_name] = endpoint_config
         except Exception as e:
