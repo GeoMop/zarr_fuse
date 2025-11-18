@@ -173,8 +173,8 @@ function App() {
         </div>
       )}
 
-      {/* Content Area - Main Panel */}
-      <main className="flex-1 min-w-0 bg-transparent p-6 border-2 border-dashed border-blue-400/60">
+  {/* Content Area - Main Panel */}
+  <main className="flex-1 min-w-0 bg-transparent p-6 border-2 border-dashed border-blue-400/60 overflow-y-auto h-screen scrollbar-thin">
         {/* Show Sidebar Button */}
         {!isVisible && (
           <button

@@ -215,7 +215,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   const statusColor = s3Loading ? 'bg-yellow-400' : (s3Error || hasStoreError) ? 'bg-red-500' : 'bg-green-400';
 
   return (
-    <aside className="h-screen flex flex-col transition-all duration-300 bg-white border-r border-gray-200 shadow-lg w-full">
+  <aside className="h-screen flex flex-col transition-all duration-300 bg-white border-r border-gray-200 shadow-lg w-full overflow-y-auto scrollbar-thin">
       {/* Header */}
       <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-4 relative">
         <div className="flex items-center justify-between">
