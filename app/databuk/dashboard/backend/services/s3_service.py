@@ -696,34 +696,86 @@ class S3Service:
             # If array, return details
             if hasattr(current, 'dataset') and current.dataset:
                 ds = current.dataset
-                if hasattr(ds, 'data_vars') and len(ds.data_vars) == 1:
-                    var_name = list(ds.data_vars.keys())[0]
-                    var = ds.data_vars[var_name]
-                    try:
-                        if len(var.shape) == 1:
-                            sample_data = var[:10].tolist()
-                        elif len(var.shape) == 2:
-                            sample_data = var[:5, :5].tolist()
-                        else:
+                # Fill vars and coords from xarray dataset if available
+                vars_list = []
+                coords_list = []
+                # Variables (data_vars)
+                if hasattr(ds, 'data_vars'):
+                    for var_name in ds.data_vars.keys():
+                        var = ds.data_vars[var_name]
+                        try:
+                            if len(var.shape) == 1:
+                                sample_data = var[:10].tolist()
+                            elif len(var.shape) == 2:
+                                sample_data = var[:5, :5].tolist()
+                            else:
+                                sample_data = []
+                        except Exception:
                             sample_data = []
-                    except Exception:
-                        sample_data = []
+                        vars_list.append({
+                            'name': var_name,
+                            'path': f"{node_path}/{var_name}" if node_path else var_name,
+                            'shape': list(var.shape),
+                            'dtype': str(var.dtype),
+                            'size': getattr(var, 'size', None),
+                            'attrs': dict(var.attrs) if hasattr(var, 'attrs') else {},
+                            'sample_data': sample_data
+                        })
+                # Coordinates (coords)
+                if hasattr(ds, 'coords'):
+                    for coord_name in ds.coords.keys():
+                        coord = ds.coords[coord_name]
+                        try:
+                            if len(coord.shape) == 1:
+                                sample_data = coord[:10].tolist()
+                            elif len(coord.shape) == 2:
+                                sample_data = coord[:5, :5].tolist()
+                            else:
+                                sample_data = []
+                        except Exception:
+                            sample_data = []
+                        coords_list.append({
+                            'name': coord_name,
+                            'shape': list(coord.shape),
+                            'dtype': str(coord.dtype),
+                            'size': getattr(coord, 'size', None),
+                            'attrs': dict(coord.attrs) if hasattr(coord, 'attrs') else {},
+                            'sample_data': sample_data
+                        })
+                # If single variable, return array details
+                if hasattr(ds, 'data_vars') and len(ds.data_vars) == 1:
+                    var_obj = vars_list[0]
                     return {
-                        'name': var_name,
+                        'name': var_obj['name'],
                         'path': node_path,
                         'type': 'array',
-                        'shape': list(var.shape),
-                        'dtype': str(var.dtype),
-                        'size': getattr(var, 'size', None),
-                        'attrs': dict(var.attrs) if hasattr(var, 'attrs') else {},
-                        'sample_data': sample_data
+                        'shape': var_obj['shape'],
+                        'dtype': var_obj['dtype'],
+                        'size': var_obj['size'],
+                        'attrs': var_obj['attrs'],
+                        'vars': vars_list,
+                        'coords': coords_list,
+                        'sample_data': var_obj['sample_data']
                     }
-            # Return group node details
+                # If group, return group details with vars/coords
+                return {
+                    'name': getattr(current, 'name', node_path.split('/')[-1]),
+                    'path': node_path,
+                    'type': 'group',
+                    'children': children,
+                    'attrs': {},
+                    'vars': vars_list,
+                    'coords': coords_list
+                }
+            # Return group node details (no dataset)
             return {
                 'name': getattr(current, 'name', node_path.split('/')[-1]),
                 'path': node_path,
                 'type': 'group',
-                'children': children
+                'children': children,
+                'attrs': {},
+                'vars': [],
+                'coords': []
             }
         except Exception as e:
             logger.error(f"Failed to get node details for {store_name}/{node_path}: {e}")

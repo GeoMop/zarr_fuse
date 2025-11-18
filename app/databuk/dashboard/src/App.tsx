@@ -230,7 +230,7 @@ function App() {
             {nodeDetails && !nodeLoading && (
               <div className="space-y-6">
                 {/* ATTRS */}
-                {Object.keys(nodeDetails.attrs).length > 0 && (
+                {nodeDetails.attrs && Object.keys(nodeDetails.attrs).length > 0 && (
                   <div className="bg-white rounded-lg border border-gray-200 p-6">
                     <h2 className="text-xl font-semibold text-gray-800 mb-4">ATTRS</h2>
                     <div className="space-y-2">
@@ -245,29 +245,35 @@ function App() {
                 )}
 
                 {/* COORDS */}
-                {Object.keys(nodeDetails.coords).length > 0 && (
+                {Array.isArray(nodeDetails.coords) && nodeDetails.coords.length > 0 && (
                   <div className="bg-white rounded-lg border border-gray-200 p-6">
                     <h2 className="text-xl font-semibold text-gray-800 mb-4">COORDS</h2>
                     <div className="space-y-4">
-                      {Object.entries(nodeDetails.coords).map(([name, coord]: [string, any]) => (
-                        <div key={name} className="border border-gray-100 rounded-lg p-4">
-                          <h3 className="font-medium text-gray-800 mb-2">{name}</h3>
-                          {coord.values && (
-                            <div className="space-y-2 text-sm">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">values:</span>
-                                <span className="text-gray-600">[{coord.values.sample_data?.slice(0, 5).join(', ')}...]</span>
-                              </div>
-                              <div className="flex items-center gap-4">
-                                <span className="font-medium">min:</span>
-                                <span className="text-gray-600">{coord.values.min}</span>
-                                <span className="font-medium">max:</span>
-                                <span className="text-gray-600">{coord.values.max}</span>
-                                <span className="font-medium"># values:</span>
-                                <span className="text-gray-600">{coord.values.count}</span>
-                              </div>
+                      {nodeDetails.coords.map((coord: any, idx: number) => (
+                        <div key={coord.name || idx} className="border border-gray-100 rounded-lg p-4">
+                          <h3 className="font-medium text-gray-800 mb-2">{coord.name}</h3>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">Shape:</span>
+                              <span className="text-gray-600">[{coord.shape?.join(', ')}]</span>
                             </div>
-                          )}
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">Type:</span>
+                              <span className="text-gray-600">{coord.dtype}</span>
+                            </div>
+                            {coord.attrs && Object.keys(coord.attrs).length > 0 && (
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">Attrs:</span>
+                                <span className="text-gray-600">{JSON.stringify(coord.attrs)}</span>
+                              </div>
+                            )}
+                            {coord.sample_data && coord.sample_data.length > 0 && (
+                              <div>
+                                <span className="font-medium">Sample Data:</span>
+                                <pre className="bg-gray-100 p-2 rounded text-xs overflow-auto max-h-24 text-gray-800">{JSON.stringify(coord.sample_data, null, 2)}</pre>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -275,28 +281,28 @@ function App() {
                 )}
 
                 {/* VARS - ACCORDION STYLE */}
-                {Object.keys(nodeDetails.vars).length > 0 && (
+                {Array.isArray(nodeDetails.vars) && nodeDetails.vars.length > 0 && (
                   <div className="bg-white rounded-lg border border-gray-200 p-6">
-                    <h2 className="text-xl font-semibold text-gray-800 mb-4">Variables ({Object.keys(nodeDetails.vars).length})</h2>
+                    <h2 className="text-xl font-semibold text-gray-800 mb-4">Variables ({nodeDetails.vars.length})</h2>
                     <div className="space-y-2">
-                      {Object.entries(nodeDetails.vars).map(([name, variable]: [string, any]) => {
-                        const isExpanded = expandedVariables.has(name);
-                        const data = variableData[name];
+                      {nodeDetails.vars.map((variable: any, idx: number) => {
+                        const isExpanded = expandedVariables.has(variable.name);
+                        const data = variableData[variable.name];
 
                         return (
-                          <div key={name} className="border border-gray-200 rounded-lg overflow-hidden">
+                          <div key={variable.name || idx} className="border border-gray-200 rounded-lg overflow-hidden">
                             {/* Variable Header - Clickable */}
                             <div
                               className="p-4 bg-gray-50 hover:bg-blue-50 cursor-pointer transition-colors flex items-center justify-between"
-                              onClick={() => handleVariableClick(name, variable.path || `${selectedNode?.nodePath ? selectedNode.nodePath + '/' : ''}${name}`)}
+                              onClick={() => handleVariableClick(variable.name, variable.path || `${selectedNode?.nodePath ? selectedNode.nodePath + '/' : ''}${variable.name}`)}
                             >
                               <div className="flex items-center gap-3">
-                                <div className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>
+                                <div className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}> 
                                   <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                   </svg>
                                 </div>
-                                <h3 className="font-medium text-gray-800">{name}</h3>
+                                <h3 className="font-medium text-gray-800">{variable.name}</h3>
                               </div>
                               <div className="text-sm text-gray-500">
                                 {isExpanded ? 'Click to collapse' : 'Click to expand'}
@@ -344,6 +350,25 @@ function App() {
                                     )}
                                   </div>
                                 )}
+
+                                {/* Variable meta info from nodeDetails.vars */}
+                                <div className="space-y-2 mt-4">
+                                  <p className="text-gray-700"><strong>Shape:</strong> [{variable.shape?.join(', ')}]</p>
+                                  <p className="text-gray-700"><strong>Type:</strong> {variable.dtype}</p>
+                                  <p className="text-gray-700"><strong>Size:</strong> {variable.size?.toLocaleString()} elements</p>
+                                  {variable.attrs && Object.keys(variable.attrs).length > 0 && (
+                                    <div>
+                                      <span className="font-medium">Attrs:</span>
+                                      <pre className="bg-gray-100 p-2 rounded text-xs overflow-auto max-h-24 text-gray-800">{JSON.stringify(variable.attrs, null, 2)}</pre>
+                                    </div>
+                                  )}
+                                  {variable.sample_data && variable.sample_data.length > 0 && (
+                                    <div>
+                                      <span className="font-medium">Sample Data:</span>
+                                      <pre className="bg-gray-100 p-2 rounded text-xs overflow-auto max-h-24 text-gray-800">{JSON.stringify(variable.sample_data, null, 2)}</pre>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                             )}
                           </div>
