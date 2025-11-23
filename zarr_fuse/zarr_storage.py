@@ -30,9 +30,9 @@ tuple val coords:
 - source cols as quantities
 - Coordinates object holds both index and non-dim coordinates
   so we use them. We just form the index coodrinate by hash.
-- How to allow providint tuple coord values in structure. 
+- How to allow providint tuple coord values in structure.
   Ideal as dictionary for source cols, but then there is duplicity of their names
-  Rather have values as dict determining source columns, optionaly providing values 
+  Rather have values as dict determining source columns, optionaly providing values
 
 - pivot_nd - hash source cols
 - future read - hash source cols
@@ -122,6 +122,16 @@ def _s3_options(store_options):
     custom_options = json.loads(custom_options_json)
     return recursive_update(s3_options, custom_options)
 
+_STORE_CACHE: dict[tuple, zarr.storage.StoreLike] = {}
+
+def _store_key(store_options: Dict[str, Any]) -> tuple:
+    return (
+        store_options.get("STORE_URL"),
+        store_options.get("S3_ENDPOINT_URL"),
+        store_options.get("S3_ACCESS_KEY"),
+        store_options.get("S3_SECRET_KEY"),
+    )
+
 def _zarr_store_open(store_options: Dict[str, Any]) -> zarr.storage.StoreLike:
     """
     Open a Zarr store based on the provided URL and options
@@ -130,20 +140,27 @@ def _zarr_store_open(store_options: Dict[str, Any]) -> zarr.storage.StoreLike:
     :param kwargs:
     :return:
     """
+    key = _store_key(store_options)
+    if key in _STORE_CACHE:
+        return _STORE_CACHE[key]
+
     store_url = store_options['STORE_URL']  # The only mandatory parameter
     if re.match(r'^s3://', store_url):
         s3_opts = _s3_options(store_options)
         fs = fsspec.filesystem('s3', **s3_opts)
         # Remove s3:// scheme from path for FsspecStore
         clean_path = store_url.replace('s3://', '')
-        return zarr.storage.FsspecStore(fs, path=clean_path)
+        store = zarr.storage.FsspecStore(fs, path=clean_path)
     elif re.match(r'^zip://', store_url):
-        return zarr.storage.ZipStore(store_url)
+        store = zarr.storage.ZipStore(store_url)
     else:
         path = Path(store_url)
         if not path.is_absolute():
             path = store_options.get('WORKDIR', ".") / path
-        return zarr.storage.LocalStore(path)
+        store = zarr.storage.LocalStore(path)
+
+    _STORE_CACHE[key] = store
+    return store
 
 
 def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Dict[str, Any]:
@@ -676,7 +693,7 @@ class Node:
 
     """
      For the updating DF we define "overlap" slice:
-     For sorted coord:  current_coords > new_coords.min() 
+     For sorted coord:  current_coords > new_coords.min()
      For unsorted coords: current_coord_idx > index_of( argmin( current_coords _intersect_ new_coords))
      However new_coords could undergo e.g. projection to existing coords.
      How to unify the procedure?
@@ -807,7 +824,7 @@ for dim in dim_order:
     n, merged_new_coords = merge_coords(dim, new_ds.coords[dim])
     l_overlap = len(ds_zar.coords[dim]) - N
     split_dict[dim] = (n,     l_overlap, merged_new_coords)
- 
+
 dim = dim_order[0]
 ` pad ds_zarr by Nans over [0:N] in 'dim', adding len(new_coords) - l_overlap for each d > dim'
 N, L, coords = slpit_dir[dim]
