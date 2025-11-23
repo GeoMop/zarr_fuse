@@ -16,18 +16,18 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends git=1:2.39.5-0+deb12u2 && \
     rm -rf /var/lib/apt/lists/*
 
-USER 1000:1000
+USER 50000:root
 
-COPY --chown=1000:root packages/common /opt/app/packages/common
-COPY --chown=1000:root inputs /opt/app/inputs
-COPY --chown=1000:root services/extractor_service /opt/app/services/extractor_service
+COPY --chown=50000:root packages/common /opt/app/packages/common
+COPY --chown=50000:root inputs /opt/app/inputs
+COPY --chown=50000:root services/extractor_service /opt/app/services/extractor_service
 
 ENV PIP_NO_CACHE_DIR=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 RUN pip install --no-cache-dir -e /opt/app/packages/common -e /opt/app/services/extractor_service
 
-COPY --chown=1000:root services/extractor_service/dags /opt/airflow/dags
+COPY --chown=50000:root services/extractor_service/dags /opt/airflow/dags
 
 ENV SCHEMAS_DIR=/opt/app/inputs/schemas
 ENV PYTHONUNBUFFERED=1
