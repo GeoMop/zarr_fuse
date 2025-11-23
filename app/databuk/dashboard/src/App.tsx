@@ -1,9 +1,73 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Plot from 'react-plotly.js'; // Plotly importu en tepeye alındı
 import { API_BASE_URL } from './api';
 import LogPanel from './components/LogPanel';
 import { Sidebar } from './components/sidebar';
 import type { ConfigData } from './components/sidebar/types/sidebar';
+import PlotlyViewer from './components/PlotlyViewer'; // Eğer PlotlyViewer kullanacaksan import et
 
+
+// --- PlotSection Bileşeni (App dışında tanımlanmalı) ---
+// Not: Bu bileşen tekil değişken grafiği çizmek içindir.
+// Eğer genel harita/zaman serisi istiyorsan PlotlyViewer kullanılır.
+// Ancak kodunda bu parça geçtiği için buraya düzgünce ekliyorum.
+const PlotSection = ({ storeName, nodePath, variable }: { storeName: string, nodePath: string, variable: any }) => {
+  const [figure, setFigure] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    setFigure(null);
+    const fetchBody = {
+      store_name: storeName,
+      node_path: nodePath,
+      plot_type: variable.name,
+    };
+    fetch(`${API_BASE_URL}/api/s3/plot`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(fetchBody),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.status === 'success' && data.figure) {
+          setFigure(data.figure);
+        } else {
+          // Incompatible durumunda sessiz kal veya hata göster
+          if (data.status !== 'incompatible') {
+             setError(data.reason || 'Unknown error.');
+          }
+        }
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [storeName, nodePath, variable.name]);
+
+  // Eğer figür yoksa ve hata da yoksa (incompatible), hiçbir şey gösterme
+  if (!figure && !loading && !error) return null;
+
+  return (
+    <div className="border border-gray-100 rounded-lg p-4">
+      <h3 className="font-medium text-gray-800 mb-2">{variable.name}</h3>
+      {loading && <div className="text-blue-600">Loading plot...</div>}
+      {error && <div className="text-red-600">{error}</div>}
+      {figure && (
+        <Plot
+          data={figure.data}
+          layout={figure.layout}
+          config={figure.config}
+          style={{ width: '100%', height: '400px' }}
+          useResizeHandler={true}
+        />
+      )}
+    </div>
+  );
+};
+
+// --- Ana App Bileşeni ---
 function App() {
   const [isVisible, setIsVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(420);
@@ -18,6 +82,10 @@ function App() {
   const [expandedVariables, setExpandedVariables] = useState<Set<string>>(new Set());
   const [variableData, setVariableData] = useState<{ [key: string]: any }>({});
   const [showLogPanel, setShowLogPanel] = useState(false);
+  
+  // State for PlotlyViewer interaction (Map selection)
+  const [plotSelection, setPlotSelection] = useState<any>(null);
+
   const sidebarRef = useRef<HTMLDivElement>(null);
 
   // Fetch configuration data
@@ -53,6 +121,8 @@ function App() {
     setSelectedNode({ storeName, nodePath });
     setNodeLoading(true);
     setNodeError(null);
+    // Reset selection when node changes
+    setPlotSelection(null); 
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/s3/node/${storeName}/${nodePath}`);
@@ -173,8 +243,8 @@ function App() {
         </div>
       )}
 
-  {/* Content Area - Main Panel */}
-  <main className="flex-1 min-w-0 bg-transparent p-6 border-2 border-dashed border-blue-400/60 overflow-y-auto h-screen scrollbar-thin w-full mr-0">
+      {/* Content Area - Main Panel */}
+      <main className="flex-1 min-w-0 bg-transparent p-6 border-2 border-dashed border-blue-400/60 overflow-y-auto h-screen scrollbar-thin w-full mr-0">
         {/* Show Sidebar Button */}
         {!isVisible && (
           <button
@@ -229,6 +299,27 @@ function App() {
             {/* Node Details */}
             {nodeDetails && !nodeLoading && (
               <div className="space-y-6">
+                {/* VISUALIZATION SECTION */}
+                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                    <h2 className="text-xl font-semibold text-gray-800 mb-4">Data Visualization</h2>
+                    <div className="space-y-6">
+                        {/* Map View */}
+                        <PlotlyViewer 
+                            storeName={selectedNode.storeName}
+                            nodePath={selectedNode.nodePath}
+                            plotType="map"
+                            selection={plotSelection}
+                        />
+                        {/* Time Series View */}
+                        <PlotlyViewer 
+                            storeName={selectedNode.storeName}
+                            nodePath={selectedNode.nodePath}
+                            plotType="time_series"
+                            selection={plotSelection}
+                        />
+                    </div>
+                </div>
+
                 {/* ATTRS */}
                 {nodeDetails.attrs && Object.keys(nodeDetails.attrs).length > 0 && (
                   <div className="bg-white rounded-lg border border-gray-200 p-6">
@@ -297,7 +388,7 @@ function App() {
                               onClick={() => handleVariableClick(variable.name, variable.path || `${selectedNode?.nodePath ? selectedNode.nodePath + '/' : ''}${variable.name}`)}
                             >
                               <div className="flex items-center gap-3">
-                                <div className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}> 
+                                <div className={`transform transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`}>
                                   <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                                   </svg>
@@ -368,6 +459,14 @@ function App() {
                                       <pre className="bg-gray-100 p-2 rounded text-xs overflow-auto max-h-24 text-gray-800">{JSON.stringify(variable.sample_data, null, 2)}</pre>
                                     </div>
                                   )}
+                                  {/* Single Variable Plot (Optional) */}
+                                  <div className="mt-4">
+                                      <PlotSection 
+                                          storeName={selectedNode.storeName}
+                                          nodePath={selectedNode.nodePath}
+                                          variable={variable}
+                                      />
+                                  </div>
                                 </div>
                               </div>
                             )}

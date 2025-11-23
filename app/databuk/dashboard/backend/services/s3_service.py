@@ -25,9 +25,20 @@ def clean_nan_values(data):
         return [clean_nan_values(item) for item in data]
     return data
 
+
 class S3Service:
     """Service for S3 operations with custom S3 configuration"""
-    
+
+    def get_plot_json(self, store_name, node_path, plot_type=None, selection=None):
+        """Return plot-ready JSON for dashboard visualizations (stub for now)."""
+        # TODO: Implement logic using MultiZoomer/InteractiveMapPlotter style
+        # For now, return a dummy Plotly figure
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[1,2,3], y=[1,4,9], mode='lines+markers'))
+        fig.update_layout(title="Demo Plot", xaxis_title="X", yaxis_title="Y")
+        return fig.to_dict()
+
     def __init__(self):
         self._fs: Optional[fsspec.AbstractFileSystem] = None
         self._current_config: Optional[EndpointConfig] = None
