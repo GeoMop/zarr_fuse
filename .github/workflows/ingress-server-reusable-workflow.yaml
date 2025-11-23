@@ -2,12 +2,7 @@ name: Ingress server - reusable workflow
 on:
   workflow_call:
     inputs:
-      push-container:
-        description: Whether to push the container image
-        required: false
-        type: boolean
-        default: false
-      deploy-helm-chart:
+      deploy:
         description: Whether to deploy the Helm chart
         required: false
         type: boolean
@@ -25,44 +20,100 @@ on:
         description: Extra Helm values to pass during deployment
         required: false
         type: string
+      docker-repository:
+        description: The Docker repository to use
+        required: false
+        type: string
+        default: jbrezmorf/zarr-fuse-ingress-server
+      docker-registry:
+        description: The Docker registry to use
+        required: false
+        type: string
+        default: docker.io
+      configuration-dir-path:
+        description: Path to the directory containing configuration files
+        required: false
+        type: string
+        default: app/databuk/inputs
+      extra-helm-args:
+        description: Extra Helm arguments to pass during deployment
+        required: false
+        type: string
+        default: ""
+      zarr-fuse-ref:
+        description: "Ref/branch/tag repozitáře GeoMop/zarr_fuse"
+        required: false
+        type: string
+        default: main
 jobs:
   get-version-tag:
     name: Get version tag
     runs-on: ubuntu-latest
     outputs:
-      version-tag: ${{ steps.get_version_tag.outputs.version-tag }}
+      version-tag: ${{ steps.get-version-tag.outputs.version_tag }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
       - name: Get version tag
-        id: get_version_tag
+        id: get-version-tag
         run: |
           if [[ ${{ inputs.tag }} == "generate" ]]; then
-            echo "version-tag=ci-$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+            echo "version_tag=ci-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
           else
-            echo "version-tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+            echo "version_tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
           fi
+  pre-containerize:
+    name: Prepare for containerization
+    runs-on: ubuntu-latest
+    if: ${{ inputs.configuration-dir-path != '' }}
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v4
+      - name: Copy configuration files
+        run: |
+          SRC_DIR="${{ inputs.configuration-dir-path }}"
+          DEST_DIR="ci-inputs"
+
+          if [[ ! -d "$SRC_DIR" ]]; then
+            echo "Source directory '$SRC_DIR' does not exist."
+            exit 1
+          fi
+
+          mkdir -p "$DEST_DIR"
+          rm -rf "$DEST_DIR/*"
+
+          cp -r "$SRC_DIR"/. "$DEST_DIR"/
+      - name: Upload configuration files as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingress-server-configuration
+          path: ci-inputs/
   lint-ingress-service-containerfile:
     name: Lint ingress service Containerfile
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          repository: GeoMop/zarr_fuse
+          ref: ${{ inputs.zarr-fuse-ref }}
       - uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: ingress_server/oci/ingress.Containerfile
   containerize-ingress-service:
     name: Containerize ingress server
     runs-on: ubuntu-latest
+    needs:
+      - get-version-tag
+      - pre-containerize
+      - lint-ingress-service-containerfile
     container:
       image: quay.io/buildah/stable:v1.35.4
       options: --privileged
-    needs:
-      - get-version-tag
-      - lint-ingress-service-containerfile
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          repository: GeoMop/zarr_fuse
+          ref: ${{ inputs.zarr-fuse-ref }}
       - name: Containerize
         uses: GeoMop/github-actions/.github/actions/containerize@v1
         with:
@@ -95,41 +146,61 @@ jobs:
       - get-version-tag
       - lint-extractor-service-containerfile
     steps:
-      - name: Checkout
+      - name: Checkout zarr_fuse
         uses: actions/checkout@v4
+        with:
+          repository: GeoMop/zarr_fuse
+          ref: ${{ inputs.zarr-fuse-ref }}
+
+      - name: Remove existing configuration files
+        if: ${{ inputs.configuration-dir-path != '' }}
+        run: rm -rf ingress_server/src/inputs/*
+
+      - name: Download configuration files artifact
+        if: ${{ inputs.configuration-dir-path != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ingress-server-configuration
+          path: ingress_server/src/inputs/
+
       - name: Containerize
         uses: GeoMop/github-actions/.github/actions/containerize@v1
         with:
-          registry: docker.io
-          repository: jbrezmorf/zarr-fuse-extractor-service
+          registry: ${{ inputs.docker-registry }}
+          repository: ${{ inputs.docker-repository }}
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
-          containerfile-path: oci/extractor.Containerfile
-          working-directory: ingress_server
+          containerfile-path: oci/Containerfile
+          push: true
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
-          push: true
-          extra-build-args: >-
-            --build-arg APP_VERSION=${{ needs.get-version-tag.outputs.version-tag }}
+          working-directory: ingress_server
+          extra-build-args: --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}"
   validate-helm-chart:
     name: Validate ingress server Helm chart
     runs-on: ubuntu-latest
     container:
-      image: alpine/k8s:1.29.14
+      image: docker.io/alpine/k8s:1.29.14
+    needs:
+      - containerize-ingress-service
+      - containerize-extractor-service
     steps:
-      - name: Checkout
+      - name: Checkout zarr_fuse
         uses: actions/checkout@v4
+        with:
+          repository: GeoMop/zarr_fuse
+          ref: ${{ inputs.zarr-fuse-ref }}
       - name: Lint Helm chart
         uses: GeoMop/github-actions/.github/actions/helm-lint@v1
         with:
           working-directory: ingress_server/charts
           chart: zarr-fuse-ingress
           helm-dependencies: "apache-airflow=https://airflow.apache.org"
-  deploy-helm-chart:
+  deploy:
     name: Deploy ingress server to e-infra rancher
     runs-on: ubuntu-latest
-    if: ${{ inputs.deploy-helm-chart }}
+    if: ${{ inputs.deploy }}
     container:
-      image: alpine/k8s:1.29.14
+      image: docker.io/alpine/k8s:1.29.14
     needs:
       - validate-helm-chart
       - get-version-tag
@@ -137,9 +208,15 @@ jobs:
       - containerize-extractor-service
     env:
       KUBECONFIG: ./kubeconfig.yaml
+    defaults:
+      run:
+        working-directory: ingress_server/charts
     steps:
-      - name: Checkout
+      - name: Checkout zarr_fuse
         uses: actions/checkout@v4
+        with:
+          repository: GeoMop/zarr_fuse
+          ref: ${{ inputs.zarr-fuse-ref }}
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
       - name: Set context
@@ -160,7 +237,7 @@ jobs:
           --set ingressService.configuration.s3.secrets.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
           --set ingressService.configuration.s3.secrets.secretKey="${{ secrets.S3_SECRET_KEY }}" \
           --set ingressService.configuration.fastapi.secrets.usersJson='${{ secrets.BASIC_AUTH_USERS_JSON }}' \
-          ${{ inputs.extra-helm-values }}
+          ${{ inputs.extra-helm-args }}
 
 # TODO:
 # Check shibo for airflow

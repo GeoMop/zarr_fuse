@@ -9,6 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get-version.outputs.version }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-get-changed-files
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,13 +27,13 @@ jobs:
       - get-version
     if: needs.get-version.outputs.version != ''
     concurrency:
-      group: "${{ github.workflow }}-${{ github.ref }}-build-and-deploy"
-      cancel-in-progress: true
+      group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
+      cancel-in-progress: false
     with:
-      push-container: true
-      deploy-helm-chart: true
+      deploy: true
       tag: ${{ needs.get-version.outputs.version }}
       namespace: ingress-server
       extra-helm-values: |
         --values .github/values/ingress-server/tag.yaml
+      zarr-fuse-ref: main
     secrets: inherit

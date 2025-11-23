@@ -1,11 +1,11 @@
 name: Ingress server - push main
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
     paths:
       - ingress_server/**
-  workflow_dispatch:
 jobs:
   build-and-deploy:
     name: Build and deploy ingress server for pre-production
@@ -14,10 +14,10 @@ jobs:
       group: "${{ github.workflow }}-${{ github.ref }}-build-and-deploy"
       cancel-in-progress: true
     with:
-      push-container: true
-      deploy-helm-chart: true
+      deploy: true
       tag: generate
       namespace: ingress-server-latest
+      zarr-fuse-ref: main
       extra-helm-values: >-
         --values .github/values/ingress-server/main.yaml
     secrets: inherit
