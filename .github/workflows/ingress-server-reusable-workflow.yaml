@@ -109,11 +109,23 @@ jobs:
       image: quay.io/buildah/stable:v1.35.4
       options: --privileged
     steps:
-      - name: Checkout
+      - name: Checkout zarr_fuse
         uses: actions/checkout@v4
         with:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}
+
+      - name: Remove existing configuration files
+        if: ${{ inputs.configuration-dir-path != '' }}
+        run: rm -rf ingress_server/inputs/*
+
+      - name: Download configuration files artifact
+        if: ${{ inputs.configuration-dir-path != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ingress-server-configuration
+          path: ingress_server/inputs/
+
       - name: Containerize
         uses: GeoMop/github-actions/.github/actions/containerize@v1
         with:
@@ -154,14 +166,14 @@ jobs:
 
       - name: Remove existing configuration files
         if: ${{ inputs.configuration-dir-path != '' }}
-        run: rm -rf ingress_server/src/inputs/*
+        run: rm -rf ingress_server/inputs/*
 
       - name: Download configuration files artifact
         if: ${{ inputs.configuration-dir-path != '' }}
         uses: actions/download-artifact@v4
         with:
           name: ingress-server-configuration
-          path: ingress_server/src/inputs/
+          path: ingress_server/inputs/
 
       - name: Containerize
         uses: GeoMop/github-actions/.github/actions/containerize@v1
@@ -169,7 +181,7 @@ jobs:
           registry: ${{ inputs.docker-registry }}
           repository: ${{ inputs.docker-repository }}
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
-          containerfile-path: oci/Containerfile
+          containerfile-path: oci/extractor.Containerfile
           push: true
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
