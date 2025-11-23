@@ -178,8 +178,8 @@ jobs:
       - name: Containerize
         uses: GeoMop/github-actions/.github/actions/containerize@v1
         with:
-          registry: ${{ inputs.docker-registry }}
-          repository: ${{ inputs.docker-repository }}
+          registry: docker.io
+          repository: jbrezmorf/zarr-fuse-extractor-service
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           containerfile-path: oci/extractor.Containerfile
           push: true
