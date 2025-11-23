@@ -237,9 +237,9 @@ def test_node_tree(storage_type):
     #print(f"[TIMING] test_node_tree({storage_type}) START")
     
     #t0 = time.time()
-    structure, store, tree = aux_read_struc("structure_tree.yaml", storage_type=storage_type)
-    assert tree.schema == structure.ds
-    assert tree['child_1'].schema == structure.groups['child_1'].ds
+    schema, store, tree = aux_read_struc("schema_tree.yaml", storage_type=storage_type)
+    assert tree.schema == schema.ds
+    assert tree['child_1'].schema == schema.groups['child_1'].ds
     #print(f"[TIMING] aux_read_struc: {time.time() - t0:.2f}s")
     
     #t1 = time.time()
@@ -268,8 +268,8 @@ def _check_ds_attrs_weather(ds, schema_ds):
 @pytest.mark.parametrize("storage_type", ["local", "s3"])
 def test_update_weather(tmp_path, storage_type):
     # Example YAML file content (as a string for illustration):
-    structure, store, tree = aux_read_struc("structure_weather.yaml", storage_type=storage_type)
-    ds_schema = structure.ds
+    schema, store, tree = aux_read_struc("schema_weather.yaml", storage_type=storage_type)
+    ds_schema = schema.ds
     assert len(ds_schema.COORDS) == 2
     assert len(ds_schema.VARS) == 3
     print("Coordinates:")
@@ -396,8 +396,8 @@ def test_update_weather(tmp_path, storage_type):
 
 
 def test_update_tensors(tmp_path):
-    structure, store, tree = aux_read_struc("structure_tensors.yaml")
-    ds_schema = structure.ds
+    schema, store, tree = aux_read_struc("schema_tensors.yaml")
+    ds_schema = schema.ds
     assert len(ds_schema.COORDS) == 3
     assert len(ds_schema.VARS) == 2
     print("Coordinates:")
@@ -546,7 +546,7 @@ def test_pivot_nd():
 @pytest.mark.skip
 def test_update_dense():
     # Example YAML file content (as a string for illustration):
-    structure, store, tree = aux_read_struc("structure_transport.yaml")
+    schema, store, tree = aux_read_struc("schema_transport.yaml")
     assert '__structure__' in tree.dataset.attrs
     childs = [key for key, _ in tree._storage_group_paths()]
     assert childs == ["run_XYZ"]

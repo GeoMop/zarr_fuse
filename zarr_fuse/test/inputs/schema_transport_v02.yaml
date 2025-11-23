@@ -1,0 +1,63 @@
+run_XYZ:
+  VARS:
+    # We put forward varaible keys as valid keywords, but quoted names are valid in YAML
+    conc:
+      unit: "g/m^3"
+      coords: [ "iid", "qmc", "time", "X"]
+
+    param:
+      unit: ""
+      description: "All parameters are real numbers from uniform distribution [0,1]. Transformations are part of the model."
+      coords: [ "iid", "qmc", "param_name"]
+
+    A_sample:
+      unit: "bool"
+      description: "Indicator function for parameter of that QMC sample be from the set A (oposed to the set B) of the Saltelli schema."
+      coords: [ "qmc", "param_name"]
+
+
+
+
+  COORDS:
+    iid:
+      unit: "int"
+      description: "Independent sample set"
+      df_col: None
+      sorted: False
+      chunk_size: 1
+      merge: None
+    qmc:
+      unit: "int"
+      description: "Quasi Monte Carlo sub sample for Saltelli schema for Sobol indices."
+      df_col: None
+      sorted: False
+      chunk_size: 1
+      merge: None
+
+    param_name:
+      unit: "str"
+      description: "Parameter name for the sensitivity analysis."
+      df_col: None
+
+      sorted: False
+      chunk_size: 16
+      step_limits: None
+
+    time:
+      unit: "year"
+      description: "Time coordinate"
+      df_col: None
+      chunk_size: 1024
+      step_limits: None
+
+    X:
+      unit: "m"
+      description: "Spatial coordinate in X direction."
+      df_col: None
+      chunk_size: 1024
+      step_limits: None
+
+
+  ATTRS:
+    description: "Test dataset for collecting data from a sensitivity analysis transport problem."
+    VERSION: 0.2.0

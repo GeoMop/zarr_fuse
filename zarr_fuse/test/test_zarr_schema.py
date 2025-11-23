@@ -111,7 +111,7 @@ def aux_read_struc(tmp_dir, struc_yaml):
 
 @pytest.mark.parametrize(
     "struc_yaml",
-    ["structure_weather.yaml", "structure_tensors.yaml", "structure_tree.yaml"],
+    ["schema_weather.yaml", "schema_tensors.yaml", "schema_tree.yaml"],
 )
 def test_schema_serialization(smart_tmp_path, struc_yaml):
     node_schema = aux_read_struc(smart_tmp_path, struc_yaml)
@@ -122,7 +122,7 @@ def test_schema_serialization(smart_tmp_path, struc_yaml):
     check_fn(node_schema)
 
 
-def check_structure_weather(node_schema):
+def check_schema_weather(node_schema):
     ds_schema = node_schema.ds
     assert isinstance(ds_schema, schema.DatasetSchema), "Expected DatasetSchema instance"
     coords = ds_schema.COORDS
@@ -133,7 +133,7 @@ def check_structure_weather(node_schema):
         f"Expected 2 coordinate definitions, got {len(ds_schema.COORDS)}"
 
     # Check that VARS is a dictionary and that only one primary variable remains.
-    # In our processed structure, we expect that variables used only as coordinates
+    # In our processed schema, we expect that variables used only as coordinates
     # (e.g., "time of year", "latitude", "longitude") are removed and only "temperature" remains.
     assert isinstance(ds_schema.VARS, dict), "VARS must be a dictionary"
     assert len(ds_schema.VARS) == 3, \
@@ -156,8 +156,8 @@ def check_structure_weather(node_schema):
         print(f"{var_name}: {var_details}")
 
 
-def check_structure_tensors(structure):
-    ds_schema = structure.ds
+def check_schema_tensors(schema_tn):
+    ds_schema = schema_tn.ds
     assert isinstance(ds_schema, schema.DatasetSchema), \
         "Expected DatasetSchema instance"
 
@@ -181,10 +181,10 @@ def _check_node(struc, ref_node):
     return struc.groups
 
 
-def check_structure_tree(structure):
+def check_schema_tree(schema_tree):
     ref_node = (["temperature"], ["time"])
 
-    children_0 = _check_node(structure, ref_node)
+    children_0 = _check_node(schema_tree, ref_node)
     children_1 = _check_node(children_0['child_1'], ref_node)
     _ = _check_node(children_1['child_3'], ref_node)
     assert len(_) == 0
