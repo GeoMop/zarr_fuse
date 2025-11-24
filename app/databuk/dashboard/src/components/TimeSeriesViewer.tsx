@@ -63,7 +63,7 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
 
   return (
     <div 
-        className="w-full bg-white rounded-lg shadow-md border border-gray-200 flex flex-col mt-6 transition-all duration-300 ease-in-out"
+        className="w-full bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col mt-6 transition-all duration-300 ease-in-out"
         style={{ 
             height: '500px',
         }}

@@ -289,6 +289,14 @@ function App() {
                             selection={selection}
                             onSelectionChange={(newSelection) => setSelection((prev: any) => ({ ...prev, ...newSelection }))}
                         />
+                        
+                        {/* Time Series Viewer - Inline */}
+                        {timeSeriesData && (
+                          <TimeSeriesViewer 
+                            data={timeSeriesData} 
+                            onClose={() => setTimeSeriesData(null)} 
+                          />
+                        )}
                     </div>
                 </div>
 
@@ -458,14 +466,6 @@ function App() {
         show={showLogPanel}
         onClose={() => setShowLogPanel(false)}
       />
-
-      {/* Time Series Viewer Overlay */}
-      {timeSeriesData && (
-        <TimeSeriesViewer 
-          data={timeSeriesData} 
-          onClose={() => setTimeSeriesData(null)} 
-        />
-      )}
     </div>
   );
 }
