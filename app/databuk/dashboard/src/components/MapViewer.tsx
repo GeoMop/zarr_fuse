@@ -76,7 +76,11 @@ export const MapViewer: React.FC<MapViewerProps> = ({
       }
     };
 
+    // Cleanup function to revoke object URLs if we were using them (not currently, but good practice)
     fetchMap();
+    return () => {
+        // cleanup logic if needed
+    };
   }, [storeName, nodePath, selection]); // Re-fetch when selection (time) changes
 
   if (loading) {

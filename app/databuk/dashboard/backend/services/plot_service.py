@@ -73,6 +73,7 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
                 lons = np.degrees(lons)
                 
         # 3. Create Plotly Figure
+        logger.info("Converting coordinates to list for JSON serialization")
         fig = go.Figure()
         
         # Prepare hover text
@@ -84,12 +85,12 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
                      for col in hover_cols]
             hover_texts.append("<br>".join(lines))
             
-        fig.add_trace(go.Scattermapbox(
-            lat=lats,
-            lon=lons,
+        fig.add_trace(go.Scattergeo(
+            lat=lats.tolist(),
+            lon=lons.tolist(),
             mode='markers',
-            marker=go.scattermapbox.Marker(
-                size=14,
+            marker=dict(
+                size=10,
                 opacity=0.8,
                 color='red',
                 symbol='circle'
@@ -102,24 +103,24 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
         # 4. Layout & Auto Focus
         center_lat = 0
         center_lon = 0
-        zoom = 1
+        # Zoom logic for Scattergeo is different (projection scale), but we can use center
         
         plot_mask = np.isfinite(lats) & (np.abs(lats) <= 90)
         if np.any(plot_mask):
             center_lat = float(np.mean(lats[plot_mask]))
             center_lon = float(np.mean(lons[plot_mask]))
-            span = max(np.ptp(lats[plot_mask]), np.ptp(lons[plot_mask]))
-            
-            if span < 1: zoom = 9
-            elif span < 5: zoom = 7
-            elif span < 15: zoom = 5
-            else: zoom = 3
             
         fig.update_layout(
-            mapbox=dict(
-                style="open-street-map",
+            geo=dict(
+                projection_type='natural earth',
+                showland=True,
+                showcountries=True,
+                showocean=True,
+                countrycolor="rgb(204, 204, 204)",
+                landcolor="rgb(243, 243, 243)",
+                oceancolor="rgb(230, 245, 255)",
                 center=dict(lat=center_lat, lon=center_lon),
-                zoom=zoom
+                # projection_scale can be adjusted for zoom if needed, but auto is safer for now
             ),
             margin=dict(l=0, r=0, t=0, b=0),
             height=600,

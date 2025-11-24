@@ -6,6 +6,7 @@ import os
 from typing import Dict, Any, Optional, List
 from core.config_manager import load_endpoints, get_first_endpoint, EndpointConfig
 import fsspec
+import xarray as xr
 
 # Import zarr_fuse (now installed via pip)
 import zarr_fuse
@@ -80,36 +81,90 @@ class S3Service:
 
             # Load DataFrame
             print(f"Loading data for variables: {var_names}")
-            if hasattr(current_node, 'read_df'):
-                # Load all time steps
-                df = current_node.read_df(var_names, date_time=slice(None))
-                
-                # Convert Polars to Pandas if needed
-                if hasattr(df, 'to_pandas'):
-                    print("Converting Polars DataFrame to Pandas")
-                    df = df.to_pandas()
-            else:
-                # Fallback
-                print("Node has no read_df, using xarray to_dataframe")
-                df = ds.to_dataframe().reset_index()
+            
+            # Helper to get all relevant variables including composed coords
+            all_vars = list(var_names)
+            try:
+                if hasattr(ds, 'coords'):
+                    dims = set()
+                    for coord_name in ds.coords:
+                        if hasattr(ds.coords[coord_name], 'attrs') and 'composed' in ds.coords[coord_name].attrs:
+                            dims = dims.union(set(ds.coords[coord_name].attrs['composed']))
+                    all_vars.extend(list(dims))
+                all_vars = list(set([v for v in all_vars if v in ds]))
+            except Exception as e:
+                print(f"Error determining composed variables: {e}")
+            
+            df = None
+            
+            # Optimization: Read only the first time step for the map
+            if 'date_time' in ds.coords and ds.coords['date_time'].size > 1:
+                print("Optimization: Reading only first time step using isel")
+                try:
+                    # Use isel directly on xarray dataset to avoid DatetimeIndex slicing issues
+                    ds_subset = ds[all_vars].isel(date_time=slice(0, 1))
+                    print("Converting sliced dataset to Pandas DataFrame")
+                    df = ds_subset.to_dataframe().reset_index()
+                except Exception as e:
+                    print(f"Optimization with isel failed: {e}")
+            
+            # Fallback if optimization failed or wasn't applied
+            if df is None:
+                if hasattr(current_node, 'read_df'):
+                    print("Using read_df for full load")
+                    df = current_node.read_df(var_names)
+                    if hasattr(df, 'to_pandas'):
+                        df = df.to_pandas()
+                else:
+                    print("Using xarray to_dataframe for full load")
+                    df = ds.to_dataframe().reset_index()
 
             # 3. Generate Plot
             if plot_type == 'map':
                 # Extract time from selection if available
                 time_point = selection.get('time_point') if selection else None
                 
-                # Identify columns (simple heuristic)
-                # Assuming standard names or finding them from coords
+                # Identify columns (Smart detection)
+                all_cols = df.columns.tolist()
+                lower_cols = [c.lower() for c in all_cols]
+                
+                # Defaults
                 lat_col = 'latitude'
                 lon_col = 'longitude'
-                time_col = 'date_time' # Based on notebook output "date_time"
-                
-                # Check if these columns exist, if not try to find them
-                for col in df.columns:
-                    c = col.lower()
-                    if 'lat' in c: lat_col = col
-                    elif 'lon' in c: lon_col = col
-                    elif 'time' in c or 'date' in c: time_col = col
+                time_col = 'date_time'
+
+                # 1. Latitude Detection
+                if 'latitude' in lower_cols:
+                    lat_col = all_cols[lower_cols.index('latitude')]
+                elif 'lat' in lower_cols:
+                    lat_col = all_cols[lower_cols.index('lat')]
+                else:
+                    # Fuzzy search but avoid combined names like lat_lon
+                    candidates = [c for c in all_cols if 'lat' in c.lower() and 'lon' not in c.lower()]
+                    if candidates: lat_col = candidates[0]
+
+                # 2. Longitude Detection
+                if 'longitude' in lower_cols:
+                    lon_col = all_cols[lower_cols.index('longitude')]
+                elif 'lon' in lower_cols:
+                    lon_col = all_cols[lower_cols.index('lon')]
+                else:
+                    # Fuzzy search
+                    candidates = [c for c in all_cols if 'lon' in c.lower() and 'lat' not in c.lower()]
+                    if candidates: lon_col = candidates[0]
+
+                # 3. Time Detection
+                if 'date_time' in lower_cols:
+                    time_col = all_cols[lower_cols.index('date_time')]
+                elif 'time' in lower_cols:
+                    time_col = all_cols[lower_cols.index('time')]
+                else:
+                    candidates = [c for c in all_cols if 'time' in c.lower() or 'date' in c.lower()]
+                    if candidates: time_col = candidates[0]
+
+                print(f"Selected columns for plot: lat='{lat_col}', lon='{lon_col}', time='{time_col}'")
+                print(f"DataFrame head columns: {df.columns.tolist()}")
+                print(f"DataFrame head:\n{df[[lat_col, lon_col, time_col]].head()}")
 
                 from services.plot_service import generate_map_figure
                 return generate_map_figure(df, time_point, lat_col, lon_col, time_col)
