@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Plot from 'react-plotly.js';
 
 interface TimeSeriesViewerProps {
@@ -7,6 +7,8 @@ interface TimeSeriesViewerProps {
 }
 
 export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClose }) => {
+  const [selectedTime, setSelectedTime] = useState<string | null>(null);
+
   if (!data) return null;
 
   // Handle nested structure from backend router
@@ -45,8 +47,17 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
     );
   }
 
+  // Initialize selectedTime with the first time point if not set
+  useEffect(() => {
+    if (!selectedTime && plotData[timeKey] && plotData[timeKey].length > 0) {
+        // Try to pick a middle point or just the first one
+        const times = plotData[timeKey];
+        setSelectedTime(times[Math.floor(times.length / 2)]);
+    }
+  }, [plotData, timeKey, selectedTime]);
+
   // Create traces for all other variables (excluding lat/lon/time)
-  const traces = Object.keys(plotData)
+  const baseTraces = Object.keys(plotData)
     .filter(key => 
       key !== timeKey && 
       !key.toLowerCase().includes('lat') && 
@@ -57,9 +68,58 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
       x: plotData[timeKey],
       y: plotData[key],
       type: 'scatter' as const,
-      mode: 'lines+markers' as const,
+      mode: 'lines' as const, // Lines only for cleaner look in multi-view
       name: key,
+      hovertemplate: `<b>${key}</b>: %{y:.2f}<extra></extra>`
     }));
+
+  // Helper to calculate ranges
+  const getRange = (centerTime: string, days: number) => {
+      if (!centerTime) return undefined;
+      const date = new Date(centerTime);
+      const start = new Date(date);
+      start.setDate(date.getDate() - days);
+      const end = new Date(date);
+      end.setDate(date.getDate() + days);
+      return [start.toISOString(), end.toISOString()];
+  };
+
+  const handlePlotClick = (event: any) => {
+      if (event.points && event.points[0]) {
+          const clickedTime = event.points[0].x;
+          console.log("Selected Time:", clickedTime);
+          setSelectedTime(clickedTime);
+      }
+  };
+
+  // Common layout settings
+  const commonLayout = {
+      autosize: true,
+      margin: { l: 40, r: 10, t: 30, b: 30 },
+      showlegend: false, // Hide legend on individual plots to save space
+      yaxis: { 
+          gridcolor: '#f3f4f6',
+          zerolinecolor: '#e5e7eb',
+          showticklabels: false // Hide Y axis labels for cleaner look (except maybe first one)
+      },
+      plot_bgcolor: '#ffffff',
+      paper_bgcolor: '#ffffff',
+      hovermode: 'x unified' as const,
+      shapes: selectedTime ? [{
+          type: 'line' as const,
+          xref: 'x' as const,
+          yref: 'paper' as const,
+          x0: selectedTime,
+          x1: selectedTime,
+          y0: 0,
+          y1: 1,
+          line: {
+              color: 'black',
+              width: 1,
+              dash: 'dash' as const
+          }
+      }] : []
+  };
 
   return (
     <div 
@@ -72,11 +132,16 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
         <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                <h3 className="font-semibold text-gray-700">Time Series Analysis</h3>
+                <h3 className="font-semibold text-gray-700">Time Series Analysis (Multi-Scale Zoom)</h3>
             </div>
             {meta.selected_lat && meta.selected_lon && (
                 <span className="text-sm text-gray-500 bg-white px-2 py-0.5 rounded border border-gray-200">
                     {meta.selected_lat.toFixed(4)}°N, {meta.selected_lon.toFixed(4)}°E
+                </span>
+            )}
+            {selectedTime && (
+                <span className="text-xs font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-100">
+                    Focus: {new Date(selectedTime).toLocaleString()}
                 </span>
             )}
         </div>
@@ -90,45 +155,78 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
           </svg>
         </button>
       </div>
-      <div className="flex-1 w-full overflow-hidden relative bg-white p-4 rounded-b-lg">
-        {traces.length === 0 ? (
-             <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                <svg className="w-12 h-12 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
+      
+      <div className="flex-1 w-full overflow-hidden relative bg-white p-2 flex gap-2">
+        {baseTraces.length === 0 ? (
+             <div className="flex flex-col items-center justify-center h-full w-full text-gray-400">
                 <p>No plottable variables found</p>
              </div>
         ) : (
-            <Plot
-            data={traces as any}
-            layout={{
-                autosize: true,
-                margin: { l: 50, r: 20, t: 20, b: 40 },
-                showlegend: true,
-                legend: { orientation: 'h', y: 1.1, x: 0 },
-                xaxis: { 
-                    title: { text: 'Time' },
-                    gridcolor: '#f3f4f6',
-                    zerolinecolor: '#e5e7eb'
-                },
-                yaxis: { 
-                    title: { text: 'Value' },
-                    gridcolor: '#f3f4f6',
-                    zerolinecolor: '#e5e7eb'
-                },
-                plot_bgcolor: '#ffffff',
-                paper_bgcolor: '#ffffff',
-                hovermode: 'x unified'
-            }}
-            config={{
-                responsive: true,
-                displayModeBar: true,
-                displaylogo: false,
-                modeBarButtonsToRemove: ['lasso2d', 'select2d']
-            }}
-            useResizeHandler={true}
-            style={{ width: '100%', height: '100%' }}
-            />
+            <>
+                {/* View 1: Year Overview (+/- 180 days) */}
+                <div className="flex-1 border border-gray-100 rounded relative">
+                    <div className="absolute top-2 left-2 z-10 bg-white/80 px-2 py-0.5 text-xs font-bold text-gray-600 rounded border border-gray-200">Year View</div>
+                    <Plot
+                        data={baseTraces as any}
+                        layout={{
+                            ...commonLayout,
+                            title: undefined,
+                            xaxis: { 
+                                title: { text: 'Year Overview' },
+                                range: selectedTime ? getRange(selectedTime, 180) : undefined,
+                                gridcolor: '#f3f4f6'
+                            },
+                            yaxis: { ...commonLayout.yaxis, showticklabels: true, title: { text: 'Value' } } // Show Y labels on first plot
+                        }}
+                        config={{ responsive: true, displayModeBar: false }}
+                        useResizeHandler={true}
+                        style={{ width: '100%', height: '100%' }}
+                        onClick={handlePlotClick}
+                    />
+                </div>
+
+                {/* View 2: Month View (+/- 15 days) */}
+                <div className="flex-1 border border-gray-100 rounded relative">
+                    <div className="absolute top-2 left-2 z-10 bg-white/80 px-2 py-0.5 text-xs font-bold text-gray-600 rounded border border-gray-200">Month View</div>
+                    <Plot
+                        data={baseTraces as any}
+                        layout={{
+                            ...commonLayout,
+                            xaxis: { 
+                                title: { text: 'Month View' },
+                                range: selectedTime ? getRange(selectedTime, 15) : undefined,
+                                gridcolor: '#f3f4f6'
+                            }
+                        }}
+                        config={{ responsive: true, displayModeBar: false }}
+                        useResizeHandler={true}
+                        style={{ width: '100%', height: '100%' }}
+                        onClick={handlePlotClick}
+                    />
+                </div>
+
+                {/* View 3: Day View (+/- 2 days) */}
+                <div className="flex-1 border border-gray-100 rounded relative">
+                    <div className="absolute top-2 left-2 z-10 bg-white/80 px-2 py-0.5 text-xs font-bold text-gray-600 rounded border border-gray-200">Day View</div>
+                    <Plot
+                        data={baseTraces.map(t => ({...t, mode: 'lines+markers'})) as any} // Add markers for detail view
+                        layout={{
+                            ...commonLayout,
+                            showlegend: true, // Show legend only on the last plot
+                            legend: { orientation: 'h', y: 1.1, x: 0 },
+                            xaxis: { 
+                                title: { text: 'Day View' },
+                                range: selectedTime ? getRange(selectedTime, 2) : undefined,
+                                gridcolor: '#f3f4f6'
+                            }
+                        }}
+                        config={{ responsive: true, displayModeBar: false }}
+                        useResizeHandler={true}
+                        style={{ width: '100%', height: '100%' }}
+                        onClick={handlePlotClick}
+                    />
+                </div>
+            </>
         )}
       </div>
     </div>
