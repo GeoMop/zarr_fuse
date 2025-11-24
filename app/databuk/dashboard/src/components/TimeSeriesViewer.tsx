@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Plot from 'react-plotly.js';
 
 interface TimeSeriesViewerProps {
@@ -8,6 +8,7 @@ interface TimeSeriesViewerProps {
 
 export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClose }) => {
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [selectedVariables, setSelectedVariables] = useState<string[]>([]);
 
   if (!data) return null;
 
@@ -56,14 +57,41 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
     }
   }, [plotData, timeKey, selectedTime]);
 
+  // Get all available variables
+  const availableVariables = useMemo(() => {
+      if (!plotData || !timeKey) return [];
+      return Object.keys(plotData).filter(key => 
+        key !== timeKey && 
+        !key.toLowerCase().includes('lat') && 
+        !key.toLowerCase().includes('lon') &&
+        !key.toLowerCase().includes('index')
+      );
+  }, [plotData, timeKey]);
+
+  // Initialize selected variables (default to air_temperature)
+  useEffect(() => {
+    if (availableVariables.length > 0) {
+        if (availableVariables.includes('air_temperature')) {
+            setSelectedVariables(['air_temperature']);
+        } else {
+            setSelectedVariables([availableVariables[0]]);
+        }
+    }
+  }, [availableVariables]);
+
+  const toggleVariable = (variable: string) => {
+      setSelectedVariables(prev => {
+          if (prev.includes(variable)) {
+              return prev.filter(v => v !== variable);
+          } else {
+              return [...prev, variable];
+          }
+      });
+  };
+
   // Create traces for all other variables (excluding lat/lon/time)
-  const baseTraces = Object.keys(plotData)
-    .filter(key => 
-      key !== timeKey && 
-      !key.toLowerCase().includes('lat') && 
-      !key.toLowerCase().includes('lon') &&
-      !key.toLowerCase().includes('index')
-    )
+  const baseTraces = availableVariables
+    .filter(key => selectedVariables.includes(key))
     .map(key => ({
       x: plotData[timeKey],
       y: plotData[key],
@@ -156,6 +184,23 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
         </button>
       </div>
       
+      {/* Variable Selection Checkboxes */}
+      <div className="px-4 py-2 bg-white border-b border-gray-100 flex flex-wrap gap-x-4 gap-y-2">
+        {availableVariables.map(variable => (
+            <label key={variable} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-2 py-1 rounded border border-transparent hover:border-gray-200 transition-colors">
+                <input 
+                    type="checkbox" 
+                    checked={selectedVariables.includes(variable)}
+                    onChange={() => toggleVariable(variable)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-3 h-3"
+                />
+                <span className={selectedVariables.includes(variable) ? 'text-gray-900 font-medium' : 'text-gray-500'}>
+                    {variable}
+                </span>
+            </label>
+        ))}
+      </div>
+
       <div className="flex-1 w-full overflow-hidden relative bg-white p-2 flex gap-2">
         {baseTraces.length === 0 ? (
              <div className="flex flex-col items-center justify-center h-full w-full text-gray-400">
