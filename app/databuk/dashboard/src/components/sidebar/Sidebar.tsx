@@ -164,7 +164,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   // Render tree structure recursively
   const renderTreeItem = (item: any, level: number = 0, parentPath: string = '', storeName: string = '') => {
-    const indent = level * 16;
+    const indent = level * 12;
     const itemPath = parentPath ? `${parentPath}/${item.name}` : item.name;
 
     console.log('Rendering item:', item); // Debug log
@@ -175,7 +175,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       return (
         <div key={itemPath} style={{ marginLeft: indent }}>
           <div
-            className="flex items-center gap-3 py-2 hover:bg-gray-100 rounded px-2 cursor-pointer"
+            className="flex items-center gap-2 py-1 hover:bg-gray-100 rounded px-1 cursor-pointer"
             onClick={() => onNodeClick?.(storeName, itemPath)}
           >
             {groupsOnly.length > 0 ? (
@@ -184,16 +184,16 @@ const Sidebar: React.FC<SidebarProps> = ({
                 onClick={(e) => { e.stopPropagation(); toggleExpand(itemPath); }}
                 aria-label={isExpanded ? 'Collapse' : 'Expand'}
               >
-                {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-600" /> : <ChevronRight className="w-4 h-4 text-gray-600" />}
+                {isExpanded ? <ChevronDown className="w-3 h-3 text-gray-600" /> : <ChevronRight className="w-3 h-3 text-gray-600" />}
               </button>
             ) : (
-              <span className="inline-block w-4 h-4" />
+              <span className="inline-block w-3 h-3" />
             )}
-            <Folder className="w-5 h-5 text-blue-600" />
-            <span className="text-sm font-medium text-gray-700">{item.name}</span>
+            <Folder className="w-4 h-4 text-blue-600" />
+            <span className="text-xs font-medium text-gray-700">{item.name}</span>
           </div>
           {isExpanded && groupsOnly.length > 0 && (
-            <div className="ml-4">
+            <div className="ml-2">
               {groupsOnly.map((child: any, index: number) => (
                 <div key={`${itemPath}/${child.name}-${index}`}>
                   {renderTreeItem(child, level + 1, itemPath, storeName)}
@@ -217,32 +217,32 @@ const Sidebar: React.FC<SidebarProps> = ({
   return (
   <aside className="h-screen flex flex-col transition-all duration-300 bg-white border-r border-gray-200 shadow-lg w-full overflow-y-auto scrollbar-thin">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-4 relative">
+      <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-3 relative">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-white/20 rounded-xl shadow-lg backdrop-blur-sm">
-              <Database className="w-7 h-7 text-white" />
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 bg-white/20 rounded-lg shadow-lg backdrop-blur-sm">
+              <Database className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h2 className="font-bold text-2xl">ZARR FUSE</h2>
-              <p className="text-blue-100 text-base">Data Platform</p>
+              <h2 className="font-bold text-lg">ZARR FUSE</h2>
+              <p className="text-blue-100 text-xs">Data Platform</p>
             </div>
           </div>
           <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="p-2.5 bg-blue-100 hover:bg-blue-200 text-blue-600 rounded-xl transition-all duration-200 hover:shadow-md transform hover:scale-105 shadow-sm"
+              className="p-1.5 bg-blue-100 hover:bg-blue-200 text-blue-600 rounded-lg transition-all duration-200 hover:shadow-md transform hover:scale-105 shadow-sm"
               aria-label="Close sidebar"
             >
-              <X className="w-6 h-6" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
         {/* Store URL and Description */}
         {configData && (
-            <div className="mt-3 pt-3 border-t border-blue-500/30">
-              <div className="text-sm">
+            <div className="mt-2 pt-2 border-t border-blue-500/30">
+              <div className="text-xs">
                 <label htmlFor="endpoint-select" className="font-medium mb-1 block">Store Name</label>
                 <select
                   id="endpoint-select"
@@ -253,60 +253,58 @@ const Sidebar: React.FC<SidebarProps> = ({
                     params.set('store', e.target.value);
                     window.history.replaceState({}, '', `${window.location.pathname}?${params}`);
                   }}
-                  className="w-full px-3 py-2 rounded-xl bg-blue-600 text-blue-100 border border-blue-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-150 font-semibold hover:bg-blue-700"
-                  style={{ minHeight: 44 }}
+                  className="w-full px-2 py-1 rounded-lg bg-blue-600 text-blue-100 border border-blue-300 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-all duration-150 font-semibold hover:bg-blue-700 text-xs"
+                  style={{ minHeight: 32 }}
                 >
                   {endpointOptions.map(opt => (
                     <option key={opt.key} value={opt.key}>{opt.label}</option>
                   ))}
                 </select>
-                <div className="font-medium mt-2 text-blue-100">{selectedEndpointObj?.url}</div>
-                <div className="text-blue-100">{selectedEndpointObj?.description}</div>
+                <div className="font-medium mt-1 text-blue-100 truncate">{selectedEndpointObj?.url}</div>
+                <div className="text-blue-100 truncate">{selectedEndpointObj?.description}</div>
               </div>
             </div>
         )}
 
         {/* Progress Bar - Clickable for reload */}
         {configData && (
-          <div className="mt-3 pt-3 border-t border-blue-500/30">
-            <div className="flex items-center justify-between text-sm text-blue-100 mb-2">
+          <div className="mt-2 pt-2 border-t border-blue-500/30">
+            <div className="flex items-center justify-between text-xs text-blue-100 mb-1">
               <span>Service Status</span>
               <span className="flex items-center gap-1">
-                <span className={`inline-block w-2 h-2 ${statusColor} rounded-full`}></span>
+                <span className={`inline-block w-1.5 h-1.5 ${statusColor} rounded-full`}></span>
                 <span>{s3Loading ? 'Loading' : (s3Error || hasStoreError) ? 'Issues' : 'Active'}</span>
               </span>
             </div>
             <div
-              className="w-full bg-blue-500/30 rounded-full h-3 cursor-pointer hover:bg-blue-500/50 transition-colors duration-200"
+              className="w-full bg-blue-500/30 rounded-full h-2 cursor-pointer hover:bg-blue-500/50 transition-colors duration-200"
               onClick={() => {
                 fetchS3Data();
               }}
               title="Click to force reload"
             >
-              <div className="bg-green-400 h-3 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
+              <div className="bg-green-400 h-2 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
             </div>
-            <div className="flex items-center gap-2 mt-2 text-xs text-blue-200">
+            <div className="flex items-center gap-2 mt-1 text-[10px] text-blue-200">
               <Clock className="w-3 h-3" />
               <span>Updated: {new Date(lastFetchAt ?? Date.now()).toLocaleString()}</span>
-              {/* Data age indicator placeholder */}
-              {/* <span className="text-blue-300">• Data age: 2m 30s</span> */}
             </div>
           </div>
         )}
       </div>
 
       {/* Content */}
-      <div className="flex-1 p-4 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
+      <div className="flex-1 p-2 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
         {/* Loading State */}
         {configLoading && (
-          <div className="mb-6 p-4 bg-yellow-50 rounded-xl border border-yellow-200 shadow-sm">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="p-2.5 bg-yellow-500 rounded-xl shadow-md">
-                <RefreshCw className="w-6 h-6 text-white animate-spin" />
+          <div className="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-200 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-1.5 bg-yellow-500 rounded-lg shadow-md">
+                <RefreshCw className="w-4 h-4 text-white animate-spin" />
               </div>
               <div>
-                <h3 className="font-semibold text-lg text-yellow-800">Loading Configuration</h3>
-                <p className="text-yellow-600 text-base">Fetching S3 endpoint data...</p>
+                <h3 className="font-semibold text-sm text-yellow-800">Loading Configuration</h3>
+                <p className="text-yellow-600 text-xs">Fetching S3 endpoint data...</p>
               </div>
             </div>
           </div>
@@ -314,67 +312,67 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         {/* Error State */}
         {configError && (
-          <div className="mb-6 p-4 bg-red-50 rounded-xl border border-red-200 shadow-sm">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="p-2.5 bg-red-500 rounded-xl shadow-md">
-                <AlertCircle className="w-6 h-6 text-white" />
+          <div className="mb-4 p-3 bg-red-50 rounded-lg border border-red-200 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-1.5 bg-red-500 rounded-lg shadow-md">
+                <AlertCircle className="w-4 h-4 text-white" />
               </div>
               <div>
-                <h3 className="font-semibold text-lg text-red-800">Configuration Error</h3>
-                <p className="text-red-600 text-base">Failed to load configuration</p>
+                <h3 className="font-semibold text-sm text-red-800">Configuration Error</h3>
+                <p className="text-red-600 text-xs">Failed to load configuration</p>
               </div>
             </div>
-            <div className="text-sm text-red-700 mt-2">
+            <div className="text-xs text-red-700 mt-1">
               {configError}
             </div>
           </div>
         )}
 
         {/* Sources */}
-        <div className="mb-6 p-4 bg-green-50 rounded-xl border border-green-200 shadow-sm hover:shadow-md transition-shadow duration-200">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="p-2.5 bg-green-500 rounded-xl shadow-md">
-              <BarChart3 className="w-6 h-6 text-white" />
+        <div className="mb-4 p-3 bg-green-50 rounded-lg border border-green-200 shadow-sm hover:shadow-md transition-shadow duration-200">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="p-1.5 bg-green-500 rounded-lg shadow-md">
+              <BarChart3 className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h3 className="font-semibold text-lg text-green-800">Sources</h3>
-              <p className="text-green-600 text-base">Available data sources</p>
+              <h3 className="font-semibold text-sm text-green-800">Sources</h3>
+              <p className="text-green-600 text-xs">Available data sources</p>
             </div>
           </div>
 
           {/* S3 Loading State */}
           {s3Loading && (
-            <div className="flex items-center gap-2 py-2">
-              <RefreshCw className="w-4 h-4 text-green-600 animate-spin" />
-              <span className="text-sm text-green-600">Loading S3 data...</span>
+            <div className="flex items-center gap-2 py-1">
+              <RefreshCw className="w-3 h-3 text-green-600 animate-spin" />
+              <span className="text-xs text-green-600">Loading S3 data...</span>
             </div>
           )}
 
           {/* S3 Error State */}
           {s3Error && (
-            <div className="flex items-center gap-2 py-2">
-              <AlertCircle className="w-4 h-4 text-red-600" />
-              <span className="text-sm text-red-600">S3 Error: {s3Error}</span>
+            <div className="flex items-center gap-2 py-1">
+              <AlertCircle className="w-3 h-3 text-red-600" />
+              <span className="text-xs text-red-600">S3 Error: {s3Error}</span>
             </div>
           )}
 
           {/* S3 Data */}
           {s3Data && s3Data.structure.stores.length > 0 && (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {s3Data.structure.stores.map((store) => (
-                <div key={store.name} className="border border-green-200 rounded-lg p-3 bg-white">
+                <div key={store.name} className="border border-green-200 rounded-lg p-2 bg-white">
                   <div
-                    className="mb-2 cursor-pointer hover:bg-green-50 p-2 rounded transition-colors"
+                    className="mb-1 cursor-pointer hover:bg-green-50 p-1 rounded transition-colors"
                     onClick={() => onNodeClick?.(store.name, '')}
                   >
-                    <span className="font-semibold text-green-800">{store.name}</span>
-                    <span className="text-xs text-gray-500 ml-2">(click to view root variables)</span>
+                    <span className="font-semibold text-sm text-green-800">{store.name}</span>
+                    <span className="text-[10px] text-gray-500 ml-1">(click to view root variables)</span>
                   </div>
 
                   {store.error ? (
-                    <div className="text-sm text-red-600">{store.error}</div>
+                    <div className="text-xs text-red-600">{store.error}</div>
                   ) : store.structure ? (
-                    <div className="space-y-1 pl-4">
+                    <div className="space-y-1 pl-2">
                       {(store.structure?.children || [])
                         .filter((c: any) => c.type === 'group')
                         .map((child: any, index: number) => (
@@ -384,7 +382,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                         ))}
                     </div>
                   ) : (
-                    <div className="text-sm text-gray-500">No structure data</div>
+                    <div className="text-xs text-gray-500">No structure data</div>
                   )}
                 </div>
               ))}
@@ -393,13 +391,13 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </div>
       {/* Fixed Footer - Logs */}
-      <div className="p-4 border-t border-gray-200 bg-white">
+      <div className="p-2 border-t border-gray-200 bg-white">
         <div
-          className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-2 rounded-lg transition-colors duration-200"
+          className="flex items-center gap-2 cursor-pointer hover:bg-gray-100 p-1.5 rounded-lg transition-colors duration-200"
           onClick={onLogClick}
         >
-          <span className={`inline-block w-2 h-2 ${statusColor} rounded-full`}></span>
-          <span className="text-gray-700 font-medium">Logs</span>
+          <span className={`inline-block w-1.5 h-1.5 ${statusColor} rounded-full`}></span>
+          <span className="text-gray-700 text-sm font-medium">Logs</span>
         </div>
       </div>
     </aside>

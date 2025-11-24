@@ -10,7 +10,7 @@ import type { ConfigData } from './components/sidebar/types/sidebar';
 // --- Ana App Bileşeni ---
 function App() {
   const [isVisible, setIsVisible] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState(420);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
   const [isResizing, setIsResizing] = useState(false);
   const [configData, setConfigData] = useState<ConfigData | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
@@ -128,7 +128,7 @@ function App() {
       if (!isResizing) return;
 
       const newWidth = e.clientX;
-      if (newWidth >= 200 && newWidth <= 600) {
+      if (newWidth >= 180 && newWidth <= 450) {
         setSidebarWidth(newWidth);
       }
     };
@@ -224,7 +224,7 @@ function App() {
       )}
 
       {/* Content Area - Main Panel */}
-      <main className="flex-1 min-w-0 bg-transparent p-6 border-2 border-dashed border-blue-400/60 overflow-y-auto h-screen scrollbar-thin w-full mr-0">
+      <main className="flex-1 min-w-0 bg-transparent p-2 border-2 border-dashed border-blue-400/60 overflow-y-auto h-screen scrollbar-thin">
         {/* Show Sidebar Button */}
         {!isVisible && (
           <button
@@ -278,9 +278,9 @@ function App() {
 
             {/* Node Details */}
             {nodeDetails && !nodeLoading && (
-              <div className="space-y-6">
+              <div className="space-y-4">
                 {/* VISUALIZATION SECTION */}
-                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <div className="bg-white rounded-lg border border-gray-200 p-4">
                     <h2 className="text-xl font-semibold text-gray-800 mb-4">Data Visualization</h2>
                     <div className="space-y-6">
                         <MapViewer 
