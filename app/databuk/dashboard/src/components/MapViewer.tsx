@@ -125,14 +125,16 @@ export const MapViewer: React.FC<MapViewerProps> = ({
         style={{ width: '100%', height: '500px' }}
         useResizeHandler={true}
         onClick={(data) => {
-            if (data.points && data.points.length > 0 && onSelectionChange) {
+            if (data.points && data.points.length > 0) {
                 const point = data.points[0] as any;
                 // Extract lat/lon from point
-                // Depending on how plotly returns it for scattermapbox
-                // usually point.lat and point.lon or point.x point.y
                 const lat = point.lat;
                 const lon = point.lon;
-                if (lat !== undefined && lon !== undefined) {
+                
+                console.log("Map Clicked:", point);
+                console.log(`Captured Coordinates -> Lat: ${lat}, Lon: ${lon}`);
+
+                if (lat !== undefined && lon !== undefined && onSelectionChange) {
                     onSelectionChange({ lat_point: lat, lon_point: lon });
                 }
             }

@@ -3,6 +3,7 @@ import { API_BASE_URL } from './api';
 import LogPanel from './components/LogPanel';
 import { Sidebar } from './components/sidebar';
 import { MapViewer } from './components/MapViewer';
+import { TimeSeriesViewer } from './components/TimeSeriesViewer';
 import type { ConfigData } from './components/sidebar/types/sidebar';
 
 
@@ -24,8 +25,49 @@ function App() {
   
   // Visualization State
   const [selection, setSelection] = useState<any>({});
+  const [timeSeriesData, setTimeSeriesData] = useState<any>(null);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // Fetch Time Series Data when selection changes
+  useEffect(() => {
+    const fetchTimeSeries = async () => {
+      if (!selectedNode || !selection.lat_point || !selection.lon_point) return;
+
+      console.log("Fetching Time Series for:", selection);
+      
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/s3/plot`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            store_name: selectedNode.storeName,
+            node_path: selectedNode.nodePath,
+            plot_type: 'timeseries',
+            selection: selection
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log("Time Series Data Received:", data);
+        
+        if (data.status === 'success') {
+            setTimeSeriesData(data);
+        } else {
+            console.error("Time Series Error:", data.reason);
+        }
+
+      } catch (error) {
+        console.error("Failed to fetch time series:", error);
+      }
+    };
+
+    fetchTimeSeries();
+  }, [selection, selectedNode]);
 
   // Fetch configuration data
   useEffect(() => {
@@ -416,6 +458,14 @@ function App() {
         show={showLogPanel}
         onClose={() => setShowLogPanel(false)}
       />
+
+      {/* Time Series Viewer Overlay */}
+      {timeSeriesData && (
+        <TimeSeriesViewer 
+          data={timeSeriesData} 
+          onClose={() => setTimeSeriesData(null)} 
+        />
+      )}
     </div>
   );
 }

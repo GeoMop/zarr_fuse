@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional, List
 from core.config_manager import load_endpoints, get_first_endpoint, EndpointConfig
 import fsspec
 import xarray as xr
+import numpy as np
 
 # Import zarr_fuse (now installed via pip)
 import zarr_fuse
@@ -97,8 +98,87 @@ class S3Service:
             
             df = None
             
+            # --- TIMESERIES LOGIC ---
+            if plot_type == 'timeseries':
+                print(f"Processing timeseries for selection: {selection}")
+                if not selection or 'lat_point' not in selection or 'lon_point' not in selection:
+                     return {"status": "error", "reason": "Missing lat_point/lon_point for timeseries"}
+                
+                try:
+                    req_lat = float(selection['lat_point'])
+                    req_lon = float(selection['lon_point'])
+                    
+                    # Helper to find var in ds (case insensitive)
+                    def get_var(names):
+                        for n in names:
+                            for v in ds.variables:
+                                if v.lower() == n: return ds[v]
+                        return None
+
+                    lat_arr = get_var(['latitude', 'lat'])
+                    lon_arr = get_var(['longitude', 'lon'])
+                    
+                    if lat_arr is not None and lon_arr is not None:
+                        # Load arrays to memory
+                        lats = lat_arr.values
+                        lons = lon_arr.values
+                        
+                        # Simple Euclidean distance
+                        dist = (lats - req_lat)**2 + (lons - req_lon)**2
+                        min_idx = dist.argmin()
+                        
+                        print(f"Selected nearest point index: {min_idx} for coords ({req_lat}, {req_lon})")
+                        
+                        # Handle 1D vs 2D coordinates
+                        ds_point = None
+                        if lat_arr.ndim == 1:
+                            if lat_arr.dims:
+                                dim_name = lat_arr.dims[0]
+                                ds_point = ds.isel({dim_name: min_idx})
+                            else:
+                                return {"status": "error", "reason": "Latitude variable has no dimensions"}
+                        elif lat_arr.ndim == 2:
+                            # Unravel index for 2D grid
+                            unraveled_idx = np.unravel_index(min_idx, lat_arr.shape)
+                            print(f"Unraveled 2D index: {unraveled_idx}")
+                            
+                            # Map dimensions to indices
+                            if len(lat_arr.dims) == 2:
+                                selector = {
+                                    lat_arr.dims[0]: unraveled_idx[0],
+                                    lat_arr.dims[1]: unraveled_idx[1]
+                                }
+                                ds_point = ds.isel(selector)
+                            else:
+                                return {"status": "error", "reason": f"Latitude has 2 dimensions but dims attribute is {lat_arr.dims}"}
+                        else:
+                             return {"status": "error", "reason": f"Unsupported coordinate dimensionality: {lat_arr.ndim}"}
+
+                        print(f"Sliced dataset for timeseries")
+                        
+                        df = ds_point.to_dataframe().reset_index()
+                        
+                        # Return raw data for frontend to handle
+                        result = {
+                            "status": "success",
+                            "plot_type": "timeseries",
+                            "data": df.to_dict(orient='list'),
+                            "meta": {
+                                "selected_lat": float(lats.flat[min_idx]),
+                                "selected_lon": float(lons.flat[min_idx])
+                            }
+                        }
+                        return clean_nan_values(result)
+                    else:
+                        return {"status": "error", "reason": "Could not find latitude/longitude variables"}
+                except Exception as e:
+                    print(f"Error in timeseries processing: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    return {"status": "error", "reason": str(e)}
+
             # Optimization: Read only the first time step for the map
-            if 'date_time' in ds.coords and ds.coords['date_time'].size > 1:
+            if plot_type == 'map' and 'date_time' in ds.coords and ds.coords['date_time'].size > 1:
                 print("Optimization: Reading only first time step using isel")
                 try:
                     # Use isel directly on xarray dataset to avoid DatetimeIndex slicing issues
