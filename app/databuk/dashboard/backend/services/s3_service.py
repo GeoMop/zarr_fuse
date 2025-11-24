@@ -30,14 +30,98 @@ class S3Service:
     """Service for S3 operations with custom S3 configuration"""
 
     def get_plot_json(self, store_name, node_path, plot_type=None, selection=None):
-        """Return plot-ready JSON for dashboard visualizations (stub for now)."""
-        # TODO: Implement logic using MultiZoomer/InteractiveMapPlotter style
-        # For now, return a dummy Plotly figure
-        import plotly.graph_objects as go
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=[1,2,3], y=[1,4,9], mode='lines+markers'))
-        fig.update_layout(title="Demo Plot", xaxis_title="X", yaxis_title="Y")
-        return fig.to_dict()
+        """Return plot-ready JSON for dashboard visualizations."""
+        try:
+            print(f"Generating plot for {node_path}, type={plot_type}")
+            
+            # 1. Open Store & Node
+            _, root_node = self._open_zarr_store()
+            
+            # Navigate to node
+            parts = [p for p in node_path.split('/') if p]
+            current_node = root_node
+            
+            # Debug info
+            print(f"Root node name: {getattr(root_node, 'name', 'unknown')}")
+            if hasattr(root_node, 'children'):
+                print(f"Root children: {list(root_node.children.keys())}")
+            
+            for part in parts:
+                # If the part matches the current node's name, it might be redundant path info
+                # But usually we want to traverse down.
+                
+                if hasattr(current_node, 'children') and part in current_node.children:
+                    current_node = current_node.children[part]
+                elif part == getattr(current_node, 'name', ''):
+                    # If the path part is the same as current node name, skip it (it's redundant)
+                    continue
+                else:
+                    # If not found in children, check if it's the node itself (root case)
+                    # This is a bit tricky. If we are at root and path is "yr.no", and root has child "yr.no", we go there.
+                    # If root IS "yr.no", then we stay.
+                    if part == getattr(current_node, 'name', ''):
+                         continue
+                         
+                    print(f"Failed to find {part} in {getattr(current_node, 'name', 'unknown')}")
+                    if hasattr(current_node, 'children'):
+                        print(f"Available children: {list(current_node.children.keys())}")
+                    
+                    raise ValueError(f"Node {part} not found in path {node_path}")
+            
+            # 2. Prepare Data
+            if not hasattr(current_node, 'dataset') or not current_node.dataset:
+                 raise ValueError("Node does not contain a dataset")
+
+            ds = current_node.dataset
+            var_names = list(ds.data_vars.keys())
+            
+            if not var_names:
+                raise ValueError("No variables found in dataset")
+
+            # Load DataFrame
+            print(f"Loading data for variables: {var_names}")
+            if hasattr(current_node, 'read_df'):
+                # Load all time steps
+                df = current_node.read_df(var_names, date_time=slice(None))
+                
+                # Convert Polars to Pandas if needed
+                if hasattr(df, 'to_pandas'):
+                    print("Converting Polars DataFrame to Pandas")
+                    df = df.to_pandas()
+            else:
+                # Fallback
+                print("Node has no read_df, using xarray to_dataframe")
+                df = ds.to_dataframe().reset_index()
+
+            # 3. Generate Plot
+            if plot_type == 'map':
+                # Extract time from selection if available
+                time_point = selection.get('time_point') if selection else None
+                
+                # Identify columns (simple heuristic)
+                # Assuming standard names or finding them from coords
+                lat_col = 'latitude'
+                lon_col = 'longitude'
+                time_col = 'date_time' # Based on notebook output "date_time"
+                
+                # Check if these columns exist, if not try to find them
+                for col in df.columns:
+                    c = col.lower()
+                    if 'lat' in c: lat_col = col
+                    elif 'lon' in c: lon_col = col
+                    elif 'time' in c or 'date' in c: time_col = col
+
+                from services.plot_service import generate_map_figure
+                return generate_map_figure(df, time_point, lat_col, lon_col, time_col)
+            
+            else:
+                return {"status": "error", "reason": f"Unknown plot type: {plot_type}"}
+
+        except Exception as e:
+            logger.error(f"Failed to generate plot: {e}")
+            import traceback
+            traceback.print_exc()
+            return {"status": "error", "reason": str(e)}
 
     def __init__(self):
         self._fs: Optional[fsspec.AbstractFileSystem] = None
