@@ -27,8 +27,8 @@ ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
 ENV PYTHONPATH=/app
 
-RUN adduser --disabled-password --gecos "" --uid 1000 ingress
-USER 1000:1000
+RUN adduser --disabled-password --gecos "" --uid 1001 ingress
+USER 1001:1001
 
 WORKDIR /app/services
 ENV PORT=8000
