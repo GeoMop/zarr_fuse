@@ -80,7 +80,7 @@ Together, these components form a complete ingestion-to-processing workflow.
 │       └── pyproject.toml
 │
 ├── inputs/
-│   ├── configuration.yaml            # Endpoints and scrappers configuration
+│   ├── endpoints_config.yaml            # Endpoints and scrappers configuration
 │   └── schemas/
 │       └── bukov_schema_v1.yaml      # Zarr-fuse schema definitions
 │
@@ -114,7 +114,7 @@ LOG_LEVEL=INFO
 BASIC_AUTH_USERS_JSON={"user":"password"}
 ```
 
-`inputs/configuration.yaml:`
+`inputs/endpoints_config.yaml:`
 ```yaml
 endpoints:
   - name: weather

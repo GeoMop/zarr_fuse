@@ -39,7 +39,7 @@ def load_s3_config() -> S3Config:
 
 
 def load_endpoints_config() -> list[EndpointConfig]:
-    cfg_path = BASE_DIR / "inputs/configuration.yaml"
+    cfg_path = BASE_DIR / "inputs/endpoints_config.yaml"
 
     with open(cfg_path, "r", encoding="utf-8") as file:
         raw = yaml.safe_load(file) or {}
@@ -47,7 +47,7 @@ def load_endpoints_config() -> list[EndpointConfig]:
     return [EndpointConfig(**ec) for ec in raw.get("endpoints", [])]
 
 def load_scrappers_config() -> list[ScrapperConfig]:
-    cfg_path = BASE_DIR / "inputs/configuration.yaml"
+    cfg_path = BASE_DIR / "inputs/endpoints_config.yaml"
 
     with open(cfg_path, "r", encoding="utf-8") as file:
         raw = yaml.safe_load(file) or {}
