@@ -1,0 +1,347 @@
+# -- (int) Unique run identifier
+runId: 0
+
+# -- (object) Registry definition
+# @default -- ~
+registry:
+  # -- (string) Hostname of the container registry
+  host: docker.io
+
+# -- (object) Ingress Service configuration
+# @default -- ~
+ingressService:
+  # -- (string) Application name
+  name: ingress-service
+  # -- (int) Number of desired pods
+  replicaCount: 1
+  # -- (string) Restart policy for the pod
+  restartPolicy: Always
+  # -- (string) Image pull policy
+  imagePullPolicy: Always
+  # -- (string) Part of label 'app.kubernetes.io/part-of'
+  # @default -- .Chart.Name
+  partOf: ""
+  # -- (string) Component name for label 'app.kubernetes.io/component'
+  # @default -- .Chart.Name
+  component: "ingress-service"
+  # -- (array) Extra environment variables injected into the application container.
+  # -- Each item is an object with {name, value}.
+  extraEnv: []
+  # -- (dict) Extra labels to add to all resources
+  extraLabels: {}
+  # -- (dict) Extra annotations to add to all resources
+  extraAnnotations: {}
+
+  # -- (object) Image details
+  # @default -- ~
+  image:
+    # -- (string) Image repository
+    name: jbrezmorf/zarr-fuse-ingress-service
+    # -- (string) Image tag
+    tag: ci-7aab59a
+
+  # -- (object) Service configuration
+  # @default -- ~
+  configuration:
+    # -- (object) S3 configuration
+    # @default -- ~
+    s3:
+      # -- (string) S3 endpoint URL
+      endpointUrl: "endpointUrl"
+      # -- (string) S3 store URL
+      storeUrl: "storeUrl"
+      # -- (object) S3 secrets
+      # @default -- ~
+      secrets:
+        # -- (string) S3 access key
+        accessKey: "accessKey"
+        # -- (string) S3 secret key
+        secretKey: "secretKey"
+    # -- (object) FastAPI configuration
+    # @default -- ~
+    fastapi:
+      # -- (object) FastAPI secrets
+      # @default -- ~
+      secrets:
+        # -- (string/json) User/credentials definition for authentication.
+        # -- Must be provided as a JSON string.
+        # @default -- "{}"
+        usersJson: "{}"
+
+  # -- (object) Service configuration
+  # @default -- ~
+  service:
+    # -- (string) Service type
+    type: ClusterIP
+    # -- (string) Service name
+    name: ingress-service
+    # -- (dict) Service labels
+    labels: {}
+    # -- (dict) Service annotations
+    annotations: {}
+    # -- (object) External port configuration
+    # @default -- ~
+    externalPort:
+      # -- (int) Port number
+      number: 80
+      # -- (string) Port name
+      name: http
+    # -- (object) Internal port configuration
+    # @default -- ~
+    internalPort:
+      # -- (int) Port number
+      number: 8000
+      # -- (string) Port name
+      name: http
+
+  # -- (object) Ingress configuration
+  # @default -- ~
+  ingress:
+    # -- (string) Ingress class name
+    className: "nginx"
+    # -- (dict) Ingress annotations
+    annotations: {}
+    # -- (dict) Ingress labels
+    # @default -- {}
+    labels: {}
+    # -- (object) Hosts configuration
+    # @default -- ~
+    hosts:
+    # - name: example.com
+    #   tls:
+    #     enabled: true
+    #     secretName: example-com-tls
+
+  # -- (object) Resource requests and limits
+  # @default -- ~
+  resources:
+    # -- (object) Resource requests for the container
+    # @default -- {}
+    requests: {}
+    #   cpu: 125m
+    #   memory: 128Mi
+
+    # -- (object) Resource limits for the container
+    # @default -- {}
+    limits: {}
+    #   cpu: 250m
+    #   memory: 256Mi
+
+  # -- (object) Security context settings
+  # @default -- ~
+  securityContext:
+    pod:
+      fsGroup: 1000
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      capabilities:
+        drop:
+          - ALL
+      allowPrivilegeEscalation: false
+      privileged: false
+      runAsNonRoot: true
+      readOnlyRootFilesystem: true
+      runAsUser: 1000
+      runAsGroup: 1000
+
+securityContext:
+  pod:
+    fsGroup: 0
+    runAsNonRoot: true
+    runAsUser: 50000
+    runAsGroup: 0
+    seccompProfile:
+      type: RuntimeDefault
+  container:
+    capabilities:
+      drop:
+        - ALL
+    allowPrivilegeEscalation: false
+    privileged: false
+    runAsNonRoot: true
+    runAsUser: 50000
+    runAsGroup: 0
+
+image:
+  repository: jbrezmorf/zarr-fuse-extractor-service
+  tag: ci-7aab59a
+  pullPolicy: IfNotPresent
+
+postgres:
+  image: docker.io/mocstepan/postgresql-testing-moc:latest
+  storage: 5Gi
+  user: airflow
+  password: airflow
+  database: airflow
+
+airflow:
+  secretKey: "mysecretkey"
+  fernetKey: "GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14="
+  executor: LocalExecutor
+
+service:
+  type: ClusterIP
+  port: 8080
+# -- (object) Apache Airflow configuration
+# Documentation: https://artifacthub.io/packages/helm/apache-airflow/airflow
+# @default -- ~
+#airflow:
+#  enabled: true
+#  defaultAirflowRepository: jbrezmorf/zarr-fuse-extractor-service
+#  defaultAirflowTag: ci-22193e5
+#
+#  extraEnvFrom: |
+#    - secretRef:
+#        name: airflow-s3-credentials
+#  ingress:
+#    enabled: true
+#    web:
+#      enabled: true
+#      annotations:
+#        kubernetes.io/tls-acme: "true"
+#        cert-manager.io/cluster-issuer: "letsencrypt-prod"
+#      pathType: Prefix
+#      ingressClassName: nginx
+#      hosts:
+#        - name: "zarr-fuse-extractor-service-development.dyn.cloud.e-infra.cz"
+#          tls:
+#            enabled: true
+#            secretName: "zarr-fuse-extractor-service-development-dyn-cloud-e-infra-cz-tls"
+#    apiServer:
+#      enabled: false
+#    flower:
+#      enabled: false
+#    statsd:
+#      enabled: false
+#  webserver:
+#    resources:
+#      requests:
+#        cpu: 100m
+#        memory: 128Mi
+#      limits:
+#        cpu: 200m
+#        memory: 256Mi
+#    defaultUser:
+#      enabled: true
+#      role: Admin
+#      username: admin
+#      email: admin@example.com
+#      password: admin
+#      firstName: admin
+#      lastName: user
+#    securityContexts:
+#      pod:
+#        runAsNonRoot: true
+#        seccompProfile:
+#          type: RuntimeDefault
+#      container:
+#        capabilities:
+#          drop:
+#            - ALL
+#        runAsNonRoot: true
+#        allowPrivilegeEscalation: false
+#        privileged: false
+#  workers:
+#    replicas: 1
+#    resources:
+#      requests:
+#        cpu: 100m
+#        memory: 128Mi
+#      limits:
+#        cpu: 200m
+#        memory: 256Mi
+#    volumeClaimTemplates: []
+#    securityContexts:
+#      pod:
+#        runAsNonRoot: true
+#        seccompProfile:
+#          type: RuntimeDefault
+#      container:
+#        capabilities:
+#          drop:
+#            - ALL
+#        runAsNonRoot: true
+#        allowPrivilegeEscalation: false
+#        privileged: false
+#  scheduler:
+#    resources:
+#      requests:
+#        cpu: 100m
+#        memory: 128Mi
+#      limits:
+#        cpu: 200m
+#        memory: 256Mi
+#    securityContexts:
+#      pod:
+#        runAsNonRoot: true
+#        seccompProfile:
+#          type: RuntimeDefault
+#      container:
+#        capabilities:
+#          drop:
+#            - ALL
+#        runAsNonRoot: true
+#        allowPrivilegeEscalation: false
+#        privileged: false
+#  dagProcessor:
+#    resources:
+#      requests:
+#        cpu: 100m
+#        memory: 128Mi
+#      limits:
+#        cpu: 200m
+#        memory: 256Mi
+#    securityContexts:
+#      pod:
+#        runAsNonRoot: true
+#        seccompProfile:
+#          type: RuntimeDefault
+#      container:
+#        capabilities:
+#          drop:
+#            - ALL
+#        runAsNonRoot: true
+#        allowPrivilegeEscalation: false
+#        privileged: false
+#  redis:
+#    resources:
+#      requests:
+#        cpu: 100m
+#        memory: 128Mi
+#      limits:
+#        cpu: 200m
+#        memory: 256Mi
+#    securityContexts:
+#      pod:
+#        runAsNonRoot: true
+#        seccompProfile:
+#          type: RuntimeDefault
+#      container:
+#        capabilities:
+#          drop:
+#            - ALL
+#        runAsNonRoot: true
+#        allowPrivilegeEscalation: false
+#        privileged: false
+#  apiServer:
+#    replicas: 0
+#    securityContexts:
+#      pod:
+#        runAsNonRoot: true
+#        seccompProfile:
+#          type: RuntimeDefault
+#      container:
+#        capabilities:
+#          drop:
+#            - ALL
+#        runAsNonRoot: true
+#        allowPrivilegeEscalation: false
+#        privileged: false
+#  flower:
+#    enabled: false
+#  statsd:
+#    enabled: false
