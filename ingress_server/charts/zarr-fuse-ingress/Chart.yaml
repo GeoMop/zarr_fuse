@@ -16,8 +16,3 @@ keywords:
   - Apache airflow
   - Zarr_fuse
   - FastAPI
-dependencies:
-  - name: airflow
-    version: 1.18.0
-    repository: https://airflow.apache.org
-    condition: airflow.enabled

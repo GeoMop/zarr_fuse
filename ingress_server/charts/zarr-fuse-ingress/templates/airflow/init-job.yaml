@@ -1,0 +1,75 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airflow-init
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      volumes:
+        - name: airflow-init-logs
+          emptyDir: {}
+      containers:
+        - name: init
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
+          volumeMounts:
+            - name: airflow-init-logs
+              mountPath: /opt/airflow/logs
+          env:
+            - name: AIRFLOW__CORE__EXECUTOR
+              value: {{ .Values.airflow.executor }}
+            - name: AIRFLOW__WEBSERVER__SECRET_KEY
+              value: {{ .Values.airflow.secretKey }}
+            - name: AIRFLOW__CORE__FERNET_KEY
+              value: {{ .Values.airflow.fernetKey }}
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: postgresql+psycopg2://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@postgres/{{ .Values.postgres.database }}
+          command:
+            - bash
+            - -c
+            - |
+              echo "Initializing Airflow database"
+              airflow db init
+
+              echo "Creating admin user..."
+              airflow users create \
+                --username admin \
+                --firstname admin \
+                --lastname user \
+                --role Admin \
+                --email admin@example.com \
+                --password admin
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16
+          securityContext:
+            capabilities:
+              drop: [ "ALL" ]
+            allowPrivilegeEscalation: false
+            privileged: false
+            runAsNonRoot: true
+          env:
+            - name: PGHOST
+              value: "postgres.testing-moc-airflow.svc.cluster.local"
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: {{ .Values.postgres.database | quote }}
+            - name: PGUSER
+              value: {{ .Values.postgres.user | quote }}
+            - name: PGPASSWORD
+              value: {{ .Values.postgres.password | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Postgres..."
+              until pg_isready -h postgres -p 5432 -U {{ .Values.postgres.user }} -d {{ .Values.postgres.database }}; do
+                echo "Postgres is not ready yet..."
+                sleep 3
+              done
+              echo "Postgres is ready!"

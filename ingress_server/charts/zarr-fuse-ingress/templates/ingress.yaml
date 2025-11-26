@@ -13,13 +13,20 @@ spec:
     - host: {{ .name | quote }}
       http:
         paths:
-          - path: /
+          - path: /api
             pathType: Prefix
             backend:
               service:
                 name: {{ $.Values.ingressService.service.name | quote }}
                 port:
                   name: {{ $.Values.ingressService.service.externalPort.name | quote }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: airflow-webserver
+                port:
+                  number: {{ $.Values.service.port }}
     {{- end }}
   tls:
     {{- range .Values.ingressService.ingress.hosts }}
