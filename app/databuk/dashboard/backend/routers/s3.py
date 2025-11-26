@@ -1,3 +1,4 @@
+
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 from services.s3_service import s3_service
@@ -5,6 +6,23 @@ from core.config_manager import get_first_endpoint
 from core.config_manager import load_endpoints
 
 router = APIRouter(prefix="/s3", tags=["s3"])
+
+@router.post("/plot")
+async def get_plot_data(payload: Dict[str, Any]):
+    """Return plot-ready data for dashboard visualizations (time series, map, etc.)"""
+    try:
+        await ensure_connected()
+        # Extract parameters
+        store_name = payload.get("store_name")
+        node_path = payload.get("node_path")
+        plot_type = payload.get("plot_type")
+        selection = payload.get("selection")
+
+        # Call s3_service to get plot data (to be implemented)
+        plot_data = s3_service.get_plot_json(store_name, node_path, plot_type, selection)
+        return {"status": "success", "figure": plot_data}
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
 
 async def ensure_connected():
     """Ensure S3 service is connected, connect if not"""

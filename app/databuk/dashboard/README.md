@@ -59,47 +59,33 @@ npm install
 ```
 
 ### 2. Backend Setup
-```powershell
-cd backend
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-pip install -e .[dev]
-```
+See [backend/README.md](./backend/README.md) for updated backend setup instructions.
+
+**Note:** The backend no longer uses a `.env` file. All environment variables are set via the `start_backend.ps1` script in the backend folder.
 
 ### 3. Configuration
 
-Create `.env` file in `backend/` (copy from `backend/env.example`):
-```ini
-# S3 Configuration (placeholders)
-S3_BUCKET_NAME=your_bucket_name
-S3_ACCESS_KEY=your_access_key_here
-S3_SECRET_KEY=your_secret_key_here
-S3_ENDPOINT_URL=https://s3.example.com
-S3_ADDRESSING_STYLE=path
-```
-
-Configure `backend/config/endpoints.yaml`:
+Configure `backend/config/endpoints.yaml` using the new approach:
 ```yaml
 "your_endpoint_name":
-  Reload_interval: 300  # seconds
-  Schema_file: "schemas/your_schema.yaml"
-  STORE_URL: "s3://${S3_BUCKET_NAME}/path/to/your/store.zarr"
-  S3_ENDPOINT_URL: "${S3_ENDPOINT_URL}"
-  S3_access_key: "${S3_ACCESS_KEY}"
-  S3_secret_key: "${S3_SECRET_KEY}"
-  S3_region: "us-east-1"
-  S3_use_ssl: true
-  S3_verify_ssl: true
-  Description: "Your store description"
-  Store_type: "zarr"
-  Version: "1.0.0"
+  reload_interval: 300  # seconds
+  schema_file: "schemas/your_schema.yaml"
+  rel_path: "path/to/your/store.zarr"
+  description: "Your store description"
+  store_type: "zarr"
+  version: "1.0.0"
+```
+
+The backend will automatically construct the full S3 URL as:
+```python
+store_url = f"s3://{os.environ['S3_BUCKET_NAME']}/{endpoints['rel_path']}"
 ```
 
 ### 4. Run Application
 ```powershell
 # Terminal 1: Start backend
 cd backend
-python run.py
+./start_backend.ps1
 
 # Terminal 2: Start frontend
 cd ..  # back to dashboard root
@@ -206,7 +192,7 @@ Works with any Zarr group/array hierarchy!
 ### Common Issues
 
 **S3 Connection Errors:**
-- Verify credentials in `.env`
+- Verify environment variables are set via the startup script
 - Check S3 endpoint URL
 - Ensure bucket/store exists
 
@@ -223,12 +209,12 @@ Works with any Zarr group/array hierarchy!
 **Store Structure Issues:**
 - Verify store is valid Zarr format
 - Check S3 permissions
-- Try different STORE_URL paths
+- Try different rel_path values
 
 ## File Locations
 
 ### Configuration
-- **S3 Credentials**: `backend/.env`
+- **S3 Credentials**: Set via `start_backend.ps1` in `backend/`
 - **Endpoint Config**: `backend/config/endpoints.yaml`
 - **Dependencies**: `backend/pyproject.toml`, `package.json`
 

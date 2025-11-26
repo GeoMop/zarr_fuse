@@ -8,7 +8,7 @@ class EndpointConfig(BaseModel):
     """Pydantic model for endpoint configuration validation"""
     reload_interval: int = Field(..., gt=0, description="Reload interval in seconds")
     schema_file: str = Field(..., description="Path to schema file")
-    store_url: str = Field(..., description="S3 store URL")
+    store_url: str = Field(..., description="Full S3 store URL")
     description: str = Field(..., description="Endpoint description")
     store_type: str = Field(default="zarr", description="Store type")
     version: str = Field(default="1.0.0", description="Version")
@@ -40,11 +40,12 @@ def load_endpoints(config_path: Optional[str] = None) -> Dict[str, EndpointConfi
         try:
             # Process environment variables
             processed_data = _process_environment_variables(endpoint_data)
+            if "store_url" not in processed_data:
+                raise ValueError(f"store_url not found for endpoint '{endpoint_name}'")
             endpoint_config = EndpointConfig(**processed_data)
             endpoints[endpoint_name] = endpoint_config
         except Exception as e:
             print(f"Warning: Invalid configuration for endpoint '{endpoint_name}': {e}")
-    
     return endpoints
 
 def _process_environment_variables(data: Dict[str, Any]) -> Dict[str, Any]:
