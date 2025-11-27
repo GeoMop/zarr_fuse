@@ -74,18 +74,18 @@ def loc_forecast(scrapping_fn, cache, location):
         latitude=lat,
         grid_domain=grid
     )
-    print(df)
+    # print(df)
     return df
 
-def update_meteo(node, scrapping_fn, df_locs: pl.DataFrame):
-    yr_no_node = node
+def update_meteo(scrapping_fn, df_locs: pl.DataFrame):
     loc_df = df_locs #.filter(pl.col('grid') == 1)
 
-    html_cache_flag = node.dataset.attrs['update']['html_cache']
+    html_cache_flag = False
     cache = generic.create_http_cache(work_dir / 'http_cache.sqlite', html_cache_flag)
     loc_dfs = [loc_forecast(scrapping_fn, cache, loc) for loc in loc_df.iter_rows(named=True)]
     # Concatenate all DataFrames
     final_df = pl.concat(loc_dfs)
+    return final_df
 
     # df = final_df
     #
@@ -102,16 +102,16 @@ def update_meteo(node, scrapping_fn, df_locs: pl.DataFrame):
     # # Print result
     # print(result)
 
-    yr_no_node.update(final_df)
-
+    
 
 
 def main():
     schema = zarr_fuse.schema.deserialize(inputs.surface_schema_yaml)
     df_locs = location_df(schema.ds.ATTRS)
 
+    df = update_meteo(yr_no.get_3day_forecast, df_locs)
     root_node = zarr_fuse.open_store(schema, workdir = work_dir)
-    update_meteo(   root_node['yr.no'], yr_no.get_3day_forecast, df_locs)
+    root_node['yr.no'].update(df)
 
 if __name__ == '__main__':
     main()

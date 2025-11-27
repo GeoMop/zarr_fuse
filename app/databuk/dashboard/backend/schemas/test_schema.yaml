@@ -1,5 +1,5 @@
 ATTRS:
-  STORE_URL: "s3://hlavo-release/dashboard-test/structure_tree.zarr"
+  STORE_URL: "s3://hlavo-release/bukov.zarr"
   S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
 
 VARS:

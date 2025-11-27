@@ -1,147 +1,200 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import datetime
+import polars as pl
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from .store_overview import get_key_for_value
 
-
-# Class to handle zoom and synchronization
 class MultiZoomer:
     def __init__(self, df, data_selector, handlers):
+        """
+        Parameters:
+        -----------
+        df : polars.DataFrame
+            The full dataset.
+        data_selector : dict
+            Shared state dictionary (time, lat, lon).
+        handlers : list
+            List of objects to notify on update.
+        """
         self.handlers = handlers
         self.handlers.append(self)
         self.data_selector = data_selector
+        self.df_full = df
+
+        # Identify coordinate keys
         self.time_coord = get_key_for_value(self.data_selector, 'time_axis')
         self.lon_coord = get_key_for_value(self.data_selector, 'lon_axis')
         self.lat_coord = get_key_for_value(self.data_selector, 'lat_axis')
 
-        self.df_full = df
+        # Exclude coordinates and metadata columns
+        exclude_cols = [self.time_coord, self.lon_coord, self.lat_coord, 'lat_lon', 'grid_domain']
+        self.quantities = [col for col in self.df_full.columns if col not in exclude_cols]
 
-        self.fig, self.axes = plt.subplots(
-            len(self.quantities), 3, figsize=(15, 6),
-            constrained_layout=True, sharey='row', sharex='col')
+        # --- VISUAL CONFIGURATION ---
+        self.style_config = {
+            'air_temperature': {'color': '#d62728', 'title': 'Air Temp (°C)', 'fill': 'none'},
+            'precipitation_amount': {'color': '#1f77b4', 'title': 'Precipitation (mm)', 'fill': 'tozeroy'},
+            'relative_humidity': {'color': '#2ca02c', 'title': 'Humidity (%)', 'fill': 'none'},
+            'wind_speed': {'color': '#9467bd', 'title': 'Wind Speed (m/s)', 'fill': 'tozeroy'},
+            'default': {'color': '#7f7f7f', 'title': 'Value', 'fill': 'none'}
+        }
 
+        # -- PLOTLY FIGURE SETUP --
+        self.fig = go.FigureWidget(make_subplots(
+            rows=len(self.quantities), 
+            cols=3, 
+            shared_yaxes='rows', 
+            column_titles=["<b>Year Overview</b>", "<b>Month View</b>", "<b>Day Detail</b>"],
+            vertical_spacing=0.1,
+            horizontal_spacing=0.02
+        ))
 
-        # Instantiate the multi-zoom handler
-        plt.show()
-        self.cid = self.fig.canvas.mpl_connect('button_press_event', self.onclick)
+        # Initialize traces
+        for i, q in enumerate(self.quantities):
+            style = self.style_config.get(q, self.style_config['default'])
+            self.fig.update_yaxes(title_text=style['title'], title_font=dict(size=11), row=i+1, col=1)
+            
+            for j in range(3):
+                # Year: Line only, Day: Line + Markers
+                if j == 0: mode, width, m_size = 'lines', 1.5, 0
+                elif j == 1: mode, width, m_size = 'lines', 2, 0
+                else: mode, width, m_size = 'lines+markers', 2.5, 6
 
+                trace = go.Scatter(
+                    x=[], y=[], mode=mode, name=style['title'],
+                    line=dict(color=style['color'], width=width),
+                    marker=dict(size=m_size, color=style['color']),
+                    fill=style['fill'] if j == 2 else 'none',
+                    showlegend=(j==0), legendgroup=q
+                )
+                self.fig.add_trace(trace, row=i+1, col=j+1)
+        
+        # --- LAYOUT SETTINGS (WIDE VIEW) ---
+        # Reduced row height (220px) for a wider aspect ratio
+        row_height = 220 
+        total_height = max(400, row_height * len(self.quantities))
 
-        self.spans = [365, 30, 2]
+        self.fig.update_layout(
+            height=total_height,
+            margin=dict(l=50, r=10, t=40, b=10), # Minimal margins
+            hovermode="x unified",
+            template="plotly_white",
+            font=dict(family="Arial", size=11),
+            autosize=True,
+            title_text="<b>Meteorological Data Analysis</b>",
+            title_x=0.5
+        )
 
+        # Connect events
+        for trace in self.fig.data: trace.on_click(self._on_click)
+
+        print("--- DEBUG: Time Series Initialized (Wide View) ---")
         self.update_cross()
 
+    def _on_click(self, trace, points, selector):
+        """Handle click events on graphs."""
+        if not points.point_inds: return
+        idx = points.point_inds[0]
+        clicked_time = trace.x[idx]
+        self.data_selector['time_point'] = clicked_time
+        print(f"DEBUG: Time selected: {clicked_time}")
+        self.update_cross() 
+        for h in self.handlers:
+            if h is not self and hasattr(h, 'update_cross'): h.update_cross()
 
-    @property
-    def quantities(self):
-        return [col
-                for col in self.df_full.columns
-                if col in self.data_selector and not isinstance(self.data_selector[col], str)
-                ]  # Exclude 'time', 'lon', 'lat'.
+    def _add_time_marker(self):
+        """Draws the vertical time indicator line."""
+        time_point = self.data_selector.get('time_point')
+        if time_point is None: return
+        
+        shapes = []
+        total_subplots = len(self.quantities) * 3
+        for k in range(1, total_subplots + 1):
+            xref = f'x{k}' if k > 1 else 'x'
+            shapes.append(dict(
+                type="line", xref=xref, yref='paper',
+                x0=time_point, x1=time_point, y0=0, y1=1,
+                line=dict(color="black", width=1.5, dash="dash"),
+                opacity=0.7
+            ))
+        self.fig.update_layout(shapes=shapes)
 
-    @property
-    def colormaps(self):
-        return self.data_selector
+    def _get_filtered_data(self):
+        """Smart data filtering with Radian/Degree detection."""
+        target_lon = self.data_selector.get('lon_point')
+        target_lat = self.data_selector.get('lat_point')
+
+        # Default to first row if nothing selected
+        if target_lon is None or target_lat is None:
+            first_row = self.df_full.row(0, named=True)
+            target_lon, target_lat = first_row[self.lon_coord], first_row[self.lat_coord]
+            self.data_selector['lon_point'], self.data_selector['lat_point'] = target_lon, target_lat
+
+        # Check data format
+        sample_lats = self.df_full.select(pl.col(self.lat_coord).head(100)).to_numpy()
+        is_df_radians = np.max(np.abs(sample_lats)) < 1.6
+        is_target_degrees = abs(target_lat) > 1.6
+
+        search_lat, search_lon = target_lat, target_lon
+        if is_df_radians and is_target_degrees:
+            search_lat, search_lon = np.radians(target_lat), np.radians(target_lon)
+        elif not is_df_radians and not is_target_degrees:
+            search_lat, search_lon = np.degrees(target_lat), np.degrees(target_lon)
+        
+        epsilon = 0.001 
+        
+        # Try normal match
+        df_filter = self.df_full.filter(
+            (pl.col(self.lon_coord).is_between(search_lon - epsilon, search_lon + epsilon)) & 
+            (pl.col(self.lat_coord).is_between(search_lat - epsilon, search_lat + epsilon))
+        )
+
+        # Try swapped match
+        if len(df_filter) == 0:
+            df_filter = self.df_full.filter(
+                (pl.col(self.lon_coord).is_between(search_lat - epsilon, search_lat + epsilon)) & 
+                (pl.col(self.lat_coord).is_between(search_lon - epsilon, search_lon + epsilon))
+            )
+            
+        return search_lon, search_lat, df_filter
 
     def update_cross(self):
-        if self.data_selector['lon_point'] is None:
-            self.data_selector['lon_point'] = self.df_full[self.lon_coord][0]
-        if self.data_selector['lat_point'] is None:
-            self.data_selector['lat_point'] = self.df_full[self.lat_coord][0]
+        """Update graphs with new data."""
+        used_lon, used_lat, df_filtered = self._get_filtered_data()
+        if len(df_filtered) == 0: return
 
-        mask_lon = self.df_full[self.lon_coord] == self.data_selector['lon_point']
-        mask_lat = self.df_full[self.lat_coord] == self.data_selector['lat_point']
-        self.df_sel = self.df_full.filter(mask_lon & mask_lat)
+        cols = [self.time_coord] + self.quantities
+        df_pd = df_filtered.select(cols).to_pandas().sort_values(by=self.time_coord)
+        times = pd.to_datetime(df_pd[self.time_coord])
 
+        with self.fig.batch_update():
+            trace_idx = 0
+            for q in self.quantities:
+                y_vals = df_pd[q]
+                for _ in range(3): 
+                    self.fig.data[trace_idx].x = times
+                    self.fig.data[trace_idx].y = y_vals
+                    trace_idx += 1
+            
+            tp = self.data_selector.get('time_point')
+            if tp is None: 
+                tp = times.iloc[0]
+                self.data_selector['time_point'] = tp
+            if not isinstance(tp, pd.Timestamp): tp = pd.to_datetime(tp)
 
-        # Plot the data in each axis
-        # Plot data with different spans
-        for ax_row, col in zip(self.axes, self.quantities):
-            for ax in ax_row:
-                ax.clear()
-                df_col = self.df_sel[col]
-                ax.plot(mdates.date2num(self.df_sel[self.time_coord]),
-                        df_col)
-                range = df_col.min(), df_col.max()
+            # Define Zoom Ranges
+            range_year = [tp - pd.Timedelta(days=180), tp + pd.Timedelta(days=180)]
+            range_month = [tp - pd.Timedelta(days=15), tp + pd.Timedelta(days=15)]
+            range_day = [tp - pd.Timedelta(days=2), tp + pd.Timedelta(days=2)]
 
-                assert range[0] < range[1], f"Col={col}, Invalid range: {range}"
-                ax.set_ylim(*range)
-                ax.grid()
-                # print("X range", ax.get_xlim())
-            ax_row[0].set_ylabel(col)
+            cnt = 1
+            for _ in self.quantities:
+                self.fig.layout[f'xaxis{cnt}' if cnt > 1 else 'xaxis'].range = range_year
+                cnt += 1
+                self.fig.layout[f'xaxis{cnt}' if cnt > 1 else 'xaxis'].range = range_month
+                cnt += 1
+                self.fig.layout[f'xaxis{cnt}' if cnt > 1 else 'xaxis'].range = range_day
+                cnt += 1
 
-        labels = ["Year", "Month", "Day"]
-        for i, ax in enumerate(self.axes[0]):
-            ax.set_title(labels[i])
-
-        self.x_range = self.axes[0, 0].get_xlim()
-        range = max(self.x_range[1] - self.x_range[0], 365.0)
-        self.spans = range * np.array([365, 30, 1]) / 365.0
-        # print("Range:", self.x_range)
-        self.x_center = (self.x_range[0] + self.x_range[1]) / 2
-
-        self.update()
-
-    def update(self):
-        # Update each plot to center around the clicked time point
-        for ax_row in self.axes:
-            for ax, span in zip(ax_row, self.spans):
-                # Adjust limits while respecting the data range
-                new_xmin = max(self.x_range[0], self.x_center - span/2)
-                new_xmax = min(self.x_range[1], self.x_center + span/2)
-                #print(new_xmin, new_xmax, span)
-                ax.set_xlim(new_xmin, new_xmax)
-            # Custom tick locators and formatters
-            # axes[0]: Month minor ticks for month starts, month shortcut labels, major tick for year start
-            ax_row[0].xaxis.set_major_locator(mdates.YearLocator())  # Major ticks at year start
-            ax_row[0].xaxis.set_major_formatter(mdates.DateFormatter('%Y'))  # Major tick format: Year
-            ax_row[0].xaxis.set_minor_locator(mdates.MonthLocator())  # Minor ticks at month start
-            ax_row[0].xaxis.set_minor_formatter(mdates.DateFormatter('%b'))  # Minor tick format: Month shortcut
-            ax_row[0].tick_params(axis='x', which='minor', rotation=45, labelsize=8, pad=15)  # Rotate minor tick labels
-    
-            # ax_row[1]: Major tick for month start, minor tick for days, labeled by day in month
-            ax_row[1].xaxis.set_major_locator(mdates.MonthLocator())  # Major ticks at month start
-            ax_row[1].xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))  # Major tick format: Month and year
-            ax_row[1].xaxis.set_minor_locator(mdates.DayLocator())  # Minor ticks at day start
-            ax_row[1].xaxis.set_minor_formatter(mdates.DateFormatter('%d'))  # Minor tick format: Day in month
-            ax_row[1].tick_params(axis='x', which='minor', labelsize=7)  # Rotate minor tick labels
-
-            # ax_row[2]: Major tick for day, minor tick for hours
-            ax_row[2].xaxis.set_major_locator(mdates.DayLocator())  # Major ticks at day start
-            ax_row[2].xaxis.set_major_formatter(mdates.DateFormatter('%d %b'))  # Major tick format: Day and month
-            ax_row[2].xaxis.set_minor_locator(mdates.HourLocator())  # Minor ticks every hour
-            ax_row[2].xaxis.set_minor_formatter(mdates.DateFormatter('%H'))  # Minor tick format: Hour
-            ax_row[2].tick_params(axis='x', which='minor', labelsize=7)  # Rotate minor tick labels
-
-        # Redraw the canvas
-        self.fig.canvas.draw()
-
-    def onclick(self, event):
-        #print(event.inaxes)
-        #if event.inaxes not in self.axes:
-        #    return
-        # Determine the zoom factor based on the button clicked
-        if event.button == 1 and event.xdata is not None:  # Left click to zoom in
-            self.x_center = event.xdata
-            for h in self.handlers:
-                if h is self:
-                    h.update()
-                else:
-                    h.update_cross()
-
-
-
-#################################
-if __name__ == '__main__':
-    # Generate some early data
-    dates = [datetime.datetime(2023, 1, 1) + datetime.timedelta(days=i, hours=j) for i in range(365) for j in range(24)]
-    x  = np.linspace(0.0, 365.0, len(dates))
-    #data = np.sin(2 * np.pi * x/365) + np.sin(2 * np.pi * (x % 365))
-    data =  x / 365 + np.sin(2 * np.pi * (x % 365))
-    df = pd.DataFrame({'time':dates, 'val':data, 'v1':2*data})
-    df = df.set_index('time')
-
-    zoom_plot_df(df)
-
-
+        self._add_time_marker()

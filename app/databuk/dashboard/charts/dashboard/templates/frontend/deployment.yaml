@@ -46,21 +46,21 @@ spec:
               mountPath: "/var/lib/nginx/tmp"
           startupProbe:
             httpGet:
-              path: /health
+              path: "/"
               port: http
             periodSeconds: 5
             successThreshold: 1
             failureThreshold: 72
           livenessProbe:
             httpGet:
-              path: /health
+              path: "/"
               port: http
             periodSeconds: 30
             successThreshold: 1
             failureThreshold: 10
           readinessProbe:
             httpGet:
-              path: /health
+              path: "/"
               port: http
             periodSeconds: 30
             successThreshold: 1

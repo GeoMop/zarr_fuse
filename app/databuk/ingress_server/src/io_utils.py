@@ -6,7 +6,9 @@ import json
 import csv
 import polars as pl
 import zarr_fuse as zf
+
 from pathlib import Path
+from extractor import apply_extractor_if_any
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,12 +27,42 @@ def new_msg_path(base: Path, suffix: str) -> Path:
     uid = uuid.uuid4().hex[:12]
     return base / f"{ts}_{uid}{suffix}"
 
-def read_df_from_bytes(data: bytes, content_type: str) -> tuple[pl.DataFrame | None, str | None]:
+def create_df_from_bytes(
+    payload: bytes,
+    extract_fn: str,
+    fn_module: str,
+    endpoint_name: str,
+) -> tuple[pl.DataFrame | None, str | None]:
+    if not extract_fn or not fn_module:
+        try:
+            df = pl.read_json(io.BytesIO(payload))
+            return df, None
+        except Exception as e:
+            return None, f"Failed to read JSON data: {e}"
+
+    try:
+        return apply_extractor_if_any(
+            payload=payload,
+            extract_fn=extract_fn,
+            fn_module=fn_module,
+            endpoint_name=endpoint_name,
+        ), None
+    except Exception as e:
+        return None, f"Failed to read JSON: {e}"
+
+def read_df_from_bytes(
+    payload: bytes,
+    content_type: str,
+    extract_fn: str,
+    fn_module: str,
+    endpoint_name: str,
+) -> tuple[pl.DataFrame | None, str | None]:
     ct = content_type.lower()
+
     if "csv" in ct:
-        return pl.read_csv(io.BytesIO(data)), None
+        return pl.read_csv(io.BytesIO(payload)), None
     elif "json" in ct:
-        return pl.read_json(io.BytesIO(data)), None
+        return create_df_from_bytes(payload, extract_fn, fn_module, endpoint_name)
     else:
         return None, f"Unsupported content type: {content_type}. Use application/json or text/csv."
 

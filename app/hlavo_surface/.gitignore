@@ -1,0 +1,9 @@
+# .gitignore for hlavo_surface
+secrets.env
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.env
+*.zarr
+*.ipynb_checkpoints/

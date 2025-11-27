@@ -2,9 +2,5 @@ endpoints:
   - name: bukov
     endpoint: /api/v1/bukov
     schema_path: schemas/bukov_schema_v1.yaml
-
-active-scrappers:
-  - name: bukov
-    cron: "*/5 * * * *"
-    url: http://test.cz/api/v1/bukov
-    schema_path: schemas/bukov_schema_v1.yaml
+    extract_fn: normalize_new # fn(json_data, meta_data) -> pd.DataFrame
+    fn_module: inputs.extract.bukov_extract

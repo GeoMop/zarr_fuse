@@ -49,6 +49,10 @@ bash jupyter.sh
 Assumes the the local python environment is created (see 'Install environment').
 Assumes 'jupyter-lab' be installed and accessible through the system PATH.
 
+The prototype notebook tries to read scrapped data from S3 bucket according to the 
+`inputs/surface_schema.yaml`
+
+
 ## Voila application
 Try resulting Voila! application:
 ```
