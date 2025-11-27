@@ -20,9 +20,10 @@ from zarr.errors import ZarrUserWarning, GroupNotFoundError
 import fsspec
 import asyncio
 from pathlib import Path
-
+from functools import cached_property
 
 from . import zarr_schema, units
+from .schema_ctx import RaisingLogger
 from .dtype_converter import to_typed_array, TrimmedArrayWarning
 from .logger import get_logger
 from .interpolate import interpolate_ds
@@ -39,6 +40,13 @@ tuple val coords:
 
 - pivot_nd - hash source cols
 - future read - hash source cols
+
+TODO:
+- strict separation of read only and append/write operations
+
+- schema and dataset should be read only
+  If the group does not exist, should return None , empty or raise error.
+- Write operations: logger (see also LoggingStore), and update operations.
 """
 
 
@@ -146,9 +154,12 @@ def _zarr_store_open(store_options: Dict[str, Any]) -> zarr.storage.StoreLike:
                 category=ZarrUserWarning,
             )
             return zarr.storage.FsspecStore(fs, path=clean_path)
-    elif re.match(r'^zip://', store_url):
+    elif store_url.startswith('zip://'):
+        store_url = store_url[len('zip://'):]
         return zarr.storage.ZipStore(store_url)
     else:
+        if store_url.startswith('file://'):
+            store_url = store_url[len('file://'):]
         path = Path(store_url)
         if not path.is_absolute():
             path = store_options.get('WORKDIR', ".") / path
@@ -162,7 +173,7 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
     - overwrite by schema ATTRS is provided
     - overwrite by evironment variables
     """
-    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS', 'WORKDIR'}
+    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS', 'WORKDIR', 'MODE'}
     secret_attrs = {'S3_ACCESS_KEY', 'S3_SECRET_KEY'}
     interpreted_attrs = interpreted_attrs.union(secret_attrs)
     options = {key:kwargs[key] for key in interpreted_attrs if key in kwargs}
@@ -182,12 +193,15 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
 
 def _get_schema_safe(schema):
     if isinstance(schema, NodeSchema):
-        node_schema = schema
-    elif isinstance(schema, (str, Path)):
-        node_schema = zarr_schema.deserialize(schema)
+        return schema
+    if isinstance(schema, str):
+        if schema == '':
+            return NodeSchema.make_empty()
+        schema = Path(schema)
+    if isinstance(schema, Path):
+        return zarr_schema.deserialize(schema)
     else:
         raise TypeError(f"Unsupported schema type: {type(schema)}. Expected NodeSchema or Path.")
-    return node_schema
 
 
 def _wipe_store(store):
@@ -243,7 +257,7 @@ def remove_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
     #store.delete_dir("")
 
 
-def open_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
+def open_store(schema: zarr_schema.NodeSchema | Path | str, **kwargs):
     """
     Open existing or create a new ZARR store according to given schema.
     'schema': Could be schema dict or YAML string or Path object to YAML file.
@@ -262,7 +276,8 @@ def open_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
     except ZFOptionError as e:
         raise ZFOptionError(f"{str(e)}. Opening store for schema {schema}.")
 
-    return Node("", store, new_schema = node_schema)
+    mode = options.get('MODE', 'a')
+    return Node("", store, new_schema = node_schema, mode=mode)
 
 class Node:
     """
@@ -428,7 +443,8 @@ class Node:
 
 
     def __init__(self, name, store, parent=None,
-                 new_schema:zarr_schema.NodeSchema=None):
+                 new_schema:zarr_schema.NodeSchema=None,
+                 mode="a"):
         """
         Parameters:
           name (str): The name of the node. For the root node, use an empty string ("").
@@ -437,20 +453,29 @@ class Node:
         """
         self.name = name
         self.store = store
-        self.parent = parent
+        if store.read_only:
+            mode = 'r'
+        else:
+            # Make sure group exists.
+            zarr_root_dict = zarr.open_group(self.store).store
 
-        # Setup logger
-        zarr_root_dict = zarr.open_group(store).store
-        self.logger = get_logger(zarr_root_dict, self.group_path)
+        self.mode = mode
+        self.parent = parent
 
         self.children = self._make_consistent(new_schema)
         # This calls self._update_schema_ds() implicitely.
 
-        # TODO: separate class to represent child nodes dict
-        # it must be a separate class with overwritten setitem method to
-        # maintain consistency between node tree and zarr storage.
-        # Alternatively we can eliminate the dict like interface and only provide
-        # access to keys and getitem method (minimalistic corresponding to the zarr storage API)
+
+    @cached_property
+    def logger(self):
+        if self.mode == 'r':
+            return RaisingLogger(get_logger(store=None, path=self.group_path))
+        else:
+            zarr_root_dict = zarr.open_group(self.store).store
+            return get_logger(zarr_root_dict, self.group_path)
+
+
+
 
     def _make_null_ctx(self):
         return zarr_schema.SchemaCtx([], file='', logger=self.logger)

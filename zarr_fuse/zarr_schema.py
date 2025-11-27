@@ -455,6 +455,10 @@ class NodeSchema(AddressMixin):
     ds: DatasetSchema
     groups: Dict[str, "NodeSchema"] = attrs.field(factory=dict)
 
+    @classmethod
+    def make_empty(cls):
+        return build_nodeschema(ContextCfg({}, SchemaCtx([])))
+
     def asdict(self, value_serializer, filter):
         """
         Custom asdict to override ds and groups serialization.
@@ -468,7 +472,7 @@ class NodeSchema(AddressMixin):
 
 # ----------------------- (De)serialization helpers ----------------------- #
 
-def dict_deserialize(content: ContextCfg) -> NodeSchema:
+def build_nodeschema(content: ContextCfg) -> NodeSchema:
     """
     Recursively deserializes the schema = tree of node dictionaries.
     Create instances of DatasetScheme from special keys:
@@ -486,7 +490,7 @@ def dict_deserialize(content: ContextCfg) -> NodeSchema:
     )
 
     children = {
-        key: dict_deserialize(content[key])
+        key: build_nodeschema(content[key])
         for key in content.keys()
     }
 
@@ -535,11 +539,10 @@ def deserialize(source: Union[IO, str, bytes, Path],
     raw_dict = yaml.safe_load(content) or {}
     if log is None:
         log = default_logger()
-    attrs = raw_dict.get('ATTRS', {})
-    version = attrs.get('VERSION', '0.2.0')  # currently unused
+    version = raw_dict.get('ATTRS', {}).get('VERSION', '0.2.0')
     root_address = SchemaCtx(addr=[], version=version, file=file_name, logger=log)
     root = ContextCfg(raw_dict, root_address)
-    return dict_deserialize(root)
+    return build_nodeschema(root)
 
 
 def convert_value(obj: NodeSchema):
@@ -584,7 +587,7 @@ def serialize(node_schema: NodeSchema, path: Union[str, Path]=None) -> str:
     custom value serializer for attrs.asdict.
     """
     root_node_dict = convert_value(node_schema)
-    #root_node_dict['ATTRS']['VERSION'] = __version__
+    root_node_dict['ATTRS']['VERSION'] = __version__
     content = yaml.safe_dump(root_node_dict, sort_keys=False)
     if path is None:
         return content
