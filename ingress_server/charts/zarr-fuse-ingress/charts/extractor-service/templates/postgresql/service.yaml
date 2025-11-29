@@ -1,0 +1,19 @@
+---
+{{- with .Values.postgres.service  }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name | quote }}
+  labels:
+    {{- toYaml .labels | nindent 4 }}
+  annotations:
+    {{- toYaml .annotations | nindent 4 }}
+spec:
+  type: {{ .type }}
+  selector:
+    app.kubernetes.io/name: {{ $.Values.postgres.name | quote }}
+  ports:
+    - name: {{ .externalPort.name | quote }}
+      port: {{ .externalPort.number | int }}
+      targetPort: {{ .internalPort.name | quote }}
+{{- end -}}

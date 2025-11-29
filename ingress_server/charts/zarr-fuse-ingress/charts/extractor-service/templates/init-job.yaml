@@ -1,33 +1,29 @@
+---
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: airflow-init
+  name: {{ .Values.airflow.initJob.name | quote }}
 spec:
   template:
     spec:
       restartPolicy: OnFailure
       securityContext:
-        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+        {{- toYaml .Values.airflow.initJob.securityContext.pod | nindent 8 }}
       volumes:
         - name: airflow-init-logs
           emptyDir: {}
       containers:
         - name: init
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.airflow.image.host }}/{{ .Values.airflow.image.name }}:{{ .Values.airflow.image.tag }}"
+          imagePullPolicy: {{ .Values.airflow.initJob.imagePullPolicy }}
           securityContext:
-            {{- toYaml .Values.securityContext.container | nindent 12 }}
+            {{- toYaml .Values.airflow.initJob.securityContext.container | nindent 12 }}
           volumeMounts:
             - name: airflow-init-logs
               mountPath: /opt/airflow/logs
-          env:
-            - name: AIRFLOW__CORE__EXECUTOR
-              value: {{ .Values.airflow.executor }}
-            - name: AIRFLOW__WEBSERVER__SECRET_KEY
-              value: {{ .Values.airflow.secretKey }}
-            - name: AIRFLOW__CORE__FERNET_KEY
-              value: {{ .Values.airflow.fernetKey }}
-            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
-              value: postgresql+psycopg2://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@postgres/{{ .Values.postgres.database }}
+          envFrom:
+            - secretRef:
+                name: airflow-secrets
           command:
             - bash
             - -c
@@ -54,21 +50,21 @@ spec:
             runAsNonRoot: true
           env:
             - name: PGHOST
-              value: "postgres.testing-moc-airflow.svc.cluster.local"
+              value: "{{ .Values.postgres.service.name }}.testing-moc-airflow.svc.cluster.local"
             - name: PGPORT
-              value: "5432"
+              value: {{ .Values.postgres.service.externalPort.number | quote }}
             - name: PGDATABASE
-              value: {{ .Values.postgres.database | quote }}
+              value: {{ .Values.postgres.secrets.database | quote }}
             - name: PGUSER
-              value: {{ .Values.postgres.user | quote }}
+              value: {{ .Values.postgres.secrets.user | quote }}
             - name: PGPASSWORD
-              value: {{ .Values.postgres.password | quote }}
+              value: {{ .Values.postgres.secrets.password | quote }}
           command:
             - sh
             - -c
             - |
               echo "Waiting for Postgres..."
-              until pg_isready -h postgres -p 5432 -U {{ .Values.postgres.user }} -d {{ .Values.postgres.database }}; do
+              until pg_isready -h postgres -p $PGPORT -U $PGUSER -d $PGDATABASE; do
                 echo "Postgres is not ready yet..."
                 sleep 3
               done

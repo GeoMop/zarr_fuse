@@ -1,0 +1,86 @@
+---
+{{- with .Values.postgres }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .name | quote }}
+spec:
+  serviceName: {{ .service.name | quote }}
+  replicas: {{ .replicaCount | int }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .name | quote }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .name | quote }}
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+        app.kubernetes.io/version: {{ $.Chart.AppVersion }}
+        app.kubernetes.io/part-of: {{ .partOf | default $.Chart.Name }}
+        app.kubernetes.io/component: {{ .component | default $.Chart.Name }}
+        app.kubernetes.io/managed-by: {{ $.Release.Service }}
+        {{- if .extraLabels }}
+        {{- toYaml .extraLabels | nindent 8 }}
+        {{- end }}
+      annotations:
+        github.com/run-id: {{ $.Values.global.runId | quote }}
+        {{- if .extraAnnotations }}
+        {{- toYaml .extraAnnotations | nindent 8 }}
+        {{- end }}
+    spec:
+      restartPolicy: {{ .restartPolicy }}
+      securityContext:
+        {{- toYaml .securityContext.pod | nindent 8 }}
+      containers:
+        - name: {{ .name | quote }}
+          image: "{{ .image.host }}/{{ .image.name }}:{{ .image.tag }}"
+          imagePullPolicy: {{ .imagePullPolicy }}
+          ports:
+            - name: {{ .service.internalPort.name | quote }}
+              containerPort: {{ .service.internalPort.number | int }}
+          securityContext:
+            {{- toYaml .securityContext.container | nindent 12 }}
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+          volumeMounts:
+            - name: {{ .persistence.name | quote }}
+              mountPath: /var/lib/postgresql/data
+          envFrom:
+            - secretRef:
+                name: postgresql-secrets
+          env:
+            {{- if .extraEnv }}
+            {{- toYaml .extraEnv | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /
+              port: {{ .service.internalPort.name | quote }}
+            periodSeconds: 5
+            successThreshold: 1
+            failureThreshold: 72
+          livenessProbe:
+            httpGet:
+              path: /
+              port: {{ .service.internalPort.name | quote }}
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ .service.internalPort.name | quote }}
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 10
+  volumeClaimTemplates:
+  - metadata:
+      name: {{ .persistence.name | quote }}
+    spec:
+      accessModes: {{ toYaml .persistence.accessModes | nindent 8 }}
+      volumeMode: {{ .persistence.volumeMode | quote }}
+      storageClassName: {{ .persistence.storageClass | quote }}
+      resources:
+        requests:
+          storage: {{ .persistence.size }}
+{{- end -}}

@@ -1,15 +1,41 @@
-# -- (int) Unique run identifier
-runId: 0
+global:
+  # -- (int) Unique run identifier
+  runId: 0
 
-# -- (object) Registry definition
+  s3:
+    # -- (string) S3 endpoint URL
+    endpointUrl: "endpointUrl"
+    # -- (string) S3 store URL
+    storeUrl: "storeUrl"
+    # -- (object) S3 secrets
+    # @default -- ~
+    secrets:
+      # -- (string) S3 access key
+      accessKey: "accessKey"
+      # -- (string) S3 secret key
+      secretKey: "secretKey"
+
+# -- (object) Ingress configuration
 # @default -- ~
-registry:
-  # -- (string) Hostname of the container registry
-  host: docker.io
+ingress:
+  # -- (string) Ingress class name
+  className: "nginx"
+  # -- (dict) Ingress annotations
+  annotations: {}
+  # -- (dict) Ingress labels
+  # @default -- {}
+  labels: {}
+  # -- (object) Hosts configuration
+  # @default -- ~
+  hosts:
+  # - name: example.com
+  #   tls:
+  #     enabled: true
+  #     secretName: example-com-tls
 
 # -- (object) Ingress Service configuration
 # @default -- ~
-ingressService:
+ingress-service:
   # -- (string) Application name
   name: ingress-service
   # -- (int) Number of desired pods
@@ -35,6 +61,8 @@ ingressService:
   # -- (object) Image details
   # @default -- ~
   image:
+    # -- (string) Hostname of the container registry
+    host: docker.io
     # -- (string) Image repository
     name: jbrezmorf/zarr-fuse-ingress-service
     # -- (string) Image tag
@@ -43,20 +71,6 @@ ingressService:
   # -- (object) Service configuration
   # @default -- ~
   configuration:
-    # -- (object) S3 configuration
-    # @default -- ~
-    s3:
-      # -- (string) S3 endpoint URL
-      endpointUrl: "endpointUrl"
-      # -- (string) S3 store URL
-      storeUrl: "storeUrl"
-      # -- (object) S3 secrets
-      # @default -- ~
-      secrets:
-        # -- (string) S3 access key
-        accessKey: "accessKey"
-        # -- (string) S3 secret key
-        secretKey: "secretKey"
     # -- (object) FastAPI configuration
     # @default -- ~
     fastapi:
@@ -94,24 +108,6 @@ ingressService:
       # -- (string) Port name
       name: http
 
-  # -- (object) Ingress configuration
-  # @default -- ~
-  ingress:
-    # -- (string) Ingress class name
-    className: "nginx"
-    # -- (dict) Ingress annotations
-    annotations: {}
-    # -- (dict) Ingress labels
-    # @default -- {}
-    labels: {}
-    # -- (object) Hosts configuration
-    # @default -- ~
-    hosts:
-    # - name: example.com
-    #   tls:
-    #     enabled: true
-    #     secretName: example-com-tls
-
   # -- (object) Resource requests and limits
   # @default -- ~
   resources:
@@ -130,218 +126,218 @@ ingressService:
   # -- (object) Security context settings
   # @default -- ~
   securityContext:
-    pod:
-      fsGroup: 1000
-      runAsNonRoot: true
-      runAsUser: 1000
-      runAsGroup: 1000
-      seccompProfile:
-        type: RuntimeDefault
-    container:
-      capabilities:
-        drop:
-          - ALL
-      allowPrivilegeEscalation: false
-      privileged: false
-      runAsNonRoot: true
-      readOnlyRootFilesystem: true
-      runAsUser: 1000
-      runAsGroup: 1000
+    pod: {}
+    container: {}
 
-securityContext:
-  pod:
-    fsGroup: 0
-    runAsNonRoot: true
-    runAsUser: 50000
-    runAsGroup: 0
-    seccompProfile:
-      type: RuntimeDefault
-  container:
-    capabilities:
-      drop:
-        - ALL
-    allowPrivilegeEscalation: false
-    privileged: false
-    runAsNonRoot: true
-    runAsUser: 50000
-    runAsGroup: 0
+extractor-service:
+  postgres:
+    name: postgres
+    replicaCount: 1
+    restartPolicy: Always
+    imagePullPolicy: IfNotPresent
+    partOf: "extractor-service"
+    component: "postgresql"
+    extraLabels: {}
+    extraAnnotations: {}
+    extraEnv: []
+    image:
+      host: docker.io
+      name: postgres
+      tag: 16
 
-image:
-  repository: jbrezmorf/zarr-fuse-extractor-service
-  tag: ci-7aab59a
-  pullPolicy: IfNotPresent
+    secrets:
+      user: ""
+      password: ""
+      database: ""
 
-postgres:
-  image: docker.io/mocstepan/postgresql-testing-moc:latest
-  storage: 5Gi
-  user: airflow
-  password: airflow
-  database: airflow
+    persistence:
+      name: postgres-data
+      storageClass: "csi-ceph-rbd-du"
+      size: 10Gi
+      volumeMode: Filesystem
+      accessModes:
+        - ReadWriteOnce
 
-airflow:
-  secretKey: "mysecretkey"
-  fernetKey: "GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14="
-  executor: LocalExecutor
+    # -- (object) Service configuration
+    # @default -- ~
+    service:
+      # -- (string) Service type
+      type: ClusterIP
+      # -- (string) Service name
+      name: postgres-service
+      # -- (dict) Service labels
+      labels: {}
+      # -- (dict) Service annotations
+      annotations: {}
+      # -- (object) External port configuration
+      # @default -- ~
+      externalPort:
+        # -- (int) Port number
+        number: 5432
+        # -- (string) Port name
+        name: http
+      # -- (object) Internal port configuration
+      # @default -- ~
+      internalPort:
+        # -- (int) Port number
+        number: 5432
+        # -- (string) Port name
+        name: http
 
-service:
-  type: ClusterIP
-  port: 8080
-# -- (object) Apache Airflow configuration
-# Documentation: https://artifacthub.io/packages/helm/apache-airflow/airflow
-# @default -- ~
-#airflow:
-#  enabled: true
-#  defaultAirflowRepository: jbrezmorf/zarr-fuse-extractor-service
-#  defaultAirflowTag: ci-22193e5
-#
-#  extraEnvFrom: |
-#    - secretRef:
-#        name: airflow-s3-credentials
-#  ingress:
-#    enabled: true
-#    web:
-#      enabled: true
-#      annotations:
-#        kubernetes.io/tls-acme: "true"
-#        cert-manager.io/cluster-issuer: "letsencrypt-prod"
-#      pathType: Prefix
-#      ingressClassName: nginx
-#      hosts:
-#        - name: "zarr-fuse-extractor-service-development.dyn.cloud.e-infra.cz"
-#          tls:
-#            enabled: true
-#            secretName: "zarr-fuse-extractor-service-development-dyn-cloud-e-infra-cz-tls"
-#    apiServer:
-#      enabled: false
-#    flower:
-#      enabled: false
-#    statsd:
-#      enabled: false
-#  webserver:
-#    resources:
-#      requests:
-#        cpu: 100m
-#        memory: 128Mi
-#      limits:
-#        cpu: 200m
-#        memory: 256Mi
-#    defaultUser:
-#      enabled: true
-#      role: Admin
-#      username: admin
-#      email: admin@example.com
-#      password: admin
-#      firstName: admin
-#      lastName: user
-#    securityContexts:
-#      pod:
-#        runAsNonRoot: true
-#        seccompProfile:
-#          type: RuntimeDefault
-#      container:
-#        capabilities:
-#          drop:
-#            - ALL
-#        runAsNonRoot: true
-#        allowPrivilegeEscalation: false
-#        privileged: false
-#  workers:
-#    replicas: 1
-#    resources:
-#      requests:
-#        cpu: 100m
-#        memory: 128Mi
-#      limits:
-#        cpu: 200m
-#        memory: 256Mi
-#    volumeClaimTemplates: []
-#    securityContexts:
-#      pod:
-#        runAsNonRoot: true
-#        seccompProfile:
-#          type: RuntimeDefault
-#      container:
-#        capabilities:
-#          drop:
-#            - ALL
-#        runAsNonRoot: true
-#        allowPrivilegeEscalation: false
-#        privileged: false
-#  scheduler:
-#    resources:
-#      requests:
-#        cpu: 100m
-#        memory: 128Mi
-#      limits:
-#        cpu: 200m
-#        memory: 256Mi
-#    securityContexts:
-#      pod:
-#        runAsNonRoot: true
-#        seccompProfile:
-#          type: RuntimeDefault
-#      container:
-#        capabilities:
-#          drop:
-#            - ALL
-#        runAsNonRoot: true
-#        allowPrivilegeEscalation: false
-#        privileged: false
-#  dagProcessor:
-#    resources:
-#      requests:
-#        cpu: 100m
-#        memory: 128Mi
-#      limits:
-#        cpu: 200m
-#        memory: 256Mi
-#    securityContexts:
-#      pod:
-#        runAsNonRoot: true
-#        seccompProfile:
-#          type: RuntimeDefault
-#      container:
-#        capabilities:
-#          drop:
-#            - ALL
-#        runAsNonRoot: true
-#        allowPrivilegeEscalation: false
-#        privileged: false
-#  redis:
-#    resources:
-#      requests:
-#        cpu: 100m
-#        memory: 128Mi
-#      limits:
-#        cpu: 200m
-#        memory: 256Mi
-#    securityContexts:
-#      pod:
-#        runAsNonRoot: true
-#        seccompProfile:
-#          type: RuntimeDefault
-#      container:
-#        capabilities:
-#          drop:
-#            - ALL
-#        runAsNonRoot: true
-#        allowPrivilegeEscalation: false
-#        privileged: false
-#  apiServer:
-#    replicas: 0
-#    securityContexts:
-#      pod:
-#        runAsNonRoot: true
-#        seccompProfile:
-#          type: RuntimeDefault
-#      container:
-#        capabilities:
-#          drop:
-#            - ALL
-#        runAsNonRoot: true
-#        allowPrivilegeEscalation: false
-#        privileged: false
-#  flower:
-#    enabled: false
-#  statsd:
-#    enabled: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 100Mi
+      limits:
+        cpu: 500m
+        memory: 500Mi
+
+    securityContext:
+      pod:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      container:
+        capabilities:
+          drop:
+            - ALL
+        allowPrivilegeEscalation: false
+        privileged: false
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+
+  airflow:
+    imagePullPolicy: IfNotPresent
+    image:
+      host: docker.io
+      name: jbrezmorf/zarr-fuse-extractor-service
+      tag: ci-7aab59a
+    executor: LocalExecutor
+    secrets:
+      fernetKey: ""
+
+    scheduler:
+      name: airflow-scheduler
+      replicaCount: 1
+      restartPolicy: Always
+      imagePullPolicy: IfNotPresent
+      partOf: "extractor-service"
+      component: "scheduler"
+      extraLabels: {}
+      extraAnnotations: {}
+      extraEnv: []
+
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 1024Mi
+
+      securityContext:
+        pod:
+          runAsUser: 50000
+          runAsGroup: 50000
+          fsGroup: 50000
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        container:
+          capabilities:
+            drop:
+              - ALL
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsUser: 50000
+          runAsGroup: 50000
+          runAsNonRoot: true
+
+    webServer:
+      name: airflow-webserver
+      replicaCount: 1
+      restartPolicy: Always
+      imagePullPolicy: IfNotPresent
+      partOf: "extractor-service"
+      component: "scheduler"
+      extraLabels: {}
+      extraAnnotations: {}
+      extraEnv: []
+      secrets:
+        webServerSecretKey: ""
+      # -- (object) Service configuration
+      # @default -- ~
+      service:
+        # -- (string) Service type
+        type: ClusterIP
+        # -- (string) Service name
+        name: airflow-webserver-service
+        # -- (dict) Service labels
+        labels: {}
+        # -- (dict) Service annotations
+        annotations: {}
+        # -- (object) External port configuration
+        # @default -- ~
+        externalPort:
+          # -- (int) Port number
+          number: 8080
+          # -- (string) Port name
+          name: http
+        # -- (object) Internal port configuration
+        # @default -- ~
+        internalPort:
+          # -- (int) Port number
+          number: 80
+          # -- (string) Port name
+          name: http
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 1024Mi
+      securityContext:
+        pod:
+          runAsUser: 50000
+          runAsGroup: 50000
+          fsGroup: 50000
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        container:
+          capabilities:
+            drop:
+              - ALL
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsUser: 50000
+          runAsGroup: 50000
+          runAsNonRoot: true
+
+    initJob:
+      name: airflow-init-job
+      restartPolicy: OnFailure
+      imagePullPolicy: IfNotPresent
+
+      securityContext:
+        pod:
+          runAsUser: 50000
+          runAsGroup: 50000
+          fsGroup: 50000
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        container:
+          capabilities:
+            drop:
+              - ALL
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsUser: 50000
+          runAsGroup: 50000
+          runAsNonRoot: true

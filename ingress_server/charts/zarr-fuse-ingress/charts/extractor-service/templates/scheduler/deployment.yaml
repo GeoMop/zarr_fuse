@@ -1,0 +1,58 @@
+---
+{{- with .Values.airflow.scheduler }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name | quote }}
+spec:
+  replicas: {{ .replicaCount | int }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .name | quote }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .name | quote }}
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+        app.kubernetes.io/version: {{ $.Chart.AppVersion }}
+        app.kubernetes.io/part-of: {{ .partOf | default $.Chart.Name }}
+        app.kubernetes.io/component: {{ .component | default $.Chart.Name }}
+        app.kubernetes.io/managed-by: {{ $.Release.Service }}
+        {{- if .extraLabels }}
+        {{- toYaml .extraLabels | nindent 8 }}
+        {{- end }}
+      annotations:
+        github.com/run-id: {{ $.Values.global.runId | quote }}
+        {{- if .extraAnnotations }}
+        {{- toYaml .extraAnnotations | nindent 8 }}
+        {{- end }}
+    spec:
+      restartPolicy: {{ .restartPolicy }}
+      securityContext:
+        {{- toYaml .securityContext.pod | nindent 8 }}
+      volumes:
+        - name: airflow-scheduler-logs
+          emptyDir: {}
+      containers:
+        - name: scheduler
+          image: "{{ $.Values.airflow.image.host }}/{{ $.Values.airflow.image.name }}:{{ $.Values.airflow.image.tag }}"
+          imagePullPolicy: {{ $.Values.airflow.imagePullPolicy }}
+          args:
+            - "scheduler"
+          volumeMounts:
+            - name: airflow-scheduler-logs
+              mountPath: /opt/airflow/logs
+          securityContext:
+            {{- toYaml .securityContext.container | nindent 12 }}
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: airflow-secrets
+            - secretRef:
+                name: airflow-s3-credentials
+          env:
+            {{- if .extraEnv }}
+            {{- toYaml .extraEnv | nindent 12 }}
+            {{- end }}
+{{- end -}}

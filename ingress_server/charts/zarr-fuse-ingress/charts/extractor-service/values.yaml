@@ -1,0 +1,104 @@
+global:
+  runId: 0
+  s3:
+    endpointUrl: ""
+    storeUrl: ""
+    secrets:
+      accessKey: ""
+      secretKey: ""
+postgres:
+  name: ""
+  replicaCount: 1
+  restartPolicy: Always
+  imagePullPolicy: IfNotPresent
+  partOf: ""
+  component: ""
+  extraLabels: {}
+  extraAnnotations: {}
+  extraEnv: []
+  image:
+    host: ""
+    name: ""
+    tag: 16
+  secrets:
+    user: ""
+    password: ""
+    database: ""
+  persistence:
+    name: ""
+    storageClass: ""
+    size: 10Gi
+    volumeMode: Filesystem
+    accessModes:
+      - ReadWriteOnce
+  service:
+    type: ClusterIP
+    name: ""
+    labels: {}
+    annotations: {}
+    externalPort:
+      number: 5432
+      name: http
+    internalPort:
+      number: 5432
+      name: http
+  resources:
+    requests: {}
+    limits: {}
+  securityContext:
+    pod: {}
+    container: {}
+airflow:
+  imagePullPolicy: IfNotPresent
+  image:
+    host: ""
+    name: ""
+    tag: ""
+  executor: ""
+  secrets:
+    fernetKey: ""
+  scheduler:
+    name: ""
+    replicaCount: 1
+    restartPolicy: Always
+    imagePullPolicy: IfNotPresent
+    partOf: ""
+    component: ""
+    extraLabels: {}
+    extraAnnotations: {}
+    extraEnv: []
+    resources:
+      requests: {}
+      limits: {}
+    securityContext:
+      pod: {}
+      container: {}
+  webServer:
+    name: ""
+    replicaCount: 1
+    restartPolicy: Always
+    imagePullPolicy: IfNotPresent
+    partOf: ""
+    component: ""
+    extraLabels: {}
+    extraAnnotations: {}
+    extraEnv: []
+    secrets:
+      webServerSecretKey: ""
+    service:
+      type: ClusterIP
+      name: ""
+      labels: {}
+      annotations: {}
+      externalPort:
+        number: 8080
+        name: http
+      internalPort:
+        number: 80
+        name: http
+    resources:
+      requests: {}
+      limits: {}
+    securityContext:
+      pod: {}
+      container: {}
