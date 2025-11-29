@@ -20,7 +20,11 @@ async def get_plot_data(payload: Dict[str, Any]):
 
         # Call s3_service to get plot data (to be implemented)
         plot_data = s3_service.get_plot_json(store_name, node_path, plot_type, selection)
-        return {"status": "success", "figure": plot_data}
+
+        # PNG overlay köşe koordinatlarını plot_service'den al
+        from services.overlay_corners import get_overlay_corners
+        overlay = get_overlay_corners()
+        return {"status": "success", "figure": plot_data, "overlay": overlay}
     except Exception as e:
         return {"status": "error", "reason": str(e)}
 

@@ -93,7 +93,7 @@ export const MapViewer: React.FC<MapViewerProps> = ({
             ...(validFigure.layout.mapbox || {}),
           };
         }
-
+        
         console.log('Figure to render:', validFigure);
         
         // Log layers for debugging
