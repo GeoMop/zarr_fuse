@@ -2,23 +2,16 @@ import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 import logging
+import os
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', lon_col='longitude', time_col='time'):
     """
     Generates a Plotly map figure based on the provided DataFrame and time point.
-    
-    Args:
-        df (pd.DataFrame): DataFrame containing the data (must include lat, lon, time columns).
-        time_point (str or datetime, optional): The specific time to filter by. If None, uses the earliest time.
-        lat_col (str): Name of the latitude column.
-        lon_col (str): Name of the longitude column.
-        time_col (str): Name of the time column.
-        
-    Returns:
-        dict: Plotly figure dictionary (JSON serializable).
     """
+    print(f"DEBUG: Generate map figure called. Time: {time_point}")
     try:
         # Ensure time column is datetime
         if not np.issubdtype(df[time_col].dtype, np.datetime64):
@@ -41,12 +34,12 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
             nearest_idx = (times_series - selected_time).abs().idxmin()
             selected_time = times_series.iloc[nearest_idx]
             
-        logger.info(f"Generating map for time: {selected_time}")
+        print(f"DEBUG: Generating map for time: {selected_time}")
         
         current_df = df[df[time_col] == selected_time].copy()
         
         if current_df.empty:
-            logger.warning("No data found for the selected time.")
+            print("WARNING: No data found for the selected time.")
             return go.Figure().to_dict()
 
         # 2. Coordinate Handling (Swap & Radian Detection)
@@ -62,18 +55,18 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
             
             # Swap detection (Heuristic: Europe context)
             if mean_lat < 30 and mean_lon > 30:
-                logger.info("Detected swapped coordinates. Swapping back.")
+                print("DEBUG: Detected swapped coordinates. Swapping back.")
                 lats, lons = lons, lats
                 
             # Radian detection
             max_val = np.max(np.abs(lats[valid_mask]))
             if max_val < 1.6:
-                logger.info("Detected radians. Converting to degrees.")
+                print("DEBUG: Detected radians. Converting to degrees.")
                 lats = np.degrees(lats)
                 lons = np.degrees(lons)
                 
         # 3. Create Plotly Figure
-        logger.info("Converting coordinates to list for JSON serialization")
+        print("DEBUG: Converting coordinates to list for JSON serialization")
         fig = go.Figure()
         
         # Prepare hover text
@@ -85,7 +78,7 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
                      for col in hover_cols]
             hover_texts.append("<br>".join(lines))
             
-        fig.add_trace(go.Scattergeo(
+        fig.add_trace(go.Scattermapbox(
             lat=lats.tolist(),
             lon=lons.tolist(),
             mode='markers',
@@ -93,17 +86,15 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
                 size=10,
                 opacity=0.8,
                 color='red',
-                symbol='circle'
             ),
             text=hover_texts,
             hoverinfo='text',
             name='Data'
         ))
-        
+
         # 4. Layout & Auto Focus
         center_lat = 0
         center_lon = 0
-        # Zoom logic for Scattergeo is different (projection scale), but we can use center
         
         plot_mask = np.isfinite(lats) & (np.abs(lats) <= 90)
         if np.any(plot_mask):
@@ -111,16 +102,11 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
             center_lon = float(np.mean(lons[plot_mask]))
             
         fig.update_layout(
-            geo=dict(
-                projection_type='natural earth',
-                showland=True,
-                showcountries=True,
-                showocean=True,
-                countrycolor="rgb(204, 204, 204)",
-                landcolor="rgb(243, 243, 243)",
-                oceancolor="rgb(230, 245, 255)",
+            template=None,
+            mapbox=dict(
+                style="open-street-map",
                 center=dict(lat=center_lat, lon=center_lon),
-                # projection_scale can be adjusted for zoom if needed, but auto is safer for now
+                zoom=5
             ),
             margin=dict(l=0, r=0, t=0, b=0),
             height=600,
@@ -130,5 +116,5 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
         return fig.to_dict()
         
     except Exception as e:
-        logger.error(f"Error generating map figure: {e}")
+        print(f"ERROR: Error generating map figure: {e}")
         raise

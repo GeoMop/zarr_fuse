@@ -1,6 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import Plot from 'react-plotly.js';
+import createPlotlyComponent from 'react-plotly.js/factory';
+import Plotly from 'plotly.js-dist-min';
 import { API_BASE_URL } from '../api';
+
+Plotly.setPlotConfig({
+  mapboxAccessToken: ''
+});
+
+const Plot = createPlotlyComponent(Plotly);
 
 interface MapViewerProps {
   storeName: string;
@@ -18,6 +25,19 @@ export const MapViewer: React.FC<MapViewerProps> = ({
   const [figure, setFigure] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [plotKey, setPlotKey] = useState(0);
+
+  // Force resize when figure loads to fix blank map issues
+  useEffect(() => {
+    if (!loading && figure) {
+        // Small delay to ensure DOM is ready
+        const timer = setTimeout(() => {
+            window.dispatchEvent(new Event('resize'));
+            console.log('Triggered resize event for Plotly');
+        }, 100);
+        return () => clearTimeout(timer);
+    }
+  }, [loading, figure]);
 
   useEffect(() => {
     if (!storeName || !nodePath) return;
@@ -33,53 +53,69 @@ export const MapViewer: React.FC<MapViewerProps> = ({
             store_name: storeName,
             node_path: nodePath,
             plot_type: 'map',
-            selection: selection
+            selection: selection,
           }),
         });
 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
         const data = await response.json();
-        
-        if (data.status === 'error') {
-            throw new Error(data.reason || 'Unknown backend error');
+        console.log('🔍 Backend Raw Response:', data);
+
+        if (!response.ok || data.status === 'error') {
+          throw new Error(data.reason || `HTTP error! status: ${response.status}`);
         }
 
-        // Check for nested error in figure
-        if (data.figure && data.figure.status === 'error') {
-            throw new Error(data.figure.reason || 'Error generating plot');
+        // 1️⃣ Figure adayını belirle
+        let validFigure: any = null;
+
+        // Case 1: Response direkt { data, layout }
+        if (Array.isArray(data.data) && data.layout) {
+          validFigure = data;
         }
+        // Case 2: { status: 'success', figure: { data, layout } }
+        else if (data.figure && Array.isArray(data.figure.data) && data.figure.layout) {
+          validFigure = data.figure;
+        }
+
+        // 2️⃣ Sıkı doğrulama
+        if (!validFigure) {
+          console.error('Invalid Plotly structure:', data);
+          throw new Error("Invalid backend response: JSON must contain 'data' (array) and 'layout' (object).");
+        }
+
+        // 3️⃣ Frontend tarafında da template & mapbox normalize et
+        if (validFigure.layout) {
+          // Template’i tamamen kapat
+          validFigure.layout.template = undefined;
+
+          // Mapbox alanını garantile
+          validFigure.layout.mapbox = {
+            style: 'open-street-map',
+            ...(validFigure.layout.mapbox || {}),
+          };
+        }
+
+        console.log('Figure to render:', validFigure);
         
-        // If the backend returns the figure directly (as dict) or wrapped
-        // My implementation returns the figure dict directly or {status: error}
-        // Let's check if it has 'data' and 'layout' keys directly
-        if (data.data && data.layout) {
-             setFigure(data);
-        } else if (data.figure) {
-             // In case I wrapped it in previous logic (I didn't in plot_service, but s3_service returns what plot_service returns)
-             // Wait, s3_service returns what generate_map_figure returns.
-             // generate_map_figure returns fig.to_dict().
-             // So it should be the figure object directly.
-             setFigure(data.figure);
-        } else {
-             // Assume data is the figure
-             setFigure(data);
+        // Log layers for debugging
+        if (validFigure.layout?.mapbox?.layers) {
+            console.log('Map layers detected:', validFigure.layout.mapbox.layers);
         }
+
+        setFigure(validFigure);
+        setPlotKey(prev => prev + 1); // Force re-render
 
       } catch (err) {
-        console.error("Failed to fetch map:", err);
+        console.error('Failed to fetch map:', err);
         setError(err instanceof Error ? err.message : 'Failed to load map');
       } finally {
         setLoading(false);
       }
     };
 
-    // Cleanup function to revoke object URLs if we were using them (not currently, but good practice)
     fetchMap();
+
     return () => {
-        // cleanup logic if needed
+      // cleanup logic if needed
     };
   }, [storeName, nodePath, selection]); // Re-fetch when selection (time) changes
 
@@ -108,15 +144,17 @@ export const MapViewer: React.FC<MapViewerProps> = ({
   if (!figure) return null;
 
   return (
-    <div className="w-full bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+    <div className="w-full bg-white rounded-lg shadow-sm border border-gray-200 p-4 relative min-h-[500px]">
       <h3 className="text-lg font-semibold text-gray-800 mb-4">Geographic View</h3>
       <Plot
+        key={plotKey}
         data={figure.data}
         layout={{
             ...figure.layout,
             autosize: true,
             width: undefined, // Let container control width
             height: 500,
+            margin: { t: 0, b: 0, l: 0, r: 0 }, // Minimize margins
         }}
         config={{
             responsive: true,
