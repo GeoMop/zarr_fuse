@@ -1,3 +1,8 @@
+ingress:
+  className: "nginx"
+  annotations:
+    kubernetes.io/tls-acme: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
 ingressService:
   extraEnv:
     - name: LOG_LEVEL
@@ -11,11 +16,6 @@ ingressService:
     internalPort:
       number: 8000
       name: http
-  ingress:
-    className: "nginx"
-    annotations:
-      kubernetes.io/tls-acme: "true"
-      cert-manager.io/cluster-issuer: "letsencrypt-prod"
   resources:
     requests:
       cpu: 125m

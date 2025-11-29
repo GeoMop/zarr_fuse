@@ -6,4 +6,4 @@ dependencies:
   repository: file://charts/extractor-service
   version: 2.0.0
 digest: sha256:6af68090113cd76289b938f4787feece620bb85f7953853da9b847270af06ea1
-generated: "2025-11-30T00:12:15.23666251+01:00"
+generated: "2025-11-30T00:42:17.97398621+01:00"

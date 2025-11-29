@@ -1,3 +1,12 @@
+global:
+  s3:
+    storeUrl: "s3://app-databuk-test-service/bukov-pull-request.zarr"
+ingress:
+  hosts:
+    - name: zarr-fuse-ingress-server-development.dyn.cloud.e-infra.cz
+      tls:
+        enabled: true
+        secretName: zarr-fuse-ingress-server-development-dyn-cloud-e-infra-cz-tls
 ingressService:
   name: ingress-service-development
   configuration:
@@ -5,17 +14,3 @@ ingressService:
       storeUrl: "s3://app-databuk-test-service/bukov-pull-request.zarr"
   service:
     name: ingress-service-development
-  ingress:
-    hosts:
-      - name: zarr-fuse-ingress-server-development.dyn.cloud.e-infra.cz
-        tls:
-          enabled: true
-          secretName: zarr-fuse-ingress-server-development-dyn-cloud-e-infra-cz-tls
-airflow:
-  ingress:
-    web:
-      hosts:
-        - name: "zarr-fuse-extractor-server-development.dyn.cloud.e-infra.cz"
-          tls:
-            enabled: true
-            secretName: "zarr-fuse-extractor-server-development-dyn-cloud-e-infra-cz-tls"

@@ -1,7 +1,8 @@
 global:
   # -- (int) Unique run identifier
   runId: 0
-
+  # -- (object) S3 configuration
+  # @default -- ~
   s3:
     # -- (string) S3 endpoint URL
     endpointUrl: "endpointUrl"
@@ -35,7 +36,7 @@ ingress:
 
 # -- (object) Ingress Service configuration
 # @default -- ~
-ingress-service:
+ingressService:
   # -- (string) Application name
   name: ingress-service
   # -- (int) Number of desired pods
@@ -129,7 +130,7 @@ ingress-service:
     pod: {}
     container: {}
 
-extractor-service:
+extractorService:
   postgres:
     name: postgres
     replicaCount: 1
