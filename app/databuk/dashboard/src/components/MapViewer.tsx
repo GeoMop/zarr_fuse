@@ -64,10 +64,10 @@ export const MapViewer: React.FC<MapViewerProps> = ({
           throw new Error(data.reason || `HTTP error! status: ${response.status}`);
         }
 
-        // 1️⃣ Figure adayını belirle
+        // 1️⃣ Determine valid figure
         let validFigure: any = null;
 
-        // Case 1: Response direkt { data, layout }
+        // Case 1: Response direct { data, layout }
         if (Array.isArray(data.data) && data.layout) {
           validFigure = data;
         }
@@ -76,27 +76,38 @@ export const MapViewer: React.FC<MapViewerProps> = ({
           validFigure = data.figure;
         }
 
-        // 2️⃣ Sıkı doğrulama
+        // 2️⃣ Strict validation
         if (!validFigure) {
           console.error('Invalid Plotly structure:', data);
-          throw new Error("Invalid backend response: JSON must contain 'data' (array) and 'layout' (object).");
+          throw new Error("Invalid backend response: JSON must contain 'data' (array) and 'layout' (object)." );
         }
 
-        // 3️⃣ Frontend tarafında da template & mapbox normalize et
-        if (validFigure.layout) {
-          // Template’i tamamen kapat
-          validFigure.layout.template = undefined;
+        // 3️⃣ Add corner markers if overlay.corners exists
+        if (data.overlay && Array.isArray(data.overlay.corners)) {
+          const corners: [number, number][] = data.overlay.corners;
+          const markerTrace = {
+            type: 'scattermapbox',
+            mode: 'markers+text',
+            lon: corners.map((c: [number, number]) => c[0]),
+            lat: corners.map((c: [number, number]) => c[1]),
+            marker: { color: 'blue', size: 12 },
+            text: ['Top-Left', 'Top-Right', 'Bottom-Right', 'Bottom-Left'],
+            textposition: 'top right',
+            name: 'Overlay Corners',
+          };
+          validFigure.data = [...validFigure.data, markerTrace];
+        }
 
-          // Mapbox alanını garantile
+        // 4️⃣ Normalize template & mapbox
+        if (validFigure.layout) {
+          validFigure.layout.template = undefined;
           validFigure.layout.mapbox = {
             style: 'open-street-map',
             ...(validFigure.layout.mapbox || {}),
           };
         }
-        
+
         console.log('Figure to render:', validFigure);
-        
-        // Log layers for debugging
         if (validFigure.layout?.mapbox?.layers) {
             console.log('Map layers detected:', validFigure.layout.mapbox.layers);
         }
