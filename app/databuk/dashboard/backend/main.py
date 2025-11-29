@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -38,6 +39,13 @@ app = FastAPI(
     version=settings.VERSION,
     description="API for exploring Zarr stores",
     lifespan=lifespan
+)
+
+# Serve static files for overlay PNG
+app.mount(
+    "/static",
+    StaticFiles(directory="config/surface_data_endpoint"),
+    name="static"
 )
 
 # Add CORS middleware

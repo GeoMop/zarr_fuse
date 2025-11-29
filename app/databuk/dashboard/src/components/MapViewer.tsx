@@ -82,9 +82,14 @@ export const MapViewer: React.FC<MapViewerProps> = ({
           throw new Error("Invalid backend response: JSON must contain 'data' (array) and 'layout' (object)." );
         }
 
-        // 3️⃣ Add corner markers if overlay.corners exists
-        if (data.overlay && Array.isArray(data.overlay.corners)) {
+        // 3️⃣ Add PNG overlay as raster image layer if overlay info exists
+        if (data.overlay && Array.isArray(data.overlay.corners) && data.overlay.image_url) {
           const corners: [number, number][] = data.overlay.corners;
+          const lons = corners.map(c => c[0]);
+          const lats = corners.map(c => c[1]);
+          const centerLon = (Math.min(...lons) + Math.max(...lons)) / 2;
+          const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
+
           const markerTrace = {
             type: 'scattermapbox',
             mode: 'markers+text',
@@ -96,6 +101,49 @@ export const MapViewer: React.FC<MapViewerProps> = ({
             name: 'Overlay Corners',
           };
           validFigure.data = [...validFigure.data, markerTrace];
+
+          // PNG overlay as mapbox image layer
+          const imageLayer = {
+            sourcetype: 'image',
+            source: data.overlay.image_url,
+            coordinates: [
+              [corners[0][0], corners[0][1]], // top-left
+              [corners[1][0], corners[1][1]], // top-right
+              [corners[2][0], corners[2][1]], // bottom-right
+              [corners[3][0], corners[3][1]]  // bottom-left
+            ],
+            opacity: 0.7,
+            below: 'traces',
+          };
+          if (!validFigure.layout.mapbox.layers) {
+            validFigure.layout.mapbox.layers = [];
+          }
+          validFigure.layout.mapbox.layers = [imageLayer, ...validFigure.layout.mapbox.layers];
+
+          // Set map center and zoom to overlay center and bounds
+          validFigure.layout.mapbox.center = { lon: centerLon, lat: centerLat };
+          // Estimate zoom based on bounds (simple heuristic)
+          const lonSpan = Math.abs(Math.max(...lons) - Math.min(...lons));
+          const latSpan = Math.abs(Math.max(...lats) - Math.min(...lats));
+          let zoom = 12;
+          if (lonSpan < 0.01 && latSpan < 0.01) zoom = 15;
+          else if (lonSpan < 0.05 && latSpan < 0.05) zoom = 13;
+          else if (lonSpan < 0.1 && latSpan < 0.1) zoom = 12;
+          else zoom = 10;
+          validFigure.layout.mapbox.zoom = zoom;
+
+          // Add a marker to the center of the overlay for debugging
+          const centerMarker = {
+            type: 'scattermapbox',
+            mode: 'markers',
+            lon: [centerLon],
+            lat: [centerLat],
+            marker: { color: 'purple', size: 16 },
+            name: 'Overlay Center',
+            text: ['Overlay Center'],
+            textposition: 'bottom right',
+          };
+          validFigure.data = [...validFigure.data, centerMarker];
         }
 
         // 4️⃣ Normalize template & mapbox

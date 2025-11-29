@@ -46,6 +46,7 @@ def get_overlay_corners():
             [float(corners[1][0]), float(corners[1][1])], # top-right
             [float(corners[2][0]), float(corners[2][1])], # bottom-right
             [float(corners[3][0]), float(corners[3][1])]  # bottom-left
-        ]
+        ],
+        "image_url": "/static/mapa_uhelna_vyrez.png"
     }
     return overlay
