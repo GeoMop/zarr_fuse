@@ -82,11 +82,13 @@ type_mapping = {
     "uint32": np.uint32,
     "uint64": np.uint64,
     "float": np.float64,
+    "float32": np.float32,
     "float64": np.float64,
-    "complex": np.complex64,
+    "complex": np.complex128,
+    "complex64": np.complex64,
+    "complex128": np.complex128,
 }
 _PREFERRED_NAME = {np.dtype(v): k for k,v in type_mapping.items()}
-
 
 def make_na(val, dt):
     """
@@ -95,8 +97,12 @@ def make_na(val, dt):
     :param dt:
     :return:
     """
+
     if dt is None:
-        return val
+        if val is None:
+            return val
+        else:
+            raise ValueError("Unable to interpret NA sentinel value when dtype is None.")
 
     dtype = np.dtype(dt)
     if isinstance(val, str):
@@ -105,6 +111,9 @@ def make_na(val, dt):
                 return np.iinfo(dtype).max
             if val == "min_int":
                 return np.iinfo(dtype).min
+        if dtype.kind in  {"f"}:
+            if val == "nan":
+                return np.asarray([np.nan], dtype=dtype)[0]
         if dtype.kind in  {"U"}:
             return np.asarray([val], dtype=dtype)[0]
         raise ValueError(f"Unknown NA sentinel string: {val}")
@@ -152,7 +161,7 @@ class DType:
             return cls(np.dtype(f"<U{n}"))
         _dtype = type_mapping.get(_type,  None)
         if _dtype is None:
-            _ctx.error(f"Unsaported value type: {_type}")
+            _ctx.error(f"Unsaported value type: '{_type}'")
         return cls(np.dtype(_dtype))
 
     def asdict(self, value_serializer, filter):

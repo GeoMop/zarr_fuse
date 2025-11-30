@@ -243,6 +243,10 @@ class Variable(AddressMixin):
 
         # Optional attributes
         self.type: DType = DType.from_cfg(dict.get("type", None))
+        # Hack for DataTime Units TODO: derive default type of a unit
+        if  isinstance(self.unit, units.DateTimeUnit):
+            self.type = DType(np.dtype(self.unit.default_dtype()))
+
         na_cfg = dict.get("na_value", self.type.default_na).cfg
         self.na_value : Optional[Any] = make_na(na_cfg, self.type.dtype)
         self.description: Optional[str] = dict.get("description", None).value()

@@ -1055,7 +1055,7 @@ def check_unique_coords(ds):
     }
 
 
-def eliminate_dims_if_equal(arr: np.ndarray, dims_to_check: List[bool]) -> np.ndarray:
+def eliminate_dims_if_equal(arr: np.ma.MaskedArray, dims_to_check: List[bool]) -> np.ndarray:
     """
     Check that for each axis flagged True in dims_to_check, all values along that axis
     are equal. For each such axis, eliminate that dimension by taking the 0-th slice.
@@ -1085,17 +1085,22 @@ def eliminate_dims_if_equal(arr: np.ndarray, dims_to_check: List[bool]) -> np.nd
 
     # Process axes in descending order so that removal of one axis doesn't change indices.
     for axis in reversed(range(arr.ndim)):
-        if dims_to_check[axis]:
-            # Take the first element along the axis.
-            ref = np.take(arr, 0, axis=axis)
-            # Expand dims so that it can broadcast for comparison.
-            ref_expanded = np.expand_dims(ref, axis=axis)
-            if not np.all(arr == ref_expanded):
-                print(arr)
-                raise ValueError(f"Values along axis {axis} are not all equal")
-            # Remove this axis by selecting the 0th element along that axis.
-            arr = np.take(arr, 0, axis=axis)
-    return arr
+        if not dims_to_check[axis]:
+            continue
+
+        # Take the first valid element along the axis.
+        i_ref = arr.argmax(axis=axis)
+
+        # Expand dims so that it can broadcast for comparison.
+        expanded_idx = np.expand_dims(i_ref, axis=axis)  # shape like arr but axis len 1
+        ref_expanded = np.take_along_axis(arr, expanded_idx, axis=axis)
+        equal_on_valid = (arr == ref_expanded)
+        if not equal_on_valid.compressed().all():
+            print(arr)
+            raise ValueError(f"Values along axis {axis} are not all equal")
+        # Remove this axis by selecting the 0th element along that axis.
+        arr = ref_expanded.squeeze(axis=axis)
+    return arr.data
 
 def get_df_col(df, var:zarr_schema.Variable, logger: logging.Logger):
     try:
@@ -1209,15 +1214,12 @@ def coerce_df(schema: zarr_schema.DatasetSchema,
     #df_multi_idx = tuple(idx[valid_rows] for idx in idx_list)
     # multiindex for each df row, but flattend, so it actually index result_nd_array.flat[..]
     coord_sizes = [len(coords_dict_raw[d]) for d in dims]
-    df_multi_idx = np.ravel_multi_index([idx[valid_rows] for idx in idx_list], dims=coord_sizes)  #
-
-    # Apply valid_rows to the variable columns from Step 1
-    var_data = {k: col[valid_rows] for k, col in data_vars.items() if k not in coords_dict_raw}
+    df_multi_idx = np.ravel_multi_index(idx_list, dims=coord_sizes)  #
 
     # --- Step 5: let Node build final coords (xarray-ready etc.) ---
     coords_dict = Node._create_coords(schema.COORDS, coords_dict_raw)
 
-    return df_multi_idx, coords_dict, var_data
+    return df_multi_idx, coords_dict, data_vars
 
 
 def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
@@ -1312,7 +1314,8 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
         result.flat[df_multi_idx[mask_valid]] = column_vals[mask_valid]
         # eliminate inappropriate coordinates
         dims_to_eliminate = [d not in var_struc.coords for d in coords_dict.keys()]
-        np_var = eliminate_dims_if_equal(result, dims_to_eliminate)
+        result_valid = np.ma.array(result, mask=~var_struc.valid_mask(result))
+        np_var = eliminate_dims_if_equal(result_valid, dims_to_eliminate)
         data_var = Node._variable(var_struc, np_var, coords_dict)
         return data_var
 

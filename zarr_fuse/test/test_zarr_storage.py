@@ -526,6 +526,7 @@ class TestPivotND:
         df_all = pl.DataFrame(case)
         ds_all = zf.zarr_storage.pivot_nd(self.schema, df_all, self.logger)
         self.check_temp(ds_all, ref_mat)
+        return ds_all
 
     def test_pivot_nd_weather(self):
         schema = zf.schema.deserialize(Path(inputs_dir/"schema_weather.yaml")).ds

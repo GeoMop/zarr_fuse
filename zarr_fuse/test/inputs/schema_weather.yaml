@@ -9,12 +9,14 @@ VARS:
 
   longitude:
     unit: "deg"
+    type: float
     na_value: 'nan'
     description: "Signed Earth longitude."
     coords: "lat_lon"
 
   latitude:
     unit: "deg"
+    type: float
     na_value: 'nan'
     description: "Signed Earth longitude."
     coords: "lat_lon"

@@ -58,8 +58,11 @@ def test_dtype_from_cfg_basic_and_str():
         ("uint32", np.uint32),
         ("uint64", np.uint64),
         ("float", np.float64),
+        ("float32", np.float32),
         ("float64", np.float64),
-        ("complex", np.complex64),
+        ("complex", np.complex128),
+        ("complex64", np.complex64),
+        ("complex128", np.complex128),
     ]
     for spec, expected in basics:
         dt = ta.DType.from_cfg(DummyCfg(spec, ctx)).dtype
