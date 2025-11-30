@@ -18,6 +18,6 @@ jobs:
       tag: generate
       zarr-fuse-ref: ${{ github.head_ref }}
       # TODO: Change testing.yaml to pull-request.yaml before merging airflow-main to main
-      extra-helm-values: |
+      extra-helm-args: |
         --values ingress_server/charts/zarr-fuse-ingress/values/testing.yaml
     secrets: inherit

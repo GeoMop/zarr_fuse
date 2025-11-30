@@ -33,7 +33,7 @@ jobs:
       deploy: true
       tag: ${{ needs.get-version.outputs.version }}
       namespace: ingress-server
-      extra-helm-values: |
+      extra-helm-args: |
         --values ingress_server/charts/zarr-fuse-ingress/values/tag.yaml
       zarr-fuse-ref: main
     secrets: inherit
