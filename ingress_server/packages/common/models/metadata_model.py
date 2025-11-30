@@ -13,6 +13,18 @@ class MetadataModel(BaseModel):
         description="UTC timestamp (ISO 8601)"
     )
     schema_name: str = Field(..., description="Name of the schema file (without path)")
+    extract_fn: str | None = Field(
+        None,
+        description="Optional extraction function name to apply after loading"
+    )
+    fn_module: str | None = Field(
+        None,
+        description="Optional module name where the extraction function is located"
+    )
+    dataframe_row: dict | None = Field(
+        None,
+        description="Optional dictionary representing a single row of the dataframe"
+    )
 
     @field_validator("content_type")
     @classmethod

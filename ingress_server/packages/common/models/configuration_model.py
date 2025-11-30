@@ -9,9 +9,17 @@ class S3Config(BaseModel):
 
 
 class EndpointConfig(BaseModel):
-    name: str
-    endpoint: str
-    schema_name: str
+    name: str = Field(..., description="Logical name of the endpoint (no slashes)")
+    endpoint: str = Field(..., description="API endpoint path (must start with '/')")
+    schema_name: str = Field(..., description="Name of the schema file (without path)")
+    extract_fn: str | None = Field(
+        None,
+        description="Optional extraction function name to apply after loading"
+    )
+    fn_module: str | None = Field(
+        None,
+        description="Optional module name where the extraction function is located"
+    )
 
     @field_validator("endpoint")
     @classmethod
@@ -20,18 +28,31 @@ class EndpointConfig(BaseModel):
             raise ValueError("Endpoint must start with a '/'")
         return v
 
+class ActiveScrapperURLParams(BaseModel):
+    param_name: str = Field(..., description="Name of the URL parameter")
+    column_name: str = Field(..., description="Name of the column to map the parameter to")
 
-class ScrapperConfig(BaseModel):
-    name: str
-    url: str
-    cron: str
-    schema_name: str
-    method: str = Field("GET", description="HTTP method to use for the scrapper")
+class ActiveScrapperHeaders(BaseModel):
+    header_name: str = Field(..., description="Name of the HTTP header")
+    header_value: str = Field(..., description="Value or placeholder for the header")
 
-    @field_validator("cron")
+class ActiveScrapperConfig(BaseModel):
+    name: str = Field(..., description="Name of the scrapper")
+    url: str = Field(..., description="URL to scrape data from")
+    crons: list[str] = Field(..., description="List of cron expressions for scheduling")
+    schema_name: str = Field(..., description="Name of the schema to use for the scrapper")
+    extract_fn: str | None = Field(None,description="Name of the extraction function to use (if any)")
+    fn_module: str | None = Field(None, description="Module where the extraction function is located (if any)")
+    headers: list[ActiveScrapperHeaders] = Field(default_factory=list, description="List of HTTP headers to include in requests")
+    url_params: list[ActiveScrapperURLParams] = Field(default_factory=list, description="List of URL parameters to include in requests")
+    dataframe_path: str | None = Field(None, description="Path to save the scraped data as a dataframe (if any)")
+    dataframe_has_header: bool = Field(True, description="Indicates if the dataframe has a header row")
+
+    @field_validator("crons")
     @classmethod
     def validate_cron(cls, v):
-        parts = v.split()
-        if len(parts) != 5:
-            raise ValueError("Cron expression must have 5 parts (min hour day month dow)")
+        for cron in v:
+            parts = cron.split()
+            if len(parts) != 5:
+                raise ValueError("Each cron expression must have 5 parts (min hour day month dow)")
         return v
