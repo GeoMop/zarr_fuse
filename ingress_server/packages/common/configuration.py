@@ -3,7 +3,7 @@ import yaml
 
 from pathlib import Path
 from dotenv import load_dotenv
-from .models import S3Config, EndpointConfig, ScrapperConfig
+from .models import S3Config, EndpointConfig, ActiveScrapperConfig
 
 import boto3
 from botocore.config import Config
@@ -46,13 +46,13 @@ def load_endpoints_config() -> list[EndpointConfig]:
 
     return [EndpointConfig(**ec) for ec in raw.get("endpoints", [])]
 
-def load_scrappers_config() -> list[ScrapperConfig]:
+def load_scrappers_config() -> list[ActiveScrapperConfig]:
     cfg_path = BASE_DIR / "inputs/endpoints_config.yaml"
 
     with open(cfg_path, "r", encoding="utf-8") as file:
         raw = yaml.safe_load(file) or {}
 
-    return [ScrapperConfig(**sc) for sc in raw.get("active_scrappers", [])]
+    return [ActiveScrapperConfig(**sc) for sc in raw.get("active_scrappers", [])]
 
 def create_boto3_client() -> BaseClient:
     cfg = load_s3_config()
@@ -61,8 +61,8 @@ def create_boto3_client() -> BaseClient:
         s3={
             "addressing_style": "path",
         },
-        #request_checksum_calculation="WHEN_REQUIRED",
-        #response_checksum_validation="WHEN_REQUIRED",
+        request_checksum_calculation="WHEN_REQUIRED",
+        response_checksum_validation="WHEN_REQUIRED",
         retries={"max_attempts": 3, "mode": "standard"},
     )
     return boto3.client(

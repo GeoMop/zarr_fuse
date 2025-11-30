@@ -20,6 +20,8 @@ from dotenv import load_dotenv
 from packages.common.models import MetadataModel
 from packages.common import configuration, s3io, logging_setup
 
+from extractors import extractor
+
 LOG = logging.getLogger("dag_extractor")
 
 load_dotenv()
@@ -38,15 +40,39 @@ class Prefixes(BaseModel):
     processed: str
     failed: str
 
+class DataFrameCreation(BaseModel):
+    payload: bytes
+    content_type: str
+    metadata: MetadataModel
 
-def read_df_from_bytes(data: bytes, content_type: str) -> tuple[pl.DataFrame | None, str | None]:
-    ct = content_type.lower()
+def create_df_from_bytes(df_creation: DataFrameCreation) -> tuple[pl.DataFrame | None, str | None]:
+    metadata = df_creation.metadata
+    if not metadata.extract_fn or not metadata.fn_module:
+        try:
+            df = pl.read_json(io.BytesIO(df_creation.payload))
+            return df, None
+        except Exception as e:
+            return None, f"Failed to read JSON data: {e}"
+
+    try:
+        return extractor.apply_extractor_if_any(
+            payload=df_creation.payload,
+            extract_fn=metadata.extract_fn,
+            fn_module=metadata.fn_module,
+            endpoint_name=metadata.endpoint_name,
+            dataframe_row=metadata.dataframe_row,
+        ), None
+    except Exception as e:
+        return None, f"Failed to read JSON: {e}"
+
+def read_df_from_bytes(df_creation: DataFrameCreation) -> tuple[pl.DataFrame | None, str | None]:
+    ct = df_creation.content_type.lower()
     if "csv" in ct:
-        return pl.read_csv(io.BytesIO(data)), None
+        return pl.read_csv(io.BytesIO(df_creation.payload)), None
     elif "json" in ct:
-        return pl.read_json(io.BytesIO(data)), None
+        return create_df_from_bytes(df_creation)
     else:
-        return None, f"Unsupported content type: {content_type}. Use application/json or text/csv."
+        return None, f"Unsupported content type: {df_creation.content_type}. Use application/json or text/csv."
 
 def open_root(schema_path: Path) -> zf.Node:
     opts = {
@@ -107,12 +133,6 @@ def _load_meta(bucket: str, meta_key: str) -> MetadataModel | None:
     except Exception:
         return None
 
-def _df_from_payload(payload: bytes, content_type: str):
-    df, err = read_df_from_bytes(payload, content_type)
-    if err:
-        raise ValueError(err)
-    return df
-
 def _get_schema_dir(schema_name: str) -> Path:
     env = os.getenv("SCHEMAS_DIR")
     if env:
@@ -143,7 +163,13 @@ def _process_single(prefixes: Prefixes, data_key: str) -> bool:
         _move_pair(prefixes.bucket, data_key, meta_key, prefixes.failed, prefixes.accepted)
         raise ValueError("Missing schema_name in meta")
 
-    df = _df_from_payload(payload, content_type)
+    df_creation = DataFrameCreation(
+        payload=payload,
+        content_type=content_type,
+        metadata=meta,
+    )
+
+    df = read_df_from_bytes(df_creation)
     _write_to_zarr(schema_name, node_path, df)
 
     _move_pair(prefixes.bucket, data_key, meta_key, prefixes.processed, prefixes.accepted)
@@ -182,14 +208,12 @@ with DAG(
                 if _process_single(pfx, item.key):
                     processed += 1
             except Exception:
-                # necháme job failnout = retry přes Airflow retries
                 raise
 
         msg = f"{endpoint_name}: processed {processed} object(s)."
         LOG.info(msg)
         return msg
 
-    # Vytvoř tasks pro všechny endpoints (z configu) a scrappery
     for ep in configuration.load_endpoints_config():
         process_endpoint.override(task_id=f"process_endpoint__{ep.name}")(
             endpoint_name=ep.name,

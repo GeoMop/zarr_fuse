@@ -6,19 +6,20 @@ from fastapi.responses import JSONResponse
 from . import auth
 from packages.common import s3io, validation
 from packages.common.models import MetadataModel
+from packages.common.models import EndpointConfig
 
 LOG = logging.getLogger("ingress")
 
 async def _upload_node(
-    endpoint_name: str,
-    schema_name: str,
+    endpoint_config: EndpointConfig,
     request: Request,
     username: str,
     node_path: str = "",
 ) -> JSONResponse:
     LOG.debug(
-        "ingress.request endpoint=%s node_path=%r ct=%r user=%r",
-        endpoint_name,
+        "ingress.request name=%s endpoint=%s node_path=%r ct=%r user=%r",
+        endpoint_config.name,
+        endpoint_config.endpoint,
         node_path,
         request.headers.get("content-type"),
         username,
@@ -31,7 +32,7 @@ async def _upload_node(
         return JSONResponse({"error": err}, status_code=415 if "Unsupported" in err else 400)
 
     payload = await request.body()
-    ok, err = validation.validate_data(payload, content_type)
+    ok, err = validation.validate_data(payload)
     if not ok:
         LOG.warning("Validating data failed for %s", err)
         return JSONResponse({"error": err}, status_code=406)
@@ -39,27 +40,30 @@ async def _upload_node(
     meta_data = MetadataModel(
         content_type=content_type,
         node_path=node_path,
-        endpoint_name=endpoint_name,
+        endpoint_name=endpoint_config.name,
         username=username,
-        schema_name=schema_name,
+        schema_name=endpoint_config.schema_name,
+        extract_fn=endpoint_config.extract_fn,
+        fn_module=endpoint_config.fn_module,
     )
 
-    location = s3io.save_accepted_object(endpoint_name, node_path, content_type, payload, meta_data)
+    location = s3io.save_accepted_object(endpoint_config.name, node_path, content_type, payload, meta_data)
 
     LOG.info(
-        "Accepted endpoint=%s node=%s loc=%s bytes=%d",
-        endpoint_name,
+        "Accepted name=%s endpoint=%s node=%s loc=%s bytes=%d",
+        endpoint_config.name,
+        endpoint_config.endpoint,
         node_path,
         location,
         len(payload),
     )
     return JSONResponse({"status": "accepted"}, status_code=202)
 
-def register_upload_endpoints(app: FastAPI, endpoint_name: str, endpoint_url: str, schema_name: str):
+def register_upload_endpoints(app: FastAPI, endpoint_config: EndpointConfig):
     @app.post(
-        endpoint_url,
-        summary=f"Upload to root node {endpoint_name}",
-        description=f"Upload data to the s3 queue for endpoint {endpoint_name}.",
+        endpoint_config.endpoint,
+        summary=f"Upload to root node {endpoint_config.name}",
+        description=f"Upload data to the s3 queue for endpoint {endpoint_config.name}.",
         responses={
             202: {"description": "Accepted (saved to S3)"},
             400: {"description": "Bad Request"},
@@ -68,12 +72,12 @@ def register_upload_endpoints(app: FastAPI, endpoint_name: str, endpoint_url: st
         }
     )
     async def upload_root(request: Request, username: str = Depends(auth.authenticate)):
-        return await _upload_node(endpoint_name, schema_name, request, username)
+        return await _upload_node(endpoint_config, request, username)
 
     @app.post(
-        f"{endpoint_url}/{{node_path:path}}",
-        summary=f"Upload to child node of {endpoint_name}",
-        description=f"Upload child data to the s3 queue for endpoint {endpoint_name}.",
+        f"{endpoint_config.endpoint}/{{node_path:path}}",
+        summary=f"Upload to child node of {endpoint_config.name}",
+        description=f"Upload child data to the s3 queue for endpoint {endpoint_config.name}.",
         responses={
             202: {"description": "Accepted (saved to S3)"},
             400: {"description": "Bad Request"},
@@ -82,4 +86,4 @@ def register_upload_endpoints(app: FastAPI, endpoint_name: str, endpoint_url: st
         }
     )
     async def upload_node(node_path: str, request: Request, username: str = Depends(auth.authenticate)):
-        return await _upload_node(endpoint_name, schema_name, request, username, node_path)
+        return await _upload_node(endpoint_config, request, username, node_path)
