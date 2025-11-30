@@ -1,7 +1,7 @@
 import pytest
 import warnings
 import logging
-import pint
+#import pint
 from zarr_fuse import schema, units
 import numpy as np
 
@@ -82,6 +82,187 @@ def test_schemawarning():
         warnings.warn(warn_obj)
         msgs = [w.message for w in rec]
         assert any(isinstance(m, schema.SchemaWarning) for m in msgs)
+
+
+
+def _mk_var_for_convert(**kwargs):
+    """
+    Helper to build a Variable instance for convert_values / convert_value tests.
+
+    kwargs are the raw schema fields (without ContextCfg), e.g.:
+
+        _mk_var_for_convert(
+            name="height",
+            coords=[],
+            unit="m",
+            source_unit="cm",
+            type="float64",
+            range={"interval": [0, 2]},
+        )
+    """
+    base = {"name": "height", "coords": []}
+    base.update(kwargs)
+    v, _ = _mk_var(base)
+    return v
+
+def test_variable():
+    # --- setup: numeric variable with unit conversion + interval range ---
+    v = _mk_var_for_convert(
+        unit="m",
+        source_unit="cm",
+        type="float64",
+        range={"interval": [0, 2]},  # allowed range in *meters*
+    )
+
+    # Basic sanity: dtype and units
+    assert isinstance(v.unit, units.Unit)
+    assert v.unit == units.Unit("m")
+    assert v.source_unit == units.Unit("cm")
+    assert v.dtype == np.dtype("float64")
+
+    # --- convert_values: default from_unit/source_unit and range enforcement ---
+
+    # Values are in centimeters (source_unit); they should be converted to meters.
+    vals_cm = np.array([0.0, 50.0, 100.0])  # cm
+    converted = v.convert_values(vals_cm)
+    # 0 cm -> 0 m, 50 cm -> 0.5 m, 100 cm -> 1 m
+    assert np.allclose(converted, np.array([0.0, 0.5, 1.0], dtype=np.float64))
+
+    # Values that land outside [0, 2] meters should raise a ValueError
+    vals_cm_out_of_range = np.array([-10.0, 50.0])  # -> [-0.1, 0.5] m
+    with pytest.raises(ValueError):
+        v.convert_values(vals_cm_out_of_range)
+
+    # --- convert_values: overriding units and range ---
+
+    # Supply values in millimeters but override from_unit/to_unit + range.
+    vals_mm = np.array([0.0, 500.0, 1000.0])  # mm
+    custom_range = schema.InfRange()  # disables range checking
+
+    converted_mm = v.convert_values(
+        vals_mm,
+        from_unit=units.Unit("mm"),
+        to_unit=units.Unit("m"),
+        range=custom_range,
+    )
+    # 0 mm -> 0 m, 500 mm -> 0.5 m, 1000 mm -> 1 m
+    assert np.allclose(converted_mm, np.array([0.0, 0.5, 1.0], dtype=np.float64))
+
+    # --- encode / decode + quantity / magnitude helpers ---
+
+    # encode should run through v.range.encode and be identity within range
+    values_m = np.array([0.25, 0.75], dtype=np.float64)
+    encoded = v.encode(values_m)
+    assert np.allclose(encoded, values_m)
+
+    # decode should give back a Quantity in the variable's unit
+    decoded_q = v.decode(encoded)
+    assert isinstance(decoded_q, units.Quantity)
+    assert decoded_q.unit == v.unit
+    assert np.allclose(v.magnitude(decoded_q), values_m)
+
+    # quantity() given raw array should wrap it into a Quantity in v.unit
+    q_from_raw = v.quantity(values_m)
+    assert isinstance(q_from_raw, units.Quantity)
+    assert q_from_raw.units == v.unit
+    assert np.allclose(q_from_raw.magnitude, values_m)
+
+    # magnitude() on a plain ndarray should return it unchanged
+    assert np.allclose(v.magnitude(values_m), values_m)
+
+    # --- schema.convert_value applied to Variable instance ---
+
+    serialized = schema.convert_value(v)
+    # Must be a plain dict, no internal ContextCfg / SchemaCtx leaking out
+    assert isinstance(serialized, dict)
+    assert serialized["name"] == "height"
+    assert serialized["coords"] == []
+    assert "_address" not in serialized
+
+    # Type should round-trip into some string representation
+    # (exact token is tested elsewhere; here we only care that it's serializable)
+    assert isinstance(serialized["type"], str)
+
+    # Range should be serialized via IntervalRange.asdict -> {"interval": [start, end, unit_like]}
+    assert "range" in serialized
+    assert isinstance(serialized["range"], dict)
+    assert "interval" in serialized["range"]
+    interval_spec = serialized["range"]["interval"]
+    assert interval_spec[0] == 0
+    assert interval_spec[1] == 2
+    # Don't pin down the exact representation of the unit; just ensure it's there.
+    assert len(interval_spec) == 3
+
+    v = _mk_var_for_convert(
+        unit={ "tick": "s", "tz": "UTC" },
+        # range={"interval": [0, 2]},  # TODO: test data time ranges
+    )
+
+    values = np.array(
+        [
+            "2023-01-01T00:00:00",
+            "2022-10-05T16:00:00+00:00",
+            #"",  # test missing value handling
+        ])
+
+    converted = v.convert_values(values)
+
+    # We expect a proper numpy array back, not None.
+    assert converted.dtype == np.dtype('datetime64[s]')
+    assert isinstance(converted, np.ndarray)
+    assert converted.shape == (2,)
+
+    # No element should be None (this is the regression we want to guard).
+    assert all(x is not None for x in converted)
+
+    # Sanity: ordering should be preserved – 2022-10-05 < 2023-01-01
+    # regardless of how the underlying DateTimeQuantity is represented.
+    assert converted[1] < converted[0]
+
+CASES = [
+    # integers
+    (np.int64, -9999, 1),
+    (np.int32, -1, 0),
+
+    # floats (numeric sentinel)
+    (np.float64, -9999.0, 0.0),
+    (np.float32, -1.0, 1.5),
+
+    # floats (NaN sentinel)
+    (np.float64, np.nan, 0.0),
+    (np.float32, np.float32("nan"), np.float32(1.0)),
+
+    # complex
+    (np.complex128, complex(0.0, 0.0), complex(1.0, -1.0)),
+    (np.complex64, np.complex64(0 + 0j), np.complex64(2 + 3j)),
+
+    # strings
+    ("U10", "missing", "ok"),
+    ("U5", "", "val"),
+
+    # datetime64 (NaT sentinel)
+    ("datetime64[ns]", np.datetime64("NaT", "ns"), np.datetime64("2020-01-01T00:00:00")),
+    ("datetime64[D]",  np.datetime64("NaT", "D"),  np.datetime64("2020-01-01", "D")),
+]
+
+@pytest.mark.parametrize("dtype, sentinel, valid_value", CASES)
+def test_variable_mask_valid(dtype, sentinel, valid_value):
+    # Build the test array [sentinel, valid_value] with the given dtype
+    arr = np.array([sentinel, valid_value], dtype=dtype)
+
+    var = _mk_var_for_convert(
+        na_value=sentinel,
+        dtype=dtype)
+    mask = var.valid_mask(arr)
+
+    # By definition: sentinel is invalid, valid_value is valid
+    expected = np.array([False, True], dtype=bool)
+
+    assert mask.shape == (2,)
+    assert mask.dtype == bool
+    np.testing.assert_array_equal(mask, expected)
+
+
 
 
 """
@@ -322,11 +503,11 @@ def test_coord_specific_attributes():
     # step_limits default and explicit None (match new semantics)
     # missing -> "any_new" => [-inf, +inf]
     c, _ = _mk_coord({"name": "t", "coords": []})   # default: "any_new"
-    assert c.step_limits == schema.Interval(-np.inf, np.inf, pint.Unit(""))
+    assert c.step_limits == schema.Interval(-np.inf, np.inf, units.Unit(""))
 
     # explicit None -> "no_new" => [NaN, NaN]
     c, _ = _mk_coord({"name": "t", "coords": [], "step_limits": "no_new"})
-    assert c.step_limits == schema.Interval(-np.inf, -np.inf, pint.Unit(""))
+    assert c.step_limits == schema.Interval(-np.inf, -np.inf, units.Unit(""))
 
     # sorted default depends on composition
     c, _ = _mk_coord({"name": "x", "coords": []})

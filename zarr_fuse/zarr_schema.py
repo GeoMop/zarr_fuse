@@ -265,6 +265,8 @@ class Variable(AddressMixin):
             # alternativly use numexpr
             na_array = np.full_like(array, self.na_value, dtype=self.dtype)
             return (array != na_array) & (array == array)
+        else:
+            return array != self.na_value
 
     def _zarr_keys(self):
         return ['unit', 'type', 'range', 'description', 'df_col', 'source_unit']

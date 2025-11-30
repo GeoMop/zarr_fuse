@@ -9,11 +9,13 @@ VARS:
 
   longitude:
     unit: "deg"
+    na_value: 'nan'
     description: "Signed Earth longitude."
     coords: "lat_lon"
 
   latitude:
     unit: "deg"
+    na_value: 'nan'
     description: "Signed Earth longitude."
     coords: "lat_lon"
     # df_col = <var's name is default source data frame column>
