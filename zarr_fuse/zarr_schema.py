@@ -258,6 +258,14 @@ class Variable(AddressMixin):
     def dtype(self):
         return self.type.dtype
 
+    def valid_mask(self, array: np.ndarray) -> np.ndarray:
+        if self.na_value is None:
+            return np.full(array.shape, True, dtype=bool)
+        elif (self.na_value != self.na_value):
+            # alternativly use numexpr
+            na_array = np.full_like(array, self.na_value, dtype=self.dtype)
+            return (array != na_array) & (array == array)
+
     def _zarr_keys(self):
         return ['unit', 'type', 'range', 'description', 'df_col', 'source_unit']
 

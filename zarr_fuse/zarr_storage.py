@@ -1091,6 +1091,7 @@ def eliminate_dims_if_equal(arr: np.ndarray, dims_to_check: List[bool]) -> np.nd
             # Expand dims so that it can broadcast for comparison.
             ref_expanded = np.expand_dims(ref, axis=axis)
             if not np.all(arr == ref_expanded):
+                print(arr)
                 raise ValueError(f"Values along axis {axis} are not all equal")
             # Remove this axis by selecting the 0th element along that axis.
             arr = np.take(arr, 0, axis=axis)
@@ -1110,7 +1111,8 @@ def get_df_col(df, var:zarr_schema.Variable, logger: logging.Logger):
         print(col_series)
         logger.error(f"Failed to parse values of column '{var.df_col}' with\n"
                      f"unit/format specification:{var.source_unit}\n"
-                     f"values:\n{df.head()}")
+                     f"values:\n{df.head()}"
+                     f"\n Original error: {e}")
         return np.full(df.shape[0], var.na_value)
     return q_new
 
@@ -1130,6 +1132,93 @@ def dataset_from_np(schema: zarr_schema.DatasetSchema, vars: Dict[str, np.ndarra
     attrs['__structure__'] = zarr_schema.serialize(schema)
     ds_out = xr.Dataset(data_vars=data_vars, coords=coords_dict, attrs=attrs)
     return ds_out
+
+
+def coerce_df(schema: zarr_schema.DatasetSchema,
+              df: pl.DataFrame,
+              logger):
+    """
+    Front half of pivot_nd:
+
+    1. Coerce all variable columns from df into 1D numpy arrays (no masking yet).
+    2. Coerce all coord columns (including composed coords) into data_vars,
+       then build coordinate arrays per dimension.
+    3. Compute per-row integer indices into each coord axis, and a valid_rows
+       mask (rows with valid coords).
+    4. Build df_multi_idx (tuple of index arrays) for valid rows and apply
+       valid_rows to variable columns.
+    5. Build final coords_dict via Node._create_coords.
+
+    Returns
+    -------
+    df_multi_idx : tuple[np.ndarray, ...]
+        Multi-index: one 1D index array per dim, all length K_valid.
+
+    coords_dict : dict[str, Any]
+        Final coordinate mapping as produced by Node._create_coords.
+
+    var_data : dict[str, np.ndarray]
+        Variable columns from df, coerced and masked by valid_rows.
+    """
+    # --- Step 1: DF -> dict of 1d arrays (variables only), no masking yet ---
+    data_vars = {
+        k: get_df_col(df, var, logger)
+        for k, var in schema.VARS.items()
+    }
+
+    # --- Step 2: apply hash of tuple coords / coerce coord columns ---
+    # (kept very close to your original code)
+    valid_rows = np.ones(len(df), dtype=bool)
+    for k, c in schema.COORDS.items():
+        if (c.composed is not None) and (len(c.composed) > 1):
+            # hash tuple coords
+            tuple_list = zip(*(data_vars[comp] for comp in c.composed))
+            coord_valid_rows = np.all([schema.VARS[comp].valid_mask(data_vars[comp]) for comp in c.composed], axis=0)
+            hash_list = [hash(tuple(t)) for t in tuple_list]
+            data_vars[k] = np.array(hash_list, dtype=np.int64)
+        else:
+            # mix vars and coord to be backward compatible with remaining code
+            col = get_df_col(df, c, logger)
+            coord_valid_rows = c.valid_mask(col)
+            data_vars[k] = col
+            # print("1D coord:", k)
+        valid_rows = valid_rows & coord_valid_rows
+    # filter data_vars
+    data_vars = {k:v[valid_rows] for k,v in data_vars.items()}
+
+    # --- Step 3: extract coords and build indices / valid_rows ---
+    idx_list = []
+    coords_dict_raw = {}
+    dims = list(schema.COORDS.keys())
+
+    #n_rows = len(df)
+    #valid_rows = np.ones(n_rows, dtype=bool)
+
+    for d in dims:
+        df_coord_array = data_vars[d]
+
+        coords = np.unique(df_coord_array)
+        coords = coords[schema.COORDS[d].valid_mask(coords)]
+        coords = np.sort(coords)
+
+        coords_dict_raw[d] = coords
+        final_idx = np.searchsorted(coords, df_coord_array)
+        idx_list.append(final_idx)
+
+    # Multi-index: one index array per dim, but only for valid rows
+    #df_multi_idx = tuple(idx[valid_rows] for idx in idx_list)
+    # multiindex for each df row, but flattend, so it actually index result_nd_array.flat[..]
+    coord_sizes = [len(coords_dict_raw[d]) for d in dims]
+    df_multi_idx = np.ravel_multi_index([idx[valid_rows] for idx in idx_list], dims=coord_sizes)  #
+
+    # Apply valid_rows to the variable columns from Step 1
+    var_data = {k: col[valid_rows] for k, col in data_vars.items() if k not in coords_dict_raw}
+
+    # --- Step 5: let Node build final coords (xarray-ready etc.) ---
+    coords_dict = Node._create_coords(schema.COORDS, coords_dict_raw)
+
+    return df_multi_idx, coords_dict, var_data
+
 
 def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     """
@@ -1151,58 +1240,78 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
 
     TODO: Review and simplify for clearly separated vars and coords.
     """
-    # 1. DF -> dict of 1d arrays,
-    data_vars = {
-        k: get_df_col(df, var, logger)
-        for k, var in schema.VARS.items()
-    }
-    # 2. apply hash of tuple coords, input Dict: ds_name : [df_cols]
-    for k, c in schema.COORDS.items():
+    # # 1. DF -> dict of 1d arrays,
+    # data_vars = {
+    #     k: get_df_col(df, var, logger)
+    #     for k, var in schema.VARS.items()
+    # }
+    # # 2. apply hash of tuple coords, input Dict: ds_name : [df_cols]
+    # for k, c in schema.COORDS.items():
+    #
+    #     if (c.composed is not None) and (len(c.composed) > 1):
+    #         # hash tuple coords
+    #         tuple_list = zip( *(data_vars[c] for c in c.composed) )
+    #         hash_list = [hash(tuple(t)) for t in tuple_list]
+    #         data_vars[k] = np.array(hash_list, dtype=np.int64)
+    #         #print("Composed coord:", k)
+    #         #print(data_vars[k])
+    #
+    #     else:
+    #         # mix vars and coord to be backward compatible with remaining code
+    #         col = get_df_col(df, c, logger)
+    #         data_vars[k] = col
+    #         #print("1D coord:", k)
+    #         #print(data_vars[k])
+    #
+    # # 3. Extract coords
+    # idx_list = []
+    # coords_dict = {}
+    # dims = list(schema.COORDS.keys())
+    # # Loop over each dimension in the original dataset.
+    # valid_rows = np.ones_like(len(df), dtype=bool)
+    # for d in dims:
+    #     # Get the name(s) of the column(s) in df corresponding to this dimension.
+    #     df_coord_array = data_vars[d]
+    #     # Get the coordinate values from the dataset (assumed to be in desired order).
+    #     #print(d)
+    #     #print(df_coord_array)
+    #     coords = np.unique(df_coord_array)
+    #     coords = coords[schema.COORDS[d].valid_mask(coords)]
+    #     coords = np.sort(coords)
+    #     # TODO: filter rows with NA coords first; follow with refactoring pivot_nd into distinguished steps
+    #     # preparation to separation into tasks
+    #     # In order to avoid special hash returning NA for composed coords with on NA value
+    #
+    #     coords_dict[d] = coords  # will be used as the coordinate values for this dim.
+    #     #coord_sizes[d].append(len(coords))
+    #     # Map each row’s coordinate (from df) to its index in the common_coords.
+    #     # (This works as long as common_coords is sorted. In many cases ds coordinates are already sorted.)
+    #     final_idx = np.searchsorted(coords, df_coord_array)
+    #     valid_rows = valid_rows & (coords[final_idx] == df_coord_array)
+    #     idx_list.append(final_idx)
+    # coord_sizes = [len(coords_dict[d]) for d in dims]
+    # # multiindex for each df row, but flattend, so it actually index result_nd_array.flat[..]
+    # df_multi_idx = np.ravel_multi_index([idx[valid_rows] for idx in idx_list], dims=coord_sizes)  #
+    # coords_dict = Node._create_coords(schema.COORDS, coords_dict)
 
-        if (c.composed is not None) and (len(c.composed) > 1):
-            # hash tuple coords
-            tuple_list = zip( *(data_vars[c] for c in c.composed) )
-            hash_list = [hash(tuple(t)) for t in tuple_list]
-            data_vars[k] = np.array(hash_list)
-        else:
-            # mix vars and coord to be backward compatible with remaining code
-            data_vars[k] = get_df_col(df, c, logger)
-
-    # 3. Extract coords
-    idx_list = []
-    coords_dict = {}
-    dims = list(schema.COORDS.keys())
-    # Loop over each dimension in the original dataset.
-    for d in dims:
-        # Get the name(s) of the column(s) in df corresponding to this dimension.
-        df_coord_array = data_vars[d]
-        # Get the coordinate values from the dataset (assumed to be in desired order).
-        coords = np.sort(np.unique(df_coord_array))
-        coords_dict[d] = coords  # will be used as the coordinate values for this dim.
-        #coord_sizes[d].append(len(coords))
-        # Map each row’s coordinate (from df) to its index in the common_coords.
-        # (This works as long as common_coords is sorted. In many cases ds coordinates are already sorted.)
-        final_idx = np.searchsorted(coords, df_coord_array)
-        idx_list.append(final_idx)
-    coord_sizes = [len(coords_dict[d]) for d in dims]
-    # Create an array of indices for all dimensions, one row per dimension.
-    idx_arr = np.vstack(idx_list)
-    # Compute flat indices for the N-dim output array.
-    flat_idx = np.ravel_multi_index(idx_arr, dims=coord_sizes)
-    coords_dict = Node._create_coords(schema.COORDS, coords_dict)
+    df_multi_idx, coords_dict, var_data = coerce_df(schema, df, logger)
+    coord_sizes = [len(coord) for coord in coords_dict.values()]
 
     # 4. form variables
     # Helper: for a given variable, build the pivoted array.
     def form_var_array(var_struc):
-        column_vals = data_vars[var_struc.name]
+        column_vals = var_data[var_struc.name]
         # Choose a dtype based on the column (floating or object)
         #dtype = column_vals.dtype if np.issubdtype(column_vals.dtype, np.floating) else object
         # Create an empty output array with fill_value.
         result = np.full(coord_sizes, var_struc.na_value, dtype=column_vals.dtype)
+
+        mask_valid = var_struc.valid_mask(column_vals)
+
         # Fill in the values; if duplicate keys occur, later values win.
-        result.flat[flat_idx] = column_vals
+        result.flat[df_multi_idx[mask_valid]] = column_vals[mask_valid]
         # eliminate inappropriate coordinates
-        dims_to_eliminate = [d not in var_struc.coords for d in dims]
+        dims_to_eliminate = [d not in var_struc.coords for d in coords_dict.keys()]
         np_var = eliminate_dims_if_equal(result, dims_to_eliminate)
         data_var = Node._variable(var_struc, np_var, coords_dict)
         return data_var

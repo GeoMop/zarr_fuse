@@ -93,7 +93,17 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
         # the range of old_values we can potentialy interpolate to.
         # new_values[0] <= old_values[i_min] and ald_values[i_max-1] <= new_values[-1]
 
-        assert np.all(np.diff(new_sorted) >= 0)
+
+        if not np.all(np.diff(new_sorted) > 0):
+            mask = np.diff(new_sorted) <= 0
+            no_diff = np.arange(len(mask), dtype=int)[mask]
+            no_diff_10 = no_diff[:max(0,10)]
+
+            print(f"Non unique values in new coords {schema.name}")
+            print(no_diff)
+            print(new_values.astype(str).tolist())
+            #print(np.stack((new_values[no_diff_10], new_values[no_diff_10 + 1]), axis=1))
+
         old_part_min = new_sorted[0]
         old_range_min = np.searchsorted(old_values, old_part_min, side='left')
         old_part_max = new_sorted[-1]

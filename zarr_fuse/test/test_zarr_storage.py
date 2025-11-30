@@ -1,3 +1,4 @@
+from typing import *
 import shutil
 import time
 import os
@@ -493,55 +494,150 @@ def sample_df():
     })
     return df
 
+class DummyLogger:
+    def debug(self, *a, **k): pass
+    def info(self, *a, **k): pass
+    def warning(self, *a, **k): pass
+    def error(self, *a, **k): pass
 
-@pytest.mark.skip
-def test_pivot_nd():
-    # Create a sample Polars DataFrame with columns for a 3D multi-index.
-    df = pl.DataFrame({
-        "time": [1, 1, 1, 2, 2],
-        "loc": ["A", "A", "B", "A", "B"],
-        "sensor": ["X", "Y", "X", "X", "Y"],
-        "var": [10.0, 11.0, 12.0, 20.0, 21.0]
-    })
-    dims = ["time", "loc", "sensor"]
+class TestPivotND:
+    t = ['2021-03-01T23:00:00', '2021-03-02T22:00:00']
+    lat_lon = [(50.0, 14.0), (51.0, 15.0)]
 
-    # Call pivot_nd to generate the N-d array and the coordinate mapping.
-    arr, unique_coords = pivot_nd(df, dims, "var", fill_value=np.nan)
+    def composed(self, vars):
+        tuple_list = zip(*vars)
+        hash_list = [hash(tuple(t)) for t in tuple_list]
+        return np.array(hash_list, dtype=np.int64).tolist()
 
-    # Expected unique coordinates:
-    # time: [1, 2]
-    # loc:  ["A", "B"]
-    # sensor: ["X", "Y"]
-    expected_coords = {
-        "time": np.array([1, 2]),
-        "loc": np.array(["A", "B"]),
-        "sensor": np.array(["X", "Y"])
-    }
+    def check_temp(self, ds, ref_mat):
+        da_lat_lon = self.composed((ds['latitude'].values, ds['longitude'].values))
+        np.testing.assert_array_equal( da_lat_lon, ds['lat_lon'].values)
 
-    # Check that unique_coords match.
-    for d in dims:
-        np.testing.assert_array_equal(unique_coords[d], expected_coords[d])
+        basemat = np.full_like(ref_mat, np.nan)
+        ref_t = (np.array(self.t, dtype='datetime64[h]') - np.timedelta64(1, 'h')).tolist()  # CET to UTC
+        ref_lat_lon = self.composed(zip(*self.lat_lon))
+        ds_t_subset = [ref_t.index(v) for v in ds['time of year'].values]
+        print(ref_lat_lon)
+        ds_lat_lon_subset = [ref_lat_lon.index(v) for v in ds['lat_lon'].values]
+        basemat[np.ix_(ds_t_subset, ds_lat_lon_subset)] = ds['temperature'].values
+        np.testing.assert_allclose( basemat, ref_mat, equal_nan=True)
 
-    # The resulting array should have shape (2, 2, 2)
-    assert arr.shape == (2, 2, 2)
+    def _run_case(self, case:Dict[str, np.ndarray], ref_mat ):
+        df_all = pl.DataFrame(case)
+        ds_all = zf.zarr_storage.pivot_nd(self.schema, df_all, self.logger)
+        self.check_temp(ds_all, ref_mat)
 
-    # Expected array construction:
-    # For time=1, loc="A", sensor="X": 10.0
-    # For time=1, loc="A", sensor="Y": 11.0
-    # For time=1, loc="B", sensor="X": 12.0
-    # For time=1, loc="B", sensor="Y": missing -> NaN
-    # For time=2, loc="A", sensor="X": 20.0
-    # For time=2, loc="A", sensor="Y": missing -> NaN
-    # For time=2, loc="B", sensor="X": missing -> NaN
-    # For time=2, loc="B", sensor="Y": 21.0
-    expected_arr = np.array([
-        [[10.0, 11.0],
-         [12.0, np.nan]],
-        [[20.0, np.nan],
-         [np.nan, 21.0]]
-    ])
+    def test_pivot_nd_weather(self):
+        schema = zf.schema.deserialize(Path(inputs_dir/"schema_weather.yaml")).ds
+        self.schema = schema
+        self.logger = DummyLogger()
 
-    np.testing.assert_allclose(arr, expected_arr, equal_nan=True)
+        t0, t1 = self.t
+        (lat0, lon0), (lat1, lon1) = self.lat_lon
+
+
+        # (a) all values valid
+        case_all = {
+            "timestamp": np.array([t0, t0, t1, t1]),
+            "latitude": np.array([lat0, lat1, lat0, lat1]),
+            "longitude": np.array([lon0, lon1, lon0, lon1]),
+            "temp": np.array([0, 10, 50.0, 500]),
+        }
+        ref_all = np.array(
+            [
+                [0, 10],
+                [50, 500],
+            ],
+            dtype=float,
+        )
+        self._run_case(case_all, ref_all + 273.15)
+
+        temp_var = schema.VARS["temperature"]
+        fill = temp_var.na_value
+
+        # (b) NaN in variable (temperature) – that cell should stay at fill_value
+        case_nan_var = {
+            "timestamp": np.array([t0, t0, t1, t1]),
+            "latitude": np.array([lat0, lat1, lat0, lat1]),
+            "longitude": np.array([lon0, lon1, lon0, lon1]),
+            "temp": np.array([273.0, np.nan, 275.0, 276.0]),
+        }
+        ref_nan_var = np.array(
+            [
+                [273.0, fill],
+                [275.0, 276.0],
+            ],
+            dtype=float,
+        )
+        self._run_case(case_nan_var, ref_nan_var+ 273.15)
+
+        # (c) NaN in coords – row with NaN coord is dropped; 999.0 must never appear
+        case_nan_coord = {
+            "timestamp": np.array([t0, t0, t1, t1]),
+            "latitude": np.array([lat0, np.nan, lat0, lat1]),
+            "longitude": np.array([lon0, lon1, lon0, lon1]),
+            "temp": np.array([273.0, 999.0, 275.0, 276.0]),
+        }
+        ref_nan_coord = np.array(
+            [
+                [273.0, fill],  # row with NaN coord → no update, stays fill
+                [275.0, 276.0],
+            ],
+            dtype=float,
+        )
+        ds_nan_coord = self._run_case(case_nan_coord, ref_nan_coord+ 273.15)
+
+        # explicit extra check for case (c): 999.0 must not be present
+        assert 999.0 not in ds_nan_coord["temperature"].values
+
+
+# def test_pivot_nd():
+#     # Create a sample Polars DataFrame with columns for a 3D multi-index.
+#     df = pl.DataFrame({
+#         "time": [1, 1, 1, 2, 2],
+#         "loc": ["A", "A", "B", "A", "B"],
+#         "sensor": ["X", "Y", "X", "X", "Y"],
+#         "var": [10.0, 11.0, 12.0, 20.0, 21.0]
+#     })
+#     dims = ["time", "loc", "sensor"]
+#
+#     # Call pivot_nd to generate the N-d array and the coordinate mapping.
+#     arr, unique_coords = pivot_nd(df, dims, "var", fill_value=np.nan)
+#
+#     # Expected unique coordinates:
+#     # time: [1, 2]
+#     # loc:  ["A", "B"]
+#     # sensor: ["X", "Y"]
+#     expected_coords = {
+#         "time": np.array([1, 2]),
+#         "loc": np.array(["A", "B"]),
+#         "sensor": np.array(["X", "Y"])
+#     }
+#
+#     # Check that unique_coords match.
+#     for d in dims:
+#         np.testing.assert_array_equal(unique_coords[d], expected_coords[d])
+#
+#     # The resulting array should have shape (2, 2, 2)
+#     assert arr.shape == (2, 2, 2)
+#
+#     # Expected array construction:
+#     # For time=1, loc="A", sensor="X": 10.0
+#     # For time=1, loc="A", sensor="Y": 11.0
+#     # For time=1, loc="B", sensor="X": 12.0
+#     # For time=1, loc="B", sensor="Y": missing -> NaN
+#     # For time=2, loc="A", sensor="X": 20.0
+#     # For time=2, loc="A", sensor="Y": missing -> NaN
+#     # For time=2, loc="B", sensor="X": missing -> NaN
+#     # For time=2, loc="B", sensor="Y": 21.0
+#     expected_arr = np.array([
+#         [[10.0, 11.0],
+#          [12.0, np.nan]],
+#         [[20.0, np.nan],
+#          [np.nan, 21.0]]
+#     ])
+#
+#     np.testing.assert_allclose(arr, expected_arr, equal_nan=True)
 
 @pytest.mark.skip
 def test_update_dense():
