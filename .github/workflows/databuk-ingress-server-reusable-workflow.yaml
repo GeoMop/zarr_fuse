@@ -225,10 +225,12 @@ jobs:
       - containerize-extractor-service
     env:
       KUBECONFIG: ./kubeconfig.yaml
-    defaults:
-      run:
-        working-directory: ingress_server/charts
     steps:
+      # Caller's repo is checked out to be able to access any configuration files if needed
+      - name: Checkout caller repo
+        uses: actions/checkout@v6
+        with:
+          path: caller
       - name: Checkout zarr_fuse
         uses: actions/checkout@v6
         with:
@@ -239,12 +241,12 @@ jobs:
       - name: Set context
         run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
       - name: Build Helm dependencies
-        run: helm dependency build zarr-fuse-ingress
+        run: helm dependency build ingress_server/charts/zarr-fuse-ingress
       - name: Deploy app
         run: |
-          helm upgrade zarr-fuse-ingress zarr-fuse-ingress \
+          helm upgrade zarr-fuse-ingress ingress_server/charts/zarr-fuse-ingress \
           --install --atomic --timeout 10m --namespace "${{ inputs.namespace }}" \
-          --values .github/values/ingress-server/defaults.yaml \
+          --values ingress_server/charts/zarr-fuse-ingress/values/defaults.yaml \
           --set runId="${{ github.run_id }}" \
           --set ingressService.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
           --set airflow.defaultAirflowTag="${{ needs.get-version-tag.outputs.version-tag }}" \

@@ -94,7 +94,7 @@ airflow:
         number: 8080
         name: ""
       internalPort:
-        number: 80
+        number: 8080
         name: ""
     resources:
       requests: {}

@@ -19,5 +19,5 @@ jobs:
       namespace: ingress-server-latest
       zarr-fuse-ref: main
       extra-helm-values: >-
-        --values .github/values/ingress-server/main.yaml
+        --values ingress_server/charts/zarr-fuse-ingress/values/main.yaml
     secrets: inherit

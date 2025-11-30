@@ -366,7 +366,7 @@ extractorService:
         # @default -- ~
         internalPort:
           # -- (int) Port number
-          number: 80
+          number: 8080
           # -- (string) Port name
           name: http
 

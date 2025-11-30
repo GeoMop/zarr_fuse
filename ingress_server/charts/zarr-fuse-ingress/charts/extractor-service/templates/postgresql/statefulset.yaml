@@ -9,6 +9,8 @@ metadata:
     helm.sh/hook-weight: "0"
 spec:
   serviceName: {{ .service.name | quote }}
+  strategy:
+    type: RollingUpdate
   replicas: {{ .replicaCount | int }}
   selector:
     matchLabels:

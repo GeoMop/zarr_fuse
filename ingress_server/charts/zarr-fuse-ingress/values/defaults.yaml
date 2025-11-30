@@ -106,7 +106,7 @@ extractorService:
           number: 8080
           name: http
         internalPort:
-          number: 80
+          number: 8080
           name: http
       resources:
         requests:
