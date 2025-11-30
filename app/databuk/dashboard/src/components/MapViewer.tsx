@@ -80,7 +80,7 @@ export const MapViewer: React.FC<MapViewerProps> = ({
         }
 
         // 3️⃣ Add PNG overlay as raster image layer if overlay info exists
-        if (data.overlay && Array.isArray(data.overlay.corners) && data.overlay.image_url) {
+        if (data.overlay && Array.isArray(data.overlay.corners)) {
           const corners: [number, number][] = data.overlay.corners;
           const lons = corners.map(c => c[0]);
           const lats = corners.map(c => c[1]);
@@ -99,10 +99,10 @@ export const MapViewer: React.FC<MapViewerProps> = ({
           };
           validFigure.data = [...validFigure.data, markerTrace];
 
-          // PNG overlay as mapbox image layer (public örnek PNG)
+          // PNG overlay as mapbox image layer (yeni API endpoint)
           const imageLayer = {
             sourcetype: 'image',
-            source: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/640px-PNG_transparency_demonstration_1.png',
+            source: 'http://localhost:8000/api/image/mapa_uhelna_vyrez.png',
             coordinates: [
               [corners[0][0], corners[0][1]], // top-left
               [corners[1][0], corners[1][1]], // top-right

@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from routers.image import router as image_router
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -41,12 +42,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Serve static files for overlay PNG
-app.mount(
-    "/static",
-    StaticFiles(directory="config/surface_data_endpoint"),
-    name="static"
-)
+
+# Yeni image router'ı ekle
+app.include_router(image_router)
 
 # Add CORS middleware
 app.add_middleware(
