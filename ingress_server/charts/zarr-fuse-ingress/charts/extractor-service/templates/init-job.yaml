@@ -78,7 +78,7 @@ spec:
             {{- toYaml .resources.initContainer | nindent 12 }}
           env:
             - name: PGHOST
-              value: "{{ $.Values.postgres.service.name }}.testing-moc-airflow.svc.cluster.local"
+              value: "{{ $.Values.postgres.service.name }}.{{ $.Release.Namespace }}.svc.cluster.local"
             - name: PGPORT
               value: {{ $.Values.postgres.service.externalPort.number | quote }}
             - name: PGDATABASE
