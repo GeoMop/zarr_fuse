@@ -3,9 +3,6 @@ import createPlotlyComponent from 'react-plotly.js/factory';
 import Plotly from 'plotly.js-dist-min';
 import { API_BASE_URL } from '../api';
 
-Plotly.setPlotConfig({
-  mapboxAccessToken: ''
-});
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -102,10 +99,10 @@ export const MapViewer: React.FC<MapViewerProps> = ({
           };
           validFigure.data = [...validFigure.data, markerTrace];
 
-          // PNG overlay as mapbox image layer
+          // PNG overlay as mapbox image layer (public örnek PNG)
           const imageLayer = {
             sourcetype: 'image',
-            source: data.overlay.image_url,
+            source: 'https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/640px-PNG_transparency_demonstration_1.png',
             coordinates: [
               [corners[0][0], corners[0][1]], // top-left
               [corners[1][0], corners[1][1]], // top-right
@@ -236,6 +233,25 @@ export const MapViewer: React.FC<MapViewerProps> = ({
                 }
             }
         }}
+          onError={(err: any) => {
+            // Plotly render hatası veya Mapbox hatası
+            console.error('Plotly/Mapbox render error:', err);
+            if (err && err.message) {
+              console.error('Error message:', err.message);
+            }
+            if (err && err.stack) {
+              console.error('Error stack:', err.stack);
+            }
+          }}
+          onAfterPlot={() => {
+            // Plotly plot oluştuktan sonra Mapbox layer'larını ve resim durumunu logla
+            if (figure?.layout?.mapbox?.layers) {
+              console.log('Mapbox layers after plot:', figure.layout.mapbox.layers);
+            }
+            if (figure?.layout?.mapbox?.center) {
+              console.log('Mapbox center after plot:', figure.layout.mapbox.center);
+            }
+          }}
       />
     </div>
   );
