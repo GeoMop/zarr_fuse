@@ -13,7 +13,7 @@ jobs:
       group: "${{ github.workflow }}-${{ github.event.number }}-build-and-deploy"
       cancel-in-progress: true
     with:
-      namespace: ingress-server-development
+      namespace: testing-airflow # TODO: Change namespace before merging airflow-main to main (ingress-server-development)
       deploy: true
       tag: generate
       zarr-fuse-ref: ${{ github.head_ref }}
