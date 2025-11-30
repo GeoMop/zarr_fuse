@@ -1,0 +1,23 @@
+---
+{{- with .Values.postgres.service  }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name | quote }}
+  labels:
+    {{- toYaml .labels | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    {{- if .annotations }}
+    {{- toYaml .annotations | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ .type }}
+  selector:
+    app.kubernetes.io/name: {{ $.Values.postgres.name | quote }}
+  ports:
+    - name: {{ .externalPort.name | quote }}
+      port: {{ .externalPort.number | int }}
+      targetPort: {{ .internalPort.name | quote }}
+{{- end -}}

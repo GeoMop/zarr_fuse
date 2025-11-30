@@ -8,15 +8,16 @@ on:
 jobs:
   build:
     name: Build and deploy ingress server
-    uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    uses: ./.github/workflows/databuk-ingress-server-reusable-workflow.yaml
     concurrency:
       group: "${{ github.workflow }}-${{ github.event.number }}-build-and-deploy"
       cancel-in-progress: true
     with:
+      namespace: testing-airflow # TODO: Change namespace to ingress-server-development before merging airflow-main to main
       deploy: true
       tag: generate
-      namespace: testing-moc-airflow # TODO: change back ingress-server-development
       zarr-fuse-ref: ${{ github.head_ref }}
-      extra-helm-values: |
-        --values .github/values/ingress-server/pull-request.yaml
+      # TODO: Change testing.yaml to pull-request.yaml before merging airflow-main to main
+      extra-helm-args: |
+        --values ingress_server/charts/zarr-fuse-ingress/values/testing.yaml
     secrets: inherit

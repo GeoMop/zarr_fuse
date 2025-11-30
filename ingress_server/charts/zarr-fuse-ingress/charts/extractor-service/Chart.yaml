@@ -1,0 +1,4 @@
+apiVersion: v2
+name: extractorService
+description: Extractor Service component of the Zarr Fuse Ingress Server
+version: 2.0.0
