@@ -249,6 +249,7 @@ jobs:
           --values ingress_server/charts/zarr-fuse-ingress/values/defaults.yaml \
           --set runId="${{ github.run_id }}" \
           --set ingressService.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
+          --set extractorService.airflow.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
           --set airflow.defaultAirflowTag="${{ needs.get-version-tag.outputs.version-tag }}" \
           --set ingressService.configuration.s3.endpointUrl="${{ vars.S3_ENDPOINT_URL }}" \
           --set ingressService.configuration.s3.secrets.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
