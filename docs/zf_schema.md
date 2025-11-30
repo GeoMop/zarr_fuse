@@ -33,27 +33,16 @@ Each variable is defined by its own dictionary of properties.
 String or list of strings, name(s) of the coordinate(s) indexing the variable. 
 The variable is N dimensional tensor, where each of N axes corresponds to one named coordinate defined in COORDS.
 
-### `type:` (optional)
-Explicit data type of the variable in terms of Numpy dtype. 
-Default is 'None', meaning the dtype is determined by the first write. 
-We accept also following types for non-physical quantities:
-  [`bool`, `int`, `int8`, `int32`, `int64`, `float`, `float64`, `complex`, `str[n]` ]. 
-  Here `str[n]` defines fixed length UTF8 string of length n, 
-  longer strings are truncated on write to the store. The variable length strings have support in the ZARR and
-  might be supported in future versions.
-If  `unit` is provided, the `bool` and `str[n]` are not allowed.
-Explicit type specification is recommended.
-
-### `na_value:` (optional)
-Value used to represent missing or invalid data in the variable. Native NaN is used by default for float quantities.
-'max_int' and 'min_int' keywords are supported for integer types, representing the maximum and minimum 
-signed integer values of the variable type. Otherwise you have to provide the actual value compatible with the variable type.
-
 ### `unit:` 
 Could be string or dictionary. The second case is used to define more complex variable values. 
 
+
+- **None** (default) 
+  Means a non-physical values without unit, exmples: index variables, discrete variables.
+  If unit is not provided then type key is obligatory. 
+
 - **string** physical unit of the variable, [pint package](https://pint.readthedocs.io/en/stable/) 
-  syntax is applied.
+  syntax is applied. In particular dimensionless units could be specified as ''.
 
 - **Date Time Unit** 
   Defines a variable with time stamp values, internally using [Numpy datetime64](https://numpy.org/doc/stable/reference/arrays.datetime.html) type. 
@@ -67,6 +56,25 @@ Could be string or dictionary. The second case is used to define more complex va
     timezons converted to the consistent dataset.   
   - `dayfirst` : bool, default = False; Interpret the first value as day (set to True), or as the month (set to False).
   - `yearfirst` : bool, default = True; If true YY is at the frist place, else it is at the last place. 
+
+  
+### `type:` (optional)
+Explicit data type of the variable in terms of Numpy dtype. 
+Default is 'datetime64[*]' in case of DateTime unit and 'float' otherwise.
+We accept also following types for non-physical quantities:
+  [`bool`, `int`, `int8`, `int32`, `int64`, `float`, `float32`, `float64`, `complex`, `str[n]` ]. 
+  Here `str[n]` defines fixed length UTF8 string of length n, 
+  longer strings are truncated on write to the store. The variable length strings have support in the ZARR and
+  might be supported in future versions.
+The `datatime64[*]` is automaticaly used for DateTime unit variables. The explicit use of `timedelta64[*]` is not supported (yet).
+If  `unit` is provided, the `bool` and `str[n]` are not allowed.
+Explicit type specification is recommended.
+
+### `na_value:` (optional)
+Value used to represent missing or invalid data in the variable. Native NaN is used by default for float quantities.
+'max_int' and 'min_int' keywords are supported for integer types, representing the maximum and minimum 
+signed integer values of the variable type. Otherwise you have to provide the actual value compatible with the variable type.
+
 
 ### `range:` (optional)
   - `discrete`: If set, the variable could only take values from provided set. 
@@ -132,82 +140,3 @@ The mechanism also involve interpolation which leads to loss of original values.
      E.g. one can write step_limits: [72, 126, 'minutes'] , regardless of the coordinate unit precision. 
    
  
-
-
-
-## Example
-```
-# Configuration of the ZARR-FUSE storage
-ATTRS:
-    # storage URL, not processed automaticaly by the library to connect to storage
-    store_url: "surface.zarr"
-    store_type: 'local'                 # 'guess' type is default
-    
-yr.no:
-    VARS:
-        # We put forward varaible keys as valid keywords, but quoted names are valid in YAML
-        precipitation_amount:
-            unit: "mm"
-            description: "parcipitation in [mm] per hour (!VERIFY!)"
-            coords: ["date_time", "lat_lon"]
-            
-        longitude:
-            unit: "deg"
-            description: "Signed Earth longitude."
-            coords: "lat_lon"
-            
-        latitude:
-            unit: "deg"
-            description: "Signed Earth longitude."
-            coords: "lat_lon"
-            # df_col = <var's name is default source data frame column>
-            # coords = <var's name is self coordinated variable> 
-        
-        date_time:
-            unit: "TimeStamp"
-            description: "Time coordinate"
-        
-    
-    COORDS:
-        date_time: # Defines coord from the variable of the same name. 
-            chunk_size: 1024
-            # Single components are sorted by default
-            sort: True
-            # Replace values in overalp interval between current and new values.
-            # Assumes sorted coordinate.  
-            merge: "replace_interval"
-            # Union of current and new values.
-            # merge: "union" 
-            # merge: "interpolate_to_current"
-            # merge: "interpolate_to_new"
-            
-        lat_lon:
-            # Secondary description valid for composed coordinates. 
-            description: "Example of coordinate indexed uniquely by a tuple of values. The source columns are converted to the 1D list of tuples."
-            # Composed coordinates allows to form "sparse" coordinates points with coordinates 
-            # given by the variables in the 'composed' list. 
-            composed: ["latitude", "longitude"]
-            # Sparse coordinate should be unsorted. 
-            # However we sort hash coordinates anyway to detect overlap.
-            #sort: False 
-            # Disable introducing new values.
-            merge: False
-            chunk_size: 512
-        
-    ATTRS:
-        description:
-            "Most recent 6h forcast data from yr.no collected into continuou historical data series."
-        update:
-            FN: yr_no_update
-            module: weather_scrapper
-            url: https://api.met.no/weatherapi/locationforecast/2.0/complete
-            html_cache: False    
-            locations:
-              FN: location_df
-              #module: "."   # default relative to calling function module
-              attrs_dict: *loc_file     #!Ref .ATTRS    # Helm style variable interpolation. 
-#meteosat:
-
-
-
-```

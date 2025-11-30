@@ -52,7 +52,8 @@ def unit_instance(cfg: ContextCfg, default_unit=None) -> Unit:
         return default_unit
     elif isinstance(unit, str):
         try:
-            return units.Unit(unit)
+            u = units.Unit(unit)
+            return u
         except Exception as e:
             cfg.schema_ctx.error(f"Invalid unit string: {unit}. Pint error: {e}")
     elif isinstance(unit, dict):
@@ -195,6 +196,9 @@ class Interval(AddressMixin):
 
 @attrs.define
 class IntervalRange(Interval):
+    """
+    TODO: support and test DateTime ranges.
+    """
     def asdict(self, value_serializer, filter):
         return {'interval': Interval.asdict(self, value_serializer, filter)}
 
@@ -212,7 +216,7 @@ class IntervalRange(Interval):
         return codes
 
 
-Quantity = units.pint.Quantity | units.DateTimeQuantity
+Quantity = units.Quantity | units.DateTimeQuantity
 
 
 @attrs.define
@@ -311,21 +315,21 @@ class Variable(AddressMixin):
 
         if isinstance(from_unit, units.DateTimeUnit):
             # DateTime specialization
-            quantity = units._create_dt_quantity(values, from_unit)
+            quantity = units._create_dt_quantity(values, from_unit, log=self._address)
         else:
             if dtype is not None:
                 values = to_typed_array(values, dtype, self._address)
 
             # Pint specialization when a unit string is provided
-            assert isinstance(from_unit, units.pint.Unit)
-            quantity = units.ureg.Quantity(values, from_unit)
+            assert isinstance(from_unit, units.Unit)
+            quantity = units.Quantity(values, from_unit)
         return quantity
 
     def magnitude(self, q: np.ndarray | Quantity) -> np.ndarray:
         """
         Return the magnitude of the provided quantity, converting to the variable's unit if needed.
         """
-        if isinstance(q, (units.pint.Quantity, units.DateTimeQuantity)):
+        if isinstance(q, (units.Quantity, units.DateTimeQuantity)):
             return q.magnitude
         else:
             return q
@@ -335,7 +339,7 @@ class Variable(AddressMixin):
         """
         Return the provided quantity, converting to the variable's unit if needed.
         """
-        if isinstance(q, (units.pint.Quantity, units.DateTimeQuantity)):
+        if isinstance(q, (units.Quantity, units.DateTimeQuantity)):
             return q.to(self.unit)
         else:
             return self._make_quantity(q, from_unit=self.unit)

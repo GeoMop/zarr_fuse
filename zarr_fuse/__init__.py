@@ -4,11 +4,6 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0"  # or whatever makes sense when not installed (e.g. in source tree)
 
-
-from pint import UnitRegistry, set_application_registry
-ureg = UnitRegistry()
-set_application_registry(ureg)
-
 # Use of relative imports is recomenden  in __init__.py
 from . import zarr_schema as schema
 from . import units
