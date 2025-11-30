@@ -60,21 +60,21 @@ spec:
             {{- toYaml .extraEnv | nindent 12 }}
           startupProbe:
             httpGet:
-              path: /api/v2/monitor/health
+              path: /health
               port: {{ .service.internalPort.name | quote }}
             periodSeconds: 5
             successThreshold: 1
             failureThreshold: 72
           livenessProbe:
             httpGet:
-              path: /api/v2/monitor/health
+              path: /health
               port: {{ .service.internalPort.name | quote }}
             periodSeconds: 30
             successThreshold: 1
             failureThreshold: 10
           readinessProbe:
             httpGet:
-              path: /api/v2/monitor/health
+              path: /health
               port: {{ .service.internalPort.name | quote }}
             periodSeconds: 30
             successThreshold: 1

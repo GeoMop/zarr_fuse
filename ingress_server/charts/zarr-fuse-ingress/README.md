@@ -37,12 +37,33 @@ A Helm chart for ingress service and Apache Airflow extractor service
 | extractorService.airflow.image.tag | string | `""` | Image tag |
 | extractorService.airflow.imagePullPolicy | string | `"IfNotPresent"` | Image pull policy |
 | extractorService.airflow.initJob | object | ~ | Init Job configuration |
+| extractorService.airflow.initJob.component | string | `"init-job"` | Component name for label 'app.kubernetes.io/component' |
+| extractorService.airflow.initJob.extraAnnotations | dict | `{}` | Extra annotations to add to all resources |
+| extractorService.airflow.initJob.extraEnv | array | `[]` | Extra environment variables injected into the application container. |
+| extractorService.airflow.initJob.extraLabels | array | `{}` | Extra environment variables injected into the application container. |
 | extractorService.airflow.initJob.imagePullPolicy | string | `"IfNotPresent"` | Image pull policy |
 | extractorService.airflow.initJob.name | string | `"airflow-init-job"` | Name of the init job |
+| extractorService.airflow.initJob.partOf | string | `"extractor-service"` | Part of label 'app.kubernetes.io/part-of' |
+| extractorService.airflow.initJob.resources | object | ~ | Resource requests and limits |
+| extractorService.airflow.initJob.resources.container | object | ~ | Container requests and limits |
+| extractorService.airflow.initJob.resources.container.limits | object | {} | Resource limits for the container |
+| extractorService.airflow.initJob.resources.container.requests | object | {} | Resource requests for the container |
+| extractorService.airflow.initJob.resources.initContainer | object | ~ | Init Container requests and limits |
+| extractorService.airflow.initJob.resources.initContainer.limits | object | {} | Resource limits for the container |
+| extractorService.airflow.initJob.resources.initContainer.requests | object | {} | Resource requests for the container |
 | extractorService.airflow.initJob.restartPolicy | string | `"OnFailure"` | Restart policy for the pod |
+| extractorService.airflow.initJob.secrets | object | ~ | Init Job secrets |
+| extractorService.airflow.initJob.secrets.adminUser | object | ~ | Admin user credentials |
+| extractorService.airflow.initJob.secrets.adminUser.email | string | `"admin@gmail.com"` | Admin email |
+| extractorService.airflow.initJob.secrets.adminUser.firstname | string | `"admin"` | Admin first name |
+| extractorService.airflow.initJob.secrets.adminUser.lastname | string | `"admin"` | Admin last name |
+| extractorService.airflow.initJob.secrets.adminUser.password | string | `"admin"` | Admin password |
+| extractorService.airflow.initJob.secrets.adminUser.username | string | `"admin"` | Admin username |
 | extractorService.airflow.initJob.securityContext | object | ~ | Security context settings |
 | extractorService.airflow.initJob.securityContext.container | object | ~ | Container-level security context |
+| extractorService.airflow.initJob.securityContext.initContainer | object | ~ | Init Container-level security context |
 | extractorService.airflow.initJob.securityContext.pod | object | ~ | Pod-level security context |
+| extractorService.airflow.initJob.ttlSecondsAfterFinished | int | `3600` | TTL seconds after finished |
 | extractorService.airflow.scheduler | object | ~ | Scheduler configuration |
 | extractorService.airflow.scheduler.component | string | `"scheduler"` | Component name for label 'app.kubernetes.io/component' |
 | extractorService.airflow.scheduler.extraAnnotations | dict | `{}` | Extra annotations to add to all resources |
@@ -86,7 +107,7 @@ A Helm chart for ingress service and Apache Airflow extractor service
 | extractorService.airflow.webServer.service.externalPort.number | int | `8080` | Port number |
 | extractorService.airflow.webServer.service.internalPort | object | ~ | Internal port configuration |
 | extractorService.airflow.webServer.service.internalPort.name | string | `"http"` | Port name |
-| extractorService.airflow.webServer.service.internalPort.number | int | `80` | Port number |
+| extractorService.airflow.webServer.service.internalPort.number | int | `8080` | Port number |
 | extractorService.airflow.webServer.service.labels | dict | `{}` | Service labels |
 | extractorService.airflow.webServer.service.name | string | `"airflow-webserver-service"` | Service name |
 | extractorService.airflow.webServer.service.type | string | `"ClusterIP"` | Service type |
@@ -123,10 +144,10 @@ A Helm chart for ingress service and Apache Airflow extractor service
 | extractorService.postgres.service | object | ~ | Service configuration |
 | extractorService.postgres.service.annotations | dict | `{}` | Service annotations |
 | extractorService.postgres.service.externalPort | object | ~ | External port configuration |
-| extractorService.postgres.service.externalPort.name | string | `"http"` | Port name |
+| extractorService.postgres.service.externalPort.name | string | `"postgres"` | Port name |
 | extractorService.postgres.service.externalPort.number | int | `5432` | Port number |
 | extractorService.postgres.service.internalPort | object | ~ | Internal port configuration |
-| extractorService.postgres.service.internalPort.name | string | `"http"` | Port name |
+| extractorService.postgres.service.internalPort.name | string | `"postgres"` | Port name |
 | extractorService.postgres.service.internalPort.number | int | `5432` | Port number |
 | extractorService.postgres.service.labels | dict | `{}` | Service labels |
 | extractorService.postgres.service.name | string | `"postgres-service"` | Service name |

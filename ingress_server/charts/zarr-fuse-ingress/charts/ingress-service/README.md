@@ -22,10 +22,6 @@ Ingress Service component of the Zarr Fuse Ingress Server
 | image.name | string | `""` |  |
 | image.tag | string | `""` |  |
 | imagePullPolicy | string | `"Always"` |  |
-| ingress.annotations | object | `{}` |  |
-| ingress.className | string | `""` |  |
-| ingress.hosts | string | `nil` |  |
-| ingress.labels | object | `{}` |  |
 | name | string | `""` |  |
 | partOf | string | `""` |  |
 | replicaCount | int | `1` |  |

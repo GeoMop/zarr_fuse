@@ -56,6 +56,10 @@ spec:
               {{- if $.Release.IsInstall }}
               echo "First install - running 'airflow db init'"
               airflow db init
+              {{- else }}
+              echo "Upgrade - running 'airflow db upgrade'"
+              airflow db upgrade
+              {{- end }}
 
               echo "Creating admin user..."
               airflow users create \
@@ -64,8 +68,7 @@ spec:
                 --firstname {{ .secrets.adminUser.firstname | quote }} \
                 --lastname {{ .secrets.adminUser.lastname | quote }} \
                 --email {{ .secrets.adminUser.email | quote }} \
-                --role Admin
-              {{- end }}
+                --role Admin || echo "Admin user already exists"
       initContainers:
         - name: wait-for-postgres
           image: postgres:16
