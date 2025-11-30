@@ -12,7 +12,7 @@ from . import __version__
 from . import units
 from . import logger as zf_logger
 from . dtype_converter import to_typed_array, DType, make_na
-from .schema_ctx import SchemaCtx, ContextCfg, default_logger, AddressMixin, SchemaError, SchemaWarning
+from .schema_ctx import SchemaCtx, ContextCfg, default_logger, AddressMixin, NoDefault
 
 """
 Classes to represent the store schema. It enables:
@@ -41,15 +41,16 @@ Scalar = bool | int | float | str
 Unit = str | units.DateTimeUnit
 RangeTuple = None | List[None] | Tuple[Scalar, Scalar] | Tuple[Scalar,Scalar, Unit]
 
-def unit_instance(cfg: ContextCfg, default_unit=None) -> Unit:
+def unit_instance(cfg: ContextCfg, default_unit: units.UnitType=NoDefault) -> Unit:
     """
     Create instance of pint.Unit for a string intput or
     instance of DateTimeUnit for the dict input.."""
     unit, schema_ctx = cfg.value(), cfg.schema_ctx
     if unit is None:
-        if default_unit is None:
+        if default_unit is NoDefault:
             schema_ctx.error(f"Obligatory unit was not specified.")
-        return default_unit
+        else:
+            return default_unit
     elif isinstance(unit, str):
         try:
             u = units.Unit(unit)
@@ -145,7 +146,7 @@ class Interval(AddressMixin):
         if len(lst) == 2:   # start, end
             unit = default_unit
         else: # len(lst) == 3: # start, end, unit
-            unit = unit_instance(cfg[2], default_unit)
+            unit = unit_instance(cfg.get(2, None), default_unit)
         return cls(lst[0], lst[1], unit)
 
 
@@ -167,12 +168,12 @@ class Interval(AddressMixin):
         if isinstance(cfg.cfg, list):
             start = cfg.cfg[0]
             end = cfg.cfg[1]
-            unit = unit_instance(cfg.get(2), default_unit)
+            unit = unit_instance(cfg.get(2, None), default_unit)
         else:
             assert isinstance(cfg.cfg, dict)
             start = cfg.cfg['start']
             end = cfg.cfg['end']
-            unit = unit_instance(cfg.get("unit"), default_unit)
+            unit = unit_instance(cfg.get("unit", None), default_unit)
         if start > end:
             cfg.schema_ctx.error(f"Invalid step_limits specification: start {start} > end {end}")
         return cls(start, end, unit)
@@ -237,18 +238,18 @@ class Variable(AddressMixin):
         self.coords: Union[str, List[str]] = dict.get("coords").value()
         if isinstance(self.coords, str):
             self.coords = [self.coords]
+        unit_item = dict.get("unit", None)
+        self.unit: Optional[Unit] = unit_instance(unit_item, units.NoneUnit())
 
         # Optional attributes
         self.type: DType = DType.from_cfg(dict.get("type", None))
         na_cfg = dict.get("na_value", self.type.default_na).cfg
         self.na_value : Optional[Any] = make_na(na_cfg, self.type.dtype)
-        unit_item = dict.get("unit", "")
-        self.unit: Optional[Unit] = unit_instance(unit_item)
         self.description: Optional[str] = dict.get("description", None).value()
         self.df_col: Optional[str] = dict.get("df_col", self.name).value()
 
-        source_unit_item = dict.get("source_unit", unit_item.value())
-        self.source_unit: Optional[Unit] = unit_instance(source_unit_item)
+        source_unit_item = dict.get("source_unit", None)
+        self.source_unit: Optional[Unit] = unit_instance(source_unit_item, self.unit)
 
         # Depends on unit, df_col, source_unit
         self.range: DiscreteRange | IntervalRange \
@@ -331,7 +332,7 @@ class Variable(AddressMixin):
                 values = to_typed_array(values, dtype, self._address)
 
             # Pint specialization when a unit string is provided
-            assert isinstance(from_unit, units.Unit)
+            assert isinstance(from_unit, (units.Unit, units.NoneUnit))
             quantity = units.Quantity(values, from_unit)
         return quantity
 

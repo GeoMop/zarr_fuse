@@ -72,21 +72,23 @@ class Unit(ureg.Unit):
     def delta_dtype(self, dtype):
         return dtype
 
-class NoneUnit:
+
+class NoneUnit(ureg.Unit):
     def __init__(self):
-        pass
+        super().__init__('')  # dimensionless
+
 
     def asdict(self, value_serializer, filter):
-        return 'None'
+        return None
 
     def default_dtype(self):
         return None
 
     def delta_unit(self):
-        return None
+        return self
 
     def delta_dtype(self, dtype):
-        return None
+        return dtype
 
 
 class Quantity(ureg.Quantity):
@@ -260,6 +262,6 @@ def _create_dt_quantity(values, dt_unit: DateTimeUnit, log:'SchemaCtx') -> DateT
     return DateTimeQuantity(np_dates, dt_unit)
 
 
-
+UnitType = Unit | NoneUnit | DateTimeUnit
 
 

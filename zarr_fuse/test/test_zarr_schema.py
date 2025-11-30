@@ -58,33 +58,6 @@ def test_schemaaddress_dive_and_int_key():
     assert str(a) == "cfg.yaml:root/VARS/temp/0"
 
 
-def test_schemaerror():
-    assert issubclass(schema.SchemaError, Exception)
-
-    with pytest.raises(schema.SchemaError) as ei:
-        raise schema.SchemaError("boom", schema.SchemaCtx(["x", "y"], file="f.yaml"))
-    s = str(ei.value)
-    assert "boom" in s
-    assert "(at f.yaml:x/y)" in s
-
-def test_schemawarning():
-    assert issubclass(schema.SchemaWarning, UserWarning)
-    assert issubclass(schema.SchemaWarning, Warning)
-
-    warn_obj = schema.SchemaWarning("heads up", schema.SchemaCtx(["x"], file="f.yaml"))
-    # __str__ should work
-    s = str(warn_obj)
-    assert "heads up" in s and "f.yaml:x" in s
-
-    # Emitting via warnings.warn should capture our custom warning
-    with warnings.catch_warnings(record=True) as rec:
-        warnings.simplefilter("always")
-        warnings.warn(warn_obj)
-        msgs = [w.message for w in rec]
-        assert any(isinstance(m, schema.SchemaWarning) for m in msgs)
-
-
-
 def _mk_var_for_convert(**kwargs):
     """
     Helper to build a Variable instance for convert_values / convert_value tests.

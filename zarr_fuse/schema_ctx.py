@@ -78,9 +78,12 @@ class SchemaCtx:
         file_repr = self.file if self.file else "<SCHEMA STREAM>"
         return f"{file_repr}:{self.path}"
 
-    def dive(self, *path) -> "SchemaCtx":
+    def dive(self, *path,  default=False) -> "SchemaCtx":
         """Return a new SchemaAddress with an extra path component."""
-        return attrs.evolve(self, addr=self.addr + list(path))
+        addr = self.addr + list(path)
+        if default:
+            addr = addr + ['DEFAULT']
+        return attrs.evolve(self, addr=addr)
 
     def parent(self) -> "SchemaCtx":
         """Return a new SchemaAddress for the parent path."""
@@ -99,6 +102,9 @@ class SchemaCtx:
         warn = SchemaWarning(message, self)
         self.logger.warning(warn, **kwargs)
         return warn
+
+class NoDefault:
+    pass
 
 @attrs.define
 class ContextCfg:
@@ -124,11 +130,15 @@ class ContextCfg:
     def keys(self):
         return self.cfg.keys()
 
-    def get(self, key: str| int, default=None) -> Any:
+    def get(self, key: str| int, default=NoDefault) -> Any:
         try:
             value = self.cfg[key]
         except (IndexError, KeyError):
+            if default is NoDefault:
+                raise KeyError(f"Obligatory {key} not found in config at {self.schema_ctx}")
             value = default
+            dflt_ctx = self.schema_ctx.dive(key, default=True)
+            return ContextCfg(value, self.schema_ctx.dive(key))
         return ContextCfg(value, self.schema_ctx.dive(key))
 
 

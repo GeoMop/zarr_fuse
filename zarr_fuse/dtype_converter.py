@@ -199,7 +199,6 @@ def to_typed_array(x: Any, target_dtype: Optional[np.dtype], ctx:'SchemaCtx') ->
     """
     if target_dtype is None:
         return np.asarray(x)
-    # 'ZK1-10DL',
     arr = np.asarray(x)
     out = np.asarray(arr, dtype=target_dtype)
 
