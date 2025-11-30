@@ -13,9 +13,9 @@ postgres:
   imagePullPolicy: IfNotPresent
   partOf: ""
   component: ""
+  extraEnv: []
   extraLabels: {}
   extraAnnotations: {}
-  extraEnv: []
   image:
     host: ""
     name: ""
@@ -27,7 +27,7 @@ postgres:
   persistence:
     name: ""
     storageClass: ""
-    size: 10Gi
+    size: ""
     volumeMode: Filesystem
     accessModes:
       - ReadWriteOnce
@@ -38,10 +38,10 @@ postgres:
     annotations: {}
     externalPort:
       number: 5432
-      name: http
+      name: ""
     internalPort:
       number: 5432
-      name: http
+      name: ""
   resources:
     requests: {}
     limits: {}
@@ -49,12 +49,12 @@ postgres:
     pod: {}
     container: {}
 airflow:
+  executor: ""
   imagePullPolicy: IfNotPresent
   image:
     host: ""
     name: ""
     tag: ""
-  executor: ""
   secrets:
     fernetKey: ""
   scheduler:
@@ -92,13 +92,41 @@ airflow:
       annotations: {}
       externalPort:
         number: 8080
-        name: http
+        name: ""
       internalPort:
         number: 80
-        name: http
+        name: ""
     resources:
       requests: {}
       limits: {}
     securityContext:
       pod: {}
       container: {}
+  initJob:
+    name: ""
+    restartPolicy: OnFailure
+    imagePullPolicy: IfNotPresent
+    partOf: ""
+    component: ""
+    ttlSecondsAfterFinished: 3600
+    extraLabels: {}
+    extraAnnotations: {}
+    extraEnv: []
+    secrets:
+      adminUser:
+        username: ""
+        password: ""
+        firstname: ""
+        lastname: ""
+        email: ""
+    resources:
+      container:
+        requests: {}
+        limits: {}
+      initContainer:
+        requests: {}
+        limits: {}
+    securityContext:
+      pod: {}
+      container: {}
+      initContainer: {}

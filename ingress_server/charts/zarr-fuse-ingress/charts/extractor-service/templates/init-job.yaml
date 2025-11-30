@@ -1,23 +1,47 @@
 ---
+{{- with .Values.airflow.initJob }}
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ .Values.airflow.initJob.name | quote }}
+  name: {{ .name | quote }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: hook-succeeded,before-hook-creation
+    helm.sh/hook-weight: "1"
 spec:
+  ttlSecondsAfterFinished: {{ .ttlSecondsAfterFinished | int}}
   template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .name | quote }}
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+        app.kubernetes.io/version: {{ $.Chart.AppVersion }}
+        app.kubernetes.io/part-of: {{ .partOf | default $.Chart.Name }}
+        app.kubernetes.io/component: {{ .component | default $.Chart.Name }}
+        app.kubernetes.io/managed-by: {{ $.Release.Service }}
+        {{- if .extraLabels }}
+        {{- toYaml .extraLabels | nindent 8 }}
+        {{- end }}
+      annotations:
+        github.com/run-id: {{ $.Values.global.runId | quote }}
+        {{- if .extraAnnotations }}
+        {{- toYaml .extraAnnotations | nindent 8 }}
+        {{- end }}
     spec:
-      restartPolicy: OnFailure
+      restartPolicy: {{ .restartPolicy }}
       securityContext:
-        {{- toYaml .Values.airflow.initJob.securityContext.pod | nindent 8 }}
+        {{- toYaml .securityContext.pod | nindent 8 }}
       volumes:
         - name: airflow-init-logs
           emptyDir: {}
       containers:
         - name: init
-          image: "{{ .Values.airflow.image.host }}/{{ .Values.airflow.image.name }}:{{ .Values.airflow.image.tag }}"
-          imagePullPolicy: {{ .Values.airflow.initJob.imagePullPolicy }}
+          image: "{{ $.Values.airflow.image.host }}/{{ $.Values.airflow.image.name }}:{{ $.Values.airflow.image.tag }}"
+          imagePullPolicy: {{ .imagePullPolicy }}
           securityContext:
-            {{- toYaml .Values.airflow.initJob.securityContext.container | nindent 12 }}
+            {{- toYaml .securityContext.container | nindent 12 }}
+          resources:
+            {{- toYaml .resources.container | nindent 12 }}
           volumeMounts:
             - name: airflow-init-logs
               mountPath: /opt/airflow/logs
@@ -29,43 +53,48 @@ spec:
             - -c
             - |
               echo "Initializing Airflow database"
+              {{- if $.Release.IsInstall }}
+              echo "First install - running 'airflow db init'"
               airflow db init
+              {{- else }}
+              echo "Upgrade - running 'airflow db upgrade'"
+              airflow db upgrade
+              {{- end }}
 
               echo "Creating admin user..."
               airflow users create \
-                --username admin \
-                --firstname admin \
-                --lastname user \
-                --role Admin \
-                --email admin@example.com \
-                --password admin
+                --username {{ .secrets.adminUser.username | quote }} \
+                --password {{ .secrets.adminUser.password | quote }} \
+                --firstname {{ .secrets.adminUser.firstname | quote }} \
+                --lastname {{ .secrets.adminUser.lastname | quote }} \
+                --email {{ .secrets.adminUser.email | quote }} \
+                --role Admin || echo "Admin user already exists"
       initContainers:
         - name: wait-for-postgres
           image: postgres:16
           securityContext:
-            capabilities:
-              drop: [ "ALL" ]
-            allowPrivilegeEscalation: false
-            privileged: false
-            runAsNonRoot: true
+            {{- toYaml .securityContext.initContainer | nindent 12 }}
+          resources:
+            {{- toYaml .resources.initContainer | nindent 12 }}
           env:
             - name: PGHOST
-              value: "{{ .Values.postgres.service.name }}.testing-moc-airflow.svc.cluster.local"
+              value: "{{ $.Values.postgres.service.name }}.testing-moc-airflow.svc.cluster.local"
             - name: PGPORT
-              value: {{ .Values.postgres.service.externalPort.number | quote }}
+              value: {{ $.Values.postgres.service.externalPort.number | quote }}
             - name: PGDATABASE
-              value: {{ .Values.postgres.secrets.database | quote }}
+              value: {{ $.Values.postgres.secrets.database | quote }}
             - name: PGUSER
-              value: {{ .Values.postgres.secrets.user | quote }}
+              value: {{ $.Values.postgres.secrets.user | quote }}
             - name: PGPASSWORD
-              value: {{ .Values.postgres.secrets.password | quote }}
+              value: {{ $.Values.postgres.secrets.password | quote }}
           command:
             - sh
             - -c
             - |
               echo "Waiting for Postgres..."
-              until pg_isready -h postgres -p $PGPORT -U $PGUSER -d $PGDATABASE; do
+              until pg_isready -h $PGHOST -p $PGPORT -U $PGUSER -d $PGDATABASE; do
                 echo "Postgres is not ready yet..."
                 sleep 3
               done
               echo "Postgres is ready!"
+{{- end -}}

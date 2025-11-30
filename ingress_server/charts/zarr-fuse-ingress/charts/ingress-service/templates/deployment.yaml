@@ -46,9 +46,7 @@ spec:
           securityContext:
             {{- toYaml .Values.securityContext.container | nindent 12 }}
           env:
-            {{- if .Values.extraEnv }}
             {{- toYaml .Values.extraEnv | nindent 12 }}
-            {{- end }}
           envFrom:
             - secretRef:
                 name: ingress-service-env-secrets

@@ -9,8 +9,5 @@ ingress:
         secretName: zarr-fuse-ingress-server-dyn-cloud-e-infra-cz-tls
 ingressService:
   name: ingress-server
-  configuration:
-    s3:
-      storeUrl: "s3://app-databuk-release-service/bukov.zarr"
   service:
     name: ingress-server

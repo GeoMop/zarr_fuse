@@ -34,11 +34,6 @@ service:
   internalPort:
     number: 8000
     name: http
-ingress:
-  className: ""
-  annotations: {}
-  labels: {}
-  hosts:
 resources:
   requests: {}
   limits: {}

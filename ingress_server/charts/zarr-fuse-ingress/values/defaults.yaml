@@ -18,10 +18,10 @@ ingressService:
       name: http
   resources:
     requests:
-      cpu: 125m
+      cpu: 100m
       memory: 128Mi
     limits:
-      cpu: 250m
+      cpu: 200m
       memory: 256Mi
   securityContext:
     pod:
@@ -41,3 +41,133 @@ ingressService:
       readOnlyRootFilesystem: true
       runAsUser: 1000
       runAsGroup: 1000
+extractorService:
+  postgres:
+    service:
+      externalPort:
+        number: 5432
+        name: postgres
+      internalPort:
+        number: 5432
+        name: postgres
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    securityContext:
+      pod:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      container:
+        capabilities:
+          drop:
+            - ALL
+        allowPrivilegeEscalation: false
+        privileged: false
+        runAsUser: 999
+        runAsGroup: 999
+        runAsNonRoot: true
+  airflow:
+    scheduler:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 1024Mi
+      securityContext:
+        pod:
+          runAsUser: 50000
+          runAsGroup: 50000
+          fsGroup: 50000
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        container:
+          capabilities:
+            drop:
+              - ALL
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsUser: 50000
+          runAsGroup: 50000
+          runAsNonRoot: true
+    webServer:
+      service:
+        externalPort:
+          number: 8080
+          name: http
+        internalPort:
+          number: 80
+          name: http
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 1024Mi
+      securityContext:
+        pod:
+          runAsUser: 50000
+          runAsGroup: 50000
+          fsGroup: 50000
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        container:
+          capabilities:
+            drop:
+              - ALL
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsUser: 50000
+          runAsGroup: 50000
+          runAsNonRoot: true
+    initJob:
+      resources:
+        container:
+          requests:
+            cpu: 75m
+            memory: 96Mi
+          limits:
+            cpu: 150m
+            memory: 188Mi
+        initContainer:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 50m
+            memory: 64Mi
+      securityContext:
+        pod:
+          runAsUser: 50000
+          runAsGroup: 50000
+          fsGroup: 50000
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        container:
+          capabilities:
+            drop:
+              - ALL
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsUser: 50000
+          runAsGroup: 50000
+          runAsNonRoot: true
+        initContainer:
+          capabilities:
+            drop: ["ALL"]
+          allowPrivilegeEscalation: false
+          privileged: false
+          runAsNonRoot: true

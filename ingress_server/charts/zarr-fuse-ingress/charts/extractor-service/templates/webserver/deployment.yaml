@@ -1,5 +1,5 @@
 ---
-{{- with .Values.airflow.webserver  }}
+{{- with .Values.airflow.webServer  }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,9 +35,7 @@ spec:
           emptyDir: {}
       containers:
         - name: webserver
-          {{- with $.Values.airflow.image }}
-          image: "{{ .host }}/{{ .name }}:{{ .tag }}"
-          {{- end -}}
+          image: "{{ $.Values.airflow.image.host }}/{{ $.Values.airflow.image.name }}:{{ $.Values.airflow.image.tag }}"
           imagePullPolicy: {{ $.Values.airflow.imagePullPolicy }}
           args:
             - "webserver"
@@ -57,9 +55,7 @@ spec:
             - name: airflow-webserver-logs
               mountPath: /opt/airflow/logs
           env:
-            {{- if .extraEnv }}
             {{- toYaml .extraEnv | nindent 12 }}
-            {{- end }}
           startupProbe:
             httpGet:
               path: /

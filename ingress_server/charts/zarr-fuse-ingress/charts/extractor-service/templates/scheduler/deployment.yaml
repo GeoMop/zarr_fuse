@@ -52,7 +52,5 @@ spec:
             - secretRef:
                 name: airflow-s3-credentials
           env:
-            {{- if .extraEnv }}
             {{- toYaml .extraEnv | nindent 12 }}
-            {{- end }}
 {{- end -}}

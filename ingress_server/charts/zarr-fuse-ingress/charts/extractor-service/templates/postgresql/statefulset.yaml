@@ -4,6 +4,9 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ .name | quote }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
 spec:
   serviceName: {{ .service.name | quote }}
   replicas: {{ .replicaCount | int }}
@@ -49,26 +52,21 @@ spec:
             - secretRef:
                 name: postgresql-secrets
           env:
-            {{- if .extraEnv }}
             {{- toYaml .extraEnv | nindent 12 }}
-            {{- end }}
           startupProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: {{ .service.internalPort.name | quote }}
             periodSeconds: 5
             successThreshold: 1
             failureThreshold: 72
           livenessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: {{ .service.internalPort.name | quote }}
             periodSeconds: 30
             successThreshold: 1
             failureThreshold: 10
           readinessProbe:
-            httpGet:
-              path: /
+            tcpSocket:
               port: {{ .service.internalPort.name | quote }}
             periodSeconds: 30
             successThreshold: 1

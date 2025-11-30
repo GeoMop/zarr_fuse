@@ -214,14 +214,14 @@ extractorService:
         # -- (int) Port number
         number: 5432
         # -- (string) Port name
-        name: http
+        name: postgres
       # -- (object) Internal port configuration
       # @default -- ~
       internalPort:
         # -- (int) Port number
         number: 5432
         # -- (string) Port name
-        name: http
+        name: postgres
 
     # -- (object) Resource requests and limits
     # @default -- ~
@@ -404,6 +404,68 @@ extractorService:
       restartPolicy: OnFailure
       # -- (string) Image pull policy
       imagePullPolicy: IfNotPresent
+      # -- (string) Part of label 'app.kubernetes.io/part-of'
+      partOf: extractor-service
+      # -- (string) Component name for label 'app.kubernetes.io/component'
+      component: init-job
+      # -- (int) TTL seconds after finished
+      ttlSecondsAfterFinished: 3600
+      # -- (array) Extra environment variables injected into the application container.
+      extraLabels: {}
+      # -- (dict) Extra annotations to add to all resources
+      extraAnnotations: {}
+      # -- (array) Extra environment variables injected into the application container.
+      extraEnv: []
+
+      # -- (object) Init Job secrets
+      # @default -- ~
+      secrets:
+        # -- (object) Admin user credentials
+        # @default -- ~
+        adminUser:
+          # -- (string) Admin username
+          username: admin
+          # -- (string) Admin password
+          password: admin
+          # -- (string) Admin first name
+          firstname: admin
+          # -- (string) Admin last name
+          lastname: admin
+          # -- (string) Admin email
+          email: admin@gmail.com
+
+      # -- (object) Resource requests and limits
+      # @default -- ~
+      resources:
+        # -- (object) Container requests and limits
+        # @default -- ~
+        container:
+          # -- (object) Resource requests for the container
+          # @default -- {}
+          requests: {}
+          #   cpu: 125m
+          #   memory: 128Mi
+
+          # -- (object) Resource limits for the container
+          # @default -- {}
+          limits: {}
+          #   cpu: 250m
+          #   memory: 256Mi
+
+        # -- (object) Init Container requests and limits
+        # @default -- ~
+        initContainer:
+          # -- (object) Resource requests for the container
+          # @default -- {}
+          requests: {}
+          #   cpu: 125m
+          #   memory: 128Mi
+
+          # -- (object) Resource limits for the container
+          # @default -- {}
+          limits: {}
+          #   cpu: 250m
+          #   memory: 256Mi
 
       # -- (object) Security context settings
       # @default -- ~
@@ -414,3 +476,6 @@ extractorService:
         # -- (object) Container-level security context
         # @default -- ~
         container: {}
+        # -- (object) Init Container-level security context
+        # @default -- ~
+        initContainer: {}

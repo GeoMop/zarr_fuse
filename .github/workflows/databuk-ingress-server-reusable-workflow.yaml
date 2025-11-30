@@ -20,11 +20,16 @@ on:
         description: Extra Helm values to pass during deployment
         required: false
         type: string
-      docker-repository:
+      ingress-docker-repository:
         description: The Docker repository to use
         required: false
         type: string
-        default: jbrezmorf/zarr-fuse-ingress-server
+        default: jbrezmorf/zarr-fuse-ingress-service
+      extractor-docker-repository:
+        description: The Docker repository to use
+        required: false
+        type: string
+        default: jbrezmorf/zarr-fuse-extractor-service
       docker-registry:
         description: The Docker registry to use
         required: false
@@ -66,7 +71,7 @@ jobs:
     if: ${{ inputs.configuration-dir-path != '' }}
     steps:
       - name: Checkout caller repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Copy configuration files
         run: |
           SRC_DIR="${{ inputs.configuration-dir-path }}"
@@ -82,7 +87,7 @@ jobs:
 
           cp -r "$SRC_DIR"/. "$DEST_DIR"/
       - name: Upload configuration files as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ingress-server-configuration
           path: ci-inputs/
@@ -91,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}
@@ -110,7 +115,7 @@ jobs:
       options: --privileged
     steps:
       - name: Checkout zarr_fuse
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}
@@ -121,7 +126,7 @@ jobs:
 
       - name: Download configuration files artifact
         if: ${{ inputs.configuration-dir-path != '' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ingress-server-configuration
           path: ingress_server/inputs/
@@ -129,8 +134,8 @@ jobs:
       - name: Containerize
         uses: GeoMop/github-actions/.github/actions/containerize@v1
         with:
-          registry: docker.io
-          repository: jbrezmorf/zarr-fuse-ingress-service
+          registry: ${{ inputs.docker-registry }}
+          repository: ${{ inputs.ingress-docker-repository }}
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           containerfile-path: oci/ingress.Containerfile
           working-directory: ingress_server
@@ -144,7 +149,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - uses: hadolint/hadolint-action@v3.3.0
         with:
           dockerfile: ingress_server/oci/extractor.Containerfile
@@ -159,7 +164,7 @@ jobs:
       - lint-extractor-service-containerfile
     steps:
       - name: Checkout zarr_fuse
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}
@@ -170,7 +175,7 @@ jobs:
 
       - name: Download configuration files artifact
         if: ${{ inputs.configuration-dir-path != '' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v6
         with:
           name: ingress-server-configuration
           path: ingress_server/inputs/
@@ -178,8 +183,8 @@ jobs:
       - name: Containerize
         uses: GeoMop/github-actions/.github/actions/containerize@v1
         with:
-          registry: docker.io
-          repository: jbrezmorf/zarr-fuse-extractor-service
+          registry: ${{ inputs.docker-registry }}
+          repository: ${{ inputs.extractor-docker-repository }}
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           containerfile-path: oci/extractor.Containerfile
           push: true
@@ -197,7 +202,7 @@ jobs:
       - containerize-extractor-service
     steps:
       - name: Checkout zarr_fuse
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}
@@ -225,7 +230,7 @@ jobs:
         working-directory: ingress_server/charts
     steps:
       - name: Checkout zarr_fuse
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}
@@ -249,10 +254,12 @@ jobs:
           --set ingressService.configuration.s3.secrets.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
           --set ingressService.configuration.s3.secrets.secretKey="${{ secrets.S3_SECRET_KEY }}" \
           --set ingressService.configuration.fastapi.secrets.usersJson='${{ secrets.BASIC_AUTH_USERS_JSON }}' \
+          --set extractorService.postgres.secrets.user="${{ vars.AIRFLOW_POSTGRES_USER }}" \
+          --set extractorService.postgres.secrets.password="${{ secrets.AIRFLOW_POSTGRES_PASSWORD }}" \
+          --set extractorService.postgres.secrets.database="${{ vars.AIRFLOW_POSTGRES_DATABASE }}" \
+          --set extractorService.airflow.secrets.fernetKey="${{ secrets.AIRFLOW_FERNET_KEY }}" \
+          --set extractorService.airflow.webServer.secrets.webServerSecretKey="${{ secrets.AIRFLOW_WEBSERVER_SECRET_KEY }}" \
+          --set extractorService.airflow.initJob.secrets.adminUser.username="${{ vars.AIRFLOW_ADMIN_USERNAME }}" \
+          --set extractorService.airflow.initJob.secrets.adminUser.password="${{ secrets.AIRFLOW_ADMIN_PASSWORD }}" \
+          --set extractorService.airflow.initJob.secrets.adminUser.email="${{ vars.AIRFLOW_ADMIN_EMAIL }}" \
           ${{ inputs.extra-helm-args }}
-
-# TODO:
-# Check shibo for airflow
-#  --set airflow.webserver.defaultUser.password="${{ secrets.AIRFLOW_WEBSERVER_PASSWORD }}" \
-#  --set airflow.webserver.defaultUser.username="${{ secrets.AIRFLOW_WEBSERVER_USERNAME }}"
-#  --set airflow.webserver.defaultUser.email="${{ secrets.AIRFLOW_WEBSERVER_EMAIL }}"
