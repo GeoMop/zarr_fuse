@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#set -x
+set -x
 
 # aws command wraper for CESNET s3 storage
 # Usage:
@@ -27,7 +27,8 @@ aws configure set profile.service.aws_access_key_id $(jq -r .service.key  ${keys
 aws configure set profile.service.aws_secret_access_key $(jq -r .service.secret  ${keys_file})
 aws configure set profile.service.aws_secret_access_key $(jq -r .service.secret  ${keys_file})
 
-#aws configure set profile.service.region                us-east-1
+# Fake region as aws still need it for some operations.
+aws configure set profile.service.region us-east-1
 #aws configure set profile.service.s3.addressing_style   path
 #aws configure set profile.service.s3.request_checksum_calculation   when_required
 #aws configure set profile.service.s3.response_checksum_validation   when_required
