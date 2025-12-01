@@ -49,7 +49,7 @@ def normalize(json_dict):
 
     for borehole, measurements in data.items():
         for row in measurements:
-            ts = row.get(DATETIME_KEY)
+            ts = row.get(DATETIME_KEY) or 'NaT'
 
             # --- air temperature item ---
             records.append({
