@@ -3,7 +3,6 @@ import createPlotlyComponent from 'react-plotly.js/factory';
 import Plotly from 'plotly.js-dist-min';
 import { API_BASE_URL } from '../api';
 
-
 const Plot = createPlotlyComponent(Plotly);
 
 interface MapViewerProps {
@@ -22,19 +21,6 @@ export const MapViewer: React.FC<MapViewerProps> = ({
   const [figure, setFigure] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [plotKey, setPlotKey] = useState(0);
-
-  // Force resize when figure loads to fix blank map issues
-  useEffect(() => {
-    if (!loading && figure) {
-        // Small delay to ensure DOM is ready
-        const timer = setTimeout(() => {
-            window.dispatchEvent(new Event('resize'));
-            console.log('Triggered resize event for Plotly');
-        }, 100);
-        return () => clearTimeout(timer);
-    }
-  }, [loading, figure]);
 
   useEffect(() => {
     if (!storeName || !nodePath) return;
@@ -42,6 +28,7 @@ export const MapViewer: React.FC<MapViewerProps> = ({
     const fetchMap = async () => {
       setLoading(true);
       setError(null);
+      
       try {
         const response = await fetch(`${API_BASE_URL}/api/s3/plot`, {
           method: 'POST',
@@ -55,68 +42,74 @@ export const MapViewer: React.FC<MapViewerProps> = ({
         });
 
         const data = await response.json();
-        console.log('🔍 Backend Raw Response:', data);
 
         if (!response.ok || data.status === 'error') {
           throw new Error(data.reason || `HTTP error! status: ${response.status}`);
         }
 
-        // 1️⃣ Determine valid figure
+        // 1️⃣ Determine valid figure structure
         let validFigure: any = null;
 
-        // Case 1: Response direct { data, layout }
+        // Case 1: Direct structure { data, layout }
         if (Array.isArray(data.data) && data.layout) {
           validFigure = data;
         }
-        // Case 2: { status: 'success', figure: { data, layout } }
+        // Case 2: Wrapped structure { status: 'success', figure: { data, layout } }
         else if (data.figure && Array.isArray(data.figure.data) && data.figure.layout) {
           validFigure = data.figure;
         }
 
         // 2️⃣ Strict validation
         if (!validFigure) {
-          console.error('Invalid Plotly structure:', data);
-          throw new Error("Invalid backend response: JSON must contain 'data' (array) and 'layout' (object)." );
+          throw new Error("Invalid backend response: JSON must contain 'data' (array) and 'layout' (object).");
         }
 
-        // 3️⃣ Add PNG overlay as raster image layer if overlay info exists
+        // 3️⃣ Add PNG overlay as a raster image layer if overlay info exists
         if (data.overlay && Array.isArray(data.overlay.corners)) {
-          const corners: [number, number][] = data.overlay.corners;
+          const corners = data.overlay.corners;
+          
+          // Construct the image URL dynamically using the base API URL
+          const imageUrl = `${API_BASE_URL}/api/image/mapa_uhelna_vyrez.png`;
+
           const imageLayer = {
             sourcetype: 'image',
-            source: 'http://localhost:8000/api/image/mapa_uhelna_vyrez.png',
+            source: imageUrl,
+            // Coordinates format: [[lon, lat], [lon, lat], [lon, lat], [lon, lat]]
+            // Order: Top-Left -> Top-Right -> Bottom-Right -> Bottom-Left
             coordinates: [
-              [corners[0][0], corners[0][1]], // top-left
-              [corners[1][0], corners[1][1]], // top-right
-              [corners[2][0], corners[2][1]], // bottom-right
-              [corners[3][0], corners[3][1]]  // bottom-left
+              [corners[0][0], corners[0][1]], 
+              [corners[1][0], corners[1][1]], 
+              [corners[2][0], corners[2][1]], 
+              [corners[3][0], corners[3][1]]  
             ],
             opacity: 1,
-            below: 'traces',
+            below: 'traces', // Ensures the image stays behind the data points
           };
+
+          // Initialize layers array if it doesn't exist
+          if (!validFigure.layout.mapbox) {
+             validFigure.layout.mapbox = {};
+          }
           if (!validFigure.layout.mapbox.layers) {
             validFigure.layout.mapbox.layers = [];
           }
+          
+          // Prepend the image layer so it renders first (at the bottom)
           validFigure.layout.mapbox.layers = [imageLayer, ...validFigure.layout.mapbox.layers];
-          // Zoom ve marker eklenmiyor
         }
 
-        // 4️⃣ Normalize template & mapbox
+        // 4️⃣ Normalize template & mapbox configuration
         if (validFigure.layout) {
-          validFigure.layout.template = undefined;
+          validFigure.layout.template = undefined; // Avoid conflicts
+          
+          // Merge Mapbox settings carefully to avoid overwriting backend data (like center/zoom)
           validFigure.layout.mapbox = {
             style: 'open-street-map',
-            ...(validFigure.layout.mapbox || {}),
+            ...validFigure.layout.mapbox, // Preserves existing center, zoom, and layers
           };
         }
 
-        console.log('Figure to render:', validFigure);
-        if (validFigure.layout?.mapbox?.layers) {
-            console.log('Map layers detected:', validFigure.layout.mapbox.layers);
-        }
-
         setFigure(validFigure);
-        setPlotKey(prev => prev + 1); // Force re-render
 
       } catch (err) {
         console.error('Failed to fetch map:', err);
@@ -128,10 +121,7 @@ export const MapViewer: React.FC<MapViewerProps> = ({
 
     fetchMap();
 
-    return () => {
-      // cleanup logic if needed
-    };
-  }, [storeName, nodePath, selection]); // Re-fetch when selection (time) changes
+  }, [storeName, nodePath, selection]);
 
   if (loading) {
     return (
@@ -161,55 +151,31 @@ export const MapViewer: React.FC<MapViewerProps> = ({
     <div className="w-full bg-white rounded-lg shadow-sm border border-gray-200 p-4 relative min-h-[500px]">
       <h3 className="text-lg font-semibold text-gray-800 mb-4">Geographic View</h3>
       <Plot
-        key={plotKey}
         data={figure.data}
         layout={{
-            ...figure.layout,
-            autosize: true,
-            width: undefined, // Let container control width
-            height: 500,
-            margin: { t: 0, b: 0, l: 0, r: 0 }, // Minimize margins
+          ...figure.layout,
+          autosize: true,
+          width: undefined, // Let container control width
+          height: 500,
+          margin: { t: 0, b: 0, l: 0, r: 0 }, // Minimize margins
         }}
         config={{
-            responsive: true,
-            displayModeBar: true,
+          responsive: true,
+          displayModeBar: true,
         }}
         style={{ width: '100%', height: '500px' }}
         useResizeHandler={true}
         onClick={(data) => {
-            if (data.points && data.points.length > 0) {
-                const point = data.points[0] as any;
-                // Extract lat/lon from point
-                const lat = point.lat;
-                const lon = point.lon;
-                
-                console.log("Map Clicked:", point);
-                console.log(`Captured Coordinates -> Lat: ${lat}, Lon: ${lon}`);
+          if (data.points && data.points.length > 0) {
+            const point = data.points[0] as any;
+            const { lat, lon } = point;
 
-                if (lat !== undefined && lon !== undefined && onSelectionChange) {
-                    onSelectionChange({ lat_point: lat, lon_point: lon });
-                }
+            if (lat !== undefined && lon !== undefined && onSelectionChange) {
+              onSelectionChange({ lat_point: lat, lon_point: lon });
             }
+          }
         }}
-          onError={(err: any) => {
-            // Plotly render hatası veya Mapbox hatası
-            console.error('Plotly/Mapbox render error:', err);
-            if (err && err.message) {
-              console.error('Error message:', err.message);
-            }
-            if (err && err.stack) {
-              console.error('Error stack:', err.stack);
-            }
-          }}
-          onAfterPlot={() => {
-            // Plotly plot oluştuktan sonra Mapbox layer'larını ve resim durumunu logla
-            if (figure?.layout?.mapbox?.layers) {
-              console.log('Mapbox layers after plot:', figure.layout.mapbox.layers);
-            }
-            if (figure?.layout?.mapbox?.center) {
-              console.log('Mapbox center after plot:', figure.layout.mapbox.center);
-            }
-          }}
+        onError={(err) => console.error('Plotly render error:', err)}
       />
     </div>
   );
