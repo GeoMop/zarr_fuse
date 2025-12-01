@@ -93,9 +93,15 @@ class SchemaCtx:
             addr = []
         return attrs.evolve(self, addr=addr)
 
-    def error(self, message: str, **kwargs) -> SchemaError:
-        err = SchemaError(message, self)
-        self.logger.error(err, **kwargs)
+    def error(self, message: str| Exception, **kwargs) -> SchemaError:
+        if isinstance(message, Exception):
+            err = message
+            err = type(err)(f"{err} (at {self})")
+            self.logger.error(err, **kwargs)
+            raise err
+        else:
+            err = SchemaError(message, self)
+            self.logger.error(err, **kwargs)
         return err
 
     def warning(self, message: str, **kwargs) -> SchemaWarning:
@@ -119,6 +125,9 @@ class ContextCfg:
 
     def __contains__(self, item):
         return item in self.cfg
+
+    def split(self) -> Tuple[Any, SchemaCtx]:
+        return self.cfg, self.schema_ctx
 
     def value(self) -> Any:
         return self.cfg

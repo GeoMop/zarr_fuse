@@ -401,7 +401,7 @@ def test_dtype_parse_and_serialize_roundtrip(token, expected_dtype, expected_str
     cfg = schema.ContextCfg(token, schema.SchemaCtx(["VARS", "x", "type"], file="cfg.yaml", logger=test_logger))
 
     # Deserialize
-    dt = schema.DType.from_cfg(cfg)
+    dt = schema.DType.from_cfg(cfg, None)
     assert dt.dtype == expected_dtype
 
     # Serialize back
@@ -411,12 +411,14 @@ def test_dtype_parse_and_serialize_roundtrip(token, expected_dtype, expected_str
 
 def test_variable_logging_and_basics():
     # logs error on invalid unit
-    _, log = _mk_var({"name": "v", "coords": [], "unit": "NOT_A_UNIT"})
-    assert _has(log.errors, "Invalid unit string")
+    with pytest.raises(units.UndefinedUnitError):
+        _, log = _mk_var({"name": "v", "coords": [], "unit": "NOT_A_UNIT"})
+        #assert _has(log.errors, "Invalid unit string")
 
     # error on invalid source_unit
-    _, log = _mk_var({"name": "v", "coords": [], "unit": "m", "source_unit": "NOPE"})
-    assert _has(log.errors, "Invalid unit string")
+    with pytest.raises(units.UndefinedUnitError):
+        _, log = _mk_var({"name": "v", "coords": [], "unit": "m", "source_unit": "NOPE"})
+        #assert _has(log.errors, "Invalid unit string")
 
     # error on invalid range key
     _, log = _mk_var({"name": "v", "coords": [], "range": {"bogus": 123}})
@@ -467,7 +469,7 @@ def test_variable_logging_and_basics():
 
 def test_coord_specific_attributes():
     # default coords injected == name
-    c, _ = _mk_coord({"name": "time"})
+    c, _ = _mk_coord({"name": "time", "unit":{"tick": "s"}})
     assert c.coords == ["time"]
 
     # default composed is singleton name

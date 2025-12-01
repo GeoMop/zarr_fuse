@@ -24,7 +24,10 @@ Deserialization and all underlying functions accepts optional log parameter,
 this is use preferably as a logger, otherwise a default logger is used.
 
 TODO:
-- move abstract serialization/deserialization and context wrapper to a separate module; keep here just schema classes / functions
+- move abstract serialization/deserialization and context wrapper to a separate module; 
+  keep here just schema classes / functions
+- store input values as close to the input as possible - simplify roundtrip serialization
+  provide suitable (cached) properties to extract specific values (in particular for: units, dtype, na)
 - Catch more errors, raise only on essential errors, leading to invalid schema
 - Ability to turn error logs to raise (dry run mode)
 """
@@ -56,7 +59,7 @@ def unit_instance(cfg: ContextCfg, default_unit: units.UnitType=NoDefault) -> Un
             u = units.Unit(unit)
             return u
         except Exception as e:
-            cfg.schema_ctx.error(f"Invalid unit string: {unit}. Pint error: {e}")
+            schema_ctx.error(e)
     elif isinstance(unit, dict):
         try:
             return units.DateTimeUnit(**unit)
@@ -242,13 +245,15 @@ class Variable(AddressMixin):
         self.unit: Optional[Unit] = unit_instance(unit_item, units.NoneUnit())
 
         # Optional attributes
-        self.type: DType = DType.from_cfg(dict.get("type", None))
-        # Hack for DataTime Units TODO: derive default type of a unit
-        if  isinstance(self.unit, units.DateTimeUnit):
-            self.type = DType(np.dtype(self.unit.default_dtype()))
+        default_dtype = self.unit.default_dtype()
+        type_cfg = dict.get("type", None)
+        na_cfg = dict.get("na_value", None)
+        self.type: DType = DType.from_cfg(type_cfg, default_dtype)
+        self.na_value = make_na(na_cfg, self.type.dtype)
 
-        na_cfg = dict.get("na_value", self.type.default_na).cfg
+
         self.na_value : Optional[Any] = make_na(na_cfg, self.type.dtype)
+
         self.description: Optional[str] = dict.get("description", None).value()
         self.df_col: Optional[str] = dict.get("df_col", self.name).value()
 
@@ -286,7 +291,7 @@ class Variable(AddressMixin):
         return {
             k: value_serializer(self, k, v)
             for k, v in self.__dict__.items()
-            if filter(k, v)
+            if filter(k, v) and v != None
             }
 
     def range_instance(self, dict_ctx: ContextCfg):
@@ -332,8 +337,11 @@ class Variable(AddressMixin):
             # DateTime specialization
             quantity = units._create_dt_quantity(values, from_unit, log=self._address)
         else:
-            if dtype is not None:
-                values = to_typed_array(values, dtype, self._address)
+            try:
+                if dtype is not None:
+                    values = to_typed_array(values, dtype, self._address)
+            except ValueError:
+                raise ValueError(f"Variable '{self.name}' has values not-convertible to the type: {dtype}.")
 
             # Pint specialization when a unit string is provided
             assert isinstance(from_unit, (units.Unit, units.NoneUnit))
@@ -375,7 +383,7 @@ class Coord(Variable):
 
         composed = cfg.get("composed", None).value()
         if composed is None or len(composed) == 0:
-            composed= [self.name]
+            composed = [self.name]
         self.composed: Dict[str, List[Any]] = composed
 
         # Explicit chunk size, 1024 default. Equal to 'len(values)' for fixed size coord.
@@ -467,6 +475,45 @@ class DatasetSchema(AddressMixin):
     def zarr_attrs(self):
         attrs = { k:convert_value(v) for k,v in self.ATTRS.items()}
         return attrs
+
+    # def diff(self, other:'DatasetSchema') -> List[str]:
+    #     """
+    #     Compare two DatasetSchema instances and return a list of differences as strings.
+    #     """
+    #     diffs = []
+    #
+    #     # Compare ATTRS
+    #     for key in set(self.ATTRS.keys()).union(other.ATTRS.keys()):
+    #         val1 = self.ATTRS.get(key, None)
+    #         val2 = other.ATTRS.get(key, None)
+    #         if val1 != val2:
+    #             diffs.append(f"ATTRS['{key}']: {val1} != {val2}")
+    #
+    #     # Compare COORDS
+    #     for  in set(self.COORDS.keys()).union(other.COORDS.keys()):
+    #         coord1 = self.COORDS.get(key, None)
+    #         coord2 = other.COORDS.get(key, None)
+    #         if coord1 is None:
+    #             diffs.append(f"COORD '{key}' missing in first schema.")
+    #         elif coord2 is None:
+    #             diffs.append(f"COORD '{key}' missing in second schema.")
+    #         else:
+    #             coord_diffs = coord1.diff(coord2)
+    #             diffs.extend([f"COORD '{key}': {d}" for d in coord_diffs])
+    #
+    #     # Compare VARS
+    #     for key in set(self.VARS.keys()).union(other.VARS.keys()):
+    #         var1 = self.VARS.get(key, None)
+    #         var2 = other.VARS.get(key, None)
+    #         if var1 is None:
+    #             diffs.append(f"VAR '{key}' missing in first schema.")
+    #         elif var2 is None:
+    #             diffs.append(f"VAR '{key}' missing in second schema.")
+    #         else:
+    #             var_diffs = var1.diff(var2)
+    #             diffs.extend([f"VAR '{key}': {d}" for d in var_diffs])
+    #
+    #     return diffs
 
 @attrs.define
 class NodeSchema(AddressMixin):

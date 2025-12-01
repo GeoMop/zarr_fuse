@@ -71,9 +71,10 @@ If  `unit` is provided, the `bool` and `str[n]` are not allowed.
 Explicit type specification is recommended.
 
 ### `na_value:` (optional)
-Value used to represent missing or invalid data in the variable. Native NaN is used by default for float quantities.
+Value used to represent missing or invalid data in the variable. Native NaN is used by default for float quantities, you can 
+specify that explicitly by the keyword 'nan'.
 'max_int' and 'min_int' keywords are supported for integer types, representing the maximum and minimum 
-signed integer values of the variable type. Otherwise you have to provide the actual value compatible with the variable type.
+signed integer values of the variable type. Otherwise, you have to provide the actual value compatible with the variable type.
 
 
 ### `range:` (optional)

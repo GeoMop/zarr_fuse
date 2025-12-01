@@ -34,6 +34,8 @@ class DummyCfg:
     def __init__(self, value, schema_ctx: DummyCtx):
         self._value = value
         self.schema_ctx = schema_ctx
+    def split(self):
+        return self._value, self.schema_ctx
 
     def value(self):
         return self._value
@@ -44,8 +46,8 @@ def test_dtype_from_cfg_basic_and_str():
     ctx = DummyCtx()
 
     # None -> dtype(None)
-    dt = ta.DType.from_cfg(DummyCfg(None, ctx)).dtype
-    assert dt is None
+    dt = ta.DType.from_cfg(DummyCfg(None, ctx), "my_type" ).dtype
+    assert dt == "my_type"
     assert ctx.count_level("ERROR") == 0
 
     # Valid basic specs (mapped by your new type_mapping)
@@ -65,32 +67,85 @@ def test_dtype_from_cfg_basic_and_str():
         ("complex128", np.complex128),
     ]
     for spec, expected in basics:
-        dt = ta.DType.from_cfg(DummyCfg(spec, ctx)).dtype
+        dt = ta.DType.from_cfg(DummyCfg(spec, ctx), None).dtype
         assert dt == np.dtype(expected)
     assert ctx.count_level("ERROR") == 0
 
     # str[n]
     ctx.clear()
-    dt = ta.DType.from_cfg(DummyCfg("str[5]", ctx)).dtype
+    dt = ta.DType.from_cfg(DummyCfg("str[5]", ctx), None).dtype
     assert dt == np.dtype("<U5")
     assert ctx.count_level("ERROR") == 0
 
     # bare 'str' -> default length warning to <U32
     ctx.clear()
-    dt = ta.DType.from_cfg(DummyCfg("str", ctx)).dtype
+    dt = ta.DType.from_cfg(DummyCfg("str", ctx), None).dtype
     assert dt == np.dtype("<U32")
     assert ctx.count_level("WARNING") >= 1
 
     # str[0] -> warning + default length <U32
     ctx.clear()
-    dt = ta.DType.from_cfg(DummyCfg("str[0]", ctx)).dtype
+    dt = ta.DType.from_cfg(DummyCfg("str[0]", ctx), None).dtype
     assert dt == np.dtype("<U32")
     assert ctx.count_level("WARNING") >= 1
 
     # unsupported -> error recorded
     ctx.clear()
-    _ = ta.DType.from_cfg(DummyCfg("nope", ctx)).dtype
+    _ = ta.DType.from_cfg(DummyCfg("nope", ctx), None).dtype
     assert ctx.count_level("ERROR") >= 1
+
+def _default_na(dtype_spec):
+    """Convenience helper: get default_na for a given dtype spec or np.dtype."""
+    return ta.default_na(np.dtype(dtype_spec))
+
+
+def test_dtype_default_na():
+    # 1) dtype=None -> default_na is None
+    assert ta.default_na(None) is None
+
+    no_na_default_types = [np.bool] + \
+        [np.uint8, np.uint16, np.uint32, np.uint64] + \
+        [np.int8, np.int16, np.int32, np.int64]
+    for dtype in no_na_default_types:
+        print(dtype)
+        assert _default_na(dtype) is None
+
+    # 4) Unicode strings: U+FFFF repeated to the fixed width
+    for spec in ("U1", "U2", "U4", "<U3"):
+        dt = np.dtype(spec)
+        na_value = _default_na(dt)
+
+        n_chars = dt.itemsize // np.dtype("<U1").itemsize
+
+        assert isinstance(na_value, str)
+        assert len(na_value) == n_chars
+        assert set(na_value) == {"\uFFFF"}
+
+    # 5) Floats: should be some kind of NaN (semantic test only)
+    for spec in (np.float16, np.float32, np.float64):
+        na_value = _default_na(spec)
+
+        assert isinstance(na_value, (float, np.floating))
+        assert np.isnan(na_value)
+
+    # 6) Complex: components should be NaN (semantic test only)
+    for spec in ("complex64", "complex128"):
+        na_value = _default_na(spec)
+
+        #assert isinstance(na_value, (complex, np.complexfloating))
+        assert np.isnan(na_value.real)
+        assert np.isnan(na_value.imag)
+
+    # 8) datetime64 / timedelta64: should be NaT (semantic test only)
+    for spec in ("datetime64[ns]", "datetime64[D]"):
+        na_value = _default_na(spec)
+        assert isinstance(na_value, np.datetime64)
+        assert np.isnat(na_value)
+
+    for spec in ("timedelta64[ns]", "timedelta64[D]"):
+        na_value = _default_na(spec)
+        assert isinstance(na_value, np.timedelta64)
+        assert np.isnat(na_value)
 
 
 # --- type_code ----------------------------------------------------------------

@@ -44,6 +44,7 @@ COORDS:
     # Secondary description valid for composed coordinates.
     description: "Example of coordinate indexed uniquely by a tuple of values. The source columns are converted to the 1D list of tuples."
     composed: ["latitude", "longitude"]
+    type: int64
     # Composed implies unsorted, no support for sparse data interpolation, right now.
     # Interpolation currently is mainly a mean to eliminate insertion of new coords into range of old coords.
     sorted: [] # Unsorted

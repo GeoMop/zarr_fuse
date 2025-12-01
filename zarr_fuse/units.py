@@ -8,7 +8,10 @@ import dateutil
 import attrs
 import time
 
+
 import pint as _pint
+UndefinedUnitError = _pint.UndefinedUnitError
+
 ureg = _pint.UnitRegistry()
 
 ureg.define('bool = []')
@@ -64,7 +67,7 @@ class Unit(ureg.Unit):
         return str(self)
 
     def default_dtype(self):
-        return 'float64'
+        return np.dtype('float64')
 
     def delta_unit(self):
         return self
@@ -143,7 +146,7 @@ class DateTimeUnit:
         return offset.total_seconds() / 3600.0
 
     def default_dtype(self):
-        return f'datetime64[{self.tick}]'
+        return np.dtype(f'datetime64[{self.tick}]')
 
     def delta_unit(self):
         return Unit(self.tick)  # TODO: change from 'str' to pint.Unit in DataTimeUnit

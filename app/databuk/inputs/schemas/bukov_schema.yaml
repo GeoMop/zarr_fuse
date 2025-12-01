@@ -1,6 +1,13 @@
 # Configuration of the ZARR-FUSE storage
 ATTRS:
-    STORE_URL: "bukov.zarr"
+
+
+    #STORE_URL: "bukov.zarr"
+    
+    # S3 store for data up to 2024
+    STORE_URL: "s3://bukov/store_2024.zarr"
+    S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
+     
     #store_type: 'local'                 # 'guess' type is default
     location_file: &loc_file bukov_locations.csv
     grid_min: [50.840000,14.850000]    # unit deg
@@ -12,19 +19,19 @@ ATTRS:
 bukov:
     VARS:
         rock_temp:
-            unit: "C"
+            unit: "degC"
             description: "Temperature in degC"
             df_col: "rock_temp"
             coords: [ "date_time", "borehole", "depth"]
 
         air_humidity:
-            unit: "%"
-            description: "Air humidity"
+            unit: "%"    # dimension less
+            description: "Air humidity (in percents)."
             df_col: "air_humidity"
             coords: [ "date_time", "borehole", "depth" ]
 
         air_temp:
-            unit: "C"
+            unit: "degC"
             description: "Temperature in Kelvin"
             df_col: "air_temp"
             coords: [ "date_time", "borehole", "depth" ]
@@ -49,7 +56,7 @@ bukov:
 
         borehole:
             type: "str[128]"
-            unit: ""        # dimansionless
+            unit: ""        # dimensionless
             description: "Site/borehole name."
             df_col: "borehole"
             sorted: False
@@ -57,7 +64,7 @@ bukov:
 
         depth:
             type: "float"
-            unit: "m"
+            unit: "meter"
             description: "Relative position of the sensor in the borehole."
             df_col: "depth"
 

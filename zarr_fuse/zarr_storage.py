@@ -657,6 +657,13 @@ class Node:
            -
         """
         ds = pivot_nd(self.schema, polars_df, self.logger)
+        # Test for valid coords
+        for k, v in self.schema.COORDS.items():
+            if k not in ds.coords:
+                raise ValueError(f"Coordinate '{k}' required by schema is missing in the provided data.")
+            if (ds[k] != ds[k]).any():
+                raise ValueError(f"Coordinate '{k}' contains NaN/NaT values, which are not allowed.")
+
         written_ds, merged_coords = self.merge_ds(ds)
         # check unique coordsregion="auto",
         dup_dict = check_unique_coords(written_ds)
@@ -1201,9 +1208,7 @@ def coerce_df(schema: zarr_schema.DatasetSchema,
 
     for d in dims:
         df_coord_array = data_vars[d]
-
         coords = np.unique(df_coord_array)
-        coords = coords[schema.COORDS[d].valid_mask(coords)]
         coords = np.sort(coords)
 
         coords_dict_raw[d] = coords
