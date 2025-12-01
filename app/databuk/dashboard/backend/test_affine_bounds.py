@@ -37,6 +37,6 @@ lons = corners_geo[:, 0]
 lats = corners_geo[:, 1]
 minLon, maxLon = lons.min(), lons.max()
 minLat, maxLat = lats.min(), lats.max()
-mapbox_bounds = [ [minLon, minLat], [maxLon, maxLat] ]
+map_bounds = [ [minLon, minLat], [maxLon, maxLat] ]
 
-print("Mapbox raster overlay bounds:", mapbox_bounds)
+print("Map raster overlay bounds:", map_bounds)

@@ -87,25 +87,25 @@ export const MapViewer: React.FC<MapViewerProps> = ({
           };
 
           // Initialize layers array if it doesn't exist
-          if (!validFigure.layout.mapbox) {
-             validFigure.layout.mapbox = {};
+          if (!validFigure.layout.map) {
+             validFigure.layout.map = {};
           }
-          if (!validFigure.layout.mapbox.layers) {
-            validFigure.layout.mapbox.layers = [];
+          if (!validFigure.layout.map.layers) {
+            validFigure.layout.map.layers = [];
           }
           
           // Prepend the image layer so it renders first (at the bottom)
-          validFigure.layout.mapbox.layers = [imageLayer, ...validFigure.layout.mapbox.layers];
+          validFigure.layout.map.layers = [imageLayer, ...validFigure.layout.map.layers];
         }
 
-        // 4️⃣ Normalize template & mapbox configuration
+        // 4️⃣ Normalize template & map configuration
         if (validFigure.layout) {
           validFigure.layout.template = undefined; // Avoid conflicts
           
-          // Merge Mapbox settings carefully to avoid overwriting backend data (like center/zoom)
-          validFigure.layout.mapbox = {
+          // Merge Map settings carefully to avoid overwriting backend data (like center/zoom)
+          validFigure.layout.map = {
             style: 'open-street-map',
-            ...validFigure.layout.mapbox, // Preserves existing center, zoom, and layers
+            ...validFigure.layout.map, // Preserves existing center, zoom, and layers
           };
         }
 

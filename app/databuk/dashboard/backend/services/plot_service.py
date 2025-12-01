@@ -78,7 +78,7 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
                      for col in hover_cols]
             hover_texts.append("<br>".join(lines))
             
-        fig.add_trace(go.Scattermapbox(
+        fig.add_trace(go.Scattermap(
             lat=lats.tolist(),
             lon=lons.tolist(),
             mode='markers',
@@ -103,7 +103,7 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
             
         fig.update_layout(
             template=None,
-            mapbox=dict(
+            map=dict(
                 style="open-street-map",
                 center=dict(lat=center_lat, lon=center_lon),
                 zoom=5
