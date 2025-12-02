@@ -5,7 +5,7 @@ ATTRS:
     #STORE_URL: "bukov.zarr"
     
     # S3 store for data up to 2024
-    STORE_URL: "s3://bukov/store_2024.zarr"
+    STORE_URL: "s3://bukov/store_latlon_2024.zarr"
     S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
      
     #store_type: 'local'                 # 'guess' type is default
@@ -28,13 +28,23 @@ bukov:
             unit: "%"    # dimension less
             description: "Air humidity (in percents)."
             df_col: "air_humidity"
-            coords: [ "date_time", "borehole", "depth" ]
+            coords: [ "date_time", "borehole", "depth"]
 
         air_temp:
             unit: "degC"
             description: "Temperature in Kelvin"
             df_col: "air_temp"
-            coords: [ "date_time", "borehole", "depth" ]
+            coords: [ "date_time", "borehole", "depth"]
+
+        longitude:
+            unit: "deg"
+            description: "Signed Earth longitude."
+            coords: "borehole"
+
+        latitude:
+            unit: "deg"
+            description: "Signed Earth longitude."
+            coords: "borehole"
 
 
     COORDS:
@@ -52,7 +62,6 @@ bukov:
                 # None - no limits add all new coordinates out of existing range.
                 # scalar - regular grid with this step size (use units to convert string values
                 # [min, max] - regular grid with this step size (TODO)
-        
 
         borehole:
             type: "str[128]"
@@ -69,6 +78,7 @@ bukov:
             df_col: "depth"
 
             chunk_size: 64
+
 
     ATTRS:
         description:
