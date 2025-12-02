@@ -110,8 +110,11 @@ def main():
     df_locs = location_df(schema.ds.ATTRS)
 
     df = update_meteo(yr_no.get_3day_forecast, df_locs)
+    print(df)
     root_node = zarr_fuse.open_store(schema, workdir = work_dir)
+    print('Store open')
     root_node['yr.no'].update(df)
+    print('Updated')
 
 if __name__ == '__main__':
     main()
