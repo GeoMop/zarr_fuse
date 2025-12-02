@@ -1,280 +1,544 @@
+import re
+from functools import cached_property
+from typing import *
+
+import pandas
 import yaml
 import attrs
 import numpy as np
-import warnings
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Union, IO
 
+from . import __version__
 from . import units
+from . import logger as zf_logger
+from . dtype_converter import to_typed_array, DType, make_na
+from .schema_ctx import SchemaCtx, ContextCfg, default_logger, AddressMixin, NoDefault
 
-reserved_keys = set(["ATTRS", "COORDS", "VARS"])
+"""
+Classes to represent the store schema. It enables:
+- serialization / deserialization with stable deserialized state
+- recursive comparison of schemas to test for schema changes
 
+Deserialization has to deal with possible errors in the schema file / dictionary.
+Deserialization and all underlying functions accepts optional log parameter, 
+this is use preferably as a logger, otherwise a default logger is used.
 
-@attrs.define(frozen=True)
-class SchemaAddress:
-    """
-    Represents a single value in the schema file.
-    Holds the source file name (or empty string for an anonymous stream)
-    and a list of path components locating the value within the YAML tree.
-
-    Path components are stored as provided (str or int) and converted to
-    strings only when rendering.
-    """
-    addr: List[Union[str, int]]
-    file: str = attrs.field(default=None, eq=False)
-
-    def __str__(self) -> str:
-        file_repr = self.file if self.file else "<SCHEMA STREAM>"
-        return f"{file_repr}:{'/'.join(map(str, self.addr))}"
-
-    def dive(self, key: Union[str, int]) -> "SchemaAddress":
-        """Return a new SchemaAddress with an extra path component."""
-        return SchemaAddress([*self.addr, key], self.file)
-
-class _SchemaIssueMixin:
-    """
-    Mixin that holds message and its origin address for both
-    the Exception and the Warning classes.
-    """
-    def __init__(self, message: str, address: SchemaAddress):
-        self.message = message
-        self.address = address
-
-    def __str__(self) -> str:
-        return f"{self.message}  (at {self.address})"
+TODO:
+- move abstract serialization/deserialization and context wrapper to a separate module; 
+  keep here just schema classes / functions
+- store input values as close to the input as possible - simplify roundtrip serialization
+  provide suitable (cached) properties to extract specific values (in particular for: units, dtype, na)
+- Catch more errors, raise only on essential errors, leading to invalid schema
+- Ability to turn error logs to raise (dry run mode)
+"""
 
 
-class SchemaError(_SchemaIssueMixin, Exception):
-    """Raise when the config problem should be fatal."""
-    pass
-
-
-class SchemaWarning(_SchemaIssueMixin, UserWarning):
-    """Emit when the problem should be non-fatal."""
-    pass
-
-
-class AddressMixin:
-    """
-    Mixin for schema objects that keeps their source SchemaAddress and
-    provides convenience helpers to raise errors / emit warnings bound
-    to that address.
-
-    The helpers accept an optional list of `subkeys` to append to the
-    stored address. This is useful when the message refers to a nested
-    attribute/key (e.g., a field inside ATTRS/VARS/COORDS).
-    """
-    _address: SchemaAddress  # subclasses provide this via attrs field
-
-    def _extend_address(self, subkeys: List[Union[str, int]] = []) -> SchemaAddress:
-        addr = self._address
-        for k in subkeys:
-            addr = addr.dive(k)
-        return addr
-
-    def error(self, message: str, subkeys: Optional[List[Union[str, int]]] = None) -> None:
-        raise SchemaError(message, self._extend_address(subkeys))
-
-    def warn(self, message: str, subkeys: Optional[List[Union[str, int]]] = None, *, stacklevel: int = 2) -> None:
-        warnings.warn(
-            SchemaWarning(message, self._extend_address(subkeys)),
-            stacklevel=stacklevel,
-        )
 
 
 # ----------------------- Converters & core classes ----------------------- #
 
-def _unit_converter(unit):
-    """Convert unit to a string or a units.DateTimeUnit object."""
+
+
+
+Scalar = bool | int | float | str
+Unit = str | units.DateTimeUnit
+RangeTuple = None | List[None] | Tuple[Scalar, Scalar] | Tuple[Scalar,Scalar, Unit]
+
+def unit_instance(cfg: ContextCfg, default_unit: units.UnitType=NoDefault) -> Unit:
+    """
+    Create instance of pint.Unit for a string intput or
+    instance of DateTimeUnit for the dict input.."""
+    unit, schema_ctx = cfg.value(), cfg.schema_ctx
     if unit is None:
-        return None
+        if default_unit is NoDefault:
+            schema_ctx.error(f"Obligatory unit was not specified.")
+        else:
+            return default_unit
     elif isinstance(unit, str):
-        return unit
+        try:
+            u = units.Unit(unit)
+            return u
+        except Exception as e:
+            schema_ctx.error(e)
     elif isinstance(unit, dict):
-        return units.DateTimeUnit(**unit)
-    else:
-        raise TypeError(f"Unsupported unit type: {type(unit)}")
+        try:
+            return units.DateTimeUnit(**unit)
+        except Exception as e:
+            cfg.schema_ctx.error(f"Invalid DateTimeUnit dict: {unit}. Error: {e}")
+    cfg.schema_ctx.error(f"Unsupported unit: {unit}")
+
+
+@attrs.define
+class DiscreteRange(AddressMixin):
+    codes_to_labels: np.ndarray
+
+    @staticmethod
+    def from_cfg(cfg: ContextCfg, source_col: str, convert_fn, na_value):
+        if isinstance(cfg.value(), str):
+            # read values from a CSV file
+            # TODO: for large discrete value arrays we should store them as a zarr array not in attrs
+            path = Path(cfg.schema_ctx.file) / cfg.value()
+            df = pandas.read_csv(path)
+            values = convert_fn(df[source_col])
+        else:
+            values = np.array(cfg.value())
+        # Use index zero for na_value
+        values = np.concatenate(([[na_value], values]))
+        return DiscreteRange(values)
+
+    @property
+    def na_value(self):
+        return self.codes_to_labels[0]
+
+    def asdict(self, value_serializer, filter):
+        return {'discrete': list(self.codes_to_labels[1:])}  # skip NaN
+
+    @cached_property
+    def labels_to_codes(self) -> dict[Any, int]:
+        return {lab: i for i, lab in enumerate(self.codes_to_labels)}  # NaN is code 0
+
+    def encode(self, values: Iterable[object]) -> np.ndarray:
+        # TODO: use Pndas to do encode fast
+        # single line: labels_to_codes.get(..., -1) in a comprehension
+        return np.asarray([self.labels_to_codes.get(v, 0) for v in values])
+
+    def decode(self, codes: Iterable[int]) -> np.ndarray:
+        # codes_to_labels has NaN at index 0; shift codes by +1 and index
+        c = np.asarray(codes, dtype=np.int64)
+        return self.codes_to_labels[c]
+
+class InfRange:
+    def encode(self, values: np.ndarray) -> np.ndarray:
+        return values
+
+    def decode(self, values: np.ndarray) -> np.ndarray:
+        return values
+
+    def asdict(self, value_serializer, filter):
+        return None
+
+
+
+
+@attrs.define
+class Interval(AddressMixin):
+    """
+    Start and end could be None to represent open intervals.
+    TODO: unit without type is inconsistent
+    """
+    start: Any
+    end: Any
+    unit: Unit
+
+    @classmethod
+    def from_list(cls, cfg: ContextCfg, default_unit):
+        lst, schema_ctx = cfg.value(), cfg.schema_ctx
+
+        if lst is None:     # empty interval
+            return cls(-np.inf, -np.inf, default_unit)
+
+        if not isinstance(lst, list):
+            lst = [lst]
+        if len(lst) == 0:   # full range
+            return cls(-np.inf, np.inf, default_unit)
+        if len(lst) == 1:   # single point
+            lst = 2 * lst
+
+        if len(lst) > 3:
+            raise cfg.schema_ctx.error(f"Invalid interval specification: {lst}")
+        if len(lst) == 2:   # start, end
+            unit = default_unit
+        else: # len(lst) == 3: # start, end, unit
+            unit = unit_instance(cfg.get(2, None), default_unit)
+        return cls(lst[0], lst[1], unit)
+
+
+    @classmethod
+    def step_limits(cls, cfg, default_unit):
+        # backward compatible
+        if cfg.cfg is None:
+            cfg.cfg = "no_new"
+        if isinstance(cfg.cfg, list) and len(cfg.cfg) == 0:
+            cfg.cfg = "any_new"
+
+        if isinstance(cfg.cfg, str):
+            if cfg.cfg == "no_new" :
+                return cls(-np.inf, -np.inf, default_unit)
+            elif cfg.cfg == "any_new":
+                return cls(-np.inf, np.inf, default_unit)
+            else:
+                cfg.schema_ctx.error(f"Invalid step_limits specification: {cfg.cfg}")
+        if isinstance(cfg.cfg, list):
+            start = cfg.cfg[0]
+            end = cfg.cfg[1]
+            unit = unit_instance(cfg.get(2, None), default_unit)
+        else:
+            assert isinstance(cfg.cfg, dict)
+            start = cfg.cfg['start']
+            end = cfg.cfg['end']
+            unit = unit_instance(cfg.get("unit", None), default_unit)
+        if start > end:
+            cfg.schema_ctx.error(f"Invalid step_limits specification: start {start} > end {end}")
+        return cls(start, end, unit)
+
+    def no_new(self):
+        return self.start == -np.inf and self.end == -np.inf
+
+    def any_new(self):
+        return self.start == -np.inf and self.end == np.inf
+
+    def asdict(self, value_serializer, filter):
+        # Here we serialize set_limits, reproducing special strings.
+        if self.any_new():
+            return "any_new"
+        elif self.no_new():
+            return "no_new"
+        else:
+            return [self.start, self.end, value_serializer(self, 2, self.unit)]
+
+
+
+@attrs.define
+class IntervalRange(Interval):
+    """
+    TODO: support and test DateTime ranges.
+    """
+    def asdict(self, value_serializer, filter):
+        return {'interval': Interval.asdict(self, value_serializer, filter)}
+
+    def encode(self, values: np.ndarray) -> np.ndarray:
+        # single line: labels_to_codes.get(..., -1) in a comprehension
+
+        correct_mask = (self.start <= values)  &  (values <= self.end)
+        if np.all(correct_mask):
+            return values
+        raise ValueError(f"Values out of range [{self.start}, {self.end}]: {values[~correct_mask]}")
+
+    def decode(self, codes: np.ndarray) -> np.ndarray:
+        # codes_to_labels has NaN at index 0; shift codes by +1 and index
+        c = np.asarray(codes, dtype=np.int64)
+        return codes
+
+
+Quantity = units.Quantity | units.DateTimeQuantity
 
 
 @attrs.define
 class Variable(AddressMixin):
-    _address: SchemaAddress = attrs.field(alias="_address", repr=False, eq=False)
-    # To prevent stripping underscore done by attrs by default.
-    name: str
-    unit: Optional[str] = attrs.field(default="", converter=_unit_converter)  # dimensionless
-    description: Optional[str] = None
-    coords: Union[str, List[str]] = None
-    df_col: Optional[str] = None
-    source_unit: Optional[str] = attrs.field(default=None, converter=_unit_converter)
+    """
+    Definition of a Variable in the zarr-fuse schema.
+    
+    TODO: 
+    - allow custom attrs for variables and coordinates
+    """
 
-    def __attrs_post_init__(self):
-        """Set df_cols to [name] if not explicitly provided."""
-        if self.df_col is None:
-            self.df_col = self.name
-        if self.source_unit is None:
-            self.source_unit = self.unit
-        if self.coords is None:
-            self.coords = [self.name]
-        if isinstance(self.coords, str):
-            self.coords = [self.coords]
-
-    @property
-    def attrs(self):
-        return dict(
-            unit=self.unit,
-            description=self.description,
-            df_col=self.df_col,
-            source_unit=self.source_unit,
-        )
-
-
-@attrs.define(slots=False)
-class Coord(AddressMixin):
-    _address: SchemaAddress = attrs.field(alias="_address", repr=False, eq=False)
-    name: str
-    description: Optional[str] = None
-    composed: Dict[str, List[Any]] = None
-    sorted: bool = True
-    chunk_size: Optional[int] = 1024    # Explicit chunk size, 1024 default. Equal to 'len(values)' for fixed size coord.
-    step_limits: Optional[List[float]] = []    # [min_step, max_step, unit]
-    #values: Optional[np.ndarray]  = attrs.field(eq=attrs.cmp_using(eq=np.array_equal), default=None)             # Fixed size, given coord values.
-
-    def __init__(self, **dict):
-        # _values = dict.get('values', [])
-        # if isinstance(_values, int):
-        #     _values = np.atleast_2d(np.arange(_values)).T
-        # elif isinstance(_values, list):
-        #     if len(_values) == 0:
-        #         _values = np.empty( (0, len(dict['composed'])) )
-        #     else:
-        #         a = np.asarray(_values)
-        #         if a.ndim == 1:
-        #             # Convert a 1D array to a column vector.
-        #             _values= a[:, np.newaxis]
-        #         _values = np.atleast_2d(_values)
-        #
-        # dict['values'] = _values
-        self._address = dict.get("_address")
+    def __init__(self, dict:ContextCfg):
+        self._address : SchemaCtx = dict.schema_ctx
         assert self._address is not None
 
-        if "composed" not in dict or len(dict["composed"]) == 0 or dict["composed"] is None:
-            dict["composed"] = [dict["name"]]
+        # Obligatory attributes
+        self.name: str = dict["name"].value()
+        self.coords: Union[str, List[str]] = dict.get("coords").value()
+        if isinstance(self.coords, str):
+            self.coords = [self.coords]
+        unit_item = dict.get("unit", None)
+        self.unit: Optional[Unit] = unit_instance(unit_item, units.NoneUnit())
 
-        self.name = dict["name"]
-        self.description = dict.get("description", None)
-        self.composed = dict["composed"]
-        self.chunk_size = dict.get("chunk_size", 1024)
-        self.step_limits = dict.get("step_limits", [])
-        if self.step_limits is not None and len(self.step_limits) > 0:
-            if len(self.step_limits) == 1:
-                self.step_limits = 2 * self.step_limits
-            if len(self.step_limits) == 2:
-                self.step_limits = [*self.step_limits, ""]
-            if len(self.step_limits) != 3:
-                self.error(
-                    f"step_limits should be a list of 3 elements, got {self.step_limits}",
-                    subkeys=["step_limits"],
-                )
-            if not isinstance(self.step_limits[2], str):
-                self.error(
-                    "step_limits unit (3rd element) must be a string",
-                    subkeys=["step_limits", 2],
-                )
+        # Optional attributes
+        default_dtype = self.unit.default_dtype()
+        type_cfg = dict.get("type", None)
+        na_cfg = dict.get("na_value", None)
+        self.type: DType = DType.from_cfg(type_cfg, default_dtype)
+        self.na_value = make_na(na_cfg, self.type.dtype)
 
-        self.sorted = dict.get('sorted', not self.is_composed())
+
+        self.na_value : Optional[Any] = make_na(na_cfg, self.type.dtype)
+
+        self.description: Optional[str] = dict.get("description", None).value()
+        self.df_col: Optional[str] = dict.get("df_col", self.name).value()
+
+        source_unit_item = dict.get("source_unit", None)
+        self.source_unit: Optional[Unit] = unit_instance(source_unit_item, self.unit)
+
+        # Depends on unit, df_col, source_unit
+        self.range: DiscreteRange | IntervalRange \
+            = self.range_instance(dict.get("range", None))
+
+    @property
+    def dtype(self):
+        return self.type.dtype
+
+    def valid_mask(self, array: np.ndarray) -> np.ndarray:
+        if self.na_value is None:
+            return np.full(array.shape, True, dtype=bool)
+        elif (self.na_value != self.na_value):
+            # alternativly use numexpr
+            na_array = np.full_like(array, self.na_value, dtype=self.dtype)
+            return (array != na_array) & (array == array)
+        else:
+            return array != self.na_value
+
+    def _zarr_keys(self):
+        return ['unit', 'type', 'range', 'description', 'df_col', 'source_unit']
+
+    def zarr_attrs(self):
+        return { k:convert_value(getattr(self, k)) for k in self._zarr_keys()}
+
+    def asdict(self, value_serializer, filter):
+        """
+        Custom asdict to override coords serialization.
+        """
+        return {
+            k: value_serializer(self, k, v)
+            for k, v in self.__dict__.items()
+            if filter(k, v) and v != None
+            }
+
+    def range_instance(self, dict_ctx: ContextCfg):
+        range_dict, schema_ctx = dict_ctx.value(), dict_ctx.schema_ctx
+        if range_dict is None:
+            return InfRange()
+
+        if 'discrete' in range_dict:
+            convert_fn = lambda vals: self.make_quantity(vals).magnitude
+            return DiscreteRange.from_cfg(dict_ctx['discrete'], self.df_col, convert_fn, self.na_value)
+        elif 'interval' in range_dict:
+            return IntervalRange.from_list(dict_ctx['interval'], self.unit)
+
+        schema_ctx.error(f"Invalid range specification: {range_dict}")
+
+    @staticmethod
+    def _opt_arg(arg, default):
+        return default if arg is None else arg
+
+    def convert_values(self, values, from_unit=None, dtype = None, to_unit=None, range = None):
+        """
+        Convert from source units to the variable's unit, check type
+        :param values:
+        :return:
+        """
+        quantity = self._make_quantity(values, from_unit=from_unit, dtype=dtype)
+        to_unit = self._opt_arg(to_unit, self.unit)
+        range = self._opt_arg(range, self.range)
+
+        q_new = quantity.to(to_unit)
+        q_new = q_new.magnitude
+        q_new = range.encode(q_new)
+        return q_new
+
+    def _make_quantity(self, values: np.ndarray, from_unit=None, dtype = None):
+        """
+        Convert raw values to a pint.Quantity or DateTimeQuantity in the variable's unit.
+        """
+        from_unit = self._opt_arg(from_unit, self.source_unit)
+        dtype = self._opt_arg(dtype, self.dtype)
+
+        if isinstance(from_unit, units.DateTimeUnit):
+            # DateTime specialization
+            quantity = units._create_dt_quantity(values, from_unit, log=self._address)
+        else:
+            try:
+                if dtype is not None:
+                    values = to_typed_array(values, dtype, self._address)
+            except ValueError:
+                raise ValueError(f"Variable '{self.name}' has values not-convertible to the type: {dtype}.")
+
+            # Pint specialization when a unit string is provided
+            assert isinstance(from_unit, (units.Unit, units.NoneUnit))
+            quantity = units.Quantity(values, from_unit)
+        return quantity
+
+    def magnitude(self, q: np.ndarray | Quantity) -> np.ndarray:
+        """
+        Return the magnitude of the provided quantity, converting to the variable's unit if needed.
+        """
+        if isinstance(q, (units.Quantity, units.DateTimeQuantity)):
+            return q.magnitude
+        else:
+            return q
+
+    def quantity(self, q: np.ndarray | Quantity) \
+            -> Quantity:
+        """
+        Return the provided quantity, converting to the variable's unit if needed.
+        """
+        if isinstance(q, (units.Quantity, units.DateTimeQuantity)):
+            return q.to(self.unit)
+        else:
+            return self._make_quantity(q, from_unit=self.unit)
+
+    def encode(self, values: np.ndarray | Quantity) -> np.ndarray:
+        return self.range.encode(self.magnitude(values))
+
+    def decode(self, values: np.ndarray) -> Quantity:
+        return self.quantity(self.range.decode(values))
+
+class Coord(Variable):
+
+    def __init__(self, cfg:ContextCfg):
+        # Default coords list is  only for coords.
+        if 'coords' not in cfg:
+            cfg['coords'] = cfg['name'].value()
+        super().__init__(cfg)
+
+        composed = cfg.get("composed", None).value()
+        if composed is None or len(composed) == 0:
+            composed = [self.name]
+        self.composed: Dict[str, List[Any]] = composed
+
+        # Explicit chunk size, 1024 default. Equal to 'len(values)' for fixed size coord.
+        self.chunk_size : Optional[int] \
+            = cfg.get("chunk_size", 1024).value()
+
+        step_item = cfg.get("step_limits", "any_new")  # None value allowed
+        default_step_unit = self.unit.delta_unit() # For DateTimeUnit the incremental/step unit is a pint.Unit of time.
+        self.step_limits = Interval.step_limits(step_item, default_step_unit)
+
+        self.sorted : bool = cfg.get('sorted', not self.is_composed()).value()
+
         # May be explicit in the future. Namely, if we support interpolation of sparse coordinates.
         self._variables = None # set in DatasetSchema.__init__
 
-    @property
-    def attrs(self):
-        """
-        Coordinate attributes set as attribute of rthe esulting Dataset variable.
-        Does not affect serialization.
-        :return: dict of exported attributes
-        """
-        return dict(
-            composed=self.composed,
-            description=f"\n\n{self.description}",
-            chunk_size=self.chunk_size,
-        )
+    def _zarr_keys(self):
+        return super()._zarr_keys() + ['composed', 'chunk_size', 'step_limits', 'sorted']
 
     def is_composed(self):
         return len(self.composed) > 1
-
-    def step_unit(self):
-        """
-        Return the unit of the step_limits.
-        """
-        coord_unit = self._variables[self.name].unit
-        step_unit = units.step_unit(coord_unit)
-        return step_unit
-
 
 Attrs = Dict[str, Any]
 attrs_field = attrs.field
 # Overcome the name conflict within DatasetSchema class.
 
+reserved_keys = set(["ATTRS", "COORDS", "VARS"])
+
 @attrs.define
 class DatasetSchema(AddressMixin):
-    _address: SchemaAddress = attrs.field(alias="_address", repr=False, eq=False)
+    _address: SchemaCtx = attrs.field(alias="_address", repr=False, eq=False)
     ATTRS: Attrs = attrs_field(factory=dict)
     COORDS: Dict[str, Coord] = attrs_field(factory=dict)
     VARS: Dict[str, Variable] = attrs_field(factory=dict)
 
-    def __init__(self, _address: SchemaAddress, attrs: Attrs, vars: Dict[str, Any], coords: Dict[str, Any]):
-        self._address = _address
-        self.ATTRS = attrs
-        self.VARS = self.safe_instance(Variable, vars, section_key="VARS")
-        self.COORDS = self.safe_instance(Coord, coords, section_key="COORDS")
+    def __init__(self, attrs: ContextCfg, vars: ContextCfg, coords: ContextCfg):
+        self._address = attrs.schema_ctx.parent()
+        self.ATTRS = attrs.value()
+        self.ATTRS['VERSION'] = __version__
 
+        # Backward compatible definition of coords as VARS.
+        for coord in coords.keys():
+            if coord in vars:
+                self.warn(
+                    f"OBSOLETE. Coordinate '{coord}' is defined both in VARS and COORDS. ",
+                    subkeys=["COORDS", coord],
+                )
+                coords[coord].value().update(vars[coord].cfg)
+                del vars.value()[coord]
+
+        self.VARS = self.safe_instance(Variable, vars)
         # Add implicitly defined coords.
+        for v in self.VARS.values():
+            assert isinstance(v.coords, list), f"var: {v.name}"
         implicit_coords = [coord for var in self.VARS.values() for coord in var.coords]
         for coord in set(implicit_coords):
-            coord_obj = self.COORDS.setdefault(
-                coord, Coord(name=coord, _address=self._address.dive("COORDS").dive(coord))
+            coords.value().setdefault(
+                coord, dict(name=coord)
             )
-            if not coord_obj.is_composed():
-                self.VARS.setdefault(
-                    coord,
-                    Variable(name=coord, _address=self._address.dive("VARS").dive(coord)),
-                )
+
+        self.COORDS = self.safe_instance(Coord, coords)
+
 
         # Link coords to variables
+        # TODO: Getting rid of default coord variable injection, we could now move this to Coord constructor.
         for coord in self.COORDS.values():
             coord._variables = self.VARS
 
-    def safe_instance(self, cls, kwargs_dict: Dict[str, Any], section_key: str):
+    def safe_instance(self, cls, kwargs_dict: ContextCfg):
         """
         Create mapping of name -> instance for the given class with the provided keyword arguments.
         Ensures that each instance receives its origin SchemaAddress based on self._address.
         """
         out: Dict[str, Any] = {}
-        for name, d in kwargs_dict.items():
-            if not isinstance(d, dict):
-                self.error(
-                    f"Expected a dictionary for {section_key}.{name}, got: {type(d).__name__}",
-                    subkeys=[section_key, name],
-                )
-            data = dict(d)
-            data["name"] = name
-            data["_address"] = self._address.dive(section_key).dive(name)
-            out[name] = cls(**data)
+        for name in kwargs_dict.keys():
+            d = kwargs_dict[name]
+            if  not isinstance(d.value(), dict):
+                d.schema_ctx.error(f"Expected a dictionary, got: {type(d).__name__}")
+            d["name"] = name
+            out[name] = cls(d)
         return out
 
     def is_empty(self):
-        return not self.ATTRS and not self.COORDS and not self.VARS
+        return (
+                self.ATTRS == {'VERSION':__version__}
+                and not self.COORDS
+                and not self.VARS)
 
+
+    def zarr_attrs(self):
+        attrs = { k:convert_value(v) for k,v in self.ATTRS.items()}
+        return attrs
+
+    # def diff(self, other:'DatasetSchema') -> List[str]:
+    #     """
+    #     Compare two DatasetSchema instances and return a list of differences as strings.
+    #     """
+    #     diffs = []
+    #
+    #     # Compare ATTRS
+    #     for key in set(self.ATTRS.keys()).union(other.ATTRS.keys()):
+    #         val1 = self.ATTRS.get(key, None)
+    #         val2 = other.ATTRS.get(key, None)
+    #         if val1 != val2:
+    #             diffs.append(f"ATTRS['{key}']: {val1} != {val2}")
+    #
+    #     # Compare COORDS
+    #     for  in set(self.COORDS.keys()).union(other.COORDS.keys()):
+    #         coord1 = self.COORDS.get(key, None)
+    #         coord2 = other.COORDS.get(key, None)
+    #         if coord1 is None:
+    #             diffs.append(f"COORD '{key}' missing in first schema.")
+    #         elif coord2 is None:
+    #             diffs.append(f"COORD '{key}' missing in second schema.")
+    #         else:
+    #             coord_diffs = coord1.diff(coord2)
+    #             diffs.extend([f"COORD '{key}': {d}" for d in coord_diffs])
+    #
+    #     # Compare VARS
+    #     for key in set(self.VARS.keys()).union(other.VARS.keys()):
+    #         var1 = self.VARS.get(key, None)
+    #         var2 = other.VARS.get(key, None)
+    #         if var1 is None:
+    #             diffs.append(f"VAR '{key}' missing in first schema.")
+    #         elif var2 is None:
+    #             diffs.append(f"VAR '{key}' missing in second schema.")
+    #         else:
+    #             var_diffs = var1.diff(var2)
+    #             diffs.extend([f"VAR '{key}': {d}" for d in var_diffs])
+    #
+    #     return diffs
 
 @attrs.define
 class NodeSchema(AddressMixin):
-    _address: SchemaAddress = attrs.field(alias="_address", repr=False, eq=False)
+    _address: SchemaCtx = attrs.field(alias="_address", repr=False, eq=False)
     ds: DatasetSchema
     groups: Dict[str, "NodeSchema"] = attrs.field(factory=dict)
 
+    @classmethod
+    def make_empty(cls):
+        return build_nodeschema(ContextCfg({}, SchemaCtx([])))
+
+    def asdict(self, value_serializer, filter):
+        """
+        Custom asdict to override ds and groups serialization.
+        """
+        children_dict = value_serializer(self, "", self.groups)
+        assert set(children_dict.keys()).isdisjoint(reserved_keys)
+
+        ds_dict = value_serializer(self, "", self.ds)
+        children_dict.update(ds_dict)
+        return children_dict
 
 # ----------------------- (De)serialization helpers ----------------------- #
 
-def dict_deserialize(content: dict, address: SchemaAddress) -> NodeSchema:
+def build_nodeschema(content: ContextCfg) -> NodeSchema:
     """
     Recursively deserializes the schema = tree of node dictionaries.
     Create instances of DatasetScheme from special keys:
@@ -286,21 +550,21 @@ def dict_deserialize(content: dict, address: SchemaAddress) -> NodeSchema:
     TODO: report path to error key
     """
     ds_schema = DatasetSchema(
-        _address=address,
         attrs = content.pop('ATTRS', {}),
         vars=content.pop('VARS', {}),
         coords = content.pop('COORDS', {})
     )
 
     children = {
-        key: dict_deserialize(value, address.dive(key))
-        for key, value in content.items()
+        key: build_nodeschema(content[key])
+        for key in content.keys()
     }
 
-    return NodeSchema(_address=address, ds=ds_schema, groups=children)
+    return NodeSchema(_address=content.schema_ctx, ds=ds_schema, groups=children)
 
 
-def deserialize(source: Union[IO, str, bytes, Path], source_description=None) -> NodeSchema:
+def deserialize(source: Union[IO, str, bytes, Path],
+                source_description=None, log: zf_logger.Logger=None) -> NodeSchema:
     """
     Deserialize YAML from a file path, stream, or bytes containing YAML content.
 
@@ -311,6 +575,7 @@ def deserialize(source: Union[IO, str, bytes, Path], source_description=None) ->
         - Otherwise, it is assumed to be a file-like stream.
 
     source_description: Used for address as a 'file_name' in case of string or YAML source
+
     Returns:
       A dictionary resulting from parsing the YAML and processing it with dict_deserialize().
 
@@ -338,8 +603,12 @@ def deserialize(source: Union[IO, str, bytes, Path], source_description=None) ->
             raise TypeError("Provided source is not a supported type (IO, str, bytes, or Path)") from e
 
     raw_dict = yaml.safe_load(content) or {}
-    root_address = SchemaAddress(addr=[], file=file_name)
-    return dict_deserialize(raw_dict, root_address)
+    if log is None:
+        log = default_logger()
+    version = raw_dict.get('ATTRS', {}).get('VERSION', '0.2.0')
+    root_address = SchemaCtx(addr=[], version=version, file=file_name, logger=log)
+    root = ContextCfg(raw_dict, root_address)
+    return build_nodeschema(root)
 
 
 def convert_value(obj: NodeSchema):
@@ -352,15 +621,14 @@ def convert_value(obj: NodeSchema):
     - For basic types (int, float, str, bool, None), return the value as is.
     - Otherwise, return the string representation of obj.
     """
-    if isinstance(obj, NodeSchema):
-        children_dict = convert_value(obj.groups)
-        assert set(children_dict.keys()).isdisjoint(reserved_keys)
+    if isinstance(obj, ContextCfg):
+        raise obj.schema_ctx.error(f"Leaking ContextCfg: {obj.value()}")
 
-        ds_dict = convert_value(obj.ds)
-        children_dict.update(ds_dict)
-        return children_dict
-
-    if attrs.has(obj):
+    if hasattr(obj, "asdict"):
+        return obj.asdict(
+            value_serializer=lambda inst, field, value: convert_value(value),
+            filter=lambda attribute, value: attribute not in {"_address", "_variables"} )
+    elif attrs.has(obj):    # for sam reason attrs.has is true also for non attrs classes Variable, Coord
         # Serialize attrs instances, serialize values recursively.
         return attrs.asdict(
             obj,
@@ -384,8 +652,9 @@ def serialize(node_schema: NodeSchema, path: Union[str, Path]=None) -> str:
     The conversion is performed by the merged convert_value function which uses a
     custom value serializer for attrs.asdict.
     """
-    converted = convert_value(node_schema)
-    content = yaml.safe_dump(converted, sort_keys=False)
+    root_node_dict = convert_value(node_schema)
+    root_node_dict['ATTRS']['VERSION'] = __version__
+    content = yaml.safe_dump(root_node_dict, sort_keys=False)
     if path is None:
         return content
     else:

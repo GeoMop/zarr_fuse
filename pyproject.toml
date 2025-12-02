@@ -59,6 +59,7 @@ dependencies = [
     "python-dotenv",  # for loading environment variables from .env files
 ]
 
+
 [project.optional-dependencies]
 plot=[
     "matplotlib",
@@ -97,6 +98,11 @@ dev = [
     # any additional development tools
 ]
 
+[project.scripts]
+zf = "zf.cli:main"
+
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["zarr_fuse", "zarr_fuse.*"]
+include = ["zarr_fuse", "zarr_fuse.*", "zf", "zf.*"]
+exclude = ["zarr_fuse.test*", "tests*"]

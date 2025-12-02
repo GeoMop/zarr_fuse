@@ -15,12 +15,16 @@ import polars as pl
 import xarray as xr
 import numpy as np
 import zarr
+from zarr.errors import ZarrUserWarning, GroupNotFoundError
+
 import fsspec
 import asyncio
 from pathlib import Path
-
+from functools import cached_property
 
 from . import zarr_schema, units
+from .schema_ctx import RaisingLogger
+from .dtype_converter import to_typed_array, TrimmedArrayWarning
 from .logger import get_logger
 from .interpolate import interpolate_ds
 from .zarr_schema import DatasetSchema, NodeSchema
@@ -36,6 +40,13 @@ tuple val coords:
 
 - pivot_nd - hash source cols
 - future read - hash source cols
+
+TODO:
+- strict separation of read only and append/write operations
+
+- schema and dataset should be read only
+  If the group does not exist, should return None , empty or raise error.
+- Write operations: logger (see also LoggingStore), and update operations.
 """
 
 
@@ -136,10 +147,19 @@ def _zarr_store_open(store_options: Dict[str, Any]) -> zarr.storage.StoreLike:
         fs = fsspec.filesystem('s3', **s3_opts)
         # Remove s3:// scheme from path for FsspecStore
         clean_path = store_url.replace('s3://', '')
-        return zarr.storage.FsspecStore(fs, path=clean_path)
-    elif re.match(r'^zip://', store_url):
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=".*fs .* was not created with `asynchronous=True`.*",
+                category=ZarrUserWarning,
+            )
+            return zarr.storage.FsspecStore(fs, path=clean_path)
+    elif store_url.startswith('zip://'):
+        store_url = store_url[len('zip://'):]
         return zarr.storage.ZipStore(store_url)
     else:
+        if store_url.startswith('file://'):
+            store_url = store_url[len('file://'):]
         path = Path(store_url)
         if not path.is_absolute():
             path = store_options.get('WORKDIR', ".") / path
@@ -153,7 +173,7 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
     - overwrite by schema ATTRS is provided
     - overwrite by evironment variables
     """
-    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS', 'WORKDIR'}
+    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS', 'WORKDIR', 'MODE'}
     secret_attrs = {'S3_ACCESS_KEY', 'S3_SECRET_KEY'}
     interpreted_attrs = interpreted_attrs.union(secret_attrs)
     options = {key:kwargs[key] for key in interpreted_attrs if key in kwargs}
@@ -173,12 +193,15 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
 
 def _get_schema_safe(schema):
     if isinstance(schema, NodeSchema):
-        node_schema = schema
-    elif isinstance(schema, (str, Path)):
-        node_schema = zarr_schema.deserialize(schema)
+        return schema
+    if isinstance(schema, str):
+        if schema == '':
+            return NodeSchema.make_empty()
+        schema = Path(schema)
+    if isinstance(schema, Path):
+        return zarr_schema.deserialize(schema)
     else:
         raise TypeError(f"Unsupported schema type: {type(schema)}. Expected NodeSchema or Path.")
-    return node_schema
 
 
 def _wipe_store(store):
@@ -234,7 +257,7 @@ def remove_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
     #store.delete_dir("")
 
 
-def open_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
+def open_store(schema: zarr_schema.NodeSchema | Path | str, **kwargs):
     """
     Open existing or create a new ZARR store according to given schema.
     'schema': Could be schema dict or YAML string or Path object to YAML file.
@@ -253,7 +276,8 @@ def open_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
     except ZFOptionError as e:
         raise ZFOptionError(f"{str(e)}. Opening store for schema {schema}.")
 
-    return Node("", store, new_schema = node_schema)
+    mode = options.get('MODE', 'a')
+    return Node("", store, new_schema = node_schema, mode=mode)
 
 class Node:
     """
@@ -326,7 +350,7 @@ class Node:
             xr_var = xr.Variable(
                      dims=list(var.coords),  # Default dimension named after the coordinate key.
                      data=data,
-                     attrs=var.attrs
+                     attrs=var.zarr_attrs()
                  )
         except ValueError as e:
             raise ValueError(f"Variable '{var.name}' has incompatible shape {data.shape} for coordinates {var.coords}.") from e
@@ -350,7 +374,7 @@ class Node:
         np_var = xr.Variable(
             dims=(name,),
             data=np_var,
-            attrs=coord.attrs.copy()
+            attrs=coord.zarr_attrs()
         )
         return np_var
 
@@ -419,7 +443,8 @@ class Node:
 
 
     def __init__(self, name, store, parent=None,
-                 new_schema:zarr_schema.NodeSchema=None):
+                 new_schema:zarr_schema.NodeSchema=None,
+                 mode="a"):
         """
         Parameters:
           name (str): The name of the node. For the root node, use an empty string ("").
@@ -428,21 +453,32 @@ class Node:
         """
         self.name = name
         self.store = store
-        self.parent = parent
+        if store.read_only:
+            mode = 'r'
+        else:
+            # Make sure group exists.
+            zarr_root_dict = zarr.open_group(self.store).store
 
-        # Setup logger
-        zarr_root_dict = zarr.open_group(store).store
-        self.logger = get_logger(zarr_root_dict, self.group_path)
+        self.mode = mode
+        self.parent = parent
 
         self.children = self._make_consistent(new_schema)
         # This calls self._update_schema_ds() implicitely.
 
-        # TODO: separate class to represent child nodes dict
-        # it must be a separate class with overwritten setitem method to
-        # maintain consistency between node tree and zarr storage.
-        # Alternatively we can eliminate the dict like interface and only provide
-        # access to keys and getitem method (minimalistic corresponding to the zarr storage API)
 
+    @cached_property
+    def logger(self):
+        if self.mode == 'r':
+            return RaisingLogger(get_logger(store=None, path=self.group_path))
+        else:
+            zarr_root_dict = zarr.open_group(self.store).store
+            return get_logger(zarr_root_dict, self.group_path)
+
+
+
+
+    def _make_null_ctx(self):
+        return zarr_schema.SchemaCtx([], file='', logger=self.logger)
 
     def _storage_group_paths(self):
         """
@@ -477,7 +513,7 @@ class Node:
         if new_node_schema is None:
             # node in storage but not in schema
             # use ds_schema from the storage and empty new children dict
-            null_address = zarr_schema.SchemaAddress([], file=None)
+            null_address = self._make_null_ctx()
             new_node_schema = zarr_schema.NodeSchema(
                 null_address,
                 self.schema,
@@ -519,9 +555,9 @@ class Node:
         """
         try:
             old_schema = self.schema
-        except KeyError:
-            null_address = zarr_schema.SchemaAddress([], file=None)
-            old_schema = zarr_schema.DatasetSchema(null_address, {}, {}, {})
+        except (KeyError,GroupNotFoundError):
+            cfg = zarr_schema.ContextCfg(dict(attrs={}, vars={}, coords={}), self._make_null_ctx())
+            old_schema = zarr_schema.DatasetSchema(cfg['attrs'], cfg['vars'], cfg['coords'])
 
         if old_schema.is_empty():
             # Initialize new dataset.
@@ -531,8 +567,8 @@ class Node:
             return new_schema
         else:
             # Preserve dataset schema.
-            assert new_schema == old_schema, (f"Modifying node dataset schema is not supported."
-                                      f"\nold:{old_schema}\nnew{new_schema} ")
+            #assert new_schema == old_schema, (f"Modifying node dataset schema is not supported."
+            #                          f"\nold:{old_schema}\nnew{new_schema} ")
             return old_schema
 
     def items(self):
@@ -580,12 +616,8 @@ class Node:
         """
         rel_path = self.group_path #+ self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
-        print(f"DEBUG: Opening Zarr group at path: {rel_path}")
-        ds = xr.open_zarr(self.store, group=rel_path)
-        print("DEBUG: Dataset loaded. Variables:", list(ds.data_vars))
-        print("DEBUG: Coordinates:", list(ds.coords))
+        ds = xr.open_zarr(self.store, group=rel_path, consolidated=False)
         for coord in ds.coords:
-            print(f"DEBUG: Coord {coord} attrs: {ds.coords[coord].attrs}")
             assert  'composed' in ds.coords[coord].attrs
         return ds
 
@@ -626,12 +658,19 @@ class Node:
            -
         """
         ds = pivot_nd(self.schema, polars_df, self.logger)
+        # Test for valid coords
+        for k, v in self.schema.COORDS.items():
+            if k not in ds.coords:
+                raise ValueError(f"Coordinate '{k}' required by schema is missing in the provided data.")
+            if (ds[k] != ds[k]).any():
+                raise ValueError(f"Coordinate '{k}' contains NaN/NaT values, which are not allowed.")
+
         written_ds, merged_coords = self.merge_ds(ds)
         # check unique coordsregion="auto",
         dup_dict = check_unique_coords(written_ds)
         if  dup_dict:
             self.logger.error(dup_dict)
-        return written_ds
+        #return written_ds
 
     def update_dense(self, vars):
         # TODO:
@@ -649,8 +688,97 @@ class Node:
         dup_dict = check_unique_coords(written_ds)
         if dup_dict:
             self.logger.error(dup_dict)
-        return written_ds
+        #return written_ds
 
+    def _validate_ds_against_schema(self, ds: xr.Dataset):
+        """
+        Ensure that a provided xarray.Dataset is compatible with this node's schema:
+        - all schema coordinates are present,
+        - all schema variables are present,
+        - variable dims match the schema's coord list.
+
+        Extra coordinates/variables in `ds` are allowed but logged as a warning.
+        """
+        schema = self.schema
+        path_str = self.group_path or "/"
+
+        # --- Coordinates ---
+        for cname, c_schema in schema.COORDS.items():
+            c_schema.validate_ds_coord(ds.coords.get(cname, None), path_str, self.logger)
+            if cname not in ds.coords:
+                self.logger.error(
+                    KeyError(f"Source dataset is missing coordinate '{cname}'."))
+
+            coord = ds.coords[cname]
+            # In your own code you always create coords as 1D with dim == name
+            if coord.ndim != 1 or coord.dims != (cname,):
+                raise ValueError(
+                    f"Coordinate '{cname}' for node '{path_str}' must be 1D with "
+                    f"dimension '{cname}', got dims={coord.dims}."
+                )
+
+        # --- Variables ---
+        for vname, vschema in schema.VARS.items():
+            if vname not in ds.data_vars:
+                raise ValueError(
+                    f"Dataset for node '{path_str}' is missing variable '{vname}' "
+                    f"required by schema."
+                )
+
+            da = ds[vname]
+            expected_dims = tuple(vschema.coords)
+            if tuple(da.dims) != expected_dims:
+                raise ValueError(
+                    f"Variable '{vname}' in node '{path_str}' has dims {da.dims}, "
+                    f"but schema expects {expected_dims}."
+                )
+
+            # ensure all dims exist as coordinates in schema
+            for dim in da.dims:
+                if dim not in schema.COORDS:
+                    raise ValueError(
+                        f"Variable '{vname}' in node '{path_str}' uses dimension "
+                        f"'{dim}' which is not declared as a coordinate in schema."
+                    )
+
+        # --- Warn about extras (but allow them) ---
+        extra_vars = set(ds.data_vars) - set(schema.VARS)
+        if extra_vars:
+            self.logger.warning(
+                f"Node '{path_str}': dataset has variables not present in schema: "
+                f"{sorted(extra_vars)}. They will still be written."
+            )
+
+        extra_coords = set(ds.coords) - set(schema.COORDS)
+        if extra_coords:
+            self.logger.warning(
+                f"Node '{path_str}': dataset has coordinates not present in schema: "
+                f"{sorted(extra_coords)}. They will still be written."
+            )
+
+    def update_from_ds(self, ds: xr.Dataset):
+        """
+        Alternative to `update_dense` that accepts a fully-formed xarray.Dataset.
+
+        - Verifies that `ds` is compatible with this node's schema
+          (coordinates + variables).
+        - Then merges it into the underlying zarr store via `merge_ds`.
+
+        This is intended for use by higher-level tools (e.g. `zf cp`) that
+        already have an xarray.Dataset and don't need the Polars/NumPy path.
+        """
+        # Validate compatibility with the current node schema
+        self._validate_ds_against_schema(ds)
+
+        # Merge/write to the store using existing logic
+        written_ds, merged_coords = self.merge_ds(ds)
+
+        # Optional: still check for duplicated coordinates and log them
+        dup_dict = check_unique_coords(written_ds)
+        if dup_dict:
+            self.logger.error(dup_dict)
+
+        return written_ds
     def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode
         rel_path = self.group_path  # + self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
@@ -790,7 +918,8 @@ class Node:
             # come from the store (i.e. the full arrays). This ensures consistency.
             # (This constructs an indexers dict using the existing merged coordinates.)
             indexers = {d: merged_coords[d] for d in dim_coord.dims if d != dim}
-            ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=np.nan)
+            na_value = ds_update.attrs.get('na_value', np.nan)
+            ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=na_value)
 
             # Append the extension subset along the current dimension.
             last_written_ds = self.write_ds(ds_ext_reindexed, mode="a", append_dim=dim)
@@ -934,7 +1063,7 @@ def check_unique_coords(ds):
     }
 
 
-def eliminate_dims_if_equal(arr: np.ndarray, dims_to_check: List[bool]) -> np.ndarray:
+def eliminate_dims_if_equal(arr: np.ma.MaskedArray, dims_to_check: List[bool]) -> np.ndarray:
     """
     Check that for each axis flagged True in dims_to_check, all values along that axis
     are equal. For each such axis, eliminate that dimension by taking the 0-th slice.
@@ -964,32 +1093,41 @@ def eliminate_dims_if_equal(arr: np.ndarray, dims_to_check: List[bool]) -> np.nd
 
     # Process axes in descending order so that removal of one axis doesn't change indices.
     for axis in reversed(range(arr.ndim)):
-        if dims_to_check[axis]:
-            # Take the first element along the axis.
-            ref = np.take(arr, 0, axis=axis)
-            # Expand dims so that it can broadcast for comparison.
-            ref_expanded = np.expand_dims(ref, axis=axis)
-            if not np.all(arr == ref_expanded):
-                raise ValueError(f"Values along axis {axis} are not all equal")
-            # Remove this axis by selecting the 0th element along that axis.
-            arr = np.take(arr, 0, axis=axis)
-    return arr
+        if not dims_to_check[axis]:
+            continue
+
+        # Take the first valid element along the axis.
+        i_ref = arr.argmax(axis=axis)
+
+        # Expand dims so that it can broadcast for comparison.
+        expanded_idx = np.expand_dims(i_ref, axis=axis)  # shape like arr but axis len 1
+        ref_expanded = np.take_along_axis(arr, expanded_idx, axis=axis)
+        equal_on_valid = (arr == ref_expanded)
+        if not equal_on_valid.compressed().all():
+            print(arr)
+            raise ValueError(f"Values along axis {axis} are not all equal")
+        # Remove this axis by selecting the 0th element along that axis.
+        arr = ref_expanded.squeeze(axis=axis)
+    return arr.data
 
 def get_df_col(df, var:zarr_schema.Variable, logger: logging.Logger):
     try:
         col_series = df[var.df_col].to_numpy()
     except pl.exceptions.ColumnNotFoundError:
         logger.error(f"Source column '{var.df_col}' not found in the input DataFrame:\n{df.head()}")
-        return np.full(df.shape[0], np.nan)
+        return np.full(df.shape[0], var.na_value)
     try:
-        source_quantity_arr = units.create_quantity(col_series, from_unit=var.source_unit)
+        q_new = var.convert_values(col_series)
     except ValueError as e:
+        # TODO: better test of the var.convert_values and treatment of possible conversion error there
+        # reporting detailed variable info.
+        print(col_series)
         logger.error(f"Failed to parse values of column '{var.df_col}' with\n"
                      f"unit/format specification:{var.source_unit}\n"
-                     f"values:\n{df.head()}")
-        return np.full(df.shape[0], np.nan)
-    q_new = source_quantity_arr.to(var.unit)
-    return q_new.magnitude
+                     f"values:\n{df.head()}"
+                     f"\n Original error: {e}")
+        return np.full(df.shape[0], var.na_value)
+    return q_new
 
         # TODO: log missing column
 
@@ -1008,6 +1146,88 @@ def dataset_from_np(schema: zarr_schema.DatasetSchema, vars: Dict[str, np.ndarra
     ds_out = xr.Dataset(data_vars=data_vars, coords=coords_dict, attrs=attrs)
     return ds_out
 
+
+def coerce_df(schema: zarr_schema.DatasetSchema,
+              df: pl.DataFrame,
+              logger):
+    """
+    Front half of pivot_nd:
+
+    1. Coerce all variable columns from df into 1D numpy arrays (no masking yet).
+    2. Coerce all coord columns (including composed coords) into data_vars,
+       then build coordinate arrays per dimension.
+    3. Compute per-row integer indices into each coord axis, and a valid_rows
+       mask (rows with valid coords).
+    4. Build df_multi_idx (tuple of index arrays) for valid rows and apply
+       valid_rows to variable columns.
+    5. Build final coords_dict via Node._create_coords.
+
+    Returns
+    -------
+    df_multi_idx : tuple[np.ndarray, ...]
+        Multi-index: one 1D index array per dim, all length K_valid.
+
+    coords_dict : dict[str, Any]
+        Final coordinate mapping as produced by Node._create_coords.
+
+    var_data : dict[str, np.ndarray]
+        Variable columns from df, coerced and masked by valid_rows.
+    """
+    # --- Step 1: DF -> dict of 1d arrays (variables only), no masking yet ---
+    data_vars = {
+        k: get_df_col(df, var, logger)
+        for k, var in schema.VARS.items()
+    }
+
+    # --- Step 2: apply hash of tuple coords / coerce coord columns ---
+    # (kept very close to your original code)
+    valid_rows = np.ones(len(df), dtype=bool)
+    for k, c in schema.COORDS.items():
+        if (c.composed is not None) and (len(c.composed) > 1):
+            # hash tuple coords
+            tuple_list = zip(*(data_vars[comp] for comp in c.composed))
+            coord_valid_rows = np.all([schema.VARS[comp].valid_mask(data_vars[comp]) for comp in c.composed], axis=0)
+            hash_list = [hash(tuple(t)) for t in tuple_list]
+            data_vars[k] = np.array(hash_list, dtype=np.int64)
+        else:
+            # mix vars and coord to be backward compatible with remaining code
+            col = get_df_col(df, c, logger)
+            coord_valid_rows = c.valid_mask(col)
+            data_vars[k] = col
+            # print("1D coord:", k)
+        valid_rows = valid_rows & coord_valid_rows
+    # filter data_vars
+    data_vars = {k:v[valid_rows] for k,v in data_vars.items()}
+
+    # --- Step 3: extract coords and build indices / valid_rows ---
+    idx_list = []
+    coords_dict_raw = {}
+    dims = list(schema.COORDS.keys())
+
+    #n_rows = len(df)
+    #valid_rows = np.ones(n_rows, dtype=bool)
+
+    for d in dims:
+        df_coord_array = data_vars[d]
+        coords = np.unique(df_coord_array)
+        coords = np.sort(coords)
+
+        coords_dict_raw[d] = coords
+        final_idx = np.searchsorted(coords, df_coord_array)
+        idx_list.append(final_idx)
+
+    # Multi-index: one index array per dim, but only for valid rows
+    #df_multi_idx = tuple(idx[valid_rows] for idx in idx_list)
+    # multiindex for each df row, but flattend, so it actually index result_nd_array.flat[..]
+    coord_sizes = [len(coords_dict_raw[d]) for d in dims]
+    df_multi_idx = np.ravel_multi_index(idx_list, dims=coord_sizes)  #
+
+    # --- Step 5: let Node build final coords (xarray-ready etc.) ---
+    coords_dict = Node._create_coords(schema.COORDS, coords_dict_raw)
+
+    return df_multi_idx, coords_dict, data_vars
+
+
 def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     """
     Pivot a Polars DataFrame with columns for each dimension in self.dataset.dims
@@ -1025,56 +1245,83 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     Returns:
         xr.Dataset: The pivoted dataset with data variables defined on the new N-dim grid,
                     and with coordinates for each dimension.
-    """
-    # 1. DF -> dict of 1d arrays,
-    data_vars = {
-        k: get_df_col(df, var, logger)
-        for k, var in schema.VARS.items()
-    }
-    # 2. apply hash of tuple coords, input Dict: ds_name : [df_cols]
-    for k, c in schema.COORDS.items():
-        if (c.composed is not None) and (len(c.composed) > 1):
-            # hash tuple coords
-            tuple_list = zip( *(data_vars[c] for c in c.composed) )
-            hash_list = [hash(tuple(t)) for t in tuple_list]
-            data_vars[k] = np.array(hash_list)
 
-    # 3. Extract coords
-    idx_list = []
-    coords_dict = {}
-    dims = list(schema.COORDS.keys())
-    # Loop over each dimension in the original dataset.
-    for d in dims:
-        # Get the name(s) of the column(s) in df corresponding to this dimension.
-        df_coord_array = data_vars[d]
-        # Get the coordinate values from the dataset (assumed to be in desired order).
-        coords = np.sort(np.unique(df_coord_array))
-        coords_dict[d] = coords  # will be used as the coordinate values for this dim.
-        #coord_sizes[d].append(len(coords))
-        # Map each row’s coordinate (from df) to its index in the common_coords.
-        # (This works as long as common_coords is sorted. In many cases ds coordinates are already sorted.)
-        final_idx = np.searchsorted(coords, df_coord_array)
-        idx_list.append(final_idx)
-    coord_sizes = [len(coords_dict[d]) for d in dims]
-    # Create an array of indices for all dimensions, one row per dimension.
-    idx_arr = np.vstack(idx_list)
-    # Compute flat indices for the N-dim output array.
-    flat_idx = np.ravel_multi_index(idx_arr, dims=coord_sizes)
-    coords_dict = Node._create_coords(schema.COORDS, coords_dict)
+    TODO: Review and simplify for clearly separated vars and coords.
+    """
+    # # 1. DF -> dict of 1d arrays,
+    # data_vars = {
+    #     k: get_df_col(df, var, logger)
+    #     for k, var in schema.VARS.items()
+    # }
+    # # 2. apply hash of tuple coords, input Dict: ds_name : [df_cols]
+    # for k, c in schema.COORDS.items():
+    #
+    #     if (c.composed is not None) and (len(c.composed) > 1):
+    #         # hash tuple coords
+    #         tuple_list = zip( *(data_vars[c] for c in c.composed) )
+    #         hash_list = [hash(tuple(t)) for t in tuple_list]
+    #         data_vars[k] = np.array(hash_list, dtype=np.int64)
+    #         #print("Composed coord:", k)
+    #         #print(data_vars[k])
+    #
+    #     else:
+    #         # mix vars and coord to be backward compatible with remaining code
+    #         col = get_df_col(df, c, logger)
+    #         data_vars[k] = col
+    #         #print("1D coord:", k)
+    #         #print(data_vars[k])
+    #
+    # # 3. Extract coords
+    # idx_list = []
+    # coords_dict = {}
+    # dims = list(schema.COORDS.keys())
+    # # Loop over each dimension in the original dataset.
+    # valid_rows = np.ones_like(len(df), dtype=bool)
+    # for d in dims:
+    #     # Get the name(s) of the column(s) in df corresponding to this dimension.
+    #     df_coord_array = data_vars[d]
+    #     # Get the coordinate values from the dataset (assumed to be in desired order).
+    #     #print(d)
+    #     #print(df_coord_array)
+    #     coords = np.unique(df_coord_array)
+    #     coords = coords[schema.COORDS[d].valid_mask(coords)]
+    #     coords = np.sort(coords)
+    #     # TODO: filter rows with NA coords first; follow with refactoring pivot_nd into distinguished steps
+    #     # preparation to separation into tasks
+    #     # In order to avoid special hash returning NA for composed coords with on NA value
+    #
+    #     coords_dict[d] = coords  # will be used as the coordinate values for this dim.
+    #     #coord_sizes[d].append(len(coords))
+    #     # Map each row’s coordinate (from df) to its index in the common_coords.
+    #     # (This works as long as common_coords is sorted. In many cases ds coordinates are already sorted.)
+    #     final_idx = np.searchsorted(coords, df_coord_array)
+    #     valid_rows = valid_rows & (coords[final_idx] == df_coord_array)
+    #     idx_list.append(final_idx)
+    # coord_sizes = [len(coords_dict[d]) for d in dims]
+    # # multiindex for each df row, but flattend, so it actually index result_nd_array.flat[..]
+    # df_multi_idx = np.ravel_multi_index([idx[valid_rows] for idx in idx_list], dims=coord_sizes)  #
+    # coords_dict = Node._create_coords(schema.COORDS, coords_dict)
+
+    df_multi_idx, coords_dict, var_data = coerce_df(schema, df, logger)
+    coord_sizes = [len(coord) for coord in coords_dict.values()]
 
     # 4. form variables
     # Helper: for a given variable, build the pivoted array.
     def form_var_array(var_struc):
-        column_vals = data_vars[var_struc.name]
+        column_vals = var_data[var_struc.name]
         # Choose a dtype based on the column (floating or object)
-        dtype = column_vals.dtype if np.issubdtype(column_vals.dtype, np.floating) else object
+        #dtype = column_vals.dtype if np.issubdtype(column_vals.dtype, np.floating) else object
         # Create an empty output array with fill_value.
-        result = np.full(coord_sizes, np.nan, dtype=dtype)
+        result = np.full(coord_sizes, var_struc.na_value, dtype=column_vals.dtype)
+
+        mask_valid = var_struc.valid_mask(column_vals)
+
         # Fill in the values; if duplicate keys occur, later values win.
-        result.flat[flat_idx] = column_vals
+        result.flat[df_multi_idx[mask_valid]] = column_vals[mask_valid]
         # eliminate inappropriate coordinates
-        dims_to_eliminate = [d not in var_struc.coords for d in dims]
-        np_var = eliminate_dims_if_equal(result, dims_to_eliminate)
+        dims_to_eliminate = [d not in var_struc.coords for d in coords_dict.keys()]
+        result_valid = np.ma.array(result, mask=~var_struc.valid_mask(result))
+        np_var = eliminate_dims_if_equal(result_valid, dims_to_eliminate)
         data_var = Node._variable(var_struc, np_var, coords_dict)
         return data_var
 
@@ -1085,7 +1332,7 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
                  if k not in coords_dict}
 
     # Build and return the xarray.Dataset with the computed coordinates.
-    attrs = schema.ATTRS
+    attrs = schema.zarr_attrs()
     attrs['__structure__'] = zarr_schema.serialize(schema)
     ds_out = xr.Dataset(data_vars=data_vars, coords=coords_dict, attrs=attrs)
     return ds_out
