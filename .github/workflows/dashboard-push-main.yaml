@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 jobs:
   build-and-deploy:
+    name: Build and lint dashboard
     uses: ./.github/workflows/dashboard-reusable-workflow.yaml
     with:
       tag: generate
