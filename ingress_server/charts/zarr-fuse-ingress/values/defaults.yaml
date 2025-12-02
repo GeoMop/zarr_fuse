@@ -1,0 +1,43 @@
+ingressService:
+  extraEnv:
+    - name: LOG_LEVEL
+      value: INFO
+    - name: PORT
+      value: "8000"
+  service:
+    externalPort:
+      number: 80
+      name: http
+    internalPort:
+      number: 8000
+      name: http
+  ingress:
+    className: "nginx"
+    annotations:
+      kubernetes.io/tls-acme: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  resources:
+    requests:
+      cpu: 125m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  securityContext:
+    pod:
+      fsGroup: 1000
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      capabilities:
+        drop:
+          - ALL
+      allowPrivilegeEscalation: false
+      privileged: false
+      runAsNonRoot: true
+      readOnlyRootFilesystem: true
+      runAsUser: 1000
+      runAsGroup: 1000

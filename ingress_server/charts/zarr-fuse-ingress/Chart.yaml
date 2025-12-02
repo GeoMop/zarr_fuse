@@ -1,0 +1,18 @@
+apiVersion: v2
+name: zarr-fuse-ingress
+description: A Helm chart for ingress service and Apache Airflow extractor service
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+home: https://github.com/geomop/zarr_fuse
+sources:
+  - https://github.com/geomop/zarr_fuse
+maintainers:
+  - name: Stepan Moc
+    email: stepan.mocik@gmail.com
+  - name: Jan Brezmor
+    email: jan.brezina@tul.cz
+keywords:
+  - Apache airflow
+  - Zarr_fuse
+  - FastAPI

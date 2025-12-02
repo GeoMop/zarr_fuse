@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airflow-webserver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-webserver
+  template:
+    metadata:
+      labels:
+        app: airflow-webserver
+    spec:
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      volumes:
+        - name: airflow-webserver-logs
+          emptyDir: {}
+      containers:
+      - name: webserver
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        args: ["webserver"]
+        ports:
+          - containerPort: 8080
+        env:
+          - name: AIRFLOW__CORE__EXECUTOR
+            value: {{ .Values.airflow.executor }}
+          - name: AIRFLOW__WEBSERVER__SECRET_KEY
+            value: {{ .Values.airflow.secretKey }}
+          - name: AIRFLOW__CORE__FERNET_KEY
+            value: {{ .Values.airflow.fernetKey }}
+          - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+            value: postgresql+psycopg2://{{ .Values.postgres.user }}:{{ .Values.postgres.password }}@postgres/{{ .Values.postgres.database }}
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        securityContext:
+          {{- toYaml .Values.securityContext.container | nindent 10 }}
+        volumeMounts:
+          - name: airflow-webserver-logs
+            mountPath: /opt/airflow/logs

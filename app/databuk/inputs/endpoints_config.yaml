@@ -1,0 +1,29 @@
+endpoints:
+  - name: bukov
+    endpoint: /api/v1/bukov
+    schema_name: inputs/schemas/bukov_schema.yaml
+    extract_fn: normalize_new # fn(json_data, meta_data) -> pd.DataFrame
+    fn_module: inputs.extract.bukov_extract
+#active_scrappers:
+#  - name: hlavo-yrno-scraper
+#    crons:
+#      - "*/1 * * * *" # Testing
+#      - "15 1  * * *"
+#      - "45 9 * * *"
+#      - "15 13 * * *"
+#      - "45 20 * * *"
+#    url: "https://api.met.no/weatherapi/locationforecast/2.0/complete"
+#    schema_path: inputs/schemas/hlavo_schema.yaml
+#    extract_fn: normalize_yrno_forecast
+#    fn_module: inputs.extract.hlavo_extract
+#    method: GET
+#    headers:
+#      - header_name: "User-Agent"
+#        header_value: "MyWeatherApp/1.0 (your_email@example.com)"
+#    url_params:
+#      - param_name: lat
+#        column_name: dflat
+#      - param_name: lon
+#        column_name: dflon
+#    dataframe_path: inputs/dataframes/hlavo_dataframe.csv
+#    dataframe_has_header: true
