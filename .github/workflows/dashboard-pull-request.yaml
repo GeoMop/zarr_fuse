@@ -1,19 +1,19 @@
-name: Dashboard - push main
+name: Dashboard - pull request
 on:
-  push:
+  pull_request:
     branches:
-      - dashboard-main
+      - "**"
     paths:
       - app/databuk/dashboard/**
   workflow_dispatch:
 jobs:
-  build-and-deploy:
+  build:
     name: Build and lint dashboard
     uses: ./.github/workflows/dashboard-reusable-workflow.yaml
     with:
       tag: generate
       deploy: true
-      namespace: zarr-fuse-dashboard
-      release-name: dashboard
+      namespace: zarr-fuse-dashboard-development
+      release-name: dashboard-development
       s3-bucket-name: hlavo-release
     secrets: inherit
