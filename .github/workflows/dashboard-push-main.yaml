@@ -3,13 +3,12 @@ on:
   push:
     branches:
       - dashboard-main
-      - JB-dashboard-deploy
-      - MF_dashboard-zarr-fuse-integration-v2
     paths:
       - app/databuk/dashboard/**
   workflow_dispatch:
 jobs:
   build-and-deploy:
+    name: Build and lint dashboard
     uses: ./.github/workflows/dashboard-reusable-workflow.yaml
     with:
       tag: generate
