@@ -3,6 +3,7 @@ from zarr.storage import FsspecStore
 import logging
 import math
 import os
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 from core.config_manager import load_endpoints, get_first_endpoint, EndpointConfig
 import fsspec
@@ -297,14 +298,14 @@ class S3Service:
         else:
             schema_path = schema_file
         print(f"Attempting to open store with zarr_fuse using schema: {schema_path}")
-        import yaml
-        with open(schema_path, 'r', encoding='utf-8') as f:
-            raw_dict = yaml.safe_load(f)
-            from zarr_fuse.zarr_schema import SchemaAddress
-            address = SchemaAddress(addr=[], file=self._current_config.store_url)
-            schema = zarr_fuse.zarr_schema.dict_deserialize(raw_dict, address)
+        # import yaml
+        # with open(schema_path, 'r', encoding='utf-8') as f:
+        #     raw_dict = yaml.safe_load(f)
+        #     from zarr_fuse.zarr_schema import SchemaAddress
+        #     address = SchemaAddress(addr=[], file=self._current_config.store_url)
+        #     schema = zarr_fuse.zarr_schema.dict_deserialize(raw_dict, address)
         kwargs = {"S3_ENDPOINT_URL": os.getenv("ZF_S3_ENDPOINT_URL")}
-        node = zarr_fuse.open_store(schema, **kwargs)
+        node = zarr_fuse.open_store(Path(schema_path), **kwargs)
         return None, node
     
     def _find_group_variables(self, store, store_group, group_path: str = "") -> List[str]:

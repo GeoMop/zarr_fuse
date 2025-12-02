@@ -5,11 +5,21 @@ Simple script to run the ZARR FUSE Dashboard backend.
 
 import uvicorn
 import sys
+import os
 from pathlib import Path
+import logging
+logging.basicConfig(
+        level=logging.DEBUG,  # most detailed normal level
+    )
+
 
 # Add the backend directory to Python path
 backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))
+
+
+from dotenv import load_dotenv
+load_dotenv("dev_env", override=False)
 
 if __name__ == "__main__":
     print(f"Starting ZARR FUSE Dashboard Backend")

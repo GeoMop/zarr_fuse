@@ -1,15 +1,20 @@
 # S3 Endpoint Configuration
 # Multiple endpoint support - each endpoint represents a different Zarr store
 
-# Endpoint 1: 
+
+# JB proposed change of the Endpoint 1 to production bukov endpoint
 "bukov_endpoint":
   reload_interval: 300  # Cache TTL in seconds (5 minutes)
-  schema_file: "schemas/test_schema.yaml"
-  store_url: "s3://hlavo-release/bukov.zarr"
+  # Following is the copy of:
+  # apps/databuk/inputs/schemas/bukov_schema.yaml
+  # TODO: remove after rafactoring dashboard out of the databuk  
+  schema_file: "schemas/bukov_schema.yaml"
+  store_url: "s3://bukov/store_2024.zarr"
+  # TODO: Read description from the schema ?
   description: "bukov_endpoint"
+  # TODO: Do we have other store_types ?
   store_type: "zarr"
-  version: "1.0.0"
-
+  version: "1.0.0"  
 
 # Endpoint 2:
 "surface_data_endpoint":
@@ -20,6 +25,16 @@
   store_type: "zarr"
   version: "1.0.0"
 
+# Endpoint 3: 
+"test_endpoint":
+  reload_interval: 300  # Cache TTL in seconds (5 minutes)
+  schema_file: "schemas/test_schema.yaml"
+  store_url: "s3://hlavo-release/test_store.zarr"
+  # TODO: move bukov.zarr to test_store.zatt
+  # - copy bukov/store_2024.zarr -> hlavo_store/bukov.zarr
+  description: "test_endpoint"
+  store_type: "zarr"
+  version: "1.0.0"
 
 
 # Notes:
