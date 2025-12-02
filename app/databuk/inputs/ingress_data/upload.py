@@ -17,10 +17,22 @@ from pathlib import Path
 sys.path.append("..")
 import extract as ex
 import pandas as pd
+import csv
 
 for f in sorted(Path('.').glob('*.json')):
+
+    profiles = {}
+    with open("bukov_locations.csv", newline="") as g:
+        reader = csv.reader(g)
+        next(reader)  # skip header
+        for _, profile_code, lat, lon in reader:
+            profiles[profile_code] = {
+                "lat": float(lat),
+                "lon": float(lon)
+            }
+
     metadata = {}
-    df_list = ex.normalize_old(ex.read_json(f), metadata)
+    df_list = ex.normalize_old(ex.read_json(f), profiles, metadata)
     df = pd.DataFrame(df_list)
     print(f)
     print(df.info())
