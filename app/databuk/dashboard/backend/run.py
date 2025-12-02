@@ -7,10 +7,7 @@ import uvicorn
 import sys
 import os
 from pathlib import Path
-import logging
-logging.basicConfig(
-        level=logging.DEBUG,  # most detailed normal level
-    )
+
 
 
 # Add the backend directory to Python path

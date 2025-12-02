@@ -4,6 +4,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import uvicorn
 import logging
+# logging.basicConfig(
+#         level=logging.DEBUG,  # most detailed normal level
+#     )
+print("DEBUG: Just to test the logging works.", Path.cwd())
+
 
 # Use absolute imports
 from core.config import settings

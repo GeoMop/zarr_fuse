@@ -304,8 +304,8 @@ class S3Service:
         #     from zarr_fuse.zarr_schema import SchemaAddress
         #     address = SchemaAddress(addr=[], file=self._current_config.store_url)
         #     schema = zarr_fuse.zarr_schema.dict_deserialize(raw_dict, address)
-        kwargs = {"S3_ENDPOINT_URL": os.getenv("ZF_S3_ENDPOINT_URL")}
-        node = zarr_fuse.open_store(Path(schema_path), **kwargs)
+        #kwargs = {"S3_ENDPOINT_URL": os.getenv("ZF_S3_ENDPOINT_URL")}
+        node = zarr_fuse.open_store(Path(schema_path))
         return None, node
     
     def _find_group_variables(self, store, store_group, group_path: str = "") -> List[str]:

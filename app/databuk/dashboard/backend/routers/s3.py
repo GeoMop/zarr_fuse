@@ -57,20 +57,29 @@ async def connect_to_s3():
 
 @router.get("/structure")
 async def get_store_structure(endpoint: str = None):
+    print("DEBUG: get_store_structure_call, endpoint:", endpoint)
+
     """Get the structure of the Zarr store for a specific endpoint"""
-    endpoints = load_endpoints()
+    try:
+        endpoints = load_endpoints()
+    except Exception as e:
+        print("DEBUG: Loaded endpoints:", str(e))
+        raise HTTPException(status_code=500, detail=f"Failed loading endpoints: {str(e)}")
+
     if not endpoint or endpoint not in endpoints:
         raise HTTPException(status_code=400, detail="Invalid or missing endpoint parameter")
     try:
         endpoint_config = endpoints[endpoint]
         success = s3_service.connect(endpoint_config)
         if not success:
+            print("DEBUG: Loaded endpoints:", str(endpoint_config))
             raise HTTPException(status_code=500, detail=f"Failed to connect to S3 for endpoint '{endpoint}'")
         structure = s3_service.get_store_structure()
         return {"status": "success", "structure": structure}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=f"Store not found: {str(e)}")
     except Exception as e:
+        print("DEBUG: failed to get s3 structure:", str(e))
         raise HTTPException(status_code=500, detail=f"Failed to get store structure: {str(e)}")
 
 @router.get("/node/{store_name}/{node_path:path}")
