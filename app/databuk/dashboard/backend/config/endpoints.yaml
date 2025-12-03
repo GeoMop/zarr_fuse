@@ -9,7 +9,8 @@
   # apps/databuk/inputs/schemas/bukov_schema.yaml
   # TODO: remove after rafactoring dashboard out of the databuk  
   schema_file: "schemas/bukov_schema.yaml"
-  store_url: "s3://bukov/store_2024.zarr"
+  # Used for titles right now, the schema vars are used in open_store
+  store_url: "s3://bukov/store_latlon_2024.zarr"
   # TODO: Read description from the schema ?
   description: "bukov_endpoint"
   # TODO: Do we have other store_types ?
@@ -20,7 +21,7 @@
 "surface_data_endpoint":
   reload_interval: 300  # Cache TTL in seconds (5 minutes)
   schema_file: "schemas/surface_schema.yaml"
-  store_url: "s3://hlavo-release/surface.zarr"
+  store_url: "s3://hlavo-release/surface_v3.zarr"
   description: "surface_data_endpoint"
   store_type: "zarr"
   version: "1.0.0"
