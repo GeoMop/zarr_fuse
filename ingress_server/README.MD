@@ -11,7 +11,6 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 
 - **Production:** https://zarr-fuse-ingress-server.dyn.cloud.e-infra.cz/health
 - **Latest (main):** https://zarr-fuse-ingress-server-latest.dyn.cloud.e-infra.cz/health
-- **Development (pull-request):** https://zarr-fuse-ingress-server-development.dyn.cloud.e-infra.cz/health
 
 
 ## Overview
