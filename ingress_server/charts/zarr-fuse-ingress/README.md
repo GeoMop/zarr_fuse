@@ -163,6 +163,8 @@ A Helm chart for ingress service and Apache Airflow extractor service
 | ingress.annotations | dict | `{}` | Ingress annotations |
 | ingress.className | string | `"nginx"` | Ingress class name |
 | ingress.hosts | object | ~ | Hosts configuration |
+| ingress.hosts.extractorService | list | `[]` | Each item is an object with {name, tls} |
+| ingress.hosts.ingressService | list | `[]` | Each item is an object with {name, tls} |
 | ingress.labels | dict | {} | Ingress labels |
 | ingressService | object | ~ | Ingress Service configuration |
 | ingressService.component | string | .Chart.Name | Component name for label 'app.kubernetes.io/component' |

@@ -29,10 +29,21 @@ ingress:
   # -- (object) Hosts configuration
   # @default -- ~
   hosts:
-  # - name: example.com
-  #   tls:
-  #     enabled: true
-  #     secretName: example-com-tls
+    # -- (array) List of host configurations for the Ingress Service Ingress
+    # -- Each item is an object with {name, tls}
+    ingressService: []
+    # - name: ingress.com
+    #   tls:
+    #     enabled: true
+    #     secretName: ingress-com-tls
+
+    # -- (array) List of host configurations for the Extractor Service Ingress
+    # -- Each item is an object with {name, tls}
+    extractorService: []
+    # - name: extractor.example.com
+    #   tls:
+    #     enabled: true
+    #     secretName: extractor-example-com-tls
 
 # -- (object) Ingress Service configuration
 # @default -- ~
