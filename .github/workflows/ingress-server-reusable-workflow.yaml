@@ -14,15 +14,15 @@ on:
         default: generate
       namespace:
         description: The Kubernetes namespace to use
-        required: true
+        required: false
         type: string
       release-name:
         description: The Helm release name to use
-        required: true
+        required: false
         type: string
       s3-store-url:
         description: The S3 store URL (e.g., s3://bucket-name/path/to/store.zarr)
-        required: true
+        required: false
         type: string
       docker-repository:
         description: The Docker repository to use
