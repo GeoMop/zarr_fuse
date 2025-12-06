@@ -86,14 +86,14 @@ class StoreLogHandler(logging.Handler):
         ))
         # start private asyncio loop in a thread
         self._append_fut = None
-        self._buffer_prototype = zarr.core.buffer.core.default_buffer_prototype()
         self._loop = asyncio.new_event_loop()
         threading.Thread(target=self._loop.run_forever, daemon=True).start()
         self._schedule = lambda coro: asyncio.run_coroutine_threadsafe(coro, self._loop)
 
 
         # choose initial append strategy
-        if isinstance(store, (zarr.storage.LocalStore,)) :
+
+        if isinstance(store, (zarr.storage.LocalStore,)) and getattr(store, 'supports_partial_writes', False):
             # Partial writes are not supported form zarr 3
             # but appending may stil work on LocalStore.
             self._append = self._append_unsafe
@@ -126,6 +126,7 @@ class StoreLogHandler(logging.Handler):
         exists = await self.store.exists(key)
 
         if exists:
+            print(f"[DEBUG] Calling store.get - key: {key}, buffer_prototype: {self._buffer_prototype}, store_type: {type(self.store)}")
             buf_old = await self.store.get(key, self._buffer_prototype)
             bytes_old = buf_old.as_numpy_array().tobytes()
             bytes_new = buf.as_numpy_array().tobytes()

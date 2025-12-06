@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "databuk-dashboard-backend"
+version = "0.1.0"
+description = "Databuk Dashboard backend (FastAPI) for Zarr store exploration"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Databuk", email = "dev@example.com" }]
+
+# Dashboard backend dependencies
+dependencies = [
+  # Core zarr_fuse dependency for dashboard functionality
+  "zarr_fuse[plot] @ git+https://github.com/GeoMop/zarr_fuse.git@dashboard-main",
+  # S3/Zarr ecosystem
+  # "aiobotocore>=2.18.0",
+  # "PyYAML",
+  # "attrs",
+  # "tzdata",
+  # "numpy",
+  # "scipy",
+  # "polars",
+  # "pint",
+  # "pint-xarray",
+  # "anytree",
+  # "pandas",
+  # "pyarrow",
+  # "seaborn",
+  # "s3fs",
+  # "fsspec",
+  # "zarr",
+  # "dask",
+  # "xarray",
+  # "python-dotenv",
+  # Backend web framework
+  "fastapi",
+  "uvicorn[standard]",
+  "pydantic",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "httpx",
+  "ruff",
+  "mypy",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "routers*", "services*", "config*", "models*", "*"]
+exclude = ["venv*", "node_modules*", "dist*", "build*"]

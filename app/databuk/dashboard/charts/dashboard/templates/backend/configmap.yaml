@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.backend.name }}-config
+  labels:
+    app.kubernetes.io/name: {{ .Values.backend.name }}
+data:
+  endpoints.yaml: |-
+    "bukov_endpoint":
+      reload_interval: 300  # Cache TTL in seconds (5 minutes)
+      schema_file: "schemas/test_schema.yaml"
+      store_url: "s3://${S3_BUCKET_NAME}/bukov.zarr"
+      description: "bukov_endpoint"
+      store_type: "zarr"
+      version: "1.0.0"
+
+    # Endpoint 2:
+    "surface_data_endpoint":
+      reload_interval: 300  # Cache TTL in seconds (5 minutes)
+      schema_file: "schemas/test_schema.yaml"
+      store_url: "s3://${S3_BUCKET_NAME}/surface.zarr"
+      description: "surface_data_endpoint"
+      store_type: "zarr"
+      version: "1.0.0"

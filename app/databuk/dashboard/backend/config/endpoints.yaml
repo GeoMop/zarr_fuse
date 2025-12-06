@@ -1,0 +1,32 @@
+# S3 Endpoint Configuration
+# Multiple endpoint support - each endpoint represents a different Zarr store
+
+# Endpoint 1: 
+"bukov_endpoint":
+  reload_interval: 300  # Cache TTL in seconds (5 minutes)
+  schema_file: "schemas/test_schema.yaml"
+  store_url: "s3://hlavo-release/bukov.zarr"
+  description: "bukov_endpoint"
+  store_type: "zarr"
+  version: "1.0.0"
+
+
+# Endpoint 2:
+"surface_data_endpoint":
+  reload_interval: 300  # Cache TTL in seconds (5 minutes)
+  schema_file: "schemas/surface_schema.yaml"
+  store_url: "s3://hlavo-release/surface.zarr"
+  description: "surface_data_endpoint"
+  store_type: "zarr"
+  version: "1.0.0"
+
+
+
+# Notes:
+# - S3 credentials are loaded from environment variables:
+#   * S3_BUCKET_NAME
+#   * S3_ACCESS_KEY
+#   * S3_SECRET_KEY
+#   * S3_ENDPOINT_URL
+# - reload_interval determines cache TTL for each endpoint
+# - Each endpoint gets its own ServiceAPI instance with isolated state
