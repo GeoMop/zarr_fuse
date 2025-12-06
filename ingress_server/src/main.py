@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
 from auth import AUTH
-from io_utils import save_data, validate_response
+from io_utils import process_payload
 from configs import CONFIG, STOP
 from worker import startup_recover, install_signal_handlers, working_loop
 from logging_setup import setup_logging
@@ -38,22 +38,17 @@ def _upload_node(endpoint_config: EndpointConfig, node_path: str = ""):
     content_type = (request.headers.get("Content-Type") or "").lower()
     data = request.get_data()
 
-    err = validate_response(data, content_type)
-    if err:
-        LOG.warning("Validating response failed for %s: %s", content_type, err)
-        return jsonify({"error": err}), 400
-
     try:
-        err = save_data(
-            name=endpoint_config.name,
+        success, err = process_payload(
+            data_source=endpoint_config.data_source,
             payload=data,
             content_type=content_type,
-            node_path=node_path,
-            schema_path=endpoint_config.schema_path,
-            extract_fn=endpoint_config.extract_fn,
-            fn_module=endpoint_config.fn_module,
             username=AUTH.current_user(),
+            node_path=node_path,
         )
+        if not success:
+            LOG.warning("Processing failed for endpoint=%s node_path=%s: %s", endpoint_config.name, node_path, err)
+            return jsonify({"error": err}), 400
     except Exception as e:
         LOG.warning("Saving data failed for endpoint=%s node_path=%s: %s", endpoint_config.name, node_path, e)
         return jsonify({"error": str(e)}), 400

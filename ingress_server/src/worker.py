@@ -71,16 +71,12 @@ def _process_one(data_path: Path) -> str | None:
 
     df, err = read_df_from_bytes(
         payload= data_path.read_bytes(),
-        content_type=metadata.content_type,
-        extract_fn=metadata.extract_fn,
-        fn_module=metadata.fn_module,
-        endpoint_name=metadata.endpoint_name,
-        dataframe_row=metadata.dataframe_row
+        metadata=metadata,
     )
     if err:
         return f"Failed to read DataFrame: {err}"
 
-    root, err = open_root(Path(metadata.schema_path))
+    root, err = open_root(metadata.get_schema_path())
     if err:
         return f"Failed to open root: {err}"
 

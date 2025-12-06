@@ -4,7 +4,7 @@ import logging
 
 import polars as pl
 
-from io_utils import validate_response, save_data
+from io_utils import validate_response, process_payload
 from models import ActiveScrapperConfig
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -37,22 +37,50 @@ def request_caller(
     except Exception as e:
         return None, f"Scrapper job {name} failed to fetch {url}: {e}"
 
-def process_job_with_dataframe(scrapper_config: ActiveScrapperConfig):
+def process_job(
+    scrapper_config: ActiveScrapperConfig,
+    headers_dict: dict,
+    params_dict: dict,
+    dataframe_row: dict | None = None
+):
+    LOG.debug("Scrapper job %s processing with param %s", scrapper_config.name, params_dict)
+
+    response, err = request_caller(
+        name=scrapper_config.name,
+        url=scrapper_config.url,
+        headers=headers_dict,
+        params=params_dict
+    )
+
+    if err:
+        LOG.error(err)
+        return
+
+    success, err = process_payload(
+        data_source=scrapper_config.data_source,
+        payload=response.content,
+        content_type=response.headers.get("Content-Type", "application/json"),
+        username=f"scrapper-{scrapper_config.name}",
+        dataframe_row=dataframe_row,
+    )
+    if not success:
+        LOG.error("Scrapper job %s failed to save data for row %s: %s", scrapper_config.name, dataframe_row, err)
+        return
+
+def process_job_with_dataframe(
+    scrapper_config: ActiveScrapperConfig,
+    headers_dict: dict,
+):
     try:
-        df = pl.read_csv(scrapper_config.dataframe_path, has_header=scrapper_config.dataframe_has_header)
+        df = pl.read_csv(scrapper_config.get_dataframe_path(), has_header=scrapper_config.dataframe_has_header)
     except Exception as e:
         LOG.error(
             "Scrapper job %s failed to read dataframe from %s: %s",
             scrapper_config.name,
-            scrapper_config.dataframe_path,
+            scrapper_config.get_dataframe_path(),
             e,
         )
         return
-
-    headers_dict = {
-        h.header_name: h.header_value
-        for h in scrapper_config.headers or []
-    }
 
     for row in df.iter_rows(named=True):
         params_dict = {
@@ -68,34 +96,9 @@ def process_job_with_dataframe(scrapper_config: ActiveScrapperConfig):
             )
             continue
 
-        LOG.debug("Scrapper job %s processing with param %s", scrapper_config.name, params_dict)
+        process_job(scrapper_config, headers_dict, params_dict, dataframe_row=row)
 
-        response, err = request_caller(
-            name=scrapper_config.name,
-            url=scrapper_config.url,
-            headers=headers_dict,
-            params=params_dict
-        )
-        if err:
-            LOG.error(err)
-            continue
-
-        err = save_data(
-            name=scrapper_config.name,
-            payload=response.content,
-            content_type=response.headers.get("Content-Type", "application/json"),
-            schema_path=scrapper_config.schema_path,
-            extract_fn=scrapper_config.extract_fn,
-            fn_module=scrapper_config.fn_module,
-            dataframe_row=row,
-            username=f"scrapper-{scrapper_config.name}",
-        )
-        if err:
-            LOG.error("Scrapper job %s failed to save data for row %s: %s", scrapper_config.name, row, err)
-            continue
-
-
-def process_job_without_dataframe(scrapper_config: ActiveScrapperConfig):
+def run_job(scrapper_config: ActiveScrapperConfig):
     headers_dict = {
         h.header_name: h.header_value
         for h in scrapper_config.headers or []
@@ -105,37 +108,10 @@ def process_job_without_dataframe(scrapper_config: ActiveScrapperConfig):
         for p in scrapper_config.url_params or []
     }
 
-    response, err = request_caller(
-        name=scrapper_config.name,
-        url=scrapper_config.url,
-        headers=headers_dict,
-        params=params_dict
-    )
-    if err:
-        LOG.error(err)
-        return
-
-    err = save_data(
-        name=scrapper_config.name,
-        payload=response.content,
-        content_type=response.headers.get("Content-Type", "application/json"),
-        schema_path=scrapper_config.schema_path,
-        extract_fn=scrapper_config.extract_fn,
-        fn_module=scrapper_config.fn_module,
-        username=f"scrapper-{scrapper_config.name}",
-    )
-    if err:
-        LOG.error("Scrapper job %s failed to save data: %s", scrapper_config.name, err)
-        return
-
-    LOG.info("Scrapper accepted name=%s", scrapper_config.name)
-
-
-def run_job(scrapper_config: ActiveScrapperConfig):
-    if scrapper_config.dataframe_path:
-        process_job_with_dataframe(scrapper_config)
+    if not scrapper_config.dataframe_path:
+        process_job(scrapper_config, headers_dict, params_dict)
     else:
-        process_job_without_dataframe(scrapper_config)
+        process_job_with_dataframe(scrapper_config, headers_dict)
 
 def add_scrapper_job(scrapper_config: ActiveScrapperConfig, scheduler: BackgroundScheduler):
     cron_job_id = 1
