@@ -15,5 +15,5 @@ FAILED_DIR = QUEUE_BASE_DIR / "failed"
 for d in (ACCEPTED_DIR, SUCCESS_DIR, FAILED_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
-with open("inputs/endpoints_config.yaml", "r", encoding="utf-8") as f:
+with open(os.getenv("CONFIG_PATH", "inputs") + "/endpoints_config.yaml", "r", encoding="utf-8") as f:
     CONFIG = yaml.safe_load(f) or {}
