@@ -76,7 +76,7 @@ def _process_one(data_path: Path) -> str | None:
     if err:
         return f"Failed to read DataFrame: {err}"
 
-    root, err = open_root(metadata.schema_path)
+    root, err = open_root(Path(metadata.schema_path))
     if err:
         return f"Failed to open root: {err}"
 
