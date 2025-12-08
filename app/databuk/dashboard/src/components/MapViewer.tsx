@@ -9,14 +9,12 @@ interface MapViewerProps {
   storeName: string;
   nodePath: string;
   selection?: any;
-  onSelectionChange?: (selection: any) => void;
 }
 
 export const MapViewer: React.FC<MapViewerProps> = ({ 
   storeName, 
   nodePath, 
-  selection,
-  onSelectionChange 
+  selection
 }) => {
   const [figure, setFigure] = useState<any>(null);
   const [loading, setLoading] = useState(false);
