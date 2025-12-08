@@ -4,14 +4,83 @@ import numpy as np
 import logging
 import os
 from pathlib import Path
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
+
+def find_nearest_time(times_array: np.ndarray, target_time) -> pd.Timestamp:
+    """
+    Find the nearest time in array to the target time.
+    
+    Args:
+        times_array: Array of unique times
+        target_time: Target time to match
+        
+    Returns:
+        Nearest timestamp in the array
+    """
+    times_series = pd.Series(times_array)
+    if not isinstance(target_time, (pd.Timestamp, np.datetime64)):
+        target_time = pd.to_datetime(target_time)
+    nearest_idx = (times_series - target_time).abs().idxmin()
+    return times_series.iloc[nearest_idx]
+
+
+def detect_and_fix_coordinates(
+    lats: np.ndarray, 
+    lons: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Detect and fix coordinate issues:
+    - Swapped coordinates (lat/lon)
+    - Radian vs Degree format
+    
+    Args:
+        lats: Latitude values
+        lons: Longitude values
+        
+    Returns:
+        Tuple of (fixed_lats, fixed_lons)
+    """
+    valid_mask = np.isfinite(lats) & np.isfinite(lons) & (np.abs(lats) <= 360)
+    
+    if np.any(valid_mask):
+        mean_lat = np.mean(lats[valid_mask])
+        mean_lon = np.mean(lons[valid_mask])
+        
+        # Swap detection: European context heuristic
+        # If mean latitude is low (<30) but mean longitude is high (>30),
+        # coordinates might be swapped
+        if mean_lat < 30 and mean_lon > 30:
+            logger.debug(f"Detected swapped coordinates. Lat={mean_lat:.1f}, Lon={mean_lon:.1f}")
+            lats, lons = lons, lats
+            
+        # Radian detection: if max value is small, likely in radians
+        max_val = np.max(np.abs(lats[valid_mask]))
+        if max_val < 1.6:
+            logger.debug("Detected radians format. Converting to degrees.")
+            lats = np.degrees(lats)
+            lons = np.degrees(lons)
+    
+    return lats, lons
+
+
 def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', lon_col='longitude', time_col='time'):
     """
-    Generates a Plotly map figure based on the provided DataFrame and time point.
+    Generate a Plotly map figure based on the provided DataFrame and time point.
+    
+    Args:
+        df: DataFrame containing geographic and temporal data
+        time_point: Specific time to filter (optional, defaults to earliest)
+        lat_col: Column name for latitude
+        lon_col: Column name for longitude
+        time_col: Column name for time
+        
+    Returns:
+        Dictionary representation of Plotly figure
     """
-    print(f"DEBUG: Generate map figure called. Time: {time_point}")
+    logger.debug(f"Generating map figure. Time: {time_point}")
     try:
         # Ensure time column is datetime
         if not np.issubdtype(df[time_col].dtype, np.datetime64):
@@ -21,61 +90,36 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
         if time_point is None:
             selected_time = df[time_col].min()
         else:
-            selected_time = pd.to_datetime(time_point)
-            # Find nearest time
-            unique_times = df[time_col].unique()
-            # Sort unique times to ensure correct nearest search
-            unique_times.sort()
+            selected_time = find_nearest_time(df[time_col].unique(), time_point)
             
-            # Find nearest index
-            # Using searchsorted for efficiency or simple absolute difference
-            # Converting to Series for easy abs diff
-            times_series = pd.Series(unique_times)
-            nearest_idx = (times_series - selected_time).abs().idxmin()
-            selected_time = times_series.iloc[nearest_idx]
-            
-        print(f"DEBUG: Generating map for time: {selected_time}")
+        logger.debug(f"Selected time: {selected_time}")
         
         current_df = df[df[time_col] == selected_time].copy()
         
         if current_df.empty:
-            print("WARNING: No data found for the selected time.")
+            logger.warning(f"No data found for selected time: {selected_time}")
             return go.Figure().to_dict()
 
         # 2. Coordinate Handling (Swap & Radian Detection)
         lats = current_df[lat_col].values.astype(float)
         lons = current_df[lon_col].values.astype(float)
         
-        # Clean invalid data
-        valid_mask = np.isfinite(lats) & np.isfinite(lons) & (np.abs(lats) <= 360)
-        
-        if np.any(valid_mask):
-            mean_lat = np.mean(lats[valid_mask])
-            mean_lon = np.mean(lons[valid_mask])
-            
-            # Swap detection (Heuristic: Europe context)
-            if mean_lat < 30 and mean_lon > 30:
-                print("DEBUG: Detected swapped coordinates. Swapping back.")
-                lats, lons = lons, lats
-                
-            # Radian detection
-            max_val = np.max(np.abs(lats[valid_mask]))
-            if max_val < 1.6:
-                print("DEBUG: Detected radians. Converting to degrees.")
-                lats = np.degrees(lats)
-                lons = np.degrees(lons)
+        # Fix coordinate issues
+        lats, lons = detect_and_fix_coordinates(lats, lons)
                 
         # 3. Create Plotly Figure
-        print("DEBUG: Converting coordinates to list for JSON serialization")
+        logger.debug("Creating Plotly figure with map markers")
         fig = go.Figure()
         
         # Prepare hover text
-        # Exclude coord columns from hover
+        # Exclude coordinate and time columns from hover
         hover_cols = [c for c in current_df.columns if c not in [lat_col, lon_col, time_col]]
         hover_texts = []
         for _, row in current_df.iterrows():
-            lines = [f"{col}: {row[col]:.2f}" if isinstance(row[col], (int, float)) else f"{col}: {row[col]}" 
-                     for col in hover_cols]
+            lines = [
+                f"{col}: {row[col]:.2f}" if isinstance(row[col], (int, float)) else f"{col}: {row[col]}"
+                for col in hover_cols
+            ]
             hover_texts.append("<br>".join(lines))
             
         fig.add_trace(go.Scattermap(
@@ -116,5 +160,5 @@ def generate_map_figure(df: pd.DataFrame, time_point=None, lat_col='latitude', l
         return fig.to_dict()
         
     except Exception as e:
-        print(f"ERROR: Error generating map figure: {e}")
+        logger.error(f"Error generating map figure: {e}")
         raise
