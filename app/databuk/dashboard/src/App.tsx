@@ -287,7 +287,6 @@ function App() {
                             storeName={selectedNode.storeName}
                             nodePath={selectedNode.nodePath}
                             selection={selection}
-                            onSelectionChange={(newSelection) => setSelection((prev: any) => ({ ...prev, ...newSelection }))}
                         />
                         
                         {/* Time Series Viewer - Inline */}
