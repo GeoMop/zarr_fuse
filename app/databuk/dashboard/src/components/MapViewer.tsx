@@ -9,12 +9,14 @@ interface MapViewerProps {
   storeName: string;
   nodePath: string;
   selection?: any;
+  onMapClick?: (lat: number, lon: number) => void;
 }
 
 export const MapViewer: React.FC<MapViewerProps> = ({ 
   storeName, 
   nodePath, 
-  selection
+  selection,
+  onMapClick
 }) => {
   const [figure, setFigure] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -159,6 +161,19 @@ export const MapViewer: React.FC<MapViewerProps> = ({
             responsive: true,
             scrollZoom: true,
             displayModeBar: true 
+        }}
+        onClick={(event: any) => {
+          // Plotly click event'inden koordinatları al
+          if (event.points && event.points[0]) {
+            const point = event.points[0];
+            const lat = point.lat;
+            const lon = point.lon;
+            
+            if (lat !== undefined && lon !== undefined && onMapClick) {
+              console.log('Map clicked at:', { lat, lon });
+              onMapClick(lat, lon);
+            }
+          }
         }}
       />
     </div>
