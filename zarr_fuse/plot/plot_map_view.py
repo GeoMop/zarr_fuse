@@ -38,15 +38,15 @@ class InteractiveMapPlotter:
         self.fig = go.FigureWidget()
         
         # Trace 0: Data Points
-        self.fig.add_trace(go.Scattermapbox(
+        self.fig.add_trace(go.Scattermap(
             lat=[], lon=[], mode='markers',
-            marker=go.scattermapbox.Marker(size=14, opacity=0.8, color='red', symbol='circle'),
+            marker=go.scattermap.Marker(size=14, opacity=0.8, color='red', symbol='circle'),
             text=[], hoverinfo='text', name='Data'
         ))
         
         # Map Layout
         self.fig.update_layout(
-            mapbox=dict(style="open-street-map", center=dict(lat=0, lon=0), zoom=1),
+            map=dict(style="open-street-map", center=dict(lat=0, lon=0), zoom=1),
             margin=dict(l=0, r=0, t=0, b=0), height=600, showlegend=False
         )
         self.fig.data[0].on_click(self.on_click)
@@ -183,5 +183,5 @@ class InteractiveMapPlotter:
                 if span < 1: zoom = 9
 
                 print(f"DEBUG: Focusing -> {center_lat:.2f}, {center_lon:.2f} (Zoom: {zoom})")
-                self.fig.layout.mapbox.center = dict(lat=center_lat, lon=center_lon)
-                self.fig.layout.mapbox.zoom = zoom
+                self.fig.layout.map.center = dict(lat=center_lat, lon=center_lon)
+                self.fig.layout.map.zoom = zoom

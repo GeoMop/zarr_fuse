@@ -29,13 +29,50 @@ def clean_nan_values(data):
     return data
 
 
+def find_dataframe_column(df, primary_names: List[str], exclude_keywords: Optional[List[str]] = None) -> Optional[str]:
+    """
+    Find a DataFrame column by name with fuzzy matching and exclusion filters.
+    
+    Attempts to match column names in order of priority:
+    1. Exact match (case-insensitive)
+    2. Fuzzy search excluding specified keywords
+    
+    Args:
+        df: Pandas DataFrame to search
+        primary_names: List of preferred column names to match (in priority order)
+        exclude_keywords: Keywords to exclude in fuzzy search (e.g., ['lon'] when searching for latitude)
+        
+    Returns:
+        Column name if found, None otherwise
+    """
+    all_cols = df.columns.tolist()
+    lower_cols = [c.lower() for c in all_cols]
+    
+    # Step 1: Try exact match
+    for name in primary_names:
+        if name.lower() in lower_cols:
+            return all_cols[lower_cols.index(name.lower())]
+    
+    # Step 2: Fuzzy search with exclusion
+    for name in primary_names:
+        exclude_set = set(exclude_keywords or [])
+        candidates = [
+            all_cols[i] for i, col in enumerate(lower_cols)
+            if name.lower() in col and not any(ex.lower() in col for ex in exclude_set)
+        ]
+        if candidates:
+            return candidates[0]
+    
+    return None
+
+
 class S3Service:
     """Service for S3 operations with custom S3 configuration"""
 
     def get_plot_json(self, store_name, node_path, plot_type=None, selection=None):
         """Return plot-ready JSON for dashboard visualizations."""
         try:
-            print(f"Generating plot for {node_path}, type={plot_type}")
+            logger.debug(f"Generating plot for {node_path}, type={plot_type}")
             
             # 1. Open Store & Node
             _, root_node = self._open_zarr_store()
@@ -45,9 +82,9 @@ class S3Service:
             current_node = root_node
             
             # Debug info
-            print(f"Root node name: {getattr(root_node, 'name', 'unknown')}")
+            logger.debug(f"Root node name: {getattr(root_node, 'name', 'unknown')}")
             if hasattr(root_node, 'children'):
-                print(f"Root children: {list(root_node.children.keys())}")
+                logger.debug(f"Root children: {list(root_node.children.keys())}")
             
             for part in parts:
                 # If the part matches the current node's name, it might be redundant path info
@@ -65,9 +102,9 @@ class S3Service:
                     if part == getattr(current_node, 'name', ''):
                          continue
                          
-                    print(f"Failed to find {part} in {getattr(current_node, 'name', 'unknown')}")
+                    logger.error(f"Failed to find {part} in {getattr(current_node, 'name', 'unknown')}")
                     if hasattr(current_node, 'children'):
-                        print(f"Available children: {list(current_node.children.keys())}")
+                        logger.debug(f"Available children: {list(current_node.children.keys())}")
                     
                     raise ValueError(f"Node {part} not found in path {node_path}")
             
@@ -82,7 +119,7 @@ class S3Service:
                 raise ValueError("No variables found in dataset")
 
             # Load DataFrame
-            print(f"Loading data for variables: {var_names}")
+            logger.debug(f"Loading data for variables: {var_names}")
             
             # Helper to get all relevant variables including composed coords
             all_vars = list(var_names)
@@ -95,13 +132,13 @@ class S3Service:
                     all_vars.extend(list(dims))
                 all_vars = list(set([v for v in all_vars if v in ds]))
             except Exception as e:
-                print(f"Error determining composed variables: {e}")
+                logger.warning(f"Error determining composed variables: {e}")
             
             df = None
             
             # --- TIMESERIES LOGIC ---
             if plot_type == 'timeseries':
-                print(f"Processing timeseries for selection: {selection}")
+                logger.debug(f"Processing timeseries for selection: {selection}")
                 if not selection or 'lat_point' not in selection or 'lon_point' not in selection:
                      return {"status": "error", "reason": "Missing lat_point/lon_point for timeseries"}
                 
@@ -128,7 +165,7 @@ class S3Service:
                         dist = (lats - req_lat)**2 + (lons - req_lon)**2
                         min_idx = dist.argmin()
                         
-                        print(f"Selected nearest point index: {min_idx} for coords ({req_lat}, {req_lon})")
+                        logger.debug(f"Selected nearest point index: {min_idx} for coords ({req_lat}, {req_lon})")
                         
                         # Handle 1D vs 2D coordinates
                         ds_point = None
@@ -141,7 +178,7 @@ class S3Service:
                         elif lat_arr.ndim == 2:
                             # Unravel index for 2D grid
                             unraveled_idx = np.unravel_index(min_idx, lat_arr.shape)
-                            print(f"Unraveled 2D index: {unraveled_idx}")
+                            logger.debug(f"Unraveled 2D index: {unraveled_idx}")
                             
                             # Map dimensions to indices
                             if len(lat_arr.dims) == 2:
@@ -155,7 +192,7 @@ class S3Service:
                         else:
                              return {"status": "error", "reason": f"Unsupported coordinate dimensionality: {lat_arr.ndim}"}
 
-                        print(f"Sliced dataset for timeseries")
+                        logger.debug("Sliced dataset for timeseries")
                         
                         df = ds_point.to_dataframe().reset_index()
                         
@@ -173,31 +210,29 @@ class S3Service:
                     else:
                         return {"status": "error", "reason": "Could not find latitude/longitude variables"}
                 except Exception as e:
-                    print(f"Error in timeseries processing: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    logger.exception(f"Error in timeseries processing: {e}")
                     return {"status": "error", "reason": str(e)}
 
             # Optimization: Read only the first time step for the map
             if plot_type == 'map' and 'date_time' in ds.coords and ds.coords['date_time'].size > 1:
-                print("Optimization: Reading only first time step using isel")
+                logger.debug("Optimization: Reading only first time step using isel")
                 try:
                     # Use isel directly on xarray dataset to avoid DatetimeIndex slicing issues
                     ds_subset = ds[all_vars].isel(date_time=slice(0, 1))
-                    print("Converting sliced dataset to Pandas DataFrame")
+                    logger.debug("Converting sliced dataset to Pandas DataFrame")
                     df = ds_subset.to_dataframe().reset_index()
                 except Exception as e:
-                    print(f"Optimization with isel failed: {e}")
+                    logger.warning(f"Optimization with isel failed: {e}")
             
             # Fallback if optimization failed or wasn't applied
             if df is None:
                 if hasattr(current_node, 'read_df'):
-                    print("Using read_df for full load")
+                    logger.debug("Using read_df for full load")
                     df = current_node.read_df(var_names)
                     if hasattr(df, 'to_pandas'):
                         df = df.to_pandas()
                 else:
-                    print("Using xarray to_dataframe for full load")
+                    logger.debug("Using xarray to_dataframe for full load")
                     df = ds.to_dataframe().reset_index()
 
             # 3. Generate Plot
@@ -205,47 +240,22 @@ class S3Service:
                 # Extract time from selection if available
                 time_point = selection.get('time_point') if selection else None
                 
-                # Identify columns (Smart detection)
-                all_cols = df.columns.tolist()
-                lower_cols = [c.lower() for c in all_cols]
+                # Identify columns using utility function
+                lat_col = find_dataframe_column(df, ['latitude', 'lat', 'y'], exclude_keywords=['lon'])
+                lon_col = find_dataframe_column(df, ['longitude', 'lon', 'x'], exclude_keywords=['lat'])
+                time_col = find_dataframe_column(df, ['date_time', 'time', 'datetime', 'date'])
                 
-                # Defaults
-                lat_col = 'latitude'
-                lon_col = 'longitude'
-                time_col = 'date_time'
+                # Use defaults if not found
+                if not lat_col:
+                    lat_col = 'latitude'
+                if not lon_col:
+                    lon_col = 'longitude'
+                if not time_col:
+                    time_col = 'date_time'
 
-                # 1. Latitude Detection
-                if 'latitude' in lower_cols:
-                    lat_col = all_cols[lower_cols.index('latitude')]
-                elif 'lat' in lower_cols:
-                    lat_col = all_cols[lower_cols.index('lat')]
-                else:
-                    # Fuzzy search but avoid combined names like lat_lon
-                    candidates = [c for c in all_cols if 'lat' in c.lower() and 'lon' not in c.lower()]
-                    if candidates: lat_col = candidates[0]
-
-                # 2. Longitude Detection
-                if 'longitude' in lower_cols:
-                    lon_col = all_cols[lower_cols.index('longitude')]
-                elif 'lon' in lower_cols:
-                    lon_col = all_cols[lower_cols.index('lon')]
-                else:
-                    # Fuzzy search
-                    candidates = [c for c in all_cols if 'lon' in c.lower() and 'lat' not in c.lower()]
-                    if candidates: lon_col = candidates[0]
-
-                # 3. Time Detection
-                if 'date_time' in lower_cols:
-                    time_col = all_cols[lower_cols.index('date_time')]
-                elif 'time' in lower_cols:
-                    time_col = all_cols[lower_cols.index('time')]
-                else:
-                    candidates = [c for c in all_cols if 'time' in c.lower() or 'date' in c.lower()]
-                    if candidates: time_col = candidates[0]
-
-                print(f"Selected columns for plot: lat='{lat_col}', lon='{lon_col}', time='{time_col}'")
-                print(f"DataFrame head columns: {df.columns.tolist()}")
-                print(f"DataFrame head:\n{df[[lat_col, lon_col, time_col]].head()}")
+                logger.debug(f"Selected columns for plot: lat='{lat_col}', lon='{lon_col}', time='{time_col}'")
+                logger.debug(f"DataFrame head columns: {df.columns.tolist()}")
+                logger.debug(f"DataFrame head:\n{df[[lat_col, lon_col, time_col]].head()}")
 
                 from services.plot_service import generate_map_figure
                 return generate_map_figure(df, time_point, lat_col, lon_col, time_col)
@@ -254,9 +264,7 @@ class S3Service:
                 return {"status": "error", "reason": f"Unknown plot type: {plot_type}"}
 
         except Exception as e:
-            logger.error(f"Failed to generate plot: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"Failed to generate plot: {e}")
             return {"status": "error", "reason": str(e)}
 
     def __init__(self):
@@ -314,7 +322,7 @@ class S3Service:
         # Method 1: Use store.list_dir() (preferred for FsspecStore)
         try:
             store_keys = list(store.list_dir(""))
-            print(f"Store list_dir result: {len(store_keys)} items")
+            logger.debug(f"Store list_dir result: {len(store_keys)} items")
             
             group_variables = []
             group_prefix = f"{group_path}/" if group_path else ""
@@ -329,10 +337,10 @@ class S3Service:
                         group_variables.append(variable_name)
             
             if group_variables:
-                print(f"SUCCESS: Found {len(group_variables)} variables using list_dir in {group_path or 'root'}")
+                logger.info(f"Found {len(group_variables)} variables using list_dir in {group_path or 'root'}")
                 return group_variables
         except Exception as e:
-            print(f"WARNING: list_dir method failed: {e}")
+            logger.warning(f"list_dir method failed: {e}")
         
         # Method 2: Access group directly
         try:
@@ -341,13 +349,13 @@ class S3Service:
             else:
                 target_group = store_group
             group_variables = list(target_group.keys())
-            print(f"SUCCESS: Found {len(group_variables)} variables using group keys in {group_path or 'root'}")
+            logger.info(f"Found {len(group_variables)} variables using group keys in {group_path or 'root'}")
             return group_variables
         except Exception as e:
-            print(f"WARNING: Group access method failed: {e}")
+            logger.warning(f"Group access method failed: {e}")
         
         # Both methods failed
-        print(f"ERROR: Could not find variables in {group_path or 'root'} using any method")
+        logger.error(f"Could not find variables in {group_path or 'root'} using any method")
         return []
     
     def _process_group(self, group, group_path: str) -> Dict[str, Any]:
@@ -400,12 +408,12 @@ class S3Service:
                             }
                             result['children'].append(array_info)
                         except Exception as e:
-                            print(f"WARNING: Could not process array {name}: {e}")
+                            logger.warning(f"Could not process array {name}: {e}")
                     
                     return result
                     
                 except Exception as e:
-                    print(f"WARNING: Store-level variable detection failed for {group_path_attr}: {e}")
+                    logger.warning(f"Store-level variable detection failed for {group_path_attr}: {e}")
         
         for key in all_subkeys:
             try:
@@ -415,7 +423,7 @@ class S3Service:
                 else:  # It's a group
                     subgroups.append(key)
             except Exception as e:
-                print(f"WARNING: Could not access subkey {key}: {e}")
+                logger.warning(f"Could not access subkey {key}: {e}")
         
         # Process arrays first
         for name in arrays:

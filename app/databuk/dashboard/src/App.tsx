@@ -287,7 +287,10 @@ function App() {
                             storeName={selectedNode.storeName}
                             nodePath={selectedNode.nodePath}
                             selection={selection}
-                            onSelectionChange={(newSelection) => setSelection((prev: any) => ({ ...prev, ...newSelection }))}
+                            onMapClick={(lat, lon) => {
+                              console.log('Map clicked, updating selection:', { lat, lon });
+                              setSelection({ lat_point: lat, lon_point: lon });
+                            }}
                         />
                         
                         {/* Time Series Viewer - Inline */}

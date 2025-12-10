@@ -1,19 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import Plot from 'react-plotly.js';
+import createPlotlyComponent from 'react-plotly.js/factory';
+import Plotly from 'plotly.js-dist-min';
 import { API_BASE_URL } from '../api';
+
+const Plot = createPlotlyComponent(Plotly);
 
 interface MapViewerProps {
   storeName: string;
   nodePath: string;
   selection?: any;
-  onSelectionChange?: (selection: any) => void;
+  onMapClick?: (lat: number, lon: number) => void;
 }
 
 export const MapViewer: React.FC<MapViewerProps> = ({ 
   storeName, 
   nodePath, 
   selection,
-  onSelectionChange 
+  onMapClick
 }) => {
   const [figure, setFigure] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -25,6 +28,7 @@ export const MapViewer: React.FC<MapViewerProps> = ({
     const fetchMap = async () => {
       setLoading(true);
       setError(null);
+      
       try {
         const response = await fetch(`${API_BASE_URL}/api/s3/plot`, {
           method: 'POST',
@@ -33,111 +37,143 @@ export const MapViewer: React.FC<MapViewerProps> = ({
             store_name: storeName,
             node_path: nodePath,
             plot_type: 'map',
-            selection: selection
+            selection: selection,
           }),
         });
 
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
         const data = await response.json();
-        
-        if (data.status === 'error') {
-            throw new Error(data.reason || 'Unknown backend error');
+
+        if (!response.ok || data.status === 'error') {
+          throw new Error(data.reason || `HTTP error! status: ${response.status}`);
         }
 
-        // Check for nested error in figure
-        if (data.figure && data.figure.status === 'error') {
-            throw new Error(data.figure.reason || 'Error generating plot');
+        // Backend bazen {data:..., layout:...} döner, bazen {figure: {data:..., layout:...}}
+        let validFigure: any = null;
+        if (Array.isArray(data.data) && data.layout) {
+          validFigure = data;
+        } else if (data.figure && Array.isArray(data.figure.data) && data.figure.layout) {
+          validFigure = data.figure;
         }
+
+        if (!validFigure) {
+          throw new Error("Invalid backend response: JSON must contain 'data' and 'layout'.");
+        }
+
+        // =========================================================
+        // 🛠️ CRITICAL FIX: 'scattermap' -> 'scattermapbox' Dönüşümü
+        // =========================================================
+
+        // 1. Trace tiplerini eski (mapbox) formatına zorla
+        validFigure.data.forEach((trace: any) => {
+           if (trace.type === 'scattermap') trace.type = 'scattermapbox';
+           if (trace.type === 'densitymap') trace.type = 'densitymapbox';
+        });
+
+        // 2. Eğer layout.map (yeni) varsa, layout.mapbox (eski) içine taşı
+        if (validFigure.layout.map) {
+            // map objesini mapbox'a kopyala
+            validFigure.layout.mapbox = { 
+                ...validFigure.layout.mapbox, // Varsa eski ayarları koru
+                ...validFigure.layout.map,    // Yeni ayarları üstüne yaz
+                style: 'open-street-map'      // Stili garantiye al
+            };
+            // Çakışmayı önlemek için eski key'i sil
+            delete validFigure.layout.map;
+        }
+
+        // 3. Mapbox objesi hiç yoksa oluştur
+        if (!validFigure.layout.mapbox) {
+            validFigure.layout.mapbox = { style: 'open-street-map' };
+        }
+
+        // 4. Varsayılan zoom ve center ayarları yoksa ekle
+        if (!validFigure.layout.mapbox.zoom) validFigure.layout.mapbox.zoom = 5;
+        if (!validFigure.layout.mapbox.center) {
+            validFigure.layout.mapbox.center = { lat: 50, lon: 14 };
+        }
+
+        // =========================================================
+        // 🖼️ IMAGE OVERLAY (Resim Katmanı) Ekleme
+        // =========================================================
         
-        // If the backend returns the figure directly (as dict) or wrapped
-        // My implementation returns the figure dict directly or {status: error}
-        // Let's check if it has 'data' and 'layout' keys directly
-        if (data.data && data.layout) {
-             setFigure(data);
-        } else if (data.figure) {
-             // In case I wrapped it in previous logic (I didn't in plot_service, but s3_service returns what plot_service returns)
-             // Wait, s3_service returns what generate_map_figure returns.
-             // generate_map_figure returns fig.to_dict().
-             // So it should be the figure object directly.
-             setFigure(data.figure);
-        } else {
-             // Assume data is the figure
-             setFigure(data);
+        if (data.overlay && Array.isArray(data.overlay.corners)) {
+          const corners = data.overlay.corners;
+          // Backend URL'ini kullanarak tam adresi oluştur
+          const imageUrl = `${API_BASE_URL}/api/image/mapa_uhelna_vyrez.png`;
+
+          const imageLayer = {
+            sourcetype: 'image',
+            source: imageUrl,
+            coordinates: [
+              [corners[0][0], corners[0][1]], // Top Left
+              [corners[1][0], corners[1][1]], // Top Right
+              [corners[2][0], corners[2][1]], // Bottom Right
+              [corners[3][0], corners[3][1]]  // Bottom Left
+            ],
+            opacity: 0.7, // Altındaki haritayı görmek için hafif şeffaflık
+            below: 'traces', // Noktaların altında kalsın
+          };
+
+          // Layers array'ini başlat veya mevcut olana ekle
+          if (!validFigure.layout.mapbox.layers) validFigure.layout.mapbox.layers = [];
+          
+          // Resim katmanını en başa ekle
+          validFigure.layout.mapbox.layers = [imageLayer, ...validFigure.layout.mapbox.layers];
         }
+
+        // Kenar boşluklarını sıfırla (Tam ekran görünüm için)
+        validFigure.layout.margin = { l: 0, r: 0, t: 0, b: 0 };
+        validFigure.layout.autosize = true;
+
+        setFigure(validFigure);
 
       } catch (err) {
-        console.error("Failed to fetch map:", err);
+        console.error('Failed to fetch map:', err);
         setError(err instanceof Error ? err.message : 'Failed to load map');
       } finally {
         setLoading(false);
       }
     };
 
-    // Cleanup function to revoke object URLs if we were using them (not currently, but good practice)
     fetchMap();
-    return () => {
-        // cleanup logic if needed
-    };
-  }, [storeName, nodePath, selection]); // Re-fetch when selection (time) changes
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64 bg-gray-50 rounded-lg border border-gray-200">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-          <p className="text-gray-500">Loading map...</p>
-        </div>
-      </div>
-    );
-  }
+  }, [storeName, nodePath, selection]);
 
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-64 bg-red-50 rounded-lg border border-red-200">
-        <div className="text-center text-red-600">
-          <p className="font-medium">Error loading map</p>
-          <p className="text-sm mt-1">{error}</p>
-        </div>
-      </div>
-    );
-  }
+  // --- RENDER ---
 
-  if (!figure) return null;
+  if (loading) return <div style={{ padding: 20 }}>Loading Map Data...</div>;
+  if (error) return <div style={{ padding: 20, color: 'red' }}>Error: {error}</div>;
+  if (!figure) return <div style={{ padding: 20 }}>Waiting for data...</div>;
 
   return (
-    <div className="w-full bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-      <h3 className="text-lg font-semibold text-gray-800 mb-4">Geographic View</h3>
+    <div style={{ width: '100%', height: '600px', border: '1px solid #ddd' }}>
       <Plot
         data={figure.data}
         layout={{
-            ...figure.layout,
-            autosize: true,
-            width: undefined, // Let container control width
-            height: 500,
+          ...figure.layout,
+          width: undefined, // Responsive olması için undefined bırakıyoruz
+          height: undefined, // CSS container yüksekliğini alsın
+          autosize: true,
         }}
-        config={{
+        useResizeHandler={true} // Ekran boyutu değişince haritayı yeniden boyutlandır
+        style={{ width: '100%', height: '100%' }}
+        config={{ 
             responsive: true,
-            displayModeBar: true,
+            scrollZoom: true,
+            displayModeBar: true 
         }}
-        style={{ width: '100%', height: '500px' }}
-        useResizeHandler={true}
-        onClick={(data) => {
-            if (data.points && data.points.length > 0) {
-                const point = data.points[0] as any;
-                // Extract lat/lon from point
-                const lat = point.lat;
-                const lon = point.lon;
-                
-                console.log("Map Clicked:", point);
-                console.log(`Captured Coordinates -> Lat: ${lat}, Lon: ${lon}`);
-
-                if (lat !== undefined && lon !== undefined && onSelectionChange) {
-                    onSelectionChange({ lat_point: lat, lon_point: lon });
-                }
+        onClick={(event: any) => {
+          // Plotly click event'inden koordinatları al
+          if (event.points && event.points[0]) {
+            const point = event.points[0];
+            const lat = point.lat;
+            const lon = point.lon;
+            
+            if (lat !== undefined && lon !== undefined && onMapClick) {
+              console.log('Map clicked at:', { lat, lon });
+              onMapClick(lat, lon);
             }
+          }
         }}
       />
     </div>
