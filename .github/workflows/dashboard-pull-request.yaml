@@ -14,5 +14,5 @@ jobs:
       deploy: true
       namespace: zarr-fuse-dashboard-development
       release-name: dashboard-development
-      s3-store-url: s3://app-databuk-test-service/bukov-main.zarr
+      s3-bucket-name: hlavo-release
     secrets: inherit

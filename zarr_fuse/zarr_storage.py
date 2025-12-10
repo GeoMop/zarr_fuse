@@ -573,14 +573,19 @@ class Node:
 
     @property
     def dataset(self):
+        print("DEBUG: Entering Node.dataset")
         """
         Lazily open the dataset stored in this node's group.
         Returns a (possibly dask‑backed) xarray.Dataset.
         """
         rel_path = self.group_path #+ self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
+        print(f"DEBUG: Opening Zarr group at path: {rel_path}")
         ds = xr.open_zarr(self.store, group=rel_path)
+        print("DEBUG: Dataset loaded. Variables:", list(ds.data_vars))
+        print("DEBUG: Coordinates:", list(ds.coords))
         for coord in ds.coords:
+            print(f"DEBUG: Coord {coord} attrs: {ds.coords[coord].attrs}")
             assert  'composed' in ds.coords[coord].attrs
         return ds
 

@@ -39,6 +39,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 import zarr_fuse
 
+def get_first_data_node(node):
+    """
+    Returns the first child node with data variables, or the node itself if it has data.
+    """
+    if list(getattr(node.dataset, 'data_vars', [])):
+        return node
+    for child_name, child_node in node.items():
+        if list(getattr(child_node.dataset, 'data_vars', [])):
+            return child_node
+    return node  # fallback: return node itself if no child has data
+
 
 def load_s3_credentials():
     """Load S3 credentials from .env file."""
@@ -334,19 +345,16 @@ def test_read_existing_s3_store():
     
     print(f"Loading schema from: {schema_path}")
     schema = zarr_fuse.zarr_schema.deserialize(schema_path)
-    
+    print(f"Source used: schema.yaml ({schema_path})")
     store_url = schema.ds.ATTRS['STORE_URL']
     print(f"Store URL: {store_url}")
-    
     print("\nGoal: Successfully read production data from S3\n")
-    
     # Try to open and read the store using zarr_fuse API
     kwargs = {"S3_ENDPOINT_URL": creds['endpoint_url']}
-    
     print("Opening production zarr store...")
     node = zarr_fuse.open_store(schema, **kwargs)
     print("✓ Store opened")
-    
+    print("Data read: using metadata from Zarr store.")
     print("\nReading dataset...")
     dataset = node.dataset
     
@@ -355,15 +363,25 @@ def test_read_existing_s3_store():
     print(f"  Coordinates: {list(dataset.coords)}")
     print(f"  Dimensions: {dataset.dims}")
     
-    # Show sample data to verify successful read
-    for var_name in list(dataset.data_vars)[:2]:  # First 2 variables
-        var = dataset[var_name]
-        print(f"\n  {var_name}:")
-        print(f"    Shape: {var.shape}")
-        print(f"    Dtype: {var.dtype}")
-        if var.size > 0 and var.size <= 10:
-            print(f"    Values: {var.values}")
-    
+        # Print sample data for all child groups and all variables (generic)
+    for group_name, child_node in node.children.items():
+        try:
+            ds = child_node.dataset
+        except Exception as e:
+            print(f"--- Could not read dataset for group '{group_name}': {e}")
+            continue
+        print(f"\n--- Sample data from group '{group_name}' ---")
+        for var_name in list(ds.data_vars):
+            var = ds[var_name]
+            print(f"  {var_name}:")
+            print(f"    Shape: {var.shape}")
+            print(f"    Dtype: {var.dtype}")
+            # Print up to 5 values
+            if var.size > 0:
+                vals = var.values.flatten()
+                print(f"    Sample values: {vals[:5]}")
+        print(f"--- End of sample data for group '{group_name}' ---\n")
+
     print("\n✓ Test PASSED - Successfully read existing S3 zarr store!")
 
 

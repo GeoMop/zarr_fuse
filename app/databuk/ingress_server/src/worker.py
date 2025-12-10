@@ -5,7 +5,7 @@ import shutil
 import logging
 
 from pathlib import Path
-from configs import ACCEPTED_DIR, FAILED_DIR, SUCCESS_DIR, ENDPOINT_NAME_TO_SCHEMA, STOP
+from configs import ACCEPTED_DIR, FAILED_DIR, SUCCESS_DIR, STOP
 from io_utils import open_root, read_df_from_bytes
 
 LOG = logging.getLogger("worker")
@@ -68,17 +68,18 @@ def _process_one(data_path: Path) -> str | None:
     if err:
         return err
 
+    extract_fn = meta.get("extract_fn", "")
+    fn_module = meta.get("fn_module", "")
     endpoint_name = meta.get("endpoint_name", "")
     node_path = meta.get("node_path", "")
     content_type = meta.get("content_type", "application/json")
-
-    schema_path = ENDPOINT_NAME_TO_SCHEMA.get(endpoint_name)
+    schema_path = meta.get("schema_path")
     if not schema_path:
         return f"No schema for endpoint {endpoint_name}"
 
     payload = data_path.read_bytes()
-    df, err = read_df_from_bytes(payload, content_type)
-    if err:
+    df, err = read_df_from_bytes(payload, content_type, extract_fn, fn_module, endpoint_name)
+    if err or df.height == 0:
         return f"Failed to read DataFrame: {err}"
 
     root, err = open_root(schema_path)
