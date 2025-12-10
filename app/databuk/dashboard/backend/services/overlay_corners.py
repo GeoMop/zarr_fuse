@@ -6,11 +6,11 @@ def get_overlay_corners():
     """
     Returns PNG overlay corner coordinates and bounds using affine transformation.
     """
-    width = 8742
-    height = 8025
+    width = 7085
+    height = 13938
     gcp_path = os.path.join(
         os.path.dirname(__file__),
-        "../config/surface_data_endpoint/uhelna_georef.raw.json"
+        "../config/bukov_endpoint/bukov_georef.json"
     )
     with open(gcp_path, "r", encoding="utf-8") as f:
         data = json.load(f)
@@ -47,6 +47,6 @@ def get_overlay_corners():
             [float(corners[2][0]), float(corners[2][1])], # bottom-right
             [float(corners[3][0]), float(corners[3][1])]  # bottom-left
         ],
-        "image_url": "/static/mapa_uhelna_vyrez.png"
+        "image_url": "/api/image/12p_final.png"
     }
     return overlay

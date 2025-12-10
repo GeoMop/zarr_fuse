@@ -6,7 +6,7 @@ router = APIRouter()
 
 @router.get("/api/image/{filename}")
 async def get_image(filename: str):
-    file_path = os.path.join("config/surface_data_endpoint", filename)
+    file_path = os.path.join("config/bukov_endpoint", filename)
     if not os.path.isfile(file_path):
         return Response(content="File not found", status_code=404)
     response = FileResponse(file_path, media_type="image/png")

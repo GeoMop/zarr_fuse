@@ -60,46 +60,46 @@ export const MapViewer: React.FC<MapViewerProps> = ({
         }
 
         // =========================================================
-        // 🛠️ CRITICAL FIX: 'scattermap' -> 'scattermapbox' Dönüşümü
+        // 🛠️ CRITICAL FIX: 'scattermap' -> 'scattermapbox' Conversion
         // =========================================================
 
-        // 1. Trace tiplerini eski (mapbox) formatına zorla
+        // 1. Force trace types to old (mapbox) format
         validFigure.data.forEach((trace: any) => {
            if (trace.type === 'scattermap') trace.type = 'scattermapbox';
            if (trace.type === 'densitymap') trace.type = 'densitymapbox';
         });
 
-        // 2. Eğer layout.map (yeni) varsa, layout.mapbox (eski) içine taşı
+        // 2. If layout.map (new) exists, move to layout.mapbox (old)
         if (validFigure.layout.map) {
-            // map objesini mapbox'a kopyala
+            // Copy map object to mapbox
             validFigure.layout.mapbox = { 
-                ...validFigure.layout.mapbox, // Varsa eski ayarları koru
-                ...validFigure.layout.map,    // Yeni ayarları üstüne yaz
-                style: 'open-street-map'      // Stili garantiye al
+                ...validFigure.layout.mapbox, // Keep old settings if any
+                ...validFigure.layout.map,    // Overwrite with new settings
+                style: 'open-street-map'      // Ensure style is set
             };
-            // Çakışmayı önlemek için eski key'i sil
+            // Prevent conflicts by deleting old key
             delete validFigure.layout.map;
         }
 
-        // 3. Mapbox objesi hiç yoksa oluştur
+        // 3. Create mapbox object if it doesn't exist
         if (!validFigure.layout.mapbox) {
             validFigure.layout.mapbox = { style: 'open-street-map' };
         }
 
-        // 4. Varsayılan zoom ve center ayarları yoksa ekle
+        // 4. Add default zoom and center settings if missing
         if (!validFigure.layout.mapbox.zoom) validFigure.layout.mapbox.zoom = 5;
         if (!validFigure.layout.mapbox.center) {
             validFigure.layout.mapbox.center = { lat: 50, lon: 14 };
         }
 
         // =========================================================
-        // 🖼️ IMAGE OVERLAY (Resim Katmanı) Ekleme
+        // 🖼️ IMAGE OVERLAY (Raster Layer) Addition
         // =========================================================
         
         if (data.overlay && Array.isArray(data.overlay.corners)) {
           const corners = data.overlay.corners;
-          // Backend URL'ini kullanarak tam adresi oluştur
-          const imageUrl = `${API_BASE_URL}/api/image/mapa_uhelna_vyrez.png`;
+          // Use image_url from backend
+          const imageUrl = `${API_BASE_URL}${data.overlay.image_url}`;
 
           const imageLayer = {
             sourcetype: 'image',
@@ -110,18 +110,18 @@ export const MapViewer: React.FC<MapViewerProps> = ({
               [corners[2][0], corners[2][1]], // Bottom Right
               [corners[3][0], corners[3][1]]  // Bottom Left
             ],
-            opacity: 0.7, // Altındaki haritayı görmek için hafif şeffaflık
-            below: 'traces', // Noktaların altında kalsın
+            opacity: 0, // Fully opaque - no transparency
+            below: 'traces', // Image layer stays below data points
           };
 
-          // Layers array'ini başlat veya mevcut olana ekle
+          // Initialize or append to existing layers array
           if (!validFigure.layout.mapbox.layers) validFigure.layout.mapbox.layers = [];
           
-          // Resim katmanını en başa ekle
+          // Add image layer to front of array
           validFigure.layout.mapbox.layers = [imageLayer, ...validFigure.layout.mapbox.layers];
         }
 
-        // Kenar boşluklarını sıfırla (Tam ekran görünüm için)
+        // Remove margins for fullscreen view
         validFigure.layout.margin = { l: 0, r: 0, t: 0, b: 0 };
         validFigure.layout.autosize = true;
 

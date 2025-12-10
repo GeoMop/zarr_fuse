@@ -2,11 +2,11 @@ import json
 import numpy as np
 
 # PNG dimensions (update if needed)
-width = 8742
-height = 8025
+width = 7085
+height = 13938
 
 # Load GCP points from raw JSON
-with open("config/surface_data_endpoint/uhelna_georef.raw.json", "r", encoding="utf-8") as f:
+with open("config/bukov_endpoint/bukov_georef.json", "r", encoding="utf-8") as f:
     data = json.load(f)
 
 src_pts = []
