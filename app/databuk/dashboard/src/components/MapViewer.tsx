@@ -47,7 +47,9 @@ export const MapViewer: React.FC<MapViewerProps> = ({
           throw new Error(data.reason || `HTTP error! status: ${response.status}`);
         }
 
-        // Backend bazen {data:..., layout:...} döner, bazen {figure: {data:..., layout:...}}
+        // Backend response can have two formats:
+        // Format 1: {data: [...], layout: {...}}
+        // Format 2: {figure: {data: [...], layout: {...}}}
         let validFigure: any = null;
         if (Array.isArray(data.data) && data.layout) {
           validFigure = data;
@@ -59,69 +61,72 @@ export const MapViewer: React.FC<MapViewerProps> = ({
           throw new Error("Invalid backend response: JSON must contain 'data' and 'layout'.");
         }
 
-        // =========================================================
-        // 🛠️ CRITICAL FIX: 'scattermap' -> 'scattermapbox' Conversion
-        // =========================================================
+        // CRITICAL FIX: Convert trace types from new format to old Plotly format
+        // Backend sends scattermap (new MapLibre format), Plotly expects scattermapbox (legacy)
+        // This conversion ensures compatibility between backend and frontend rendering
 
-        // 1. Force trace types to old (mapbox) format
+        // Convert trace types to legacy Plotly format for compatibility
         validFigure.data.forEach((trace: any) => {
            if (trace.type === 'scattermap') trace.type = 'scattermapbox';
            if (trace.type === 'densitymap') trace.type = 'densitymapbox';
         });
 
-        // 2. If layout.map (new) exists, move to layout.mapbox (old)
+        // Move layout configuration from new format (layout.map) to legacy format (layout.mapbox)
+        // This ensures all map settings (zoom, center, style) are recognized by Plotly
         if (validFigure.layout.map) {
             // Copy map object to mapbox
             validFigure.layout.mapbox = { 
-                ...validFigure.layout.mapbox, // Keep old settings if any
-                ...validFigure.layout.map,    // Overwrite with new settings
-                style: 'open-street-map'      // Ensure style is set
+                ...validFigure.layout.mapbox,
+                ...validFigure.layout.map,
+                style: 'open-street-map'
             };
-            // Prevent conflicts by deleting old key
+            // Remove old key to prevent conflicts
             delete validFigure.layout.map;
         }
 
-        // 3. Create mapbox object if it doesn't exist
+        // Ensure mapbox layout object exists with default style
         if (!validFigure.layout.mapbox) {
             validFigure.layout.mapbox = { style: 'open-street-map' };
         }
 
-        // 4. Add default zoom and center settings if missing
+        // Set default zoom and center if not provided by backend
         if (!validFigure.layout.mapbox.zoom) validFigure.layout.mapbox.zoom = 5;
         if (!validFigure.layout.mapbox.center) {
             validFigure.layout.mapbox.center = { lat: 50, lon: 14 };
         }
 
-        // =========================================================
-        // 🖼️ IMAGE OVERLAY (Raster Layer) Addition
-        // =========================================================
+        // IMAGE OVERLAY LAYER
+        // Adds a raster image (satellite/weather overlay) to the map background
+        // Image positioning is defined by corner coordinates from backend
         
         if (data.overlay && Array.isArray(data.overlay.corners)) {
           const corners = data.overlay.corners;
-          // Use image_url from backend
           const imageUrl = `${API_BASE_URL}${data.overlay.image_url}`;
 
+          // Construct image layer in Plotly format
           const imageLayer = {
-            sourcetype: 'image',
-            source: imageUrl,
-            coordinates: [
-              [corners[0][0], corners[0][1]], // Top Left
-              [corners[1][0], corners[1][1]], // Top Right
-              [corners[2][0], corners[2][1]], // Bottom Right
-              [corners[3][0], corners[3][1]]  // Bottom Left
-            ],
-            opacity: 0, // Fully opaque - no transparency
-            below: 'traces', // Image layer stays below data points
+            type: 'image',
+            source: {
+              url: imageUrl,
+              coordinates: [
+                [corners[0][0], corners[0][1]],
+                [corners[1][0], corners[1][1]],
+                [corners[2][0], corners[2][1]],
+                [corners[3][0], corners[3][1]]
+              ]
+            },
+            opacity: 0.8,
+            below: 'traces',
           };
 
-          // Initialize or append to existing layers array
+          // Initialize layers array if it doesn't exist
           if (!validFigure.layout.mapbox.layers) validFigure.layout.mapbox.layers = [];
           
-          // Add image layer to front of array
+          // Add image layer before data point traces
           validFigure.layout.mapbox.layers = [imageLayer, ...validFigure.layout.mapbox.layers];
         }
 
-        // Remove margins for fullscreen view
+        // Remove margins for fullscreen map display
         validFigure.layout.margin = { l: 0, r: 0, t: 0, b: 0 };
         validFigure.layout.autosize = true;
 
@@ -139,7 +144,8 @@ export const MapViewer: React.FC<MapViewerProps> = ({
 
   }, [storeName, nodePath, selection]);
 
-  // --- RENDER ---
+  // RENDER
+  // Display loading state, error messages, or the map component
 
   if (loading) return <div style={{ padding: 20 }}>Loading Map Data...</div>;
   if (error) return <div style={{ padding: 20, color: 'red' }}>Error: {error}</div>;
@@ -151,11 +157,11 @@ export const MapViewer: React.FC<MapViewerProps> = ({
         data={figure.data}
         layout={{
           ...figure.layout,
-          width: undefined, // Responsive olması için undefined bırakıyoruz
-          height: undefined, // CSS container yüksekliğini alsın
+          width: undefined,
+          height: undefined,
           autosize: true,
         }}
-        useResizeHandler={true} // Ekran boyutu değişince haritayı yeniden boyutlandır
+        useResizeHandler={true}
         style={{ width: '100%', height: '100%' }}
         config={{ 
             responsive: true,
@@ -163,7 +169,7 @@ export const MapViewer: React.FC<MapViewerProps> = ({
             displayModeBar: true 
         }}
         onClick={(event: any) => {
-          // Plotly click event'inden koordinatları al
+          // Extract coordinates from Plotly click event
           if (event.points && event.points[0]) {
             const point = event.points[0];
             const lat = point.lat;
