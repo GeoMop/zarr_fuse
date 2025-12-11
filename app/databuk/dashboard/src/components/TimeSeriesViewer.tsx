@@ -162,9 +162,9 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
                 <span className="w-2 h-2 rounded-full bg-blue-500"></span>
                 <h3 className="font-semibold text-gray-700">Time Series Analysis (Multi-Scale Zoom)</h3>
             </div>
-            {meta.selected_lat && meta.selected_lon && (
-                <span className="text-sm text-gray-500 bg-white px-2 py-0.5 rounded border border-gray-200">
-                    {meta.selected_lat.toFixed(4)}°N, {meta.selected_lon.toFixed(4)}°E
+            {meta.borehole_id && (
+                <span className="text-sm text-gray-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 font-medium">
+                    Borehole: {meta.borehole_id}
                 </span>
             )}
             {selectedTime && (

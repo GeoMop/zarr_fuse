@@ -257,8 +257,22 @@ class S3Service:
                 logger.debug(f"DataFrame head columns: {df.columns.tolist()}")
                 logger.debug(f"DataFrame head:\n{df[[lat_col, lon_col, time_col]].head()}")
 
+                # Extract borehole ID if available
+                borehole_id = None
+                if 'borehole' in df.columns:
+                    borehole_id = df['borehole'].iloc[0]
+                
                 from services.plot_service import generate_map_figure
-                return generate_map_figure(df, time_point, lat_col, lon_col, time_col)
+                figure = generate_map_figure(df, time_point, lat_col, lon_col, time_col)
+                
+                # Add borehole information to meta
+                if isinstance(figure, dict):
+                    if 'meta' not in figure:
+                        figure['meta'] = {}
+                    if borehole_id:
+                        figure['meta']['borehole_id'] = str(borehole_id)
+                
+                return figure
             
             else:
                 return {"status": "error", "reason": f"Unknown plot type: {plot_type}"}
