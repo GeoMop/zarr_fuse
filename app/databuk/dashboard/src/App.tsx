@@ -26,8 +26,16 @@ function App() {
   // Visualization State
   const [selection, setSelection] = useState<any>({});
   const [timeSeriesData, setTimeSeriesData] = useState<any>(null);
+  const [timeSeriesLoading, setTimeSeriesLoading] = useState(false);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // Clear time series data when selection changes (show loading state)
+  useEffect(() => {
+    if (selection.lat_point && selection.lon_point) {
+      setTimeSeriesData(null);
+    }
+  }, [selection.lat_point, selection.lon_point]);
 
   // Fetch Time Series Data when selection changes
   useEffect(() => {
@@ -35,6 +43,7 @@ function App() {
       if (!selectedNode || !selection.lat_point || !selection.lon_point) return;
 
       console.log("Fetching Time Series for:", selection);
+      setTimeSeriesLoading(true);
       
       try {
         const response = await fetch(`${API_BASE_URL}/api/s3/plot`, {
@@ -63,6 +72,8 @@ function App() {
 
       } catch (error) {
         console.error("Failed to fetch time series:", error);
+      } finally {
+        setTimeSeriesLoading(false);
       }
     };
 
@@ -294,7 +305,8 @@ function App() {
                         
                         {/* Time Series Viewer - Always visible */}
                         <TimeSeriesViewer 
-                            data={timeSeriesData} 
+                            data={timeSeriesData}
+                            loading={timeSeriesLoading}
                             onClose={() => setTimeSeriesData(null)} 
                         />
                     </div>

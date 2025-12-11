@@ -3,10 +3,11 @@ import Plot from 'react-plotly.js';
 
 interface TimeSeriesViewerProps {
   data: any;
+  loading?: boolean;
   onClose?: () => void;
 }
 
-export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClose }) => {
+export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loading = false, onClose }) => {
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [selectedVariables, setSelectedVariables] = useState<string[]>([]);
 
@@ -81,18 +82,16 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
               <h3 className="font-semibold text-gray-700">Time Series Analysis (Multi-Scale Zoom)</h3>
             </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1 rounded transition-colors"
-            title="Close Chart"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
         </div>
         <div className="flex-1 flex items-center justify-center">
-          <p className="text-gray-500 text-lg">Select a location on the map to view time series data</p>
+          {loading ? (
+            <div className="flex flex-col items-center gap-3">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+              <p className="text-gray-500">Loading time series data...</p>
+            </div>
+          ) : (
+            <p className="text-gray-500 text-lg">Select a location on the map to view time series data</p>
+          )}
         </div>
       </div>
     );
@@ -212,15 +211,6 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
                 </span>
             )}
         </div>
-        <button 
-          onClick={onClose}
-          className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1 rounded transition-colors"
-          title="Close Chart"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
       </div>
       
       {/* Variable Selection Checkboxes */}
