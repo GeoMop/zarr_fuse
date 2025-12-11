@@ -10,48 +10,32 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [selectedVariables, setSelectedVariables] = useState<string[]>([]);
 
-  if (!data) return null;
+  // Prepare data early (no early returns yet!)
+  let plotData = data?.data;
+  let meta = data?.meta || {};
 
-  // Handle nested structure from backend router
-  let plotData = data.data;
-  let meta = data.meta || {};
-
-  if (!plotData && data.figure) {
+  if (!plotData && data?.figure) {
       plotData = data.figure.data;
       meta = data.figure.meta || {};
   }
 
-  if (!plotData) {
-    return (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
-            <h3 className="text-red-800 font-bold">Error: Invalid Data Structure</h3>
-            <p className="text-red-600 text-sm">The server response is missing the 'data' field.</p>
-            <button onClick={onClose} className="mt-2 text-sm text-red-700 underline">Dismiss</button>
-        </div>
+  // Find time column (safe null checks)
+  let keys: string[] = [];
+  let timeKey: string | null = null;
+  
+  if (plotData && typeof plotData === 'object' && !Array.isArray(plotData)) {
+    keys = Object.keys(plotData);
+    const timeKeys = keys.filter(k => 
+      k.toLowerCase().includes('time') || k.toLowerCase().includes('date')
     );
+    timeKey = timeKeys.length > 0 ? timeKeys[0] : null;
   }
 
-  // Find time column
-  const keys = Object.keys(plotData);
-  const timeKeys = keys.filter(k => 
-    k.toLowerCase().includes('time') || k.toLowerCase().includes('date')
-  );
-  const timeKey = timeKeys.length > 0 ? timeKeys[0] : null;
-
-  if (!timeKey) {
-    return (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-4">
-            <div className="text-yellow-800 font-bold">Warning: No time dimension found</div>
-            <div className="text-sm text-yellow-600">Available keys: {keys.join(', ')}</div>
-            <button onClick={onClose} className="mt-2 text-sm text-yellow-700 underline">Dismiss</button>
-        </div>
-    );
-  }
-
+  // ===== HOOKS ÇALIŞIR - HER ZAMAN, HER RENDER'DA =====
+  
   // Initialize selectedTime with the first time point if not set
   useEffect(() => {
-    if (!selectedTime && plotData[timeKey] && plotData[timeKey].length > 0) {
-        // Try to pick a middle point or just the first one
+    if (!selectedTime && plotData && timeKey && plotData[timeKey] && plotData[timeKey].length > 0) {
         const times = plotData[timeKey];
         setSelectedTime(times[Math.floor(times.length / 2)]);
     }
@@ -78,6 +62,61 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, onClos
         }
     }
   }, [availableVariables]);
+
+  // ===== HOOKS BITTI =====
+
+  // NOW early returns can happen safely
+  if (!data) {
+    return (
+      <div 
+        className="w-full bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col mt-6"
+        style={{ 
+            height: '500px',
+        }}
+      >
+        <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200 rounded-t-lg">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-gray-300"></span>
+              <h3 className="font-semibold text-gray-700">Time Series Analysis (Multi-Scale Zoom)</h3>
+            </div>
+          </div>
+          <button 
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1 rounded transition-colors"
+            title="Close Chart"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-gray-500 text-lg">Select a location on the map to view time series data</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!plotData) {
+    return (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mt-4">
+            <h3 className="text-red-800 font-bold">Error: Invalid Data Structure</h3>
+            <p className="text-red-600 text-sm">The server response is missing the 'data' field.</p>
+            <button onClick={onClose} className="mt-2 text-sm text-red-700 underline">Dismiss</button>
+        </div>
+    );
+  }
+
+  if (!timeKey) {
+    return (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-4">
+            <div className="text-yellow-800 font-bold">Warning: No time dimension found</div>
+            <div className="text-sm text-yellow-600">Available keys: {keys.join(', ')}</div>
+            <button onClick={onClose} className="mt-2 text-sm text-yellow-700 underline">Dismiss</button>
+        </div>
+    );
+  }
 
   const toggleVariable = (variable: string) => {
       setSelectedVariables(prev => {

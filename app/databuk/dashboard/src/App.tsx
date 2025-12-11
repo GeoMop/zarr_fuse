@@ -292,13 +292,11 @@ function App() {
                             }}
                         />
                         
-                        {/* Time Series Viewer - Inline */}
-                        {timeSeriesData && (
-                          <TimeSeriesViewer 
+                        {/* Time Series Viewer - Always visible */}
+                        <TimeSeriesViewer 
                             data={timeSeriesData} 
                             onClose={() => setTimeSeriesData(null)} 
-                          />
-                        )}
+                        />
                     </div>
                 </div>
 
