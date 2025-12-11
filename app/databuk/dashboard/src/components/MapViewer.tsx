@@ -8,14 +8,12 @@ const Plot = createPlotlyComponent(Plotly);
 interface MapViewerProps {
   storeName: string;
   nodePath: string;
-  selection?: any;
   onMapClick?: (lat: number, lon: number) => void;
 }
 
 export const MapViewer: React.FC<MapViewerProps> = ({ 
   storeName, 
   nodePath, 
-  selection,
   onMapClick
 }) => {
   const [figure, setFigure] = useState<any>(null);
@@ -37,7 +35,6 @@ export const MapViewer: React.FC<MapViewerProps> = ({
             store_name: storeName,
             node_path: nodePath,
             plot_type: 'map',
-            selection: selection,
           }),
         });
 
@@ -69,6 +66,12 @@ export const MapViewer: React.FC<MapViewerProps> = ({
         validFigure.data.forEach((trace: any) => {
            if (trace.type === 'scattermap') trace.type = 'scattermapbox';
            if (trace.type === 'densitymap') trace.type = 'densitymapbox';
+           
+           // Make traces clickable so map click events work
+           trace.hoverinfo = trace.hoverinfo || 'text';
+           if (trace.mode) {
+             trace.mode = trace.mode || 'markers';
+           }
         });
 
         // Move layout configuration from new format (layout.map) to legacy format (layout.mapbox)
@@ -141,7 +144,7 @@ export const MapViewer: React.FC<MapViewerProps> = ({
 
     fetchMap();
 
-  }, [storeName, nodePath, selection]);
+  }, [storeName, nodePath]);
 
   // RENDER
   // Display loading state, error messages, or the map component
@@ -159,25 +162,34 @@ export const MapViewer: React.FC<MapViewerProps> = ({
           width: undefined,
           height: undefined,
           autosize: true,
+          clickmode: 'event'
         }}
         useResizeHandler={true}
         style={{ width: '100%', height: '100%' }}
         config={{ 
             responsive: true,
             scrollZoom: true,
-            displayModeBar: true 
+            displayModeBar: true
         }}
         onClick={(event: any) => {
           // Extract coordinates from Plotly click event
+          console.log('Plot clicked event:', event);
+          
           if (event.points && event.points[0]) {
             const point = event.points[0];
+            console.log('Point data:', point);
+            
             const lat = point.lat;
             const lon = point.lon;
             
             if (lat !== undefined && lon !== undefined && onMapClick) {
               console.log('Map clicked at:', { lat, lon });
               onMapClick(lat, lon);
+            } else {
+              console.log('Missing coordinates - lat:', lat, 'lon:', lon);
             }
+          } else {
+            console.log('No points found in event');
           }
         }}
       />
