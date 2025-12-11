@@ -105,18 +105,17 @@ export const MapViewer: React.FC<MapViewerProps> = ({
 
           // Construct image layer in Plotly format
           const imageLayer = {
-            type: 'image',
-            source: {
-              url: imageUrl,
-              coordinates: [
-                [corners[0][0], corners[0][1]],
-                [corners[1][0], corners[1][1]],
-                [corners[2][0], corners[2][1]],
-                [corners[3][0], corners[3][1]]
-              ]
-            },
-            opacity: 0.8,
-            below: 'traces',
+            sourcetype: 'image',
+            source: imageUrl,
+            coordinates: [
+              [corners[0][0], corners[0][1]], // Top Left
+              [corners[1][0], corners[1][1]], // Top Right
+              [corners[2][0], corners[2][1]], // Bottom Right
+              [corners[3][0], corners[3][1]]  // Bottom Left
+            ],
+            opacity: 1, // Fully opaque - no transparency
+            below: 'traces', // Image layer stays below data pointsS
+
           };
 
           // Initialize layers array if it doesn't exist
