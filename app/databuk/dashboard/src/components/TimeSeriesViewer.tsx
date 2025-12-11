@@ -53,11 +53,13 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
       );
   }, [plotData, timeKey]);
 
-  // Initialize selected variables (default to air_temperature)
+  // Initialize selected variables (default to rock_temperature)
   useEffect(() => {
     if (availableVariables.length > 0) {
-        if (availableVariables.includes('air_temperature')) {
-            setSelectedVariables(['air_temperature']);
+        if (availableVariables.includes('rock_temperature')) {
+            setSelectedVariables(['rock_temperature']);
+        } else if (availableVariables.includes('rock_temp')) {
+            setSelectedVariables(['rock_temp']);
         } else {
             setSelectedVariables([availableVariables[0]]);
         }
@@ -213,8 +215,8 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
         </div>
       </div>
       
-      {/* Variable Selection Checkboxes */}
-      <div className="px-4 py-2 bg-white border-b border-gray-100 flex flex-wrap gap-x-4 gap-y-2">
+      {/* Variable Selection Checkboxes - COMMENTED OUT */}
+      {/* <div className="px-4 py-2 bg-white border-b border-gray-100 flex flex-wrap gap-x-4 gap-y-2">
         {availableVariables.map(variable => (
             <label key={variable} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-gray-50 px-2 py-1 rounded border border-transparent hover:border-gray-200 transition-colors">
                 <input 
@@ -228,7 +230,7 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
                 </span>
             </label>
         ))}
-      </div>
+      </div> */}
 
       <div className="flex-1 w-full overflow-hidden relative bg-white p-2 flex gap-2">
         {baseTraces.length === 0 ? (
