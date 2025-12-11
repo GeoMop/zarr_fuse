@@ -196,6 +196,19 @@ class S3Service:
                         
                         df = ds_point.to_dataframe().reset_index()
                         
+                        # Extract borehole ID if available
+                        borehole_id = None
+                        if 'borehole' in ds_point.coords:
+                            try:
+                                borehole_id = str(ds_point.coords['borehole'].values)
+                            except Exception:
+                                pass
+                        if not borehole_id and 'borehole' in ds_point.data_vars:
+                            try:
+                                borehole_id = str(ds_point['borehole'].values)
+                            except Exception:
+                                pass
+                        
                         # Return raw data for frontend to handle
                         result = {
                             "status": "success",
@@ -203,7 +216,8 @@ class S3Service:
                             "data": df.to_dict(orient='list'),
                             "meta": {
                                 "selected_lat": float(lats.flat[min_idx]),
-                                "selected_lon": float(lons.flat[min_idx])
+                                "selected_lon": float(lons.flat[min_idx]),
+                                "borehole_id": borehole_id
                             }
                         }
                         return clean_nan_values(result)
