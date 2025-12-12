@@ -210,7 +210,7 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
             mode: 'lines' as const,
             name: traceName,
             line: { color: getDepthColor(depth), width: 2 },
-            hovertemplate: `<b>${traceName}</b>: %{y:.2f}<extra></extra>`
+            hoverinfo: 'skip' as const
           };
         } else {
           // Fallback: use all data if no depth filtering
@@ -220,7 +220,7 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
             type: 'scatter' as const,
             mode: 'lines' as const,
             name: varKey,
-            hovertemplate: `<b>${varKey}</b>: %{y:.2f}<extra></extra>`
+            hoverinfo: 'skip' as const
           };
         }
       });
@@ -237,7 +237,7 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
       return [start.toISOString(), end.toISOString()];
   };
 
-  const handlePlotClick = (event: any) => {
+    const handlePlotClick = (event: any) => {
       if (event.points && event.points[0]) {
           const clickedTime = event.points[0].x;
           console.log("Selected Time:", clickedTime);
@@ -320,7 +320,7 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
       {/* Depth Selection Checkboxes */}
       {uniqueDepths.length > 1 && (
         <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex flex-wrap gap-x-3 gap-y-2">
-          <span className="text-xs font-semibold text-gray-700 w-full">Depths:</span>
+          <span className="text-xs font-semibold text-gray-700 w-full">{selectedVariables.join(', ')} - Depths:</span>
           {uniqueDepths.map(depth => (
             <label 
               key={depth} 
@@ -345,7 +345,7 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
         </div>
       )}
 
-      <div className="flex-1 w-full overflow-hidden relative bg-white p-2 flex gap-2">
+      <div className="flex-1 w-full overflow-auto relative bg-white p-2 flex gap-2">
         {baseTraces.length === 0 ? (
              <div className="flex flex-col items-center justify-center h-full w-full text-gray-400">
                 <p>No plottable variables found</p>
@@ -401,8 +401,7 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
                         data={baseTraces.map(t => ({...t, mode: 'lines+markers'})) as any} // Add markers for detail view
                         layout={{
                             ...commonLayout,
-                            showlegend: true, // Show legend only on the last plot
-                            legend: { orientation: 'h', y: 1.1, x: 0 },
+                      showlegend: false,
                             xaxis: { 
                                 title: { text: 'Day View' },
                                 range: selectedTime ? getRange(selectedTime, 2) : undefined,
