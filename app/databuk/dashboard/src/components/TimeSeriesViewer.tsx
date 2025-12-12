@@ -136,16 +136,6 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
     );
   }
 
-  const toggleVariable = (variable: string) => {
-      setSelectedVariables(prev => {
-          if (prev.includes(variable)) {
-              return prev.filter(v => v !== variable);
-          } else {
-              return [...prev, variable];
-          }
-      });
-  };
-
   const toggleDepth = (depth: number) => {
       setSelectedDepths(prev => {
           if (prev.includes(depth)) {
