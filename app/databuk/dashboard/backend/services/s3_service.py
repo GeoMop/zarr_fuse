@@ -19,9 +19,9 @@ def clean_nan_values(data):
     """Clean NaN and Infinity values from data for JSON serialization"""
     if isinstance(data, float):
         if math.isnan(data):
-            return "NaN"  # Return as string
+            return None  # Return as null (JSON compatible)
         elif math.isinf(data):
-            return "Infinity" if data > 0 else "-Infinity"
+            return None  # Return null for infinity too
     elif isinstance(data, dict):
         return {k: clean_nan_values(v) for k, v in data.items()}
     elif isinstance(data, list):

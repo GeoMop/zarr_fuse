@@ -177,20 +177,27 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
         const depthIndex = uniqueDepths.indexOf(depth);
         const dataLength = plotData[timeKey]?.length || 0;
         const depthArrayLength = plotData.depth?.length || 0;
+        const depthCount = uniqueDepths.length;
         
         // If we have depth data, filter by depth
-        if (plotData.depth && depthArrayLength > 0 && dataLength > 0) {
-          const depthSize = dataLength > 0 ? depthArrayLength / dataLength : 1;
-          
+        if (plotData.depth && depthArrayLength > 0 && dataLength > 0 && depthCount > 0) {
           // Build filtered x and y arrays based on depth index
           const filteredX: any[] = [];
           const filteredY: any[] = [];
           
-          for (let i = 0; i < dataLength; i++) {
-            const depthIdx = i * depthSize + depthIndex;
+          // Data structure: each time point repeats depthCount times (once per depth)
+          // So to get depth N: indices are N, N+depthCount, N+2*depthCount, etc.
+          const timePointCount = depthArrayLength / depthCount;
+          
+          for (let i = 0; i < timePointCount; i++) {
+            const depthIdx = i * depthCount + depthIndex;
             if (depthIdx < depthArrayLength && depthIdx >= 0) {
-              filteredX.push(plotData[timeKey][i]);
-              filteredY.push(plotData[varKey][Math.floor(depthIdx)]);
+              // Get unique time point - each time repeats depthCount times in array
+              const timeIdx = i * depthCount;
+              filteredX.push(plotData[timeKey][timeIdx]);
+              const value = plotData[varKey][depthIdx];
+              // Convert string "NaN" to null if it exists
+              filteredY.push(typeof value === 'string' && value === 'NaN' ? null : value);
             }
           }
           
