@@ -398,10 +398,15 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
                 <div className="flex-1 border border-gray-100 rounded relative">
                     <div className="absolute top-2 left-2 z-10 bg-white/80 px-2 py-0.5 text-xs font-bold text-gray-600 rounded border border-gray-200">Day View</div>
                     <Plot
-                        data={baseTraces.map(t => ({...t, mode: 'lines+markers'})) as any} // Add markers for detail view
-                        layout={{
-                            ...commonLayout,
-                      showlegend: false,
+                      data={baseTraces.map(t => ({
+                        ...t,
+                        mode: 'lines+markers',
+                        hoverinfo: 'x+y+name' as const
+                      })) as any} // Add markers and enable hover for detail view
+                      layout={{
+                        ...commonLayout,
+                        hovermode: 'closest' as const,
+                        showlegend: false,
                             xaxis: { 
                                 title: { text: 'Day View' },
                                 range: selectedTime ? getRange(selectedTime, 2) : undefined,
