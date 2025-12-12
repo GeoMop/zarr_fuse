@@ -10,6 +10,7 @@ interface TimeSeriesViewerProps {
 export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loading = false, onClose }) => {
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [selectedVariables, setSelectedVariables] = useState<string[]>([]);
+  const [selectedDepths, setSelectedDepths] = useState<number[]>([]);
 
   // Prepare data early (no early returns yet!)
   let plotData = data?.data;
@@ -23,6 +24,7 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
   // Find time column (safe null checks)
   let keys: string[] = [];
   let timeKey: string | null = null;
+  let uniqueDepths: number[] = [];
   
   if (plotData && typeof plotData === 'object' && !Array.isArray(plotData)) {
     keys = Object.keys(plotData);
@@ -30,6 +32,14 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
       k.toLowerCase().includes('time') || k.toLowerCase().includes('date')
     );
     timeKey = timeKeys.length > 0 ? timeKeys[0] : null;
+    
+    // Extract unique depths if available
+    if (plotData.unique_depths && Array.isArray(plotData.unique_depths)) {
+      uniqueDepths = plotData.unique_depths;
+    } else if (plotData.depth && Array.isArray(plotData.depth)) {
+      // Fallback: get unique depths from depth array
+      uniqueDepths = Array.from(new Set(plotData.depth));
+    }
   }
 
   // ===== HOOKS ÇALIŞIR - HER ZAMAN, HER RENDER'DA =====
@@ -41,6 +51,13 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
         setSelectedTime(times[Math.floor(times.length / 2)]);
     }
   }, [plotData, timeKey, selectedTime]);
+
+  // Initialize selectedDepths (default to first depth)
+  useEffect(() => {
+    if (selectedDepths.length === 0 && uniqueDepths.length > 0) {
+      setSelectedDepths([uniqueDepths[0]]);
+    }
+  }, [uniqueDepths, selectedDepths]);
 
   // Get all available variables
   const availableVariables = useMemo(() => {
@@ -129,17 +146,78 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
       });
   };
 
+  const toggleDepth = (depth: number) => {
+      setSelectedDepths(prev => {
+          if (prev.includes(depth)) {
+              return prev.filter(d => d !== depth);
+          } else {
+              return [...prev, depth];
+          }
+      });
+  };
+
+  // Generate color palette for depths (using blue gradients + other colors)
+  const depthColors = [
+    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+    '#aec7e8', '#ffbb78', '#98df8a', '#ff9896', '#c5b0d5'
+  ];
+
+  const getDepthColor = (depth: number) => {
+    const index = uniqueDepths.indexOf(depth);
+    return depthColors[index % depthColors.length];
+  };
+
   // Create traces for all other variables (excluding lat/lon/time)
   const baseTraces = availableVariables
     .filter(key => selectedVariables.includes(key))
-    .map(key => ({
-      x: plotData[timeKey],
-      y: plotData[key],
-      type: 'scatter' as const,
-      mode: 'lines' as const, // Lines only for cleaner look in multi-view
-      name: key,
-      hovertemplate: `<b>${key}</b>: %{y:.2f}<extra></extra>`
-    }));
+    .flatMap(varKey => {
+      // For each variable, create one trace per selected depth
+      return selectedDepths.map(depth => {
+        const depthIndex = uniqueDepths.indexOf(depth);
+        const dataLength = plotData[timeKey]?.length || 0;
+        const depthArrayLength = plotData.depth?.length || 0;
+        
+        // If we have depth data, filter by depth
+        if (plotData.depth && depthArrayLength > 0 && dataLength > 0) {
+          const depthSize = dataLength > 0 ? depthArrayLength / dataLength : 1;
+          
+          // Build filtered x and y arrays based on depth index
+          const filteredX: any[] = [];
+          const filteredY: any[] = [];
+          
+          for (let i = 0; i < dataLength; i++) {
+            const depthIdx = i * depthSize + depthIndex;
+            if (depthIdx < depthArrayLength && depthIdx >= 0) {
+              filteredX.push(plotData[timeKey][i]);
+              filteredY.push(plotData[varKey][Math.floor(depthIdx)]);
+            }
+          }
+          
+          const traceName = uniqueDepths.length > 1 ? `${varKey} (${depth}m)` : varKey;
+          
+          return {
+            x: filteredX,
+            y: filteredY,
+            type: 'scatter' as const,
+            mode: 'lines' as const,
+            name: traceName,
+            line: { color: getDepthColor(depth), width: 2 },
+            hovertemplate: `<b>${traceName}</b>: %{y:.2f}<extra></extra>`
+          };
+        } else {
+          // Fallback: use all data if no depth filtering
+          return {
+            x: plotData[timeKey],
+            y: plotData[varKey],
+            type: 'scatter' as const,
+            mode: 'lines' as const,
+            name: varKey,
+            hovertemplate: `<b>${varKey}</b>: %{y:.2f}<extra></extra>`
+          };
+        }
+      });
+    });
 
   // Helper to calculate ranges
   const getRange = (centerTime: string, days: number) => {
@@ -231,6 +309,34 @@ export const TimeSeriesViewer: React.FC<TimeSeriesViewerProps> = ({ data, loadin
             </label>
         ))}
       </div> */}
+
+      {/* Depth Selection Checkboxes */}
+      {uniqueDepths.length > 1 && (
+        <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex flex-wrap gap-x-3 gap-y-2">
+          <span className="text-xs font-semibold text-gray-700 w-full">Depths:</span>
+          {uniqueDepths.map(depth => (
+            <label 
+              key={depth} 
+              className="flex items-center gap-2 text-xs cursor-pointer hover:bg-white px-2 py-1 rounded border transition-colors"
+              style={{ borderColor: getDepthColor(depth), backgroundColor: selectedDepths.includes(depth) ? getDepthColor(depth) + '20' : 'transparent' }}
+            >
+              <input 
+                type="checkbox" 
+                checked={selectedDepths.includes(depth)}
+                onChange={() => toggleDepth(depth)}
+                className="rounded border-gray-300 w-3 h-3 accent-current"
+                style={{ accentColor: getDepthColor(depth) }}
+              />
+              <span 
+                className="font-medium"
+                style={{ color: selectedDepths.includes(depth) ? getDepthColor(depth) : '#666' }}
+              >
+                {depth}m
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
 
       <div className="flex-1 w-full overflow-hidden relative bg-white p-2 flex gap-2">
         {baseTraces.length === 0 ? (

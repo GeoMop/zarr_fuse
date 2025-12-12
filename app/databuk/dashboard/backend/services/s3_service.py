@@ -194,8 +194,6 @@ class S3Service:
 
                         logger.debug("Sliced dataset for timeseries")
                         
-                        df = ds_point.to_dataframe().reset_index()
-                        
                         # Extract borehole ID if available
                         borehole_id = None
                         if 'borehole' in ds_point.coords:
@@ -209,11 +207,22 @@ class S3Service:
                             except Exception:
                                 pass
                         
-                        # Return raw data for frontend to handle
+                        # Convert to DataFrame for compatibility (preserves coordinate repetition for Plotly)
+                        df = ds_point.to_dataframe().reset_index()
+                        
+                        # Build response with both flattened data (for Plotly) and unique coordinates (for depth filtering)
+                        data_dict = df.to_dict(orient='list')
+                        
+                        # Add unique depth values for frontend depth checkboxes
+                        if 'depth' in ds_point.coords:
+                            unique_depths = ds_point.coords['depth'].values.tolist()
+                            data_dict['unique_depths'] = unique_depths
+                        
+                        # Return structured data for frontend
                         result = {
                             "status": "success",
                             "plot_type": "timeseries",
-                            "data": df.to_dict(orient='list'),
+                            "data": data_dict,
                             "meta": {
                                 "selected_lat": float(lats.flat[min_idx]),
                                 "selected_lon": float(lons.flat[min_idx]),
