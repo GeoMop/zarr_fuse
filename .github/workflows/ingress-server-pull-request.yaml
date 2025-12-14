@@ -6,35 +6,15 @@ on:
     paths:
       - ingress_server/**
 jobs:
-  get-changed-files:
-    name: Get changed file
-    runs-on: ubuntu-latest
-    outputs:
-      any-changed: ${{ steps.changed.outputs.any_changed }}
-    concurrency:
-      group: ${{ github.head_ref }}-${{ github.ref_name }}-get-changed-files
-      cancel-in-progress: true
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Check if Ingress Server files or Helm Charts were changed
-        id: changed
-        uses: tj-actions/changed-files@v45
-        with:
-          files: |
-            charts/ingress-server/**
-            app/databuk/ingress_server/**
   build:
     name: Build and deploy ingress server
-    needs:
-      - get-changed-files
-    if: ${{ needs.get-changed-files.outputs.any-changed }} == 'true'
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
       cancel-in-progress: false
     with:
       deploy: false
+      push-container: false
       tag: generate
       zarr-fuse-ref: ${{ github.head_ref }}
     secrets: inherit

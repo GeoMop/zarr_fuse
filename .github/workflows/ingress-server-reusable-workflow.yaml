@@ -2,6 +2,11 @@ name: Ingress server - reusable workflow
 on:
   workflow_call:
     inputs:
+      push-container:
+        description: Whether to push the container image
+        required: false
+        type: boolean
+        default: true
       deploy:
         description: Whether to deploy the Helm chart
         required: false
@@ -62,9 +67,9 @@ jobs:
         id: get_version_tag
         run: |
           if [[ ${{ inputs.tag }} == "generate" ]]; then
-            echo "version-tag=ci-$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+            echo "version_tag=ci-$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
           else
-            echo "version-tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+            echo "version_tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
           fi
   pre-containerize:
     name: Prepare for containerization
@@ -120,13 +125,13 @@ jobs:
           path: ingress_server/src/inputs/
 
       - name: Containerize
-        uses: GeoMop/github-actions/.github/actions/containerize@v1
+        uses: ./.github/actions/containerize
         with:
           registry: ${{ inputs.docker-registry }}
           repository: ${{ inputs.docker-repository }}
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           containerfile-path: oci/Containerfile
-          push: true
+          push: ${{ inputs.push-container }}
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
           working-directory: ingress_server
@@ -145,7 +150,7 @@ jobs:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}
       - name: Lint helm chart
-        uses: GeoMop/github-actions/.github/actions/helm-lint@v1
+        uses: ./.github/actions/helm-lint
         with:
           working-directory: ingress_server/charts/ingress-server
           values: --values values/minimal-required-values.yaml
