@@ -26,6 +26,13 @@ ENV PIP_NO_CACHE_DIR=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 RUN pip install --no-cache-dir -e /opt/app/packages/common -e /opt/app/services/extractor_service
+RUN set -eux; \
+    if [ -f /opt/app/inputs/requirements.txt ]; then \
+        pip install --no-cache-dir -r /opt/app/inputs/requirements.txt; \
+    fi; \
+    if [ -f /opt/app/inputs/pyproject.toml ]; then \
+        pip install --no-cache-dir /opt/app/inputs; \
+    fi
 
 COPY --chown=50000:root services/extractor_service/dags /opt/airflow/dags
 
