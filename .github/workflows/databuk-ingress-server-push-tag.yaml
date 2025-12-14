@@ -22,7 +22,7 @@ jobs:
           echo "version=$version" >> $GITHUB_OUTPUT
   build-and-deploy:
     name: Build and deploy ingress server for production
-    uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    uses: ./.github/workflows/databuk-ingress-server-reusable-workflow.yaml
     needs:
       - get-version
     if: needs.get-version.outputs.version != ''
@@ -34,6 +34,6 @@ jobs:
       tag: ${{ needs.get-version.outputs.version }}
       namespace: ingress-server
       extra-helm-args: |
-        --values ingress_server/charts/zarr-fuse-ingress/values/tag.yaml
+        --values .github/values/databuk-ingress-server/tag.yaml
       zarr-fuse-ref: main
     secrets: inherit

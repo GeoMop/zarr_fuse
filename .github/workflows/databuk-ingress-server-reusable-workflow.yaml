@@ -246,7 +246,7 @@ jobs:
         run: |
           helm upgrade zarr-fuse-ingress ingress_server/charts/zarr-fuse-ingress \
           --install --atomic --timeout 10m --namespace "${{ inputs.namespace }}" \
-          --values ingress_server/charts/zarr-fuse-ingress/values/defaults.yaml \
+          --values .github/values/databuk-ingress-server/defaults.yaml \
           --set global.runId="${{ github.run_id }}" \
           --set ingressService.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
           --set extractorService.airflow.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \

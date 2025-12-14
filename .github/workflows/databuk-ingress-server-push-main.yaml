@@ -9,7 +9,7 @@ on:
 jobs:
   build-and-deploy:
     name: Build and deploy ingress server for pre-production
-    uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    uses: ./.github/workflows/databuk-ingress-server-reusable-workflow.yaml
     concurrency:
       group: "${{ github.workflow }}-${{ github.ref }}-build-and-deploy"
       cancel-in-progress: true
@@ -19,5 +19,5 @@ jobs:
       namespace: ingress-server-latest
       zarr-fuse-ref: main
       extra-helm-args: >-
-        --values ingress_server/charts/zarr-fuse-ingress/values/main.yaml
+        --values .github/values/databuk-ingress-server/main.yaml
     secrets: inherit
