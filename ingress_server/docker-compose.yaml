@@ -30,9 +30,10 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__WEBSERVER__SECRET_KEY=mysecretkey
       - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
+      - AIRFLOW__CORE__AUTH_MANAGER=airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     command: |-
       bash -c """
-      airflow db init && \
+      airflow db migrate && \
       airflow users create --username admin --firstname FIRST_NAME --lastname LAST_NAME --role Admin --email admin@example.com --password admin
       """
 
@@ -49,8 +50,9 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__WEBSERVER__SECRET_KEY=mysecretkey
       - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
+      - AIRFLOW__CORE__AUTH_MANAGER=airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     ports: ["8080:8080"]
-    command: webserver
+    command: api-server
     volumes:
       - airflow_logs:/opt/airflow/logs
 
@@ -67,7 +69,44 @@ services:
       - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
       - AIRFLOW__WEBSERVER__SECRET_KEY=mysecretkey
       - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
+      - AIRFLOW__CORE__AUTH_MANAGER=airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     command: scheduler
+    volumes:
+      - airflow_logs:/opt/airflow/logs
+
+  dag-processor:
+    image: extractor-service:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    env_file: ./.env
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
+      - AIRFLOW__API__SECRET_KEY=mysecretkey
+      - AIRFLOW__CORE__AUTH_MANAGER=airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    command: dag-processor
+    volumes:
+      - airflow_logs:/opt/airflow/logs
+
+  triggerer:
+    image: extractor-service:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    env_file: ./.env
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
+      - AIRFLOW__API__SECRET_KEY=mysecretkey
+      - AIRFLOW__CORE__AUTH_MANAGER=airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    command: triggerer
     volumes:
       - airflow_logs:/opt/airflow/logs
 

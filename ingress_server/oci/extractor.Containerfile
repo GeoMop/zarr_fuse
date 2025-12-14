@@ -1,4 +1,4 @@
-FROM docker.io/apache/airflow:2.10.2-python3.11
+FROM docker.io/apache/airflow:3.1.1-python3.11
 
 ARG APP_VERSION="0.1.0"
 
@@ -17,17 +17,22 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 USER 50000:root
+WORKDIR /opt/app
 
-COPY --chown=50000:root packages/common /opt/app/packages/common
-COPY --chown=50000:root inputs /opt/app/inputs
-COPY --chown=50000:root services/extractor_service /opt/app/services/extractor_service
+COPY --chown=50000:root packages/common ./packages/common
+COPY --chown=50000:root inputs ./inputs
+COPY --chown=50000:root services/extractor_service ./services/extractor_service
 
 ENV PIP_NO_CACHE_DIR=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-RUN pip install --no-cache-dir -e /opt/app/packages/common -e /opt/app/services/extractor_service
+RUN pip install --no-cache-dir -e ./packages/common -e ./services/extractor_service && \
+    pip install --no-cache-dir "apache-airflow-providers-amazon==9.18.1" "apache-airflow-providers-fab==3.1.0"
 
-COPY --chown=50000:root services/extractor_service/dags /opt/airflow/dags
+# && \
+#     pip install --no-cache-dir 'apache-airflow==3.1.1' --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.1.1/constraints-3.11.txt"
+
+COPY --chown=50000:root ./services/extractor_service/dags /opt/airflow/dags
 
 ENV SCHEMAS_DIR=/opt/app/inputs/schemas
 ENV PYTHONUNBUFFERED=1

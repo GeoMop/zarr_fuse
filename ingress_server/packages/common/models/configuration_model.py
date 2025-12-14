@@ -1,3 +1,5 @@
+from typing import Literal, Union
+
 from pydantic import BaseModel, Field, field_validator
 
 class S3Config(BaseModel):
@@ -7,11 +9,13 @@ class S3Config(BaseModel):
     region: str | None = Field(None, description="S3 region (if any)")
     store_url: str | None = Field(None, description="S3 store URL (if any)")
 
+class BaseDataSourceConfig(BaseModel):
+    name: str = Field(..., description="Unique name of the data source")
+    schema_name: str = Field(..., description="Name of the schema to use for this data source")
 
-class EndpointConfig(BaseModel):
-    name: str
-    endpoint: str
-    schema_name: str
+class EndpointConfig(BaseDataSourceConfig):
+    kind: Literal["endpoint"] = "endpoint"
+    endpoint: str = Field(..., description="API endpoint path for this data source")
 
     @field_validator("endpoint")
     @classmethod
@@ -20,12 +24,10 @@ class EndpointConfig(BaseModel):
             raise ValueError("Endpoint must start with a '/'")
         return v
 
-
-class ScrapperConfig(BaseModel):
-    name: str
-    url: str
-    cron: str
-    schema_name: str
+class ScrapperConfig(BaseDataSourceConfig):
+    kind: Literal["scrapper"] = "scrapper"
+    url: str = Field(..., description="URL to scrape data from")
+    cron: str= Field(..., description="Cron expression for scheduling the scrapper")
     method: str = Field("GET", description="HTTP method to use for the scrapper")
 
     @field_validator("cron")
@@ -35,3 +37,5 @@ class ScrapperConfig(BaseModel):
         if len(parts) != 5:
             raise ValueError("Cron expression must have 5 parts (min hour day month dow)")
         return v
+
+UnitedDataSourceConfig = Union[EndpointConfig, ScrapperConfig]

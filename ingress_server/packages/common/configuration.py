@@ -3,7 +3,7 @@ import yaml
 
 from pathlib import Path
 from dotenv import load_dotenv
-from .models import S3Config, EndpointConfig, ScrapperConfig
+from .models import S3Config, EndpointConfig, ScrapperConfig, UnitedDataSourceConfig
 
 import boto3
 from botocore.config import Config
@@ -72,3 +72,15 @@ def create_boto3_client() -> BaseClient:
         endpoint_url=cfg.endpoint_url,
         config=config
     )
+
+def load_united_data_source_config() -> list[UnitedDataSourceConfig]:
+    """
+    Načte všechno (endpoints + scrappers) a vrátí jako jeden seznam.
+    Může to být klidně z jednoho YAML, nebo můžeš interně volat
+    load_endpoints_config() + load_scrappers_config().
+    """
+    """
+    """
+    endpoints = load_endpoints_config()
+    scrappers = load_scrappers_config()
+    return [*endpoints, *scrappers]
