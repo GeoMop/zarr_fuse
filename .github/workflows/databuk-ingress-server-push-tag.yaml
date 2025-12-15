@@ -1,0 +1,39 @@
+name: Ingress server - push tag
+on:
+  push:
+    tags:
+      - ingress-server/*.*.*
+jobs:
+  get-version:
+    name: Get version from tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get-version.outputs.version }}
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-get-changed-files
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Get version from tag
+        id: get-version
+        run: |
+          version=$(echo "${{ github.ref_name }}" | cut -d'/' -f2)
+          echo "version=$version" >> $GITHUB_OUTPUT
+  build-and-deploy:
+    name: Build and deploy ingress server for production
+    uses: ./.github/workflows/databuk-ingress-server-reusable-workflow.yaml
+    needs:
+      - get-version
+    if: needs.get-version.outputs.version != ''
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
+      cancel-in-progress: false
+    with:
+      deploy: true
+      tag: ${{ needs.get-version.outputs.version }}
+      namespace: ingress-server
+      extra-helm-args: |
+        --values .github/values/databuk-ingress-server/tag.yaml
+      zarr-fuse-ref: main
+    secrets: inherit

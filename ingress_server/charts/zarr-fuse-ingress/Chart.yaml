@@ -16,3 +16,10 @@ keywords:
   - Apache airflow
   - Zarr_fuse
   - FastAPI
+dependencies:
+  - name: ingressService
+    version: 2.0.0
+    repository: "file://charts/ingress-service"
+  - name: extractorService
+    version: 2.0.0
+    repository: "file://charts/extractor-service"

@@ -1,0 +1,42 @@
+global:
+  runId: 0
+  s3:
+    endpointUrl: ""
+    storeUrl: ""
+    secrets:
+      accessKey: ""
+      secretKey: ""
+name: ""
+replicaCount: 1
+restartPolicy: Always
+imagePullPolicy: Always
+partOf: ""
+component: ""
+extraEnv: []
+extraLabels: {}
+extraAnnotations: {}
+image:
+  host: ""
+  name: ""
+  tag: ""
+configuration:
+  fastapi:
+    secrets:
+      usersJson: "{}"
+service:
+  type: ClusterIP
+  name: ""
+  labels: {}
+  annotations: {}
+  externalPort:
+    number: 80
+    name: http
+  internalPort:
+    number: 8000
+    name: http
+resources:
+  requests: {}
+  limits: {}
+securityContext:
+  pod: {}
+  container: {}
