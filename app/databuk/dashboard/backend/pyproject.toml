@@ -38,6 +38,13 @@ dependencies = [
   "fastapi",
   "uvicorn[standard]",
   "pydantic",
+  # HoloViz stack (prototype apps)
+  "panel>=1.8",
+  "holoviews>=1.19",
+  "hvplot>=0.10",
+  "geoviews>=1.12",
+  "datashader>=0.16",
+  "bokeh>=3.8",
 ]
 
 [project.optional-dependencies]
