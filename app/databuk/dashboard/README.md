@@ -6,6 +6,9 @@ A modern, interactive dashboard for exploring Zarr stores on S3 with real-time d
 
 Built with React, TypeScript, FastAPI, and designed for generic Zarr store structures.
 
+> **🔬 Alternative Implementation Available**  
+> Check out the [HoloViz Prototype](./holoviz_prototypes/) - a Python-based dashboard using Panel, HoloViews, and GeoViews with advanced visualization capabilities including linked plots, geographic maps, and resizable layouts.
+
 ## Features
 
 - **Generic S3 Zarr Store Support**: Works with any S3-hosted Zarr store structure
@@ -230,6 +233,26 @@ Works with any Zarr group/array hierarchy!
 2. Test with multiple store structures
 3. Update documentation
 4. Ensure error handling is comprehensive
+
+## Related Projects
+
+### HoloViz Prototype
+An experimental Python-based dashboard implementation located in [`holoviz_prototypes/`](./holoviz_prototypes/):
+
+**Key Features:**
+- **Panel Framework**: Pure Python dashboard development
+- **Advanced Visualizations**: HoloViews, GeoViews for complex plots
+- **GoldenLayout**: Resizable, dockable window management
+- **Linked Interactions**: Click-to-select across multiple plots
+- **Geographic Maps**: Multi-layer maps with OSM tiles
+
+**When to Use:**
+- Rapid prototyping of new visualization types
+- Python-first development workflow
+- Need for advanced scientific plotting (geographic, linked views)
+- Integration with existing Python analysis pipelines
+
+**See:** [`holoviz_prototypes/README.md`](./holoviz_prototypes/README.md) for setup and usage
 
 ---
 
