@@ -1,4 +1,8 @@
 import panel as pn
+import holoviews as hv
+import numpy as np
+import pandas as pd
+from holoviews import streams
 from bokeh.util.serialization import make_globally_unique_id
 
 js_files = {
@@ -10,7 +14,9 @@ css_files = [
     'https://golden-layout.com/files/latest/css/goldenlayout-dark-theme.css'
 ]
 
-pn.extension(js_files=js_files, css_files=css_files, design='material', theme='dark', sizing_mode="stretch_width")
+pn.extension('bokeh', js_files=js_files, css_files=css_files, design='material', theme='dark', sizing_mode="stretch_width")
+hv.extension('bokeh')
+hv.renderer('bokeh').theme = 'dark_minimal'
 
 # Declare Panel components
 controller = pn.Column(
@@ -21,11 +27,63 @@ controller = pn.Column(
     pn.layout.VSpacer(),
 )
 
-# Placeholder panes (no data/plots)
-top_left = pn.pane.Markdown("## Top Left View\n\nPlaceholder for first view", sizing_mode='stretch_both')
-top_right = pn.pane.Markdown("## Top Right View\n\nPlaceholder for second view", sizing_mode='stretch_both')
-bottom_left = pn.pane.Markdown("## Bottom Left View\n\nPlaceholder for third view", sizing_mode='stretch_both')
-bottom_right = pn.pane.Markdown("## Bottom Right View\n\nPlaceholder for fourth view", sizing_mode='stretch_both')
+# Generate mock time-series data
+np.random.seed(42)
+times = pd.date_range('2024-01-01', periods=100, freq='h')
+x_vals = np.cumsum(np.random.randn(100)) + 10
+y_vals = np.cumsum(np.random.randn(100)) + 20
+temperature = 15 + 5 * np.sin(np.linspace(0, 4*np.pi, 100)) + np.random.randn(100)
+
+df = pd.DataFrame({
+    'time': times,
+    'x': x_vals,
+    'y': y_vals,
+    'temperature': temperature
+})
+
+# Create linked plots
+selection = streams.Selection1D()
+
+# Scatter plot: X vs Y
+scatter = hv.Scatter(df, kdims=['x', 'y'], vdims=['temperature']).opts(
+    color='temperature', cmap='plasma', size=12, alpha=0.8, 
+    line_color='white', line_width=1,
+    tools=['tap', 'hover'],
+    colorbar=True, width=600, height=400, title='X vs Y (Click to select)',
+    responsive=True
+)
+
+# Line plot: Temperature over time
+line = hv.Curve(df, 'time', 'temperature').opts(
+    color='cyan', line_width=2, tools=['hover'],
+    width=600, height=400, title='Temperature over Time',
+    responsive=True
+)
+
+# Dynamic line plot that highlights selected points
+def selected_points(index):
+    if not index:
+        # Return overlay with empty points layer
+        empty_points = hv.Points([], ['time', 'temperature']).opts(
+            color='red', size=15, marker='o', line_color='white', line_width=2
+        )
+        return line * empty_points
+    selected_df = df.iloc[index]
+    points = hv.Points(selected_df, ['time', 'temperature']).opts(
+        color='red', size=15, marker='o', line_color='white', line_width=2
+    )
+    return line * points
+
+dynamic_line = hv.DynamicMap(selected_points, streams=[selection])
+
+# Connect selection stream to scatter plot
+selection.source = scatter
+
+# Placeholder panes for bottom
+top_left = pn.pane.HoloViews(scatter, sizing_mode='stretch_both')
+top_right = pn.pane.HoloViews(dynamic_line, sizing_mode='stretch_both')
+bottom_left = pn.pane.Markdown("## Bottom Left View\n\nPlaceholder for map view", sizing_mode='stretch_both')
+bottom_right = pn.pane.Markdown("## Bottom Right View\n\nPlaceholder for additional view", sizing_mode='stretch_both')
 
 # Set up template
 template = """
@@ -146,5 +204,3 @@ tmpl.add_panel('bottom_left', bottom_left)
 tmpl.add_panel('bottom_right', bottom_right)
 
 tmpl.servable(title='HoloViz Prototypes')
-
-tmpl.servable(title="HoloViz Prototypes")
