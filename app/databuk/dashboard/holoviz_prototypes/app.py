@@ -1,9 +1,11 @@
 import panel as pn
 import holoviews as hv
+import geoviews as gv
 import numpy as np
 import pandas as pd
 from holoviews import streams
 from bokeh.util.serialization import make_globally_unique_id
+from geoviews import tile_sources as gvts
 
 js_files = {
     'jquery': 'https://code.jquery.com/jquery-1.11.1.min.js',
@@ -79,10 +81,43 @@ dynamic_line = hv.DynamicMap(selected_points, streams=[selection])
 # Connect selection stream to scatter plot
 selection.source = scatter
 
-# Placeholder panes for bottom
+# Create geographic map with multiple layers
+# Generate mock geographic data (locations in Europe)
+np.random.seed(123)
+map_lons = np.random.uniform(10, 20, 30)  # Longitude range
+map_lats = np.random.uniform(45, 55, 30)  # Latitude range
+map_values = np.random.uniform(0, 100, 30)  # Some measurement values
+
+map_df = pd.DataFrame({
+    'lon': map_lons,
+    'lat': map_lats,
+    'value': map_values
+})
+
+# Layer 1: Background map (OpenStreetMap tiles)
+base_map = gvts.OSM()
+
+# Layer 2: Mock overlay (semi-transparent rectangle as example)
+overlay_bounds = (12, 47, 18, 53)  # (lon_min, lat_min, lon_max, lat_max)
+overlay = gv.Rectangles([overlay_bounds]).opts(
+    alpha=0.2, color='orange', line_width=2, line_color='red'
+)
+
+# Layer 3: Scatter points on map
+map_points = gv.Points(map_df, kdims=['lon', 'lat'], vdims=['value']).opts(
+    color='value', cmap='viridis', size=10, alpha=0.8,
+    line_color='white', line_width=1.5,
+    tools=['hover'], colorbar=True,
+    width=600, height=400, title='Geographic Data View'
+)
+
+# Combine all layers
+map_view = base_map * overlay * map_points
+
+# Placeholder panes
 top_left = pn.pane.HoloViews(scatter, sizing_mode='stretch_both')
 top_right = pn.pane.HoloViews(dynamic_line, sizing_mode='stretch_both')
-bottom_left = pn.pane.Markdown("## Bottom Left View\n\nPlaceholder for map view", sizing_mode='stretch_both')
+bottom_left = pn.pane.HoloViews(map_view, sizing_mode='stretch_both')
 bottom_right = pn.pane.Markdown("## Bottom Right View\n\nPlaceholder for additional view", sizing_mode='stretch_both')
 
 # Set up template
