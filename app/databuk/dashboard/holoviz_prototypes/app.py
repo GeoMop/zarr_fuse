@@ -102,83 +102,84 @@ reload_button = pn.widgets.Button(
     }
 )
 
-# Tree view with Panel Accordions for expandable nodes
-tree_header = pn.pane.Markdown(
-    "### 📁 DATA STRUCTURE",
-    styles={
-        'background': '#1e293b',
-        'padding': '12px 14px 8px 14px',
-        'margin': '12px 0 0 0',
-        'border-radius': '8px 8px 0 0',
-        'border-bottom': '1px solid #334155',
-        'font-size': '13px',
-        'color': '#f1f5f9'
-    }
-)
-
-# Create leaf buttons
-temp_children = pn.Column(
-    pn.widgets.Button(name='📊 surface_temp', button_type='default', width=280,
-                      styles={'background': 'transparent', 'border': '1px solid #475569', 
-                             'color': '#94a3b8', 'font-size': '11px', 'text-align': 'left'}),
-    pn.widgets.Button(name='📊 air_temp', button_type='default', width=280,
-                      styles={'background': 'transparent', 'border': '1px solid #475569',
-                             'color': '#94a3b8', 'font-size': '11px', 'text-align': 'left'}),
-    margin=(4, 0, 4, 20)
-)
-
-pressure_children = pn.Column(
-    pn.widgets.Button(name='📊 sea_level', button_type='default', width=280,
-                      styles={'background': 'transparent', 'border': '1px solid #475569',
-                             'color': '#94a3b8', 'font-size': '11px', 'text-align': 'left'}),
-    margin=(4, 0, 4, 20)
-)
-
-wind_children = pn.Column(
-    pn.widgets.Button(name='📊 u_component', button_type='default', width=280,
-                      styles={'background': 'transparent', 'border': '1px solid #475569',
-                             'color': '#94a3b8', 'font-size': '11px', 'text-align': 'left'}),
-    pn.widgets.Button(name='📊 v_component', button_type='default', width=280,
-                      styles={'background': 'transparent', 'border': '1px solid #475569',
-                             'color': '#94a3b8', 'font-size': '11px', 'text-align': 'left'}),
-    margin=(4, 0, 4, 20)
-)
-
-# Create accordion
-tree_accordion = pn.Accordion(
-    ('📂 temperature', temp_children),
-    ('📂 pressure', pressure_children),
-    ('📂 wind', wind_children),
-    active=[],
-    toggle=True,
-    styles={
-        'background': '#1e293b',
-        'border-radius': '0 0 8px 8px',
-        'padding': '0 14px 14px 14px',
-        'margin': '0'
-    },
-    stylesheets=["""
-    .accordion-header {
-        background: #334155 !important;
-        color: #fbbf24 !important;
-        padding: 6px 10px !important;
-        border-radius: 6px !important;
-        font-weight: 600 !important;
-        font-size: 11px !important;
-        margin-bottom: 6px !important;
-    }
-    .accordion-header:hover {
-        background: #475569 !important;
-    }
-    """]
-)
-
-tree_view = pn.Column(
-    tree_header,
-    tree_accordion,
-    sizing_mode='stretch_width',
-    margin=0
-)
+tree_view = pn.pane.HTML("""
+<div style="background: #1e293b; padding: 14px; border-radius: 8px; margin-top: 12px;">
+    <div style="font-size: 13px; color: #f1f5f9; font-weight: 600; margin-bottom: 12px;
+                border-bottom: 1px solid #334155; padding-bottom: 8px;">
+        📁 DATA STRUCTURE
+    </div>
+    <div style="font-size: 11px; color: #cbd5e1;">
+        <div style="margin-bottom: 6px;">
+            <button style="background: #334155; border: none; color: #fbbf24; padding: 6px 10px;
+                          border-radius: 6px; cursor: pointer; font-weight: 600; width: 100%;
+                          text-align: left; font-size: 11px; transition: all 0.2s;"
+                    onmouseover="this.style.background='#475569'"
+                    onmouseout="this.style.background='#334155'">
+                📂 temperature
+            </button>
+            <div style="margin-left: 20px; margin-top: 4px;">
+                <button style="background: transparent; border: 1px solid #475569; color: #94a3b8;
+                              padding: 4px 8px; border-radius: 4px; cursor: pointer; width: 100%;
+                              text-align: left; font-size: 11px; margin-bottom: 3px; transition: all 0.2s;"
+                        onmouseover="this.style.background='#334155'; this.style.borderColor='#64748b'"
+                        onmouseout="this.style.background='transparent'; this.style.borderColor='#475569'">
+                    📊 surface_temp
+                </button>
+                <button style="background: transparent; border: 1px solid #475569; color: #94a3b8;
+                              padding: 4px 8px; border-radius: 4px; cursor: pointer; width: 100%;
+                              text-align: left; font-size: 11px; margin-bottom: 3px; transition: all 0.2s;"
+                        onmouseover="this.style.background='#334155'; this.style.borderColor='#64748b'"
+                        onmouseout="this.style.background='transparent'; this.style.borderColor='#475569'">
+                    📊 air_temp
+                </button>
+            </div>
+        </div>
+        <div style="margin-bottom: 6px;">
+            <button style="background: #334155; border: none; color: #fbbf24; padding: 6px 10px;
+                          border-radius: 6px; cursor: pointer; font-weight: 600; width: 100%;
+                          text-align: left; font-size: 11px; transition: all 0.2s;"
+                    onmouseover="this.style.background='#475569'"
+                    onmouseout="this.style.background='#334155'">
+                📂 pressure
+            </button>
+            <div style="margin-left: 20px; margin-top: 4px;">
+                <button style="background: transparent; border: 1px solid #475569; color: #94a3b8;
+                              padding: 4px 8px; border-radius: 4px; cursor: pointer; width: 100%;
+                              text-align: left; font-size: 11px; margin-bottom: 3px; transition: all 0.2s;"
+                        onmouseover="this.style.background='#334155'; this.style.borderColor='#64748b'"
+                        onmouseout="this.style.background='transparent'; this.style.borderColor='#475569'">
+                    📊 sea_level
+                </button>
+            </div>
+        </div>
+        <div>
+            <button style="background: #334155; border: none; color: #fbbf24; padding: 6px 10px;
+                          border-radius: 6px; cursor: pointer; font-weight: 600; width: 100%;
+                          text-align: left; font-size: 11px; transition: all 0.2s;"
+                    onmouseover="this.style.background='#475569'"
+                    onmouseout="this.style.background='#334155'">
+                📂 wind
+            </button>
+            <div style="margin-left: 20px; margin-top: 4px;">
+                <button style="background: transparent; border: 1px solid #475569; color: #94a3b8;
+                              padding: 4px 8px; border-radius: 4px; cursor: pointer; width: 100%;
+                              text-align: left; font-size: 11px; margin-bottom: 3px; transition: all 0.2s;"
+                        onmouseover="this.style.background='#334155'; this.style.borderColor='#64748b'"
+                        onmouseout="this.style.background='transparent'; this.style.borderColor='#475569'">
+                    📊 u_component
+                </button>
+                <button style="background: transparent; border: 1px solid #475569; color: #94a3b8;
+                              padding: 4px 8px; border-radius: 4px; cursor: pointer; width: 100%;
+                              text-align: left; font-size: 11px; transition: all 0.2s;"
+                        onmouseover="this.style.background='#334155'; this.style.borderColor='#64748b'"
+                        onmouseout="this.style.background='transparent'; this.style.borderColor='#475569'">
+                    📊 v_component
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+""", sizing_mode='stretch_width')
 
 # Assemble controller panel
 controller = pn.Column(
