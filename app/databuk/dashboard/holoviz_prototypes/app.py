@@ -7,6 +7,8 @@ from holoviews import streams
 from bokeh.util.serialization import make_globally_unique_id
 from geoviews import tile_sources as gvts
 
+from mock_data import generate_timeseries_data, generate_geographic_data, get_overlay_bounds
+
 js_files = {
     'jquery': 'https://code.jquery.com/jquery-1.11.1.min.js',
     'goldenlayout': 'https://golden-layout.com/files/latest/js/goldenlayout.min.js'
@@ -29,19 +31,8 @@ controller = pn.Column(
     pn.layout.VSpacer(),
 )
 
-# Generate mock time-series data
-np.random.seed(42)
-times = pd.date_range('2024-01-01', periods=100, freq='h')
-x_vals = np.cumsum(np.random.randn(100)) + 10
-y_vals = np.cumsum(np.random.randn(100)) + 20
-temperature = 15 + 5 * np.sin(np.linspace(0, 4*np.pi, 100)) + np.random.randn(100)
-
-df = pd.DataFrame({
-    'time': times,
-    'x': x_vals,
-    'y': y_vals,
-    'temperature': temperature
-})
+# Load mock data
+df = generate_timeseries_data()
 
 # Create linked plots
 selection = streams.Selection1D()
@@ -81,24 +72,14 @@ dynamic_line = hv.DynamicMap(selected_points, streams=[selection])
 # Connect selection stream to scatter plot
 selection.source = scatter
 
-# Create geographic map with multiple layers
-# Generate mock geographic data (locations in Europe)
-np.random.seed(123)
-map_lons = np.random.uniform(10, 20, 30)  # Longitude range
-map_lats = np.random.uniform(45, 55, 30)  # Latitude range
-map_values = np.random.uniform(0, 100, 30)  # Some measurement values
-
-map_df = pd.DataFrame({
-    'lon': map_lons,
-    'lat': map_lats,
-    'value': map_values
-})
+# Load mock geographic data
+map_df = generate_geographic_data()
+overlay_bounds = get_overlay_bounds()
 
 # Layer 1: Background map (OpenStreetMap tiles)
 base_map = gvts.OSM()
 
 # Layer 2: Mock overlay (semi-transparent rectangle as example)
-overlay_bounds = (12, 47, 18, 53)  # (lon_min, lat_min, lon_max, lat_max)
 overlay = gv.Rectangles([overlay_bounds]).opts(
     alpha=0.2, color='orange', line_width=2, line_color='red'
 )
