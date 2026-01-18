@@ -53,7 +53,10 @@ def _load_metadata(data_path: Path) -> tuple[MetadataModel, str | None]:
     LOG.info("Loading meta for %s", data_path)
     meta_path = data_path.with_suffix(data_path.suffix + ".meta.json")
     try:
-        return MetadataModel.model_validate_json(meta_path.read_text(encoding="utf-8")), None
+        meta = MetadataModel.model_validate_json(meta_path.read_text(encoding="utf-8"))
+        if meta.dataset_name is None:
+            meta.dataset_name = "yr.no"
+        return meta, None
     except Exception as e:
         return None, f"Failed to load meta: {e}"
 

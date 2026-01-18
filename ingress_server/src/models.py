@@ -117,7 +117,7 @@ class MetadataModel(BaseModel):
         description="Timestamp when the data was received",
     )
     dataframe_row: dict | None
-    dataset_name: str | None
+    dataset_name: str | None = None
 
     def get_schema_path(self) -> Path:
         path = Path(self.schema_path)
