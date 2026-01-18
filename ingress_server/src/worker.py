@@ -80,10 +80,15 @@ def _process_one(data_path: Path) -> str | None:
     if err:
         return f"Failed to open root: {err}"
 
-    if not metadata.node_path:
+    if not metadata.node_path and metadata.dataset_name:
+        root[metadata.dataset_name].update(df)
+    elif not metadata.node_path and not metadata.dataset_name:
         root.update(df)
-    else:
+    # TODO: handle more complex node paths (e.g. /a/b/c)
+    elif not metadata.dataset_name:
         root[metadata.node_path].update(df)
+    else:
+        root[metadata.dataset_name][metadata.node_path].update(df)
     return None
 
 

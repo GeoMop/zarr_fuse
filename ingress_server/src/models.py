@@ -10,6 +10,7 @@ class DataSourceConfig(BaseModel):
     schema_path: str
     extract_fn: str | None = None
     fn_module: str | None = None
+    dataset_name: str | None = None
 
     def get_schema_path(self) -> Path:
         path = Path(self.schema_path)
@@ -49,6 +50,7 @@ class ActiveScrapperConfig(BaseModel):
                 "schema_path": data.get("schema_path"),
                 "extract_fn": data.get("extract_fn"),
                 "fn_module": data.get("fn_module"),
+                "dataset_name": data.get("dataset_name"),
             }}
         return data
 
@@ -81,6 +83,7 @@ class EndpointConfig(BaseModel):
                 "schema_path": data.get("schema_path"),
                 "extract_fn": data.get("extract_fn"),
                 "fn_module": data.get("fn_module"),
+                "dataset_name": data.get("dataset_name"),
             }}
         return data
 
@@ -114,6 +117,7 @@ class MetadataModel(BaseModel):
         description="Timestamp when the data was received",
     )
     dataframe_row: dict | None
+    dataset_name: str | None
 
     def get_schema_path(self) -> Path:
         path = Path(self.schema_path)
@@ -140,4 +144,5 @@ class MetadataModel(BaseModel):
             extract_fn=data_source.extract_fn,
             fn_module=data_source.fn_module,
             dataframe_row=dataframe_row,
+            dataset_name=data_source.dataset_name,
         )
