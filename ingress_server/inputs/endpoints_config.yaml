@@ -1,0 +1,11 @@
+endpoints:
+  - name: bukov
+    endpoint: /api/v1/bukov
+    schema_name: bukov_schema_v1.yaml
+# active_scrappers:
+#   - name: bukov-scraper
+#     cron: "*/1 * * * *"
+#     url: "https://api.restful-api.dev/objects/7"
+#     schema_path: bukov_schema_v1.yaml
+#     schema_name: bukov_schema_v1.yaml
+#     method: GET

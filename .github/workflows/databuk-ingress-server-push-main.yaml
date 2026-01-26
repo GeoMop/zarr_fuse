@@ -1,0 +1,23 @@
+name: Ingress server - push main
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ingress_server/**
+jobs:
+  build-and-deploy:
+    name: Build and deploy ingress server for pre-production
+    uses: ./.github/workflows/databuk-ingress-server-reusable-workflow.yaml
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-build-and-deploy"
+      cancel-in-progress: true
+    with:
+      deploy: true
+      tag: generate
+      namespace: ingress-server-latest
+      zarr-fuse-ref: main
+      extra-helm-args: >-
+        --values .github/values/databuk-ingress-server/main.yaml
+    secrets: inherit

@@ -1,0 +1,23 @@
+name: Ingress server - pull request
+on:
+  pull_request:
+    branches:
+      - "**"
+    paths:
+      - ingress_server/**
+jobs:
+  build:
+    name: Build and deploy ingress server
+    uses: ./.github/workflows/databuk-ingress-server-reusable-workflow.yaml
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.event.number }}-build-and-deploy"
+      cancel-in-progress: true
+    with:
+      namespace: testing-airflow # TODO: Change namespace to ingress-server-development before merging airflow-main to main
+      deploy: true
+      tag: generate
+      zarr-fuse-ref: ${{ github.head_ref }}
+      # TODO: Change testing.yaml to pull-request.yaml before merging airflow-main to main
+      extra-helm-args: |
+        --values .github/values/databuk-ingress-server/testing.yaml
+    secrets: inherit

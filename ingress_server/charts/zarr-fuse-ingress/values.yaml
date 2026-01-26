@@ -1,0 +1,492 @@
+global:
+  # -- (int) Unique run identifier
+  runId: 0
+  # -- (object) S3 configuration
+  # @default -- ~
+  s3:
+    # -- (string) S3 endpoint URL
+    endpointUrl: endpointUrl
+    # -- (string) S3 store URL
+    storeUrl: storeUrl
+    # -- (object) S3 secrets
+    # @default -- ~
+    secrets:
+      # -- (string) S3 access key
+      accessKey: accessKey
+      # -- (string) S3 secret key
+      secretKey: secretKey
+
+# -- (object) Ingress configuration
+# @default -- ~
+ingress:
+  # -- (string) Ingress class name
+  className: nginx
+  # -- (dict) Ingress annotations
+  annotations: {}
+  # -- (dict) Ingress labels
+  # @default -- {}
+  labels: {}
+  # -- (object) Hosts configuration
+  # @default -- ~
+  hosts:
+    # -- (array) List of host configurations for the Ingress Service Ingress
+    # -- Each item is an object with {name, tls}
+    ingressService: []
+    # - name: ingress.com
+    #   tls:
+    #     enabled: true
+    #     secretName: ingress-com-tls
+
+    # -- (array) List of host configurations for the Extractor Service Ingress
+    # -- Each item is an object with {name, tls}
+    extractorService: []
+    # - name: extractor.example.com
+    #   tls:
+    #     enabled: true
+    #     secretName: extractor-example-com-tls
+
+# -- (object) Ingress Service configuration
+# @default -- ~
+ingressService:
+  # -- (string) Application name
+  name: ingress-service
+  # -- (int) Number of desired pods
+  replicaCount: 1
+  # -- (string) Restart policy for the pod
+  restartPolicy: Always
+  # -- (string) Image pull policy
+  imagePullPolicy: Always
+  # -- (string) Part of label 'app.kubernetes.io/part-of'
+  # @default -- .Chart.Name
+  partOf: ""
+  # -- (string) Component name for label 'app.kubernetes.io/component'
+  # @default -- .Chart.Name
+  component: ingress-service
+  # -- (array) Extra environment variables injected into the application container.
+  # -- Each item is an object with {name, value}.
+  extraEnv: []
+  # -- (dict) Extra labels to add to all resources
+  extraLabels: {}
+  # -- (dict) Extra annotations to add to all resources
+  extraAnnotations: {}
+
+  # -- (object) Image details
+  # @default -- ~
+  image:
+    # -- (string) Hostname of the container registry
+    host: docker.io
+    # -- (string) Image repository
+    name: jbrezmorf/zarr-fuse-ingress-service
+    # -- (string) Image tag
+    tag: ""
+
+  # -- (object) Service configuration
+  # @default -- ~
+  configuration:
+    # -- (object) FastAPI configuration
+    # @default -- ~
+    fastapi:
+      # -- (object) FastAPI secrets
+      # @default -- ~
+      secrets:
+        # -- (string/json) User/credentials definition for authentication.
+        # -- Must be provided as a JSON string.
+        # @default -- "{}"
+        usersJson: "{}"
+
+  # -- (object) Service configuration
+  # @default -- ~
+  service:
+    # -- (string) Service type
+    type: ClusterIP
+    # -- (string) Service name
+    name: ingress-service
+    # -- (dict) Service labels
+    labels: {}
+    # -- (dict) Service annotations
+    annotations: {}
+    # -- (object) External port configuration
+    # @default -- ~
+    externalPort:
+      # -- (int) Port number
+      number: 80
+      # -- (string) Port name
+      name: http
+    # -- (object) Internal port configuration
+    # @default -- ~
+    internalPort:
+      # -- (int) Port number
+      number: 8000
+      # -- (string) Port name
+      name: http
+
+  # -- (object) Resource requests and limits
+  # @default -- ~
+  resources:
+    # -- (object) Resource requests for the container
+    # @default -- {}
+    requests: {}
+    #   cpu: 125m
+    #   memory: 128Mi
+
+    # -- (object) Resource limits for the container
+    # @default -- {}
+    limits: {}
+    #   cpu: 250m
+    #   memory: 256Mi
+
+  # -- (object) Security context settings
+  # @default -- ~
+  securityContext:
+    # -- (object) Pod-level security context
+    # @default -- ~
+    pod: {}
+    # -- (object) Container-level security context
+    # @default -- ~
+    container: {}
+
+# -- (object) Extractor Service configuration
+# @default -- ~
+extractorService:
+  # -- (object) Postgres database configuration
+  # @default -- ~
+  postgres:
+    # -- (string) Application name
+    name: postgres
+    # -- (int) Number of desired pods
+    replicaCount: 1
+    # -- (string) Restart policy for the pod
+    restartPolicy: Always
+    # -- (string) Image pull policy
+    imagePullPolicy: IfNotPresent
+    # -- (string) Part of label 'app.kubernetes.io/part-of'
+    # @default -- .Chart.Name
+    partOf: extractor-service
+    # -- (string) Component name for label 'app.kubernetes.io/component'
+    # @default -- .Chart.Name
+    component: postgresql
+    # -- (array) Extra environment variables injected into the application container.
+    # -- Each item is an object with {name, value}.
+    extraEnv: []
+    # -- (dict) Extra labels to add to all resources
+    extraLabels: {}
+    # -- (dict) Extra annotations to add to all resources
+    extraAnnotations: {}
+
+    # -- (object) Image details
+    # @default -- ~
+    image:
+      # -- (string) Hostname of the container registry
+      host: docker.io
+      # -- (string) Image repository
+      name: postgres
+      # -- (string) Image tag
+      tag: 16
+
+    # -- (object) Database secrets
+    # @default -- ~
+    secrets:
+      # -- (string) Database user
+      user: ""
+      # -- (string) Database password
+      password: ""
+      # -- (string) Database name
+      database: ""
+
+    # -- (object) Persistence configuration
+    # @default -- ~
+    persistence:
+      # -- (string) Name of the PersistentVolumeClaim
+      name: postgres-data
+      # -- (string) Storage class name
+      storageClass: csi-ceph-rbd-du
+      # -- (string) Size of the persistent volume
+      size: 10Gi
+      # -- (string) Volume mode
+      volumeMode: Filesystem
+      # -- (array) Access modes for the persistent volume
+      accessModes:
+        - ReadWriteOnce
+
+    # -- (object) Service configuration
+    # @default -- ~
+    service:
+      # -- (string) Service type
+      type: ClusterIP
+      # -- (string) Service name
+      name: postgres-service
+      # -- (dict) Service labels
+      labels: {}
+      # -- (dict) Service annotations
+      annotations: {}
+      # -- (object) External port configuration
+      # @default -- ~
+      externalPort:
+        # -- (int) Port number
+        number: 5432
+        # -- (string) Port name
+        name: postgres
+      # -- (object) Internal port configuration
+      # @default -- ~
+      internalPort:
+        # -- (int) Port number
+        number: 5432
+        # -- (string) Port name
+        name: postgres
+
+    # -- (object) Resource requests and limits
+    # @default -- ~
+    resources:
+      # -- (object) Resource requests for the container
+      # @default -- {}
+      requests: {}
+      #   cpu: 125m
+      #   memory: 128Mi
+
+      # -- (object) Resource limits for the container
+      # @default -- {}
+      limits: {}
+      #   cpu: 250m
+      #   memory: 256Mi
+
+    # -- (object) Security context settings
+    # @default -- ~
+    securityContext:
+      # -- (object) Pod-level security context
+      # @default -- ~
+      pod: {}
+      # -- (object) Container-level security context
+      # @default -- ~
+      container: {}
+
+  # -- (object) Airflow configuration
+  # @default -- ~
+  airflow:
+    # -- (string) Airflow executor type
+    executor: LocalExecutor
+    # -- (string) Image pull policy
+    imagePullPolicy: IfNotPresent
+    # -- (object) Image details
+    # @default -- ~
+    image:
+      # -- (string) Hostname of the container registry
+      host: docker.io
+      # -- (string) Image repository
+      name: jbrezmorf/zarr-fuse-extractor-service
+      # -- (string) Image tag
+      tag: ""
+
+    # -- (object) Airflow secrets
+    # @default -- ~
+    secrets:
+      # -- (string) Fernet key for encrypting sensitive data
+      fernetKey: ""
+
+    # -- (object) Scheduler configuration
+    # @default -- ~
+    scheduler:
+      # -- (string) Name of the scheduler deployment
+      name: airflow-scheduler
+      # -- (int) Number of desired pods
+      replicaCount: 1
+      # -- (string) Restart policy for the pod
+      restartPolicy: Always
+      # -- (string) Image pull policy
+      imagePullPolicy: IfNotPresent
+      # -- (string) Part of label 'app.kubernetes.io/part-of'
+      partOf: extractor-service
+      # -- (string) Component name for label 'app.kubernetes.io/component'
+      component: scheduler
+      # -- (array) Extra environment variables injected into the application container.
+      extraLabels: {}
+      # -- (dict) Extra annotations to add to all resources
+      extraAnnotations: {}
+      # -- (array) Extra environment variables injected into the application container.
+      extraEnv: []
+
+      # -- (object) Resource requests and limits
+      # @default -- ~
+      resources:
+        # -- (object) Resource requests for the container
+        # @default -- {}
+        requests: {}
+        #   cpu: 125m
+        #   memory: 128Mi
+
+        # -- (object) Resource limits for the container
+        # @default -- {}
+        limits: {}
+        #   cpu: 250m
+        #   memory: 256Mi
+
+      # -- (object) Security context settings
+      # @default -- ~
+      securityContext:
+        # -- (object) Pod-level security context
+        # @default -- ~
+        pod: {}
+        # -- (object) Container-level security context
+        # @default -- ~
+        container: {}
+
+    # -- (object) Web Server configuration
+    # @default -- ~
+    webServer:
+      # -- (string) Name of the web server deployment
+      name: airflow-webserver
+      # -- (int) Number of desired pods
+      replicaCount: 1
+      # -- (string) Restart policy for the pod
+      restartPolicy: Always
+      # -- (string) Image pull policy
+      imagePullPolicy: IfNotPresent
+      # -- (string) Part of label 'app.kubernetes.io/part-of'
+      partOf: extractor-service
+      # -- (string) Component name for label 'app.kubernetes.io/component'
+      component: scheduler
+      # -- (array) Extra environment variables injected into the application container.
+      extraLabels: {}
+      # -- (dict) Extra annotations to add to all resources
+      extraAnnotations: {}
+      # -- (array) Extra environment variables injected into the application container.
+      extraEnv: []
+      # -- (object) Web Server secrets
+      # @default -- ~
+      secrets:
+        # -- (string) Secret key for the web server
+        webServerSecretKey: ""
+      # -- (object) Service configuration
+      # @default -- ~
+      service:
+        # -- (string) Service type
+        type: ClusterIP
+        # -- (string) Service name
+        name: airflow-webserver-service
+        # -- (dict) Service labels
+        labels: {}
+        # -- (dict) Service annotations
+        annotations: {}
+        # -- (object) External port configuration
+        # @default -- ~
+        externalPort:
+          # -- (int) Port number
+          number: 8080
+          # -- (string) Port name
+          name: http
+        # -- (object) Internal port configuration
+        # @default -- ~
+        internalPort:
+          # -- (int) Port number
+          number: 8080
+          # -- (string) Port name
+          name: http
+
+      # -- (object) Resource requests and limits
+      # @default -- ~
+      resources:
+        # -- (object) Resource requests for the container
+        # @default -- {}
+        requests: {}
+        #   cpu: 125m
+        #   memory: 128Mi
+
+        # -- (object) Resource limits for the container
+        # @default -- {}
+        limits: {}
+        #   cpu: 250m
+        #   memory: 256Mi
+
+      # -- (object) Security context settings
+      # @default -- ~
+      securityContext:
+        # -- (object) Pod-level security context
+        # @default -- ~
+        pod: {}
+        # -- (object) Container-level security context
+        # @default -- ~
+        container: {}
+
+    # -- (object) Init Job configuration
+    # @default -- ~
+    initJob:
+      # -- (string) Name of the init job
+      name: airflow-init-job
+      # -- (string) Restart policy for the pod
+      restartPolicy: OnFailure
+      # -- (string) Image pull policy
+      imagePullPolicy: IfNotPresent
+      # -- (string) Part of label 'app.kubernetes.io/part-of'
+      partOf: extractor-service
+      # -- (string) Component name for label 'app.kubernetes.io/component'
+      component: init-job
+      # -- (int) TTL seconds after finished
+      ttlSecondsAfterFinished: 3600
+      # -- (array) Extra environment variables injected into the application container.
+      extraLabels: {}
+      # -- (dict) Extra annotations to add to all resources
+      extraAnnotations: {}
+      # -- (array) Extra environment variables injected into the application container.
+      extraEnv: []
+
+      # -- (object) Init Job secrets
+      # @default -- ~
+      secrets:
+        # -- (object) Admin user credentials
+        # @default -- ~
+        adminUser:
+          # -- (string) Admin username
+          username: admin
+          # -- (string) Admin password
+          password: admin
+          # -- (string) Admin first name
+          firstname: admin
+          # -- (string) Admin last name
+          lastname: admin
+          # -- (string) Admin email
+          email: admin@gmail.com
+
+      # -- (object) Resource requests and limits
+      # @default -- ~
+      resources:
+        # -- (object) Container requests and limits
+        # @default -- ~
+        container:
+          # -- (object) Resource requests for the container
+          # @default -- {}
+          requests: {}
+          #   cpu: 125m
+          #   memory: 128Mi
+
+          # -- (object) Resource limits for the container
+          # @default -- {}
+          limits: {}
+          #   cpu: 250m
+          #   memory: 256Mi
+
+        # -- (object) Init Container requests and limits
+        # @default -- ~
+        initContainer:
+          # -- (object) Resource requests for the container
+          # @default -- {}
+          requests: {}
+          #   cpu: 125m
+          #   memory: 128Mi
+
+          # -- (object) Resource limits for the container
+          # @default -- {}
+          limits: {}
+          #   cpu: 250m
+          #   memory: 256Mi
+
+      # -- (object) Security context settings
+      # @default -- ~
+      securityContext:
+        # -- (object) Pod-level security context
+        # @default -- ~
+        pod: {}
+        # -- (object) Container-level security context
+        # @default -- ~
+        container: {}
+        # -- (object) Init Container-level security context
+        # @default -- ~
+        initContainer: {}
