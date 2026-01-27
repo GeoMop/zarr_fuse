@@ -149,6 +149,24 @@ Update CSS in the template section or individual component styles:
 - Font sizes
 - Spacing and padding
 
+## Things Yet to Test
+1. Big data plots
+   - Limits of datasize for standard scatter and line plots.
+   - methods to update client side data: ColumnDataSource.stream, ColumnDataSource.patch
+   - Datashader (native support for large datasets) interactivity (since original data are on server)
+
+2. Georeferencing and tiling of Large Bitmaps 
+   - test overlaying OSM with large tiled bitmaps (as in Bukov)
+   - test georeferencing from S-JSTK coordinate system (wastly used in Czech rep.)
+
+3. Customized interactions
+   - wheel zoom just in X (time) axis
+   - wheel zoom selects points probability (e.g. each point has "probability" value,  we plot (x, 1) probability range, moving x by the wheel
+   - multiple point selection
+   
+4. User Authentication (? CXI experience)
+   
+
 ## Troubleshooting
 
 ### Import Errors
