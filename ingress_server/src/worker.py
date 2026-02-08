@@ -54,8 +54,8 @@ def _load_metadata(data_path: Path) -> tuple[MetadataModel, str | None]:
     meta_path = data_path.with_suffix(data_path.suffix + ".meta.json")
     try:
         meta = MetadataModel.model_validate_json(meta_path.read_text(encoding="utf-8"))
-        if meta.dataset_name is None:
-            meta.dataset_name = "yr.no"
+        if meta.schema_node is None:
+            meta.schema_node = "yr.no"
         return meta, None
     except Exception as e:
         return None, f"Failed to load meta: {e}"
@@ -79,19 +79,19 @@ def _process_one(data_path: Path) -> str | None:
     if err:
         return f"Failed to read DataFrame: {err}"
 
-    root, err = open_root(Path(metadata.schema_path))
+    root, err = open_root(Path(metadata.get_schema_path()))
     if err:
         return f"Failed to open root: {err}"
 
-    if not metadata.node_path and metadata.dataset_name:
-        root[metadata.dataset_name].update(df)
-    elif not metadata.node_path and not metadata.dataset_name:
+    if not metadata.node_path and metadata.schema_node:
+        root[metadata.schema_node].update(df)
+    elif not metadata.node_path and not metadata.schema_node:
         root.update(df)
     # TODO: handle more complex node paths (e.g. /a/b/c)
-    elif not metadata.dataset_name:
+    elif not metadata.schema_node:
         root[metadata.node_path].update(df)
     else:
-        root[metadata.dataset_name][metadata.node_path].update(df)
+        root[metadata.schema_node][metadata.node_path].update(df)
     return None
 
 

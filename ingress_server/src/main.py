@@ -11,9 +11,10 @@ from io_utils import process_payload
 from configs import CONFIG, STOP
 from worker import startup_recover, install_signal_handlers, working_loop
 from logging_setup import setup_logging
-from active_scrapper import add_scrapper_job
+from active_scrapper.scheduler import add_scrapper_jobs
 
-from models import ActiveScrapperConfig, EndpointConfig
+from models import EndpointConfig
+from active_scrapper.active_scrapper_config_models import ActiveScrapperConfig
 from apscheduler.schedulers.background import BackgroundScheduler
 
 BG_SCHEDULER = BackgroundScheduler()
@@ -93,8 +94,8 @@ def create_app():
 
     for scrapper in CONFIG.get("active_scrappers", []):
         model = ActiveScrapperConfig.model_validate(scrapper)
-        add_scrapper_job(model, BG_SCHEDULER)
-        LOG.info("Created active scrapper job %s for %s", model.name, model.url)
+        add_scrapper_jobs(model, BG_SCHEDULER)
+        LOG.info("Created active scrapper job %s for %s", model.name, model.request.url)
     BG_SCHEDULER.start()
     return APP
 

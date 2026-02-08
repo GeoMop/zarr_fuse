@@ -46,7 +46,16 @@ def save_data(
     meta_data = metadata.model_copy(update={"node_path": str(safe_child) if safe_child else None})
 
     base = (ACCEPTED_DIR / meta_data.endpoint_name)
-    suffix = ".csv" if "csv" in meta_data.content_type else ".json"
+
+    if "csv" in meta_data.content_type.lower():
+        suffix = ".csv"
+    elif "octet-stream" in meta_data.content_type.lower():
+        suffix = ".bin"
+    elif "json" in meta_data.content_type.lower():
+        suffix = ".json"
+    else:
+        return f"Unsupported content type: {meta_data.content_type}. Use application/json or text/csv."
+
     msg_path = new_msg_path(base, suffix)
 
     try:
@@ -61,7 +70,7 @@ def save_data(
 # =========================
 # DataFrame helpers
 # =========================
-def create_df_from_bytes(
+def create_df_from_json(
     payload: bytes,
     metadata: MetadataModel,
 ) -> tuple[pl.DataFrame | None, str | None]:
@@ -88,10 +97,12 @@ def read_df_from_bytes(
 
     if "csv" in ct:
         return pl.read_csv(io.BytesIO(payload)), None
-    elif "json" in ct:
-        return create_df_from_bytes(payload, metadata)
+    if "json" in ct:
+        return create_df_from_json(payload, metadata)
+    if "octet-stream" in ct:
+        return ".bin", None
     else:
-        return None, f"Unsupported content type: {metadata.content_type}. Use application/json or text/csv."
+        return None, f"Unsupported content type: {metadata.content_type}. Use application/json, text/csv, or application/octet-stream."
 
 
 # =========================
@@ -102,7 +113,7 @@ def validate_content_type(content_type: str | None) -> tuple[bool, str | None]:
         return False, "No Content-Type provided"
 
     ct = content_type.lower()
-    if ("json" in ct) or ("csv" in ct):
+    if ("grib" in ct) or ("x-grib" in ct) or ("grb" in ct) or ("octet-stream" in ct) or ("bzip2" in ct):
         return True, None
     return False, f"Unsupported Content-Type: {content_type}"
 
@@ -123,13 +134,15 @@ def validate_data(data: bytes, content_type: str) -> str | None:
     if not data:
         return "No data provided"
 
-    if "json" in content_type:
+    ct = content_type.lower()
+
+    if "json" in ct:
         try:
             json.loads(data.decode("utf-8"))
         except Exception as e:
             return f"Invalid JSON payload: {e}"
 
-    elif "csv" in content_type:
+    elif "csv" in ct:
         try:
             reader = csv.reader(io.StringIO(data.decode("utf-8")))
             next(reader)

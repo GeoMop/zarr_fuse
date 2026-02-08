@@ -71,8 +71,9 @@ LOG_LEVEL=DEBUG
 
 The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.
 
-### 2) Endpoints (`src/endpoints_config.yaml`)
+### 2) Configuration (`src/endpoints_config.yaml`)
 
+#### Passive Scrapper
 ```yaml
 endpoints:
   - name: tree
@@ -86,6 +87,51 @@ endpoints:
   - name: sensor
     endpoint: /api/v1/sensor
     schema_path: schemas/sensor_schema_v1.yaml
+```
+
+#### Active Scrapper
+```yaml
+active_scrappers:
+  - name: chmi-aladin-1km
+    schema_path: schemas/hlavo_surface_schema.yaml
+    schema_node: chmi_aladin_10m
+    extract_fn: extract_chmi_grib
+    fn_module: inputs.extract.chmi
+
+    runs:
+      - cron: "*/1 * * * *"
+        set:
+          time: "00"
+      - cron: "52 11 * * *"
+        set:
+          time: "06"
+
+    request:
+      method: GET
+      url: "https://opendata.chmi.cz/meteorology/weather/nwp_aladin/CZ_1km/{time}/ALADCZ1K4opendata_{date}{time}_{quantity}.grb.bz2"
+      headers:
+        - header_name: "User-Agent"
+          header_value: "MyWeatherApp/1.0 (your_email@example.com)"
+
+    render:
+      - name: date
+        source: datetime_utc
+        format: "%Y%m%d"
+
+    iterate:
+      - name: quantity
+        source: schema
+        schema_node: "chmi_aladin_10m"
+        schema_regex: "VARS.*.df_col"
+
+      - name: dataframe_row
+        source: dataframe
+        dataframe_path: dataframes/chmi_surface_dataframe.csv
+        dataframe_has_header: true
+        outputs:
+          lat: dflat
+          lon: dflon
+          station_id: station
 ```
 
 Each entry creates two routes:

@@ -27,6 +27,8 @@ def apply_extractor_if_any(
         raise ValueError("No extractor found")
 
     LOG.info("Applying extractor %s from %s for endpoint %s", metadata.extract_fn, metadata.fn_module, metadata.endpoint_name)
+    result = extractor(payload, metadata)
+
 
     parsed_data = None
     try:

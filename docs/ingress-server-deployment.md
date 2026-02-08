@@ -156,21 +156,46 @@ endpoints:
     fn_module: module.path.to.extraction       # optional
 
 active_scrappers:
-  - name: scraper-name
-    url: https://api.example.com/data
-    crons:                                     # cron schedule (minute hour day month dow)
-      - "0 * * * *"                           # Every hour
-      - "0 6,18 * * *"                        # At 6 AM and 6 PM
-    schema_path: schemas/schema.yaml
-    headers:
-      - header_name: Authorization
-        header_value: Bearer token123
-    url_params:                                # URL parameters to add
-      - param_name: location
-        column_name: site_id                  # from dataframe column
-    dataframe_path: dataframes/locations.csv  # optional: CSV with parameter values
-    extract_fn: normalize_data                # optional
-    fn_module: inputs.extract.module          # optional
+  - name: chmi-aladin-1km
+    schema_path: schemas/hlavo_surface_schema.yaml
+    schema_node: chmi_aladin_10m
+    extract_fn: extract_chmi_grib
+    fn_module: inputs.extract.chmi
+
+    runs:
+      - cron: "*/1 * * * *"
+        set:
+          time: "00"
+      - cron: "52 11 * * *"
+        set:
+          time: "06"
+
+    request:
+      method: GET
+      url: "https://opendata.chmi.cz/meteorology/weather/nwp_aladin/CZ_1km/{time}/ALADCZ1K4opendata_{date}{time}_{quantity}.grb.bz2"
+      headers:
+        - header_name: "User-Agent"
+          header_value: "MyWeatherApp/1.0 (your_email@example.com)"
+
+    render:
+      - name: date
+        source: datetime_utc
+        format: "%Y%m%d"
+
+    iterate:
+      - name: quantity
+        source: schema
+        schema_node: "chmi_aladin_10m"
+        schema_regex: "VARS.*.df_col"
+
+      - name: dataframe_row
+        source: dataframe
+        dataframe_path: dataframes/chmi_surface_dataframe.csv
+        dataframe_has_header: true
+        outputs:
+          lat: dflat
+          lon: dflon
+          station_id: station
 ```
 
 **Key Points:**
@@ -222,7 +247,7 @@ SITE001,50.855,14.905,Main Weather Station
 SITE002,50.865,14.915,Secondary Station
 ```
 
-Columns are mapped to URL parameters via `url_params.column_name` in config.
+Columns are mapped to URL parameters via `query_params.column_name` in config.
 
 ## Environment Variables
 
