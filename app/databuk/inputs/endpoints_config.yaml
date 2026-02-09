@@ -2,7 +2,7 @@ endpoints:
   - name: bukov
     endpoint: /api/v1/bukov
     schema_path: inputs/schemas/bukov_schema.yaml
-    dataset_name: bukov
+    schema_node: bukov
     extract_fn: normalize_new # fn(json_data, meta_data) -> pd.DataFrame
     fn_module: inputs.extract.bukov_extract
 #active_scrappers:
@@ -21,7 +21,7 @@ endpoints:
 #    headers:
 #      - header_name: "User-Agent"
 #        header_value: "MyWeatherApp/1.0 (your_email@example.com)"
-#    url_params:
+#    query_params:
 #      - param_name: lat
 #        column_name: dflat
 #      - param_name: lon
