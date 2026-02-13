@@ -1,7 +1,10 @@
 #!/bin/bash
 
 # Usage:
-# bash ./store_create.sh [-f]
+# bash ./store_create.sh [-f] <BUCKET_NAME>
+#
+# BUCKET_NAME without leading s3://
+# !! name can not contain underscores, but may contain dashes.
 #
 # 1. delete the bucket if '-f' is present
 # 2. try to create the bucket 
@@ -11,21 +14,34 @@
 
 set -euo pipefail
 
-AWS="../../aws.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+AWS="$SCRIPT_DIR/aws.sh"
 
 #TENANT="6505d0ea_cc40_4dea_bf99_0c5b3f7eb526"
 # extract tenant from list-buckets
 TENANT=`$AWS personal s3api list-buckets | jq -r '.Owner.ID | split("$")[0]'`
 
-BUCKET="hlavo-release"
 FORCE=0
-
-# Parse -f option
-while getopts "f" opt; do
-  case "$opt" in
-    f) FORCE=1 ;;
+# Parse options manually with shift
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -f)
+      FORCE=1
+      shift
+      ;;
+    --) # explicit end of options
+      shift
+      break
+      ;;
+    *)  # first non-option => BUCKET
+      break
+      ;;
   esac
 done
+
+BUCKET="$1"
+shift
 
 ########################################
 # Handle bucket creation

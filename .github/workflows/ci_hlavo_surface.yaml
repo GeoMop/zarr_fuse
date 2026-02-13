@@ -1,5 +1,4 @@
 on:
-  push:
   workflow_dispatch:
   schedule:
     # yr.no short term world updates: 01:00, 09:30, 13:00, 20:30
@@ -20,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+            ref: main
       - name: Install hlavo_surface environment.
         run: |
           bash app/hlavo_surface/setup_env
