@@ -609,7 +609,6 @@ class Node:
 
     @property
     def dataset(self):
-        print("DEBUG: Entering Node.dataset")
         """
         Lazily open the dataset stored in this node's group.
         Returns a (possibly dask‑backed) xarray.Dataset.
