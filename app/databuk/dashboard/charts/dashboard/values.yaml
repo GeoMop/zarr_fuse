@@ -1,0 +1,109 @@
+# -- Registry details
+# @default -- ~
+registry:
+  # -- Host of the registry
+  host: docker.io
+
+backend:
+  name: dashboard-backend
+  replicaCount: 1
+  image:
+    name: jbrezmorf/zarr-fuse-dashboard-backend
+    tag: latest
+    pullPolicy: Always
+
+  service:
+    type: ClusterIP
+    externalPort:
+      number: 8000
+      name: http
+    internalPort:
+      number: 8000
+      name: http
+
+  s3:
+    bucketName: ""
+    endpointUrl: "https://s3.cl4.du.cesnet.cz"
+    addressingStyle: "path"
+    secrets:
+      accessKey: "your-access-key"
+      secretKey: "your-secret-key"
+
+  resources:
+    requests:
+      cpu: 125m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+  securityContext:
+    pod:
+      fsGroup: 11233
+      runAsNonRoot: true
+      runAsUser: 11233
+      runAsGroup: 11233
+    container:
+      capabilities:
+        drop:
+          - ALL
+      allowPrivilegeEscalation: false
+      privileged: false
+      runAsNonRoot: true
+      runAsUser: 11233
+      runAsGroup: 11233
+      seccompProfile:
+        type: RuntimeDefault
+
+frontend:
+  name: dashboard-frontend
+  replicaCount: 1
+  image:
+    name: jbrezmorf/zarr-fuse-dashboard-frontend
+    tag: latest
+    pullPolicy: Always
+
+  service:
+    type: ClusterIP
+    externalPort:
+      number: 8091
+      name: http
+    internalPort:
+      number: 8091
+      name: http
+
+  resources:
+    requests:
+      cpu: 125m
+      memory: 128Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+  securityContext:
+    pod:
+      fsGroup: 11233
+      runAsNonRoot: true
+      runAsUser: 11233
+      runAsGroup: 11233
+    container:
+      capabilities:
+        drop:
+          - ALL
+      allowPrivilegeEscalation: false
+      privileged: false
+      runAsNonRoot: true
+      runAsUser: 11233
+      runAsGroup: 11233
+      seccompProfile:
+        type: RuntimeDefault
+
+# -- Ingress configuration
+# @default -- ~
+ingress:
+  # -- Ingress class name
+  className: "nginx"
+  # -- Ingress annotations
+  annotations:
+    kubernetes.io/tls-acme: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"

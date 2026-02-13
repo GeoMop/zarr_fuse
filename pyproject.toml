@@ -81,7 +81,12 @@ dev = [
     # TODO: find a way to avoid this repetition
     # possibly PDM (Python Development Master or stick with basic setup.py
     "pytest",
+
+    # Dependencies specific for interactive plotting prototype.
+    "contextily",
+    "pyproj",
     # Include dependencies from plotting
+    "ipympl",
     "matplotlib",
     "plotly",
     # Include dependencies from apps

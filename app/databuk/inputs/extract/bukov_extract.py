@@ -43,7 +43,7 @@ def depth_label(key: str) -> str:
         return "15.2"
     return key[:-1] if key.endswith("m") else key  # '0.05m' -> '0.05' etc.
 
-def normalize(json_dict):
+def normalize(json_dict, gps_dict):
     data = json_dict
     records = []
 
@@ -55,6 +55,8 @@ def normalize(json_dict):
             records.append({
                 "date_time": ts,
                 "borehole":  borehole,
+                "longitude": gps_dict[borehole]["lon"],
+                "latitude": gps_dict[borehole]["lat"],
                 # "depth": math.nan,
                 "depth": "0",
                 "rock_temp": math.nan,
@@ -67,6 +69,8 @@ def normalize(json_dict):
             records.append({
                 "date_time": ts,
                 "borehole":  borehole,
+                "longitude": gps_dict[borehole]["lon"],
+                "latitude": gps_dict[borehole]["lat"],
                 # "depth": math.nan,
                 "depth": "0.01",
                 "rock_temp": math.nan,
@@ -81,6 +85,8 @@ def normalize(json_dict):
                     records.append({
                         "date_time": ts,
                         "borehole":  borehole,
+                        "longitude": gps_dict[borehole]["lon"],
+                        "latitude": gps_dict[borehole]["lat"],
                         "rock_temp": as_float_or_nan(v),
                         "air_temp":  math.nan,
                         "air_humidity": math.nan,
@@ -135,5 +141,5 @@ def normalize_new(json_dict : dict, metadata : dict) -> dict:
     json_dict_new = read_new_fiedler_json(json_dict)
     return normalize(json_dict_new)
 
-def normalize_old(json_dict : dict, metadata : dict) -> dict:
-    return normalize(json_dict)
+def normalize_old(json_dict : dict, gps_dict: dict, metadata : dict) -> dict:
+    return normalize(json_dict, gps_dict)

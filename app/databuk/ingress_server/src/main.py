@@ -13,7 +13,6 @@ from io_utils import validate_content_type, sanitize_node_path, atomic_write, ne
 from configs import CONFIG, ACCEPTED_DIR, STOP
 from worker import startup_recover, install_signal_handlers, working_loop
 from logging_setup import setup_logging
-from active_scrapper import add_scrapper_job
 
 load_dotenv()
 APP = Flask(__name__)
@@ -63,7 +62,6 @@ def _upload_node(endpoint_name: str, extract_fn: str = None, fn_module: str = No
         "endpoint_name": endpoint_name,
         "username": AUTH.current_user(),
         "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        "schema_path": schema_path,
     }
 
     atomic_write(msg_path.with_suffix(msg_path.suffix + ".meta.json"), json.dumps(meta_data).encode("utf-8"))

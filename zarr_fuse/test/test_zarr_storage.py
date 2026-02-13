@@ -57,7 +57,13 @@ def _store_ls(schema, **kwargs):
     options = zf.zarr_storage._zarr_fuse_options(node_schema, **kwargs)
     store = zf.zarr_storage._zarr_store_open(options)
     if not isinstance(store, FsspecStore):
-        path = Path(str(store).lstrip("file:")).parent # folder above the zarr store
+        # Handle Windows path properly - remove file:// protocol and normalize
+        store_path_str = str(store)
+        if store_path_str.startswith("file://"):
+            store_path_str = store_path_str[7:]  # Remove file://
+        elif store_path_str.startswith("file:"):
+            store_path_str = store_path_str[5:]  # Remove file:
+        path = Path(store_path_str).parent # folder above the zarr store
         return os.listdir(path)
     else:
         loop = fsspec.asyn.get_loop()                     # fsspec’s global loop
