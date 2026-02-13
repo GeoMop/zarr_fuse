@@ -24,11 +24,27 @@ def grid_points(grid_min, grid_max, grid_step):
     return lon.flatten(), lat.flatten()
 
 def sensor_locations(source_path):
-    raw_df = pl.read_csv(source_path, has_header=True)
-    lonlat = raw_df['GPS']
-    lon, lat = zip(*[row.split(',') for row in lonlat if row is not None])
-    lon = np.array(lon, dtype=float)
-    lat = np.array(lat, dtype=float)
+    raw_df = pl.read_csv(source_path, has_header=True, skip_rows=1)
+
+    col_logger_id = "logger_id"
+    df = raw_df.filter(
+        (pl.col(col_logger_id).is_not_null()) & (pl.col(col_logger_id) != "")
+    )
+
+    df = df.drop(col for col in df.columns if col not in [col_logger_id, "latitude", "longitude"])
+
+    # Replace invalid strings with nulls and cast to Float64
+    df = df.with_columns([
+        pl.col(col).cast(pl.Float64, strict=False) for col in df.columns if col != col_logger_id
+    ])
+
+    # Filter out rows with null in latitude or longitude
+    df = df.filter(
+        pl.col("latitude").is_not_null() & pl.col("longitude").is_not_null()
+    )
+
+    lon = df['longitude'].to_numpy()
+    lat = df['latitude'].to_numpy()
     return lon, lat
 
 
@@ -110,8 +126,11 @@ def main():
     df_locs = location_df(schema.ds.ATTRS)
 
     df = update_meteo(yr_no.get_3day_forecast, df_locs)
+    print(df)
     root_node = zarr_fuse.open_store(schema, workdir = work_dir)
+    print('Store open')
     root_node['yr.no'].update(df)
+    print('Updated')
 
 if __name__ == '__main__':
     main()

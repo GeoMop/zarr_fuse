@@ -183,7 +183,7 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-
+app/hlavo_surface/inputs/.env
 # Dashboard
 app/databuk/dashboard/node_modules/
 app/databuk/dashboard/dist/
