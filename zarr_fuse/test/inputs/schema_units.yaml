@@ -1,10 +1,10 @@
 VARS:
-  # We put forward varaible keys as valid keywords, but quoted names are valid in YAML
-  temperature:
-    unit: "K"
+  # Variables to test various units.
+  pressure:
+    unit: "m"
     description: "Temperature in Kelvin"
     df_col: "temp"
-    source_unit: "degC"
+    source_unit: "Pa"
     coords: ["time of year", "lat_lon"]
 
   longitude:
@@ -49,3 +49,4 @@ COORDS:
 ATTRS:
   description: "Example dataset"
   url: "https://example.com"
+  VERSION: 0.3.0

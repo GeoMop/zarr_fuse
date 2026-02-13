@@ -1,27 +1,5 @@
-# setup of global logging
-#
-# Usage in a module:
-# from chodby_inv import get_logger
-# logger = get_logger(__name__)
-#
-# def foo():
-#     logger.info("Info message")
-#     logger.debug("Debug message")
-#
-# This makes a logger that automaticaly adds the module context to the
-# messages, while the log file as well as formating remains common according to the
-# configuration in this file.
-#
-# TODO:
-#  - Logger still does not support more then one process, improve that.
-#    probably using an array would be best way to go. Splitting long messages if necessary.
-#    Appends should be "signed" somehow so we can hash author processes
-#  - Message columns: data_time, level, process_hash =
-#    (author_hash, computer_hash, process_hash), message_id,
-#
-
-
 import logging
+from logging import Logger, DEBUG, Formatter, Handler, StreamHandler
 import threading
 import asyncio
 import sys
@@ -32,40 +10,71 @@ CpuBuffer = zarr.core.buffer.cpu.Buffer
 from datetime import datetime, timezone
 
 
-def get_logger(store, path, name: str = None) -> logging.Logger:
+def get_logger(store, path: str, name: str | None = None) -> Logger:
     """
-    Create and return a logger that writes into the given Zarr store
-    via StoreLogHandler.
+    Create and return a logger.
+
+    If `store` is not None, logs are written into the given Zarr store via
+    StoreLogHandler. If `store` is None, logs go to stderr via StderrLogHandler,
+    but with the same formatter (incl. [path] context).
 
     Parameters
     ----------
-    store : zarr.abc.Store
-        A Zarr 3 store (DirectoryStore, FSStore, MemoryStore, etc.)
+    store : zarr.abc.Store or None
+        A Zarr 3 store (DirectoryStore, FSStore, MemoryStore, etc.) or None.
+    path : str
+        Group/path context for the logger; appears in log messages.
     name : str, optional
-        Name for the logger. If None, a name based on the store id is used.
+        Name for the logger. If None, a name based on the store id and path is used.
 
     Returns
     -------
     logging.Logger
         Configured logger instance.
     """
-    logger_name = name or f"zarr_logger_{id(store)}{path}"
+    suffix = "stderr" if store is None else str(id(store))
+    logger_name = name or f"zarr_logger_{suffix}{path}"
     logger = logging.getLogger(logger_name)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(DEBUG)
     logger.propagate = False
 
     # Remove any existing handlers (to avoid duplicate logs)
     for h in list(logger.handlers):
         logger.removeHandler(h)
 
-    # Attach our StoreLogHandler
-    handler = StoreLogHandler(store, path)
-    logger.addHandler(handler)
+    if store is None:
+        handler: Handler = StderrLogHandler(path)
+    else:
+        handler = StoreLogHandler(store, path)
 
+    logger.addHandler(handler)
     return logger
 
 
-class StoreLogHandler(logging.Handler):
+class _BaseFormatterMixin:
+    """Mixin to provide the common formatter used by both handlers."""
+
+    def _setup_formatter(self, group_path: str):
+        fmt = f"%(asctime)s %(levelname)-5s [{group_path}] %(message)s"
+        formatter = Formatter(fmt, datefmt="%Y-%m-%d %H:%M:%S")
+        self.setFormatter(formatter)
+
+
+class StderrLogHandler(StreamHandler, _BaseFormatterMixin):
+    """
+    Fallback handler used when store is None.
+
+    Writes to stderr but uses the same format as StoreLogHandler.
+    """
+
+    def __init__(self, group_path: str):
+        super().__init__(stream=sys.stderr)
+        self.group_path = group_path
+        self.prefix = "logs"  # unused, kept for symmetry
+        self._setup_formatter(group_path)
+
+
+class StoreLogHandler(Handler, _BaseFormatterMixin):
     """
     Zarr-3 handler that writes into logs/YYYYMMDD.log via a private
     background asyncio loop. DEBUG/ERROR block until written (with
@@ -75,15 +84,14 @@ class StoreLogHandler(logging.Handler):
     that method will swap itself out for the full-read/write (_append_safe).
     """
 
-    def __init__(self, store, group_path, partial_write: bool = False):
+    def __init__(self, store, group_path: str, partial_write: bool = False):
         super().__init__()
         self.store = store
         self.group_path = group_path
         self.prefix = "logs"
-        self.setFormatter(logging.Formatter(
-            f"%(asctime)s %(levelname)-5s [{self.group_path}] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
-        ))
+
+        self._setup_formatter(group_path)
+
         # start private asyncio loop in a thread
         self._append_fut = None
         self._buffer_prototype = zarr.core.buffer.core.default_buffer_prototype()
@@ -91,11 +99,10 @@ class StoreLogHandler(logging.Handler):
         threading.Thread(target=self._loop.run_forever, daemon=True).start()
         self._schedule = lambda coro: asyncio.run_coroutine_threadsafe(coro, self._loop)
 
-
         # choose initial append strategy
-        if isinstance(store, (zarr.storage.LocalStore,)) :
-            # Partial writes are not supported form zarr 3
-            # but appending may stil work on LocalStore.
+        if isinstance(store, (zarr.storage.LocalStore,)):
+            # Partial writes are not supported from zarr 3, but appending may
+            # still work on LocalStore.
             self._append = self._append_unsafe
         else:
             self._append = self._append_safe
@@ -130,7 +137,6 @@ class StoreLogHandler(logging.Handler):
             bytes_old = buf_old.as_numpy_array().tobytes()
             bytes_new = buf.as_numpy_array().tobytes()
             concat = bytes_old + bytes_new
-            print("\n", str(concat))
             buf = CpuBuffer.from_bytes(concat)
 
         await self.store.set(key, buf)

@@ -28,7 +28,7 @@ def health():
     return jsonify({"status": "ok"}), 200
 
 @AUTH.login_required
-def _upload_node(endpoint_name: str, schema_path: str, node_path: str = ""):
+def _upload_node(endpoint_name: str, extract_fn: str = None, fn_module: str = None, node_path: str = ""):
     LOG.debug("ingress.request endpoint=%s node_path=%r ct=%r user=%r",
         endpoint_name, node_path, request.headers.get("Content-Type"), AUTH.current_user())
 
@@ -56,11 +56,13 @@ def _upload_node(endpoint_name: str, schema_path: str, node_path: str = ""):
     atomic_write(msg_path, data)
 
     meta_data = {
+        "extract_fn": extract_fn,
+        "fn_module": fn_module,
         "content_type": content_type,
         "node_path": node_path,
         "endpoint_name": endpoint_name,
         "username": AUTH.current_user(),
-        "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "received_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         "schema_path": schema_path,
     }
 
@@ -75,14 +77,19 @@ def _upload_node(endpoint_name: str, schema_path: str, node_path: str = ""):
 # =========================
 # Route creation
 # =========================
-def create_upload_endpoint(endpoint_name: str, endpoint_url: str, schema_path: str):
+def create_upload_endpoint(
+    endpoint_name: str,
+    endpoint_url: str,
+    extract_fn: str = None,
+    fn_module: str = None
+):
     # Root path (without node_path)
     APP.add_url_rule(
         endpoint_url,
         endpoint=f"upload_node_root_{endpoint_name.replace('-', '_')}",
         view_func=_upload_node,
         methods=["POST"],
-        defaults={"endpoint_name": endpoint_name, "schema_path": schema_path, "node_path": ""},
+        defaults={"endpoint_name": endpoint_name, "extract_fn": extract_fn, "fn_module": fn_module, "node_path": ""},
     )
 
     # Subpath with node_path
@@ -91,7 +98,7 @@ def create_upload_endpoint(endpoint_name: str, endpoint_url: str, schema_path: s
         endpoint=f"upload_node_sub_{endpoint_name.replace('-', '_')}",
         view_func=_upload_node,
         methods=["POST"],
-        defaults={"endpoint_name": endpoint_name, "schema_path": schema_path},
+        defaults={"endpoint_name": endpoint_name, "extract_fn": extract_fn, "fn_module": fn_module},
     )
 
 
@@ -100,16 +107,7 @@ def create_upload_endpoint(endpoint_name: str, endpoint_url: str, schema_path: s
 # =========================
 def create_app():
     for ep in CONFIG.get("endpoints", []):
-        create_upload_endpoint(ep["name"], ep["endpoint"], ep["schema_path"])
-
-    for scrapper in CONFIG.get("active_scrappers", []):
-        add_scrapper_job(
-            name = scrapper["name"],
-            url = scrapper["url"],
-            cron = scrapper["cron"],
-            schema_path = scrapper["schema_path"],
-            method = scrapper["method"],
-        )
+        create_upload_endpoint(ep["name"], ep["endpoint"], ep["extract_fn"], ep["fn_module"])
     return APP
 
 def _start_worker_thread():
