@@ -1,0 +1,31 @@
+VARS:
+    pressure:
+        unit: "m"
+        description: "Pressure head field"
+        df_col: "pressure"
+        coords: ["time", "elements"]
+    conductivity_tn:
+        unit: "m/s"
+        description: "Hydraulic conductivity tensor."
+        coords: ["time", "elements", "tn_voigt_3d"]
+COORDS:
+    time:
+        unit:
+            tick: "s"
+            tz: 'CET'
+        description: "Time coordinate"
+        df_col: "timestamp"
+        chunk_size: 256
+    elements:
+        type: uint64   # Index
+        description: "Mesh element index"
+        df_col: "element"
+        chunk_size: 512
+    tn_voigt_3d:
+        type: uint64
+        discrete: [0, 1, 2, 3, 4, 5]
+
+ATTRS:
+    description: "Flow123d simulation result."
+    flow123d_release: "3.9.0"
+    VERSION: 0.3.0

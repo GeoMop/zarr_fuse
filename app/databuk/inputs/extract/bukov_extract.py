@@ -8,13 +8,13 @@ from pathlib import Path
 
 # IN_JSON  = Path("inputs/test_measurements/T_123_partial.json")            # input JSON with old data
 # OUT_CSV  = Path("inputs/test_measurements/T_123_partial_normalized.csv")   # CSV output
-# 
+#
 # files = [
 #     "20250915T133948_121e738c86ab.json",
 #     "20250915T111522_824a7f3dc0ad.json",
 #     "20250915T115149_8b4f1f4535aa.json",
 # ]
-# 
+#
 # IN_JSON_NEW  = Path("inputs/test_measurements/20250915T111522_824a7f3dc0ad.json")          # input JSON from Fiedler
 # OUT_CSV_NEW  = Path("inputs/test_measurements/from_fiedler_normalized.csv")   # CSV output
 
@@ -43,18 +43,20 @@ def depth_label(key: str) -> str:
         return "15.2"
     return key[:-1] if key.endswith("m") else key  # '0.05m' -> '0.05' etc.
 
-def normalize(json_dict):
+def normalize(json_dict, gps_dict):
     data = json_dict
     records = []
 
     for borehole, measurements in data.items():
         for row in measurements:
-            ts = row.get(DATETIME_KEY)
+            ts = row.get(DATETIME_KEY) or 'NaT'
 
             # --- air temperature item ---
             records.append({
                 "date_time": ts,
                 "borehole":  borehole,
+                "longitude": gps_dict[borehole]["lon"],
+                "latitude": gps_dict[borehole]["lat"],
                 # "depth": math.nan,
                 "depth": "0",
                 "rock_temp": math.nan,
@@ -67,6 +69,8 @@ def normalize(json_dict):
             records.append({
                 "date_time": ts,
                 "borehole":  borehole,
+                "longitude": gps_dict[borehole]["lon"],
+                "latitude": gps_dict[borehole]["lat"],
                 # "depth": math.nan,
                 "depth": "0.01",
                 "rock_temp": math.nan,
@@ -81,6 +85,8 @@ def normalize(json_dict):
                     records.append({
                         "date_time": ts,
                         "borehole":  borehole,
+                        "longitude": gps_dict[borehole]["lon"],
+                        "latitude": gps_dict[borehole]["lat"],
                         "rock_temp": as_float_or_nan(v),
                         "air_temp":  math.nan,
                         "air_humidity": math.nan,
@@ -129,11 +135,11 @@ def read_new_fiedler_json(json_dict) -> dict:
 def read_json(path: Path):
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    return data 
+    return data
 
 def normalize_new(json_dict : dict, metadata : dict) -> dict:
     json_dict_new = read_new_fiedler_json(json_dict)
     return normalize(json_dict_new)
 
-def normalize_old(json_dict : dict, metadata : dict) -> dict:
-    return normalize(json_dict)
+def normalize_old(json_dict : dict, gps_dict: dict, metadata : dict) -> dict:
+    return normalize(json_dict, gps_dict)

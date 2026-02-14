@@ -16,5 +16,4 @@ jobs:
       deploy: false
       push-container: false
       tag: generate
-      zarr-fuse-ref: ${{ github.head_ref }}
     secrets: inherit

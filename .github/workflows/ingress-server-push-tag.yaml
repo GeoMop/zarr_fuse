@@ -15,11 +15,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Get version from tag
         id: get-version
         run: |
           version=$(echo "${{ github.ref_name }}" | cut -d'/' -f2)
           echo "version=$version" >> $GITHUB_OUTPUT
+
   build-and-deploy:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     needs:
@@ -34,5 +36,4 @@ jobs:
       namespace: ingress-server
       release-name: ingress-server
       s3-store-url: s3://app-databuk-release-service/bukov.zarr
-      zarr-fuse-ref: ${{ github.ref }}
     secrets: inherit

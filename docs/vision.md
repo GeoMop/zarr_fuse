@@ -11,8 +11,8 @@ and training neural network models.
 - need simple data updates through (Excel/CSV) tables
 - deal with human factor, lack of consistency
 
-**data from similations**
-- updates are large datasets
+**data from simulations**
+- updates are large dense datasets
 - updates comes in parallel from many cluster machines
 
 **stochastic analysis**
@@ -25,8 +25,11 @@ and training neural network models.
 **FAIR data**
 - collect all necessary metadata about data origin
 - enable streamlined publication on repositories
-- data lineage (tracking data processing steps form the source
-
+- data lineage (tracking data processing steps form the source)
+- level of metadata organization should be scalable allowing nearly no metadata up to very complex
+  metadata schemas
+  
+  
 ## Data processing workflow
 
 1. **Ingress** 
@@ -58,13 +61,13 @@ and training neural network models.
     
     
 ## Data as virtual N-dimensional array
-For their specificity, we conceptualy distinguish five types of cordinates (aaxes of the array).
-Ve assume that each indivudual number of the dataset has unique combination of these five coordinates.
+For their specificity, we conceptualy distinguish five types of cordinates (axes of the array).
+we assume that each indivudual scalar value within a dataset has unique combination of these five coordinates.
 Moreover these coordinates types are clearly independent
 
 **Time** 
-- essentialy 1D coordinate, sortable
-- usualy primary appendable coordinate
+- essentialy single 1D coordinate, sortable
+- often primary appendable coordinate
 - multiscale postprocessing (derived subcoordinates like day of year, hour of day, ...)
 - multiscale view/plot
 - timezones, time formats
@@ -75,16 +78,18 @@ Moreover these coordinates types are clearly independent
 - non-sortable
 - allowing discrete locations, physical coordinates like labels
 - location in space
-- multiscale like time, can have more then 3D, e.g. XYZ of borehole head + position of sensor in hte borehole
+- multiscale nature similar to the Time, can have more then 3D, e.g. XYZ of borehole head + position of sensor in hte borehole
 - use of "composed" coordinate, ( ?? possible problems of  unstable hashing due to rounding errors)
-- could be modeld either as xarray coord or as ZARR folder
+  See also [new indices developments](https://xarray-indexes.readthedocs.io/#xarray-diagram-wild) in XArray. Possibly
+  these will serve better to our purpose.
+- could be modeled either as xarray coord or as ZARR folder
 
 **Realization**
 - stochastic realization
 - imagine like parallel universe realization
-- duplicit measurements in "nearly" same location
+- duplicit measurements in the "nearly" same location
 
-**Source**
+**Provenience**
 - measurement vs. simulations
 - sensor ID (+ metadata)
 - simulation ID (+ metadata)
@@ -95,6 +100,46 @@ Moreover these coordinates types are clearly independent
 - named
 - unit
 - possible comparison of same quantity in dfferent locations in common plot
+
+## Metadata association
+There are various metadata schemas and we have no support for particular metadata schema
+but the data store schema file should allow to model what kind of metadata are collected.
+The metadata could be in priciple viewed as other variables, but with specific means of store as
+they are common for large parts of the arrays, but on other hand there could be lot of them and 
+are not of primary importance. 
+
+**Metadata granularity**
+The metadata variables or their collections could be attributed to data of various extension.
+The granularity of a metadata variable specify extension of the data unit that could hold
+a value different from other units of the same extension. 
+Following are possible granularity options with examples of metadata variables that could have such granularity.
+However granularity of the metadata is always on the designer of the dataset schema.
+
+- **store**     One value for whole zarr-fuse storage. E.g. access rights, project 
+- **dataset**   One value for a dataset within the zarr-fuse storage tree. 
+                Datasets / groups could separate different fidelity of description or individual parts of some system. 
+                Metadata examples: resolution level, simulation configuration 
+- **variable**  One value for each variable in each dataset. 
+                E.g. unit, dtype, range, definition of the quantity, function relating it to other variables (in the same or different datasets), workflow history,
+                controled / dependent, precision, resolution
+- **update**    One value for each update of each variable of each dataset.
+                E.g. measurement device, computing HW, identity of operator, simulation batch
+- **slice / single value** 
+                Probably not metadata anyway, but regular variable. Could be a variable that is assumed to not affect other variable, but recorded for reference or
+                an auxiliary varaible. E.g. temperature readings of pressure sensors -- of lower imprtance in undergraoud with very small temperature variation,
+                nevertheless used in the pressure evaluation formula.
+                
+**Data Provenience Kinds**
+Let's discus little more possible metadata associated with **Provenience** axis. 
+which is often sparse and have metadata character. We can distinguish several cathegories of 
+the provenience metadata.
+- **design**    Metadata that are part of the data collection design.
+- **responsibility** Who contributes these data? Person, organisation.
+- **essential** Metadata variables that could essentialy affect the collected values. E.g. pH or temperature of concentrations measurements. 
+                Consider to treat these as coordinates or regular variables. 
+- **technical** Could affect colected values, but effect is neglected. E.g. measuring device, resolution, simulation tolerances
+- **circumstances** Variables assumend to not affecting the data. E.g. temperature of pressure sensing (see above)
+                
 
 ## Technical solution
 

@@ -1,0 +1,147 @@
+# Configuration of the ZARR-FUSE storage
+ATTRS:
+    # for the bucket name see the store_create.sh script.
+    STORE_URL: "s3://hlavo-release/surface_v3.zarr"
+    S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
+    location_file: &loc_file odyssey_locations.csv
+    grid_min: [50.840000, 14.850000]    # unit deg
+    grid_max: [50.8900000, 14.9600000]  # unit deg
+    grid_step: [1e-2, 1e-2]             # unit deg; about 1000m; approximately resolution of the yr.no service
+
+    
+    
+yr.no:
+    VARS:
+        # We put forward varaible keys as valid keywords, but quoted names are valid in YAML
+        precipitation_amount:
+            unit: "mm"
+            description: "parcipitation in [mm] per hour (!VERIFY!)"
+            coords: ["date_time", "lat_lon"]
+       
+#         "probability_of_precipitation":
+#             unit: "%"
+#             description: ""
+#             coords: ["date_time", "lat_lon"]
+#         
+#         "probability_of_thunder":     
+#             unit: "%"
+#             description: ""
+#             coords: ["date_time", "lat_lon"]
+        
+        air_temperature:
+            unit: "C"
+            description: "Temperature in Kelvin"
+            df_col: "air_temperature"
+            coords: ["date_time", "lat_lon"]
+        
+        
+        air_pressure:
+            unit: "Pa"
+            df_col: "air_pressure_at_sea_level"
+            coords: ["date_time", "lat_lon"]
+        
+        cloud_fraction:
+            unit: "%"
+            df_col: "cloud_area_fraction"
+            coords: ["date_time", "lat_lon"]
+        
+        cloud_fraction_high: 
+            unit: "%"
+            df_col: "cloud_area_fraction_high"
+            coords: ["date_time", "lat_lon"]
+
+        cloud_fraction_low:
+            unit: "%"
+            df_col: "cloud_area_fraction_low"
+            coords: ["date_time", "lat_lon"]
+
+        cloud_fraction_medium:
+            unit: "%"
+            df_col: "cloud_area_fraction_medium"
+            coords: ["date_time", "lat_lon"]
+
+        fog_fraction: 
+            unit: "%"
+            df_col: "fog_area_fraction"
+            coords: ["date_time", "lat_lon"]
+
+        
+        dew_point_temp:
+            unit: "C"
+            df_col: "dew_point_temperature"
+            coords: ["date_time", "lat_lon"]
+        
+        relative_humidity:
+            unit: "C"
+            df_col: "dew_point_temperature"
+            coords: ["date_time", "lat_lon"]
+        
+        wind_speed:
+            unit: "m/s"
+            coords: ["date_time", "lat_lon"]
+        
+        # wind_speed_of_gust:
+        #     unit: "m/s"
+        #     coords: ["date_time", "lat_lon"]
+        
+        "wind_from_direction": 
+            unit: "degrees"
+            coords: ["date_time", "lat_lon"]
+        
+        "ultraviolet_index_clear_sky": 
+            unit: ""
+            coords: ["date_time", "lat_lon"]
+        
+        grid_domain:
+            unit: "bool"
+            description: "Is the (longitude, latitude) point part of grid domain or measured points?"
+            coords: "lat_lon"
+            
+        longitude:
+            unit: "deg"
+            description: "Signed Earth longitude."
+            coords: "lat_lon"
+
+            
+        latitude:
+            unit: "deg"
+            description: "Signed Earth longitude."
+            coords: "lat_lon"
+            # df_col = <var's name is default source data frame column>
+            # coords = <var's name is self coordinated variable> 
+        
+
+
+    COORDS:
+        date_time: # Defines coord from the variable of the same name. 
+            unit: { tick: "h", tz: "UTC" }
+            description: "Time coordinate, UTC time zone, hour resolution"
+            source_unit: { tick: "h", tz: "UTC" }
+            chunk_size: 1024
+            merge: # configuration of merging existing and new coordinates and transfer (interpolation) of the data arrays
+                #allow_inserts: False  # This is currently only supported and default value.
+                #sorted: None  # Automatic, sort coord by itself for non-composed coordinates.
+                step_limits: [ 1, 1, "h" ]
+                # None - no limits add all new coordinates out of existing range.
+                # scalar - regular grid with this step size (use units to convert string values
+                # [min, max] - regular grid with this step size (TODO)
+        
+        lat_lon:
+            # Secondary description valid for composed coordinates. 
+            description: "Example of coordinate indexed uniquely by a tuple of values. The source columns are converted to the 1D list of tuples."
+            composed: ["latitude", "longitude"]
+            chunk_size: 64
+        
+    ATTRS:
+        description:
+            "Most recent 6h forcast data from yr.no collected into continuou historical data series."
+        update:
+            FN: yr_no_update
+            module: weather_scrapper
+            url: https://api.met.no/weatherapi/locationforecast/2.0/complete
+            html_cache: False    
+            locations:
+              FN: location_df
+              #module: "."   # default relative to calling function module
+              attrs_dict: *loc_file     #!Ref .ATTRS    # Helm style variable interpolation. 
+#meteosat:

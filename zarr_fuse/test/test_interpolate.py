@@ -1,7 +1,12 @@
+import logging
+
 import pytest
 import numpy as np
 import xarray as xr
 import re
+
+from zarr_fuse import schema as zf_schema
+
 try:
     import matplotlib.pyplot as plt
 except ImportError:
@@ -9,8 +14,13 @@ except ImportError:
 
 # ---- adjust this import to match your module path! ----
 from zarr_fuse.interpolate import interpolate_ds, sort_by_coord, interpolate_coord, dflt_logger
-from zarr_fuse.zarr_schema import Coord
 #from ds_interpolate import sort_by_coord, interpolate_coord, interpolate_ds
+
+def _ctx(data: dict):
+    """Create a ContextCfg with a SchemaCtx wired to our capture logger."""
+    logger = logging.Logger("test_logger")
+    ctx = zf_schema.SchemaCtx(addr=[], file="test.yaml", logger=logger)
+    return zf_schema.ContextCfg(data, ctx)
 
 # a tiny dummy schema object in lieu of Coord
 class DummySchema:
@@ -27,7 +37,11 @@ class DummySchema:
 # -- low‐level tests for sort_by_coord & interpolate_coord --
 
 def test_sort_by_coord_sorted():
-    schema = DummySchema(sorted=True)
+    cfg = dict(
+        name='tst_coord',
+        sorted=True
+    )
+    schema = zf_schema.Coord(_ctx(cfg))
     old = np.array([0, 10, 20, 30])
     new_ref = np.array([15, 25, 30, 35, 40, 50])
     new = new_ref.copy()
@@ -51,7 +65,11 @@ def test_sort_by_coord_sorted():
 
 
 def test_sort_by_coord_unsorted():
-    schema = DummySchema(sorted=False)
+    cfg = dict(
+        name='tst_coord',
+        sorted=False,
+        )
+    schema = zf_schema.Coord(_ctx(cfg))
     # empty extension
     old = np.array([5, 15, 25])
     new = np.array([25, 5, 15])
@@ -84,9 +102,14 @@ def test_sort_by_coord_unsorted():
     assert np.all([5, 25, 6, 35] == new[idx_sort])
 
 
-def run_interp(old, new, step_limits, sort=True,  unit='', step_unit='hour'):
-    schema = DummySchema(sorted=sort, step_limits=step_limits, unit=unit, step_unit=step_unit)
-
+def run_interp(old, new, step_limits, sort=True,  unit=''):
+    cfg = dict(
+        name='tst_coord',
+        unit=unit,
+        sorted=sort,
+        step_limits=step_limits
+    )
+    schema = zf_schema.Coord(_ctx(cfg))
     new = np.array(new)
     old = np.array(old)
     idx_sorter = sort_by_coord(new, old, schema, dflt_logger)
@@ -96,35 +119,37 @@ def run_interp(old, new, step_limits, sort=True,  unit='', step_unit='hour'):
 def test_interpolate_coord_sorted():
     old = [0, 1, 2]
     # sorted, step_limits - no extension
-    merged, split = run_interp(old, [1, 1.5, 2.1], step_limits=None)
+    merged, split = run_interp(old, [1, 1.5, 2.1], step_limits="no_new")
     assert split == 2
     np.allclose(merged, [1, 2])
 
     new = [1, 1.5, 2.1, 3, 10]
-    merged, split = run_interp(old, new, step_limits=None)
+    merged, split = run_interp(old, new, step_limits="no_new")
     # apendend coordinates ignored. Non-fatal error.
     assert np.allclose(merged, [1, 2])
 
     # sorted, step_limits - full extension
-    merged, split = run_interp(old, new, step_limits=[])
+    merged, split = run_interp(old, new, step_limits="any_new")
     assert split == 2
     np.allclose(merged, [1, 2, 2.1, 3, 10])
 
     new = [1, 1.5, 2, 3, 10]
-    merged, split = run_interp(old, new, step_limits=[])
+    merged, split = run_interp(old, new, step_limits="any_new")
     assert split == 2
     np.allclose(merged, [1, 2, 3, 10])
 
     # sorted, step_limits - unexact step limits
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
-                    step_limits=[72, 126, 'minutes']) # 1.2 h, 2.1 h
+                    unit='h',
+                    step_limits={'start':72, 'end':126, 'unit':'minutes'}) # 1.2 h, 2.1 h
     assert split == 2
     np.allclose(merged, [1, 2, 4, 5.75, 7.5, 8.75,  10])
 
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
-                    step_limits=[150, 150, 'minutes']) # 2.5 h
+                    unit='h',
+                    step_limits=dict(start=150, end=150, unit='minutes')) # 2.5 h
     assert split == 2
     np.allclose(merged, [1, 2, 3.5 + 1/3.0, 5 + 2/3.0, 7.5,  10])
 
@@ -306,9 +331,20 @@ def test_interpolate_ds():
         coords={"x": update_x,   "p": update_p},
     )
 
+    coord_schema = lambda x: zf_schema.Coord(_ctx(x))
     schema = {
-        "x": DummySchema(sorted=True,  step_limits=[], unit='h', step_unit='h'),
-        "p": DummySchema(sorted=False, step_limits=[], unit='deg', step_unit='deg'),
+        "x": coord_schema(dict(
+                name='x',
+                unit='h',
+                sorted=True,
+                step_limits=[]
+            )),
+        "p": coord_schema(dict(
+            name='p',
+            unit='deg',
+            sorted=False,
+            step_limits=[]
+        ))
     }
 
     # --- Run the interpolation under test ---
