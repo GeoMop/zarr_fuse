@@ -38,7 +38,7 @@ runs:
   steps:
     - name: Login to registry
       shell: bash
-      if: ${{ inputs.push }} == 'true'
+      if: ${{ inputs.push == 'true' }}
       run: buildah login -u ${{ inputs.registry-username }} -p "${{ inputs.registry-password }}" ${{ inputs.registry }}
     - name: Build container file
       shell: bash
@@ -46,7 +46,7 @@ runs:
       run: buildah build -t ${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }} ${{ inputs.extra-build-args }} -f ${{ inputs.containerfile-path }} .
     - name: Push container image
       shell: bash
-      if: ${{ inputs.push }} == 'true'
+      if: ${{ inputs.push == 'true' }}
       run: |
         buildah push ${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }} docker://${{ inputs.registry }}/${{ inputs.repository }}:${{ inputs.tag }}
         buildah logout ${{ inputs.registry }}

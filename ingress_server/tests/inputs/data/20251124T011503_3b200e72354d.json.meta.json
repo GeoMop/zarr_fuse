@@ -1,0 +1,31 @@
+{
+  "content_type": "application/json",
+  "endpoint_name": "testing",
+  "node_path": null,
+  "username": "scrapper-testing",
+  "received_at": "2025-11-24T01:15:03Z",
+  "schema_path": "schemas/testing.yaml",
+  "dataset_name": "testing",
+  "extract_fn": "normalize_yrno_forecast",
+  "fn_module": "inputs.extract.hlavo_extract",
+  "dataframe_row": {
+    "idx": "26",
+    "tmp_id": "6",
+    "profile_code": "U26 - 8FAD",
+    "GPS": "50.8687356,14.8938567",
+    "dflon": 50.8687356,
+    "dflat": 14.8938567,
+    "env_forest": "0,5",
+    "env_medow": null,
+    "env_field": null,
+    "env_undergrowth": "0,5",
+    "terain_flat": null,
+    "terain_slope": null,
+    "terain_dip": null,
+    "soil": null,
+    "forest_litter": null,
+    "bottom_clay": null,
+    "bottom_sand": null,
+    "note.": "hraniční cesta v lese (ve výsledku širší díra, bortily se stěny)"
+  }
+}

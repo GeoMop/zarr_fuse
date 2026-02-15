@@ -5,10 +5,13 @@ on:
     branches:
       - main
     paths:
-      - app/databuk/ingress_server/**
+      - ingress_server/**
 jobs:
   build-and-deploy:
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
+      cancel-in-progress: false
     with:
       deploy: true
       tag: generate

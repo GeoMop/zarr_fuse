@@ -4,15 +4,16 @@ on:
     branches:
       - "**"
     paths:
-      - app/databuk/ingress_server/**
+      - ingress_server/**
 jobs:
   build:
     name: Build and deploy ingress server
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
+      cancel-in-progress: false
     with:
-      deploy: true
+      deploy: false
+      push-container: false
       tag: generate
-      namespace: ingress-server-development
-      release-name: ingress-server-development
-      s3-store-url: s3://app-databuk-test-service/bukov-pull-request.zarr
     secrets: inherit

@@ -1,4 +1,4 @@
-.github @MocStepan
-app/databuk/ingress_server @MocStepan
+.github @MocStepan @jbrezmorf
+ingress_server @MocStepan @jbrezmorf
 zarr_fuse @jbrezmorf
 app @jbrezmorf
