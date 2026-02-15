@@ -29,11 +29,17 @@ _SETTINGS: Optional[Settings] = None
 CONFIG: Dict[str, Any] = {}
 
 
-def init_settings() -> Settings:
+def init_settings(queue_dir: Path = None, config_dir: Path = None) -> Settings:
     global _SETTINGS, CONFIG
 
-    queue_dir_path = Path(os.getenv("QUEUE_DIR_PATH", "./var/zarr_fuse")).resolve()
-    config_dir_path = Path(os.getenv("CONFIG_DIR_PATH", "inputs")).resolve()
+    queue_dir_path = Path(
+        queue_dir if queue_dir is not None
+        else os.getenv("QUEUE_DIR_PATH", "./var/zarr_fuse")
+    ).resolve()
+    config_dir_path = Path(
+        config_dir if config_dir is not None
+        else os.getenv("CONFIG_DIR_PATH", "inputs")
+    ).resolve()
 
     (queue_dir_path / "accepted").mkdir(parents=True, exist_ok=True)
     (queue_dir_path / "success").mkdir(parents=True, exist_ok=True)

@@ -31,9 +31,7 @@ RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@${za
 # --- Install ingress server ---
 WORKDIR /ingress-server
 
-COPY --chown=ingress:ingress pyproject.toml ./
-COPY --chown=ingress:ingress ingress_server/ ./ingress_server/
-COPY --chown=ingress:ingress inputs/ ./inputs/
+COPY --chown=ingress:ingress pyproject.toml ingress_server/ inputs/ ./
 COPY --chown=ingress:ingress oci/install_extras.sh ./scripts/install_extras.sh
 
 RUN pip install --no-cache-dir .
