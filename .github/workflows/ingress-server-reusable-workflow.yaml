@@ -50,10 +50,10 @@ on:
         type: string
         default: ""
       zarr-fuse-ref:
-        description: "Ref/branch/tag repozitáře GeoMop/zarr_fuse"
+        description: "Ref/branch/tag repozitáře GeoMop/zarr_fuse for external use"
         required: false
         type: string
-        default: main
+        default: ""
 jobs:
   get-version-tag:
     name: Get version tag
@@ -61,6 +61,9 @@ jobs:
     outputs:
       version-tag: ${{ steps.get_version_tag.outputs.version_tag }}
     steps:
+      - name: Checkout zarr_fuse
+        uses: actions/checkout@v4
+
       - name: Get version tag
         id: get_version_tag
         run: |
@@ -69,13 +72,14 @@ jobs:
           else
             echo "version_tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
           fi
+
   pre-containerize:
     name: Prepare for containerization
     runs-on: ubuntu-latest
-    if: ${{ inputs.configuration-dir-path != '' }}
     steps:
       - name: Checkout caller repository
         uses: actions/checkout@v4
+
       - name: Copy configuration files
         run: |
           SRC_DIR="${{ inputs.configuration-dir-path }}"
@@ -95,6 +99,7 @@ jobs:
         with:
           name: ingress-server-configuration
           path: ci-inputs/
+
   containerize:
     name: Containerize ingress server
     runs-on: ubuntu-latest
@@ -106,6 +111,11 @@ jobs:
       options: --privileged
     steps:
       - name: Checkout zarr_fuse
+        if: ${{ github.repository == 'GeoMop/zarr_fuse' }}
+        uses: actions/checkout@v4
+
+      - name: Checkout zarr_fuse for external use
+        if: ${{ github.repository != 'GeoMop/zarr_fuse' }}
         uses: actions/checkout@v4
         with:
           repository: GeoMop/zarr_fuse
@@ -113,14 +123,14 @@ jobs:
 
       - name: Remove existing configuration files
         if: ${{ inputs.configuration-dir-path != '' }}
-        run: rm -rf ingress_server/src/inputs/*
+        run: rm -rf ingress_server/inputs/*
 
       - name: Download configuration files artifact
         if: ${{ inputs.configuration-dir-path != '' }}
         uses: actions/download-artifact@v4
         with:
           name: ingress-server-configuration
-          path: ingress_server/src/inputs/
+          path: ingress_server/inputs/
 
       - name: Containerize
         uses: ./.github/actions/containerize
@@ -134,6 +144,7 @@ jobs:
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
           working-directory: ingress_server
           extra-build-args: --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}"
+
   lint-helm-chart:
     name: Lint ingress server Helm chart
     runs-on: ubuntu-latest
@@ -143,16 +154,23 @@ jobs:
       - containerize
     steps:
       - name: Checkout zarr_fuse
+        if: ${{ github.repository == 'GeoMop/zarr_fuse' }}
+        uses: actions/checkout@v4
+
+      - name: Checkout zarr_fuse for external use
+        if: ${{ github.repository != 'GeoMop/zarr_fuse' }}
         uses: actions/checkout@v4
         with:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}
+
       - name: Lint helm chart
         uses: ./.github/actions/helm-lint
         with:
           working-directory: ingress_server/charts/ingress-server
           values: --values values/minimal-required-values.yaml
-  deploy:
+
+  eploy:
     name: Deploy ingress server to e-infra rancher
     runs-on: ubuntu-latest
     if: ${{ inputs.deploy }}
@@ -168,14 +186,22 @@ jobs:
         working-directory: ingress_server/charts
     steps:
       - name: Checkout zarr_fuse
+        if: ${{ github.repository == 'GeoMop/zarr_fuse' }}
+        uses: actions/checkout@v4
+
+      - name: Checkout zarr_fuse for external use
+        if: ${{ github.repository != 'GeoMop/zarr_fuse' }}
         uses: actions/checkout@v4
         with:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}
+
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
+
       - name: Set context
         run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
+
       - name: Deploy app
         run: |
           helm upgrade ${{ inputs.release-name }} ingress-server \

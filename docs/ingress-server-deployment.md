@@ -25,7 +25,7 @@ The application is deployed on e-infra Rancher Kubernetes with two environments:
 ```
 zarr_fuse/
 ├── ingress_server/
-│   ├── src/                          # Application source code
+│   ├── ingress_server/                          # Application source code
 │   │   ├── main.py                   # Flask app entry point
 │   │   ├── models.py                 # Pydantic data models
 │   │   ├── io_utils.py               # I/O and validation utilities

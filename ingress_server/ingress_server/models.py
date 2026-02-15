@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
-CONFIG_PATH = Path(os.getenv("CONFIG_PATH", "inputs")).resolve()
+from .configs import get_settings
+
 
 class DataSourceConfig(BaseModel):
     name: str
@@ -17,7 +18,7 @@ class DataSourceConfig(BaseModel):
         path = Path(self.schema_path)
         if path.is_absolute():
             return path
-        return CONFIG_PATH / path
+        return get_settings().config_dir / path
 
 class EndpointConfig(BaseModel):
     data_source: DataSourceConfig
@@ -72,7 +73,7 @@ class MetadataModel(BaseModel):
         path = Path(self.schema_path)
         if path.is_absolute():
             return path
-        return CONFIG_PATH / path
+        return get_settings().config_dir / path
 
     @classmethod
     def from_data_source(
