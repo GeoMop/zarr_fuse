@@ -2,11 +2,11 @@ import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from active_scrapper.active_scrapper_config_models import (
+from .runner import run_one_scheduled_run
+from .active_scrapper_config_models import (
     ActiveScrapperConfig,
     RunConfig,
 )
-from active_scrapper.runner import run_one_scheduled_run
 
 LOG = logging.getLogger("active-scrapper")
 

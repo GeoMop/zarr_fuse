@@ -1,13 +1,13 @@
 import logging
 from typing import List
 
-from active_scrapper.context import ExecutionContext, ExecutionContextError
-from active_scrapper.active_scrapper_config_models import (
+from .context import ExecutionContext, ExecutionContextError
+from .iterate import expand_iterate
+from .render import apply_render_values
+from .active_scrapper_config_models import (
     ActiveScrapperConfig,
     RunConfig,
 )
-from active_scrapper.iterate import expand_iterate
-from active_scrapper.render import apply_render_values
 
 LOG = logging.getLogger("active-scrapper")
 

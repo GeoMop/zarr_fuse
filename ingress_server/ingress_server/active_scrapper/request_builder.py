@@ -1,7 +1,7 @@
 from typing import Dict, Tuple
 
-from active_scrapper.context import ExecutionContext, ExecutionContextError
-from active_scrapper.active_scrapper_config_models import (
+from .context import ExecutionContext, ExecutionContextError
+from .active_scrapper_config_models import (
     RequestConfig,
     ActiveScrapperHeader,
     QueryParamConfig,

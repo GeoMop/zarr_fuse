@@ -5,8 +5,8 @@ import polars as pl
 from pathlib import Path
 from typing import Iterable, Any
 
-from active_scrapper.context import ExecutionContext, ExecutionContextError
-from active_scrapper.active_scrapper_config_models import (
+from .context import ExecutionContext, ExecutionContextError
+from .active_scrapper_config_models import (
     IterateConfig,
     IterateSchemaConfig,
     IterateDataframeConfig,

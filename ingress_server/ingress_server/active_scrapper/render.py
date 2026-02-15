@@ -2,8 +2,8 @@ import logging
 from typing import Iterable
 from datetime import datetime, timezone
 
-from active_scrapper.context import ExecutionContext, ExecutionContextError
-from active_scrapper.active_scrapper_config_models import (
+from .context import ExecutionContext, ExecutionContextError
+from .active_scrapper_config_models import (
     RenderValue,
     RenderSource,
 )

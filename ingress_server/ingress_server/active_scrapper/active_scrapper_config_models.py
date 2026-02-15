@@ -3,7 +3,9 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
-from models import DataSourceConfig, CONFIG_PATH
+
+from ..configs import get_settings
+from ..models import DataSourceConfig
 
 class RenderSource(str, Enum):
     DATETIME_UTC = "datetime_utc"
@@ -68,7 +70,7 @@ class IterateDataframeConfig(BaseModel):
 
     def get_dataframe_path(self) -> Path:
         path = Path(self.dataframe_path)
-        return path if path.is_absolute() else (CONFIG_PATH / path)
+        return path if path.is_absolute() else (get_settings().config_dir / path)
 
 IterateConfig = IterateSchemaConfig | IterateDataframeConfig
 

@@ -1,15 +1,14 @@
+import requests
 import logging
 
-from active_scrapper.active_scrapper_config_models import (
+from .active_scrapper_config_models import (
     ActiveScrapperConfig,
     RunConfig,
 )
-from active_scrapper.context import ExecutionContextError
-from active_scrapper.planner import build_contexts_for_run
-from active_scrapper.request_builder import build_request
-from io_utils import validate_response, process_payload
-
-import requests
+from .context import ExecutionContextError
+from .planner import build_contexts_for_run
+from .request_builder import build_request
+from ..io_utils import validate_response, process_payload
 
 LOG = logging.getLogger("active-scrapper")
 
