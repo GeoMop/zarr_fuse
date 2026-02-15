@@ -123,14 +123,14 @@ jobs:
 
       - name: Remove existing configuration files
         if: ${{ inputs.configuration-dir-path != '' }}
-        run: rm -rf ingress_server/src/inputs/*
+        run: rm -rf ingress_server/inputs/*
 
       - name: Download configuration files artifact
         if: ${{ inputs.configuration-dir-path != '' }}
         uses: actions/download-artifact@v4
         with:
           name: ingress-server-configuration
-          path: ingress_server/src/inputs/
+          path: ingress_server/inputs/
 
       - name: Containerize
         uses: ./.github/actions/containerize

@@ -3,7 +3,8 @@ import time
 from pathlib import Path
 from pydantic import BaseModel, Field, model_validator
 
-_CONFIG_PATH = Path(os.getenv("CONFIG_PATH", "inputs")).resolve()
+from .configs import get_settings
+
 
 class DataSourceConfig(BaseModel):
     name: str
@@ -16,7 +17,7 @@ class DataSourceConfig(BaseModel):
         path = Path(self.schema_path)
         if path.is_absolute():
             return path
-        return _CONFIG_PATH / path
+        return get_settings().config_dir / path
 
 class ActiveScrapperURLParams(BaseModel):
     param_name: str
@@ -39,7 +40,7 @@ class ActiveScrapperConfig(BaseModel):
         path = Path(self.dataframe_path)
         if path.is_absolute():
             return path
-        return _CONFIG_PATH / path
+        return get_settings().config_dir / path
 
     @model_validator(mode="before")
     @classmethod
@@ -123,7 +124,7 @@ class MetadataModel(BaseModel):
         path = Path(self.schema_path)
         if path.is_absolute():
             return path
-        return _CONFIG_PATH / path
+        return get_settings().config_dir / path
 
     @classmethod
     def from_data_source(

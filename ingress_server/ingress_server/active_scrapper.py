@@ -1,13 +1,12 @@
 import logging
 import requests
 import logging
-
 import polars as pl
-
-from io_utils import validate_response, process_payload
-from models import ActiveScrapperConfig
-
 from apscheduler.schedulers.background import BackgroundScheduler
+
+from .io_utils import validate_response, process_payload
+from .models import ActiveScrapperConfig
+
 
 LOG = logging.getLogger("active-scrapper")
 

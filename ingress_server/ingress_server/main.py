@@ -6,16 +6,15 @@ from threading import Thread
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
-from auth import AUTH
-from io_utils import process_payload
-from configs import CONFIG, STOP
-from worker import startup_recover, install_signal_handlers, working_loop
-from logging_setup import setup_logging
-from active_scrapper import add_scrapper_job
+from .auth import AUTH
+from .io_utils import process_payload
+from .configs import init_settings, CONFIG, STOP
+from .worker import startup_recover, install_signal_handlers, working_loop
+from .logging_setup import setup_logging
+from .active_scrapper import add_scrapper_job
+from .models import ActiveScrapperConfig, EndpointConfig
 
-from models import ActiveScrapperConfig, EndpointConfig
 from apscheduler.schedulers.background import BackgroundScheduler
-
 BG_SCHEDULER = BackgroundScheduler()
 
 load_dotenv()
@@ -86,6 +85,8 @@ def create_upload_endpoint(config: EndpointConfig):
 # App creation and worker thread
 # =========================
 def create_app():
+    init_settings()
+
     for ep in CONFIG.get("endpoints", []):
         model = EndpointConfig.model_validate(ep)
         create_upload_endpoint(model)
@@ -120,11 +121,7 @@ def create_app_with_worker():
 
     return create_app()
 
-
-# =========================
-# Main
-# =========================
-if __name__ == "__main__":
+def main():
     create_app()
     startup_recover()
     install_signal_handlers()
@@ -137,3 +134,9 @@ if __name__ == "__main__":
     finally:
         LOG.info("Waiting for worker to stop…")
         _graceful_shutdown()
+
+# =========================
+# Main
+# =========================
+if __name__ == "__main__":
+    main()

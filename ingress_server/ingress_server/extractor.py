@@ -3,7 +3,7 @@ import logging
 import polars as pl
 
 from importlib import import_module
-from models import MetadataModel
+from .models import MetadataModel
 
 LOG = logging.getLogger("extractor")
 

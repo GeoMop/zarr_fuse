@@ -2,6 +2,10 @@ FROM docker.io/library/python:3.11-slim-bullseye
 
 ARG APP_VERSION="devel"
 
+ARG zarr_fuse_version="main"
+ARG git_version="1:2.30.2-1+deb11u5"
+ARG waitress_version="3.0.2"
+
 LABEL org.opencontainers.image.title="ZarrFuse Ingress (Backend-only)"
 LABEL org.opencontainers.image.description="Flask service for CSV/JSON ingestion into an S3-backed Zarr store (no UI)."
 LABEL org.opencontainers.image.version="${APP_VERSION}"
@@ -18,32 +22,28 @@ ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
 
 RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server ingress && \
-    apt-get update && apt-get install -y --no-install-recommends git && \
+    apt-get update && apt-get install -y --no-install-recommends git=${git_version} && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@main"
+RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@${zarr_fuse_version}" && \
+    pip install --no-cache-dir waitress==${waitress_version}
 
 # --- Install ingress server ---
 WORKDIR /ingress-server
 
-COPY --chown=ingress:ingress pyproject.toml /ingress-server/pyproject.toml
-COPY --chown=ingress:ingress src/ /ingress-server/
+COPY --chown=ingress:ingress pyproject.toml ./
+COPY --chown=ingress:ingress ingress_server/ ./ingress_server/
+COPY --chown=ingress:ingress inputs/ ./inputs/
+COPY --chown=ingress:ingress oci/install_extras.sh ./scripts/install_extras.sh
 
-RUN pip install --no-cache-dir /ingress-server \
-    && pip install --no-cache-dir waitress
+RUN pip install --no-cache-dir .
 
-RUN set -eux; \
-    if [ -f /ingress-server/inputs/requirements.txt ]; then \
-        pip install --no-cache-dir -r /ingress-server/inputs/requirements.txt; \
-    fi; \
-    if [ -f /ingress-server/inputs/pyproject.toml ]; then \
-        pip install --no-cache-dir /ingress-server/inputs; \
-    fi
+RUN  chmod +x ./scripts/install_extras.sh && \
+    ./scripts/install_extras.sh
 
-RUN chown -R ingress:ingress /ingress-server
+ENV CONFIG_DIR_PATH="/ingress-server/inputs"
 
 USER ingress
-WORKDIR /ingress-server
 EXPOSE 8000
 
-CMD ["waitress-serve", "--host", "0.0.0.0", "--port", "8000", "--call", "main:create_app_with_worker"]
+CMD ["waitress-serve", "--host", "0.0.0.0", "--port", "8000", "--call", "ingress_server.main:create_app_with_worker"]

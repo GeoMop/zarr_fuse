@@ -55,10 +55,10 @@ ZF_S3_ENDPOINT_URL=S3_ENDPOINT_URL
 ZF_STORE_URL=s3://...
 
 # Queue
-QUEUE_DIR=./data/zarr_fuse
+QUEUE_DIR_PATH=./data/zarr_fuse
 
 # Config Path
-CONFIG_PATH=/home/stepanmoc/Projects/zarr_fuse/app/databuk/inputs
+CONFIG_DIR_PATH=/home/stepanmoc/Projects/zarr_fuse/app/databuk/inputs
 
 # Required for HTTP Basic Auth
 BASIC_AUTH_USERS_JSON={"alice":"password"}
@@ -71,7 +71,7 @@ LOG_LEVEL=DEBUG
 
 The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.
 
-### 2) Endpoints (`src/endpoints_config.yaml`)
+### 2) Endpoints (`inputs/endpoints_config.yaml`)
 
 ```yaml
 endpoints:
@@ -136,7 +136,7 @@ The image runs with **waitress** on port **8000**, as user **ingress** (UID `112
 
 ```bash
 docker run --rm -p 8000:8000 \
-  --env-file src/.env \
+  --env-file .env \
   zarr-fuse-ingress:latest
 ```
 
@@ -146,8 +146,8 @@ The container already includes `schemas/` and `endpoints_config.yaml` from the b
 If you want to override them without rebuilding, mount them as read-only volumes:
 
 ```bash
--v $(pwd)/src/schemas:/ingress-server/schemas:ro \
--v $(pwd)/src/endpoints_config.yaml:/ingress-server/endpoints_config.yaml:ro
+-v $(pwd)/inputs/schemas:/ingress-server/schemas:ro \
+-v $(pwd)/inputs/endpoints_config.yaml:/ingress-server/endpoints_config.yaml:ro
 ```
 
 ---
