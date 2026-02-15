@@ -1,5 +1,6 @@
 name: Ingress server - push main
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -12,6 +13,7 @@ jobs:
       group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
       cancel-in-progress: false
     with:
+      deploy: true
       deploy: true
       tag: generate
       namespace: ingress-server-latest

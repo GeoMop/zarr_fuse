@@ -1,0 +1,28 @@
+VARS:
+    temperature:
+        coords: time
+COORDS:
+    # TODO: allow None values for coord keywords ?
+    time: {}
+
+ATTRS: {VERSION: 0.3.0}
+child_1:
+    VARS:
+        temperature:
+            coords: time
+    COORDS:
+        time: {}
+
+    child_3:
+        VARS:
+            temperature:
+                coords: time
+        COORDS:
+            time: {}
+    ATTRS: {}
+child_2:
+    VARS:
+        temperature:
+            coords: time
+    COORDS:
+        time: {}

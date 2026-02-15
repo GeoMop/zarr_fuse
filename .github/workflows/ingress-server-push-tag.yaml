@@ -12,6 +12,9 @@ jobs:
     concurrency:
       group: ${{ github.workflow }}-${{ github.ref }}-get-changed-files
       cancel-in-progress: true
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-get-changed-files
+      cancel-in-progress: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,6 +32,7 @@ jobs:
       group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
       cancel-in-progress: false
     with:
+      deploy: true
       deploy: true
       tag: ${{ needs.get-version.outputs.version }}
       namespace: ingress-server

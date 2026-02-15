@@ -59,6 +59,7 @@ dependencies = [
     "python-dotenv",  # for loading environment variables from .env files
 ]
 
+
 [project.optional-dependencies]
 plot=[
     "matplotlib",
@@ -80,7 +81,12 @@ dev = [
     # TODO: find a way to avoid this repetition
     # possibly PDM (Python Development Master or stick with basic setup.py
     "pytest",
+
+    # Dependencies specific for interactive plotting prototype.
+    "contextily",
+    "pyproj",
     # Include dependencies from plotting
+    "ipympl",
     "matplotlib",
     "plotly",
     # Include dependencies from apps
@@ -92,6 +98,11 @@ dev = [
     # any additional development tools
 ]
 
+[project.scripts]
+zf = "zf.cli:main"
+
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["zarr_fuse", "zarr_fuse.*"]
+include = ["zarr_fuse", "zarr_fuse.*", "zf", "zf.*"]
+exclude = ["zarr_fuse.test*", "tests*"]
