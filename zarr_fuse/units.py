@@ -1,18 +1,25 @@
 import re
+from functools import cached_property
+from typing import Iterable, Any
+
 import numpy as np
-import pint
 import datetime
 import dateutil
 import attrs
 import time
 
 
-ureg = pint.UnitRegistry()
+import pint as _pint
+UndefinedUnitError = _pint.UndefinedUnitError
+
+ureg = _pint.UnitRegistry()
 
 ureg.define('bool = []')
 ureg.define('boolean = bool')          # alias
 ureg.define('true  = 1 bool')         # allow parsing "true"
 ureg.define('false = 0 bool')
+
+_pint.set_application_registry(ureg)
 
 
 # Map common timezone abbreviations to fixed-offset tzinfo
@@ -48,13 +55,51 @@ def build_tzinfos():
                 if existing != new:
                     inconsistent.add(abbr)
             tzinfos[abbr] = tzobj
-    print("Removing inconsistent TZ codes:", inconsistent)
+    #print("Removing inconsistent TZ codes:", inconsistent)
     for code in inconsistent:
         tzinfos.pop(code)
     return tzinfos
 
 TZINFOS = build_tzinfos()
 
+class Unit(ureg.Unit):
+    def asdict(self, value_serializer, filter):
+        return str(self)
+
+    def default_dtype(self):
+        return np.dtype('float64')
+
+    def delta_unit(self):
+        return self
+
+    def delta_dtype(self, dtype):
+        return dtype
+
+
+class NoneUnit(ureg.Unit):
+    def __init__(self):
+        super().__init__('')  # dimensionless
+
+
+    def asdict(self, value_serializer, filter):
+        return None
+
+    def default_dtype(self):
+        return None
+
+    def delta_unit(self):
+        return self
+
+    def delta_dtype(self, dtype):
+        return dtype
+
+
+class Quantity(ureg.Quantity):
+
+    @property
+    def unit(self):
+        # pint.Quantity.units has unlogical name.
+        return self.units
 
 @attrs.define
 class DateTimeUnit:
@@ -75,7 +120,7 @@ class DateTimeUnit:
         """
         val = self.tz
         if val is None:
-            return None
+            return datetime.timezone.utc
 
         # offset form ±HH:MM
         m = re.match(r'([+-])(\d{2}):(\d{2})$', val)
@@ -100,6 +145,38 @@ class DateTimeUnit:
         offset = tzinfo.utcoffset(datetime.datetime.now())
         return offset.total_seconds() / 3600.0
 
+    def default_dtype(self):
+        return np.dtype(f'datetime64[{self.tick}]')
+
+    def delta_unit(self):
+        return Unit(self.tick)  # TODO: change from 'str' to pint.Unit in DataTimeUnit
+
+    def delta_dtype(self, dtype):
+        return np.dtype(f'timedelta64[{self.tick}]')
+
+    def nat(self):
+        """Return the NaT value for this DateTimeUnit."""
+        return np.datetime64('NaT', self.tick)
+
+    def parse(self, value):
+        v = str(value)
+        if str(v) == 'NaT':  #is in ['NaT', 'nat', 'null', 'None']:
+            # NaT values are valud
+            return self.nat()
+
+        dt = dateutil.parser.parse(v,
+                                   dayfirst=self.dayfirst,
+                                   yearfirst=self.yearfirst,
+                                   tzinfos=TZINFOS)
+        # If no explicit tz, assign dt_unit tz (or UTC if none)
+        if dt.tzinfo is None:
+            target_tz = self.tzinfo
+            dt = dt.replace(tzinfo=target_tz)
+        # Convert any explicit tz to dt_unit.tz (or UTC)
+        dt_utc = dt.astimezone(self.tzinfo)
+        # Drop tzinfo to store as numpy.datetime64 local times
+        return dt_utc.replace(tzinfo=None)
+
 class DateTimeQuantity:
     """
     Wraps a numpy.datetime64 array with its DateTimeUnit config.
@@ -120,9 +197,9 @@ class DateTimeQuantity:
         """Underlying numpy.datetime64 array."""
         return self._values
 
-    @property
-    def units(self) -> str:
-        return f"datetime64[{self._unit.tick}]"
+    # @property
+    # def units(self) -> str:
+    #     return f"datetime64[{self._unit.tick}]"
 
     def to(self, target_unit: DateTimeUnit):
         """
@@ -150,9 +227,10 @@ class DateTimeQuantity:
         """
         Add a timedelta expressed as a pint.Quantity to this DateTimeQuantity.
         """
-        if not isinstance(other, pint.Quantity):
+        if not isinstance(other, [Quantity, ureg.Quantity]):
             return NotImplemented
         # Ensure dimension is time
+        # TODO: simplify tis conversion
         other_sec = other.to('second').magnitude
         # Use time module to handle leap seconds correctly
         # Convert seconds to microseconds
@@ -165,53 +243,28 @@ class DateTimeQuantity:
 
     def __repr__(self):
         return (f"<DateTimeQuantity array={self._values!r} "
-                f"unit={self.units} tz_shift={self._unit.tz_shift}h>")
+                f"unit={self._unit}h>")
 
 
-def _create_dt_quantity(values, dt_unit):
+
+def _create_dt_quantity(values, dt_unit: DateTimeUnit, log:'SchemaCtx') -> DateTimeQuantity:
     """
     Create a DateTimeQuantity from a numpy array of datetime64 values and a DateTimeUnit.
     """
     parsed = []
+    last_valid = None
     for val in values:
-        dt = dateutil.parser.parse(str(val),
-                          dayfirst=dt_unit.dayfirst,
-                          yearfirst=dt_unit.yearfirst,
-                          tzinfos=TZINFOS)
-        # If no explicit tz, assign dt_unit tz (or UTC if none)
-        if dt.tzinfo is None:
-            target_tz = dt_unit.tzinfo or datetime.timezone.utc
-            dt = dt.replace(tzinfo=target_tz)
-        # Convert any explicit tz to dt_unit.tz (or UTC)
-        final_tz = dt_unit.tzinfo or datetime.timezone.utc
-        dt_utc = dt.astimezone(final_tz)
-        # Drop tzinfo to store as numpy.datetime64 local times
-        dt_naive = dt_utc.replace(tzinfo=None)
-        parsed.append(dt_naive)
-    np_dates = np.array([np.datetime64(dt, dt_unit.tick) for dt in parsed])
+        try:
+            dt_value = dt_unit.parse(val)
+            last_valid = dt_value
+        except dateutil.parser.ParserError as e:
+            log.error(f"Failed to parse datetime value: {str(val)}; last valid date time: {last_valid}")
+            dt_value = dt_unit.nat()
+        parsed.append(dt_value)
+    np_dates = np.array(parsed, dtype=f'datetime64[{dt_unit.tick}]')
     return DateTimeQuantity(np_dates, dt_unit)
 
-def create_quantity(values, from_unit):
-    """
-    Create pint.Quantity for numeric or DateTimeQuantity for datetime strings.
-    """
-    arr = np.asarray(values)
-    if isinstance(from_unit, DateTimeUnit):
-        return _create_dt_quantity(arr, from_unit)
 
-    if arr.dtype.kind in ('U', 'S', 'O'):
-        arr = arr.astype(float)
-
-    return ureg.Quantity(arr, from_unit)
+UnitType = Unit | NoneUnit | DateTimeUnit
 
 
-def step_unit(unit: str):
-    """
-    Return the step unit for a given unit.
-    """
-    q = create_quantity([], unit)
-    if isinstance(q, DateTimeUnit):
-        return q.tick
-    else:
-        assert isinstance(q, pint.Quantity), "unit must be a string or DateTimeUnit"
-        return unit

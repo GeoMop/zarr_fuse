@@ -40,13 +40,16 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
     # Both pivot_nd and dataset_from_np use that function to form coordinates.
     # We assert here just for code consistency.
     assert np.unique(new_values).size == new_values.size, f"Code consistency error. New coordinates must be unique, got {new_values}"
+    new_values = schema.decode(new_values).magnitude
+    old_values = schema.decode(old_values).magnitude
 
     sorted = schema.sorted
     if sorted:
         idx_sort = np.argsort(new_values)
         new_sorted = new_values[idx_sort]
         if len(old_values) > 0:
-            max_old = np.max(old_values)
+            assert np.all(old_values[:-1]<=old_values[1:]), f"Existing coordinate values are not sorted, got {old_values}"
+            max_old = old_values[-1]
             idx_split = np.searchsorted(new_sorted, max_old, side='right')
         else:
             idx_split = 0
@@ -77,6 +80,9 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     3. for step_limit modify part after split index
     """
     idx_sort, idx_split = idx_sorter
+    new_values = schema.decode(new_values).magnitude
+    old_values = schema.decode(old_values).magnitude
+
     new_sorted = new_values[idx_sort]
     if len(new_sorted) == 0:
         return np.array([]), 0
@@ -87,7 +93,17 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
         # the range of old_values we can potentialy interpolate to.
         # new_values[0] <= old_values[i_min] and ald_values[i_max-1] <= new_values[-1]
 
-        assert np.all(np.diff(new_sorted) >= 0)
+
+        if not np.all(np.diff(new_sorted) > 0):
+            mask = np.diff(new_sorted) <= 0
+            no_diff = np.arange(len(mask), dtype=int)[mask]
+            no_diff_10 = no_diff[:max(0,10)]
+
+            print(f"Non unique values in new coords {schema.name}")
+            print(no_diff)
+            print(new_values.astype(str).tolist())
+            #print(np.stack((new_values[no_diff_10], new_values[no_diff_10 + 1]), axis=1))
+
         old_part_min = new_sorted[0]
         old_range_min = np.searchsorted(old_values, old_part_min, side='left')
         old_part_max = new_sorted[-1]
@@ -95,10 +111,10 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
         update_old_part = np.array(old_values[old_range_min:old_range_max])
 
     else:
-        if schema.step_limits is None:
+        if schema.step_limits.no_new():
             # no extension allowed
             assert len(new_sorted[idx_split:]) == 0
-        elif schema.step_limits == []:
+        elif schema.step_limits.any_new():
             # default case, add all new coords
             pass
         else:
@@ -110,7 +126,7 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
 
     new_append = new_sorted[idx_split:]
     last_old = old_values[-1] if len(old_values) > 0 else new_values[idx_split]
-    if schema.step_limits is None:
+    if schema.step_limits.no_new() or len(new_append) == 0:
         # no extension allowed
         if len(new_append) > 1:
             # Non-fatal error.
@@ -118,17 +134,20 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
                       f"Appended coordinates ignored: {new_append[1:]}.")
         # one value in extension is allowed, but used only to interpolate
         update_new_part = np.array([], dtype=new_append.dtype)
-    elif schema.step_limits == [] or not schema.sorted:
-        # deafult case, add all new coords
+    elif schema.step_limits.any_new() or not schema.sorted:
+        # default case, add all new coords
         update_new_part = new_append
     else:
         # Constrained coordinates step.
         # Construct adjusted coordinates grid.
-        min_step, max_step, unit = schema.step_limits
-        step_range = np.array([min_step, max_step])
-        step_range = units.create_quantity(step_range, unit)
-        coord_unit = schema.step_unit()
-        step_range = step_range.to(coord_unit).magnitude
+        step_range = schema.step_limits
+        range_array = np.array([step_range.start, step_range.end])
+        to_unit = schema.unit.delta_unit()
+        step_range = schema._make_quantity(range_array, from_unit = step_range.unit) \
+                    .to(to_unit).magnitude
+        # Have compatible dtype for DateTime base unit.
+        step_range = np.array(step_range, dtype=schema.unit.delta_dtype(schema.dtype))
+
 
         if last_old < new_append[0]:
             extension_part = np.concatenate(
@@ -142,6 +161,8 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
 
     idx_split = len(update_old_part)
     merged_coord_values = np.concatenate((update_old_part, update_new_part))
+
+    merged_coord_values = schema.encode(merged_coord_values)
     return merged_coord_values, idx_split
 
 
@@ -194,11 +215,11 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
         assume_sorted=True
     )
     # then nearest-neighbor fallback to fill any NaNs
-    ds_nearest = ds_sorted.interp(
-        interp_coords,
-        method='nearest',
-        assume_sorted=True
-    )
+    # ds_nearest = ds_sorted.interp(
+    #     interp_coords,
+    #     method='nearest',
+    #     assume_sorted=True
+    # )
     # combine: use linear where available, else nearest
     #ds_interpolated = ds_linear.combine_first(ds_nearest)
     ds_interpolated = ds_linear
