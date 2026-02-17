@@ -59,7 +59,7 @@ def get_3day_forecast(cache, lat: float, lon: float) -> pl.DataFrame:
 
 def get_bukov(cache, lat: float, lon: float, sensors_profile:pl.DataFrame) -> pl.DataFrame:
 
-    with open('bukov/T_complete.json', 'r') as file:
+    with open('bukov/T_123_partial.json', 'r') as file:
         data = file.read()
         data = json.loads(data)
 
