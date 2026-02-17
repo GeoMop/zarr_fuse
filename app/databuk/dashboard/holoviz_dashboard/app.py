@@ -298,32 +298,6 @@ map_df, overlay_bounds = load_bukov_map_data(bukov_group)
 # INTERACTIVE VISUALIZATIONS
 # ============================================================================
 
-# Selection stream for linking plots
-selection = streams.Selection1D()
-
-# ============================================================================
-# INTERACTIVE VISUALIZATIONS
-# ============================================================================
-
-# Selection stream for linking plots
-selection = streams.Selection1D()
-
-# --- Scatter Plot: X vs Y colored by temperature ---
-scatter = hv.Scatter(df, kdims=['x', 'y'], vdims=['temperature']).opts(
-    color='temperature', 
-    cmap='plasma', 
-    size=12, 
-    alpha=0.8, 
-    line_color='white', 
-    line_width=1,
-    tools=['tap', 'hover'],
-    colorbar=True, 
-    width=600, 
-    height=400, 
-    title='X vs Y (Click to select)',
-    responsive=True
-)
-
 # --- Line Plot: Temperature over time ---
 line = hv.Curve(df, 'time', 'temperature').opts(
     color='cyan', 
@@ -334,37 +308,6 @@ line = hv.Curve(df, 'time', 'temperature').opts(
     title='Temperature over Time',
     responsive=True
 )
-
-# --- Dynamic overlay: Highlight selected points on line plot ---
-def create_selection_overlay(index):
-    """
-    Create an overlay showing selected points on the line plot.
-    
-    Args:
-        index: List of selected point indices from scatter plot
-        
-    Returns:
-        Overlay of line plot with red markers at selected points
-    """
-    if not index:
-        # Return empty overlay when no selection
-        empty_points = hv.Points([], ['time', 'temperature']).opts(
-            color='red', size=15, marker='o', line_color='white', line_width=2
-        )
-        return line * empty_points
-    
-    # Show red markers at selected indices
-    selected_df = df.iloc[index]
-    points = hv.Points(selected_df, ['time', 'temperature']).opts(
-        color='red', size=15, marker='o', line_color='white', line_width=2
-    )
-    return line * points
-
-# Create dynamic map bound to selection stream
-dynamic_line = hv.DynamicMap(create_selection_overlay, streams=[selection])
-
-# Link selection stream to scatter plot
-selection.source = scatter
 
 # ============================================================================
 # GEOGRAPHIC MAP
@@ -404,13 +347,12 @@ map_view = base_map * overlay * map_points
 # ============================================================================
 
 # Wrap visualizations in Panel panes
-top_left = pn.pane.HoloViews(scatter, sizing_mode='stretch_both')
-top_right = pn.pane.HoloViews(dynamic_line, sizing_mode='stretch_both')
-bottom_left = pn.pane.HoloViews(map_view, sizing_mode='stretch_both')
-bottom_right = pn.pane.Markdown(
-    "## Bottom Right View\n\nPlaceholder for additional view", 
+top_left = pn.pane.HoloViews(map_view, sizing_mode='stretch_both')
+top_right = pn.pane.Markdown(
+    "## Top Right View\n\nPlaceholder for additional view", 
     sizing_mode='stretch_both'
 )
+bottom_left = pn.pane.HoloViews(line, sizing_mode='stretch_both')
 
 # ============================================================================
 # GOLDENLAYOUT TEMPLATE
@@ -494,7 +436,7 @@ var config = {
                             }
                         ]
                     },
-                    // Bottom row: Map + Placeholder
+                    // Bottom row: Full-width Temperature
                     {
                         type: 'row',
                         content:[
@@ -504,15 +446,6 @@ var config = {
                                 componentState: { 
                                     model: '{{ embed(roots.bottom_left) }}', 
                                     title: 'Bottom Left'
-                                },
-                                isClosable: false,
-                            },
-                            {
-                                type: 'component',
-                                componentName: 'view',
-                                componentState: { 
-                                    model: '{{ embed(roots.bottom_right) }}', 
-                                    title: 'Bottom Right'
                                 },
                                 isClosable: false,
                             }
@@ -575,7 +508,6 @@ tmpl.add_panel('controller', controller)
 tmpl.add_panel('top_left', top_left)
 tmpl.add_panel('top_right', top_right)
 tmpl.add_panel('bottom_left', bottom_left)
-tmpl.add_panel('bottom_right', bottom_right)
 
 # Make template servable
 tmpl.servable(title='HoloViz Prototypes')
