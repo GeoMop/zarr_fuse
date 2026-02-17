@@ -8,13 +8,13 @@ from pathlib import Path
 
 # IN_JSON  = Path("inputs/test_measurements/T_123_partial.json")            # input JSON with old data
 # OUT_CSV  = Path("inputs/test_measurements/T_123_partial_normalized.csv")   # CSV output
-# 
+#
 # files = [
 #     "20250915T133948_121e738c86ab.json",
 #     "20250915T111522_824a7f3dc0ad.json",
 #     "20250915T115149_8b4f1f4535aa.json",
 # ]
-# 
+#
 # IN_JSON_NEW  = Path("inputs/test_measurements/20250915T111522_824a7f3dc0ad.json")          # input JSON from Fiedler
 # OUT_CSV_NEW  = Path("inputs/test_measurements/from_fiedler_normalized.csv")   # CSV output
 
@@ -135,7 +135,7 @@ def read_new_fiedler_json(json_dict) -> dict:
 def read_json(path: Path):
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
-    return data 
+    return data
 
 def normalize_new(json_dict : dict, metadata : dict) -> dict:
     json_dict_new = read_new_fiedler_json(json_dict)

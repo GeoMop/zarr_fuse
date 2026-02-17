@@ -1,40 +1,36 @@
 # Configuration of the ZARR-FUSE storage
 ATTRS:
-
-
     #STORE_URL: "bukov.zarr"
-    
+
     # S3 store for data up to 2024
     STORE_URL: "s3://bukov/store_latlon_2024.zarr"
     S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
-     
+
     #store_type: 'local'                 # 'guess' type is default
     location_file: &loc_file bukov_locations.csv
-    grid_min: [50.840000,14.850000]    # unit deg
-    grid_max: [50.8400000,14.8500000]  # unit deg
-    grid_step: [1e-2,1e-2 ]             # unit deg; about 1000m; approximately resolution of the yr.no service
+    grid_min: [50.840000, 14.850000] # unit deg
+    grid_max: [50.8400000, 14.8500000] # unit deg
+    grid_step: [1e-2, 1e-2] # unit deg; about 1000m; approximately resolution of the yr.no service
 
-    
-    
 bukov:
     VARS:
         rock_temp:
             unit: "degC"
             description: "Temperature in degC"
             df_col: "rock_temp"
-            coords: [ "date_time", "borehole", "depth"]
+            coords: ["date_time", "borehole", "depth"]
 
         air_humidity:
-            unit: "%"    # dimension less
+            unit: "%" # dimension less
             description: "Air humidity (in percents)."
             df_col: "air_humidity"
-            coords: [ "date_time", "borehole", "depth"]
+            coords: ["date_time", "borehole", "depth"]
 
         air_temp:
             unit: "degC"
             description: "Temperature in Kelvin"
             df_col: "air_temp"
-            coords: [ "date_time", "borehole", "depth"]
+            coords: ["date_time", "borehole", "depth"]
 
         longitude:
             unit: "deg"
@@ -45,7 +41,6 @@ bukov:
             unit: "deg"
             description: "Signed Earth longitude."
             coords: "borehole"
-
 
     COORDS:
         date_time: # Defines coord from the variable of the same name.
@@ -58,14 +53,14 @@ bukov:
             merge: # configuration of merging existing and new coordinates and transfer (interpolation) of the data arrays
                 #allow_inserts: False  # This is currently only supported and default value.
                 #sorted: None  # Automatic, sort coord by itself for non-composed coordinates.
-                step_limits: [ 15, 61, "m" ]
+                step_limits: [15, 61, "m"]
                 # None - no limits add all new coordinates out of existing range.
                 # scalar - regular grid with this step size (use units to convert string values
                 # [min, max] - regular grid with this step size (TODO)
 
         borehole:
             type: "str[128]"
-            unit: ""        # dimensionless
+            unit: "" # dimensionless
             description: "Site/borehole name."
             df_col: "borehole"
             sorted: False
@@ -79,8 +74,5 @@ bukov:
 
             chunk_size: 64
 
-
     ATTRS:
-        description:
-            "bukov / temperature data series."
-        
+        description: "bukov / temperature data series."

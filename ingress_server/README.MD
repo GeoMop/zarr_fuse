@@ -7,6 +7,12 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 
 ---
 
+## URLS:
+
+- **Production:** https://zarr-fuse-ingress-server.dyn.cloud.e-infra.cz/health
+- **Latest (main):** https://zarr-fuse-ingress-server-latest.dyn.cloud.e-infra.cz/health
+
+
 ## Overview
 
 - **Purpose:** Ingest tabular data (CSV/JSON) and merge it into a Zarr dataset on S3.
@@ -43,16 +49,23 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 
 ```ini
 # Required
-S3_ACCESS_KEY=YOUR_ACCESS_KEY
-S3_SECRET_KEY=YOUR_SECRET_KEY
-S3_ENDPOINT_URL=S3_ENDPOINT_URL
-S3_STORE_URL=s3://...
+ZF_S3_ACCESS_KEY=YOUR_ACCESS_KEY
+ZF_S3_SECRET_KEY=YOUR_SECRET_KEY
+ZF_S3_ENDPOINT_URL=S3_ENDPOINT_URL
+ZF_STORE_URL=s3://...
 
 # Queue
 QUEUE_DIR=./data/zarr_fuse
 
+# Config Path
+CONFIG_PATH=/home/stepanmoc/Projects/zarr_fuse/app/databuk/inputs
+
 # Required for HTTP Basic Auth
 BASIC_AUTH_USERS_JSON={"alice":"password"}
+
+# Extra
+PORT=8000
+LOG_LEVEL=DEBUG
 
 ```
 
