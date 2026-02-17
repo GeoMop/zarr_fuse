@@ -274,12 +274,41 @@ def load_bukov_map_data(group, var_name: str = "rock_temp", time_index: int = 0,
     return map_df, overlay_bounds, lats, lons
 
 
+def to_datetime_index(values, units: str | None = None):
+    arr = np.array(values)
+    if np.issubdtype(arr.dtype, np.datetime64):
+        return pd.to_datetime(arr)
+
+    if units and "since" in units:
+        unit_part, origin_part = units.split("since", 1)
+        unit_part = unit_part.strip().lower()
+        origin_part = origin_part.strip()
+        unit_map = {
+            "seconds": "s",
+            "second": "s",
+            "minutes": "m",
+            "minute": "m",
+            "hours": "h",
+            "hour": "h",
+            "days": "D",
+            "day": "D",
+        }
+        unit_code = unit_map.get(unit_part, "s")
+        return pd.to_datetime(arr, unit=unit_code, origin=origin_part, utc=True).tz_convert(None)
+
+    if np.issubdtype(arr.dtype, np.integer) or np.issubdtype(arr.dtype, np.floating):
+        return pd.to_datetime(arr, unit="s", utc=True).tz_convert(None)
+
+    return pd.to_datetime(arr, errors="coerce")
+
+
 def load_bukov_timeseries(group, var_name: str = "rock_temp", borehole_index: int = 0, depth_index: int = 0):
     """Load a single-borehole time series for plots."""
     if var_name not in group:
         raise KeyError(f"Variable '{var_name}' not found in Bukov group")
 
-    times = pd.to_datetime(group["date_time"][:])
+    units = group["date_time"].attrs.get("units")
+    times = to_datetime_index(group["date_time"][:], units=units)
     values = np.array(group[var_name][:, borehole_index, depth_index], dtype=float)
 
     return pd.DataFrame({
@@ -294,6 +323,25 @@ bukov_group = load_bukov_group()
 df = load_bukov_timeseries(bukov_group)
 map_df, overlay_bounds, lats_arr, lons_arr = load_bukov_map_data(bukov_group)
 depth_arr = np.array(bukov_group["depth"][:], dtype=float)
+date_time_units = bukov_group["date_time"].attrs.get("units")
+date_time_values = bukov_group["date_time"][:]
+date_time_index = to_datetime_index(date_time_values, units=date_time_units)
+if len(date_time_index) >= 2:
+    step = date_time_index[1] - date_time_index[0]
+else:
+    step = None
+print(
+    "[Bukov] date_time range:",
+    date_time_index.min(),
+    "->",
+    date_time_index.max(),
+    "step:",
+    step,
+    "count:",
+    len(date_time_index),
+    "units:",
+    date_time_units,
+)
 
 # ============================================================================
 # INTERACTIVE VISUALIZATIONS
@@ -345,7 +393,7 @@ def create_timeseries_from_tap_and_depths(x=None, y=None, value=None, **kwargs):
     if not selected_depths:
         selected_depths = get_available_depth_indices(borehole_index)
 
-    times = pd.to_datetime(bukov_group["date_time"][:])
+    times = to_datetime_index(bukov_group["date_time"][:], units=date_time_units)
     curves = []
     values_by_depth = [
         np.array(bukov_group["rock_temp"][:, borehole_index, depth_idx], dtype=float)
