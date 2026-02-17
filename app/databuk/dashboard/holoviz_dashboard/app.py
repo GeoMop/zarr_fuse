@@ -271,7 +271,7 @@ def load_bukov_map_data(group, var_name: str = "rock_temp", time_index: int = 0,
         "value": values
     })
     overlay_bounds = get_overlay_bounds_from_coords(lats, lons)
-    return map_df, overlay_bounds
+    return map_df, overlay_bounds, lats, lons
 
 
 def load_bukov_timeseries(group, var_name: str = "rock_temp", borehole_index: int = 0, depth_index: int = 0):
@@ -292,21 +292,84 @@ def load_bukov_timeseries(group, var_name: str = "rock_temp", borehole_index: in
 
 bukov_group = load_bukov_group()
 df = load_bukov_timeseries(bukov_group)
-map_df, overlay_bounds = load_bukov_map_data(bukov_group)
+map_df, overlay_bounds, lats_arr, lons_arr = load_bukov_map_data(bukov_group)
+depth_arr = np.array(bukov_group["depth"][:], dtype=float)
 
 # ============================================================================
 # INTERACTIVE VISUALIZATIONS
 # ============================================================================
 
-# --- Line Plot: Temperature over time ---
-line = hv.Curve(df, 'time', 'temperature').opts(
-    color='cyan', 
-    line_width=2, 
-    tools=['hover'],
-    width=600, 
-    height=400, 
-    title='Temperature over Time',
-    responsive=True
+# --- Line Plot: Temperature over time (linked to map tap + depth selection) ---
+tap_stream = streams.Tap(x=None, y=None)
+
+depth_selector = pn.widgets.CheckBoxGroup(
+    name="Depths (m)",
+    options=[],
+    value=[],
+    inline=False,
+    sizing_mode="stretch_width"
+)
+borehole_info = pn.pane.Markdown("### Borehole 0", sizing_mode="stretch_width")
+
+
+def get_borehole_index(x, y):
+    if x is None or y is None:
+        return 0
+    dist = (lons_arr - x) ** 2 + (lats_arr - y) ** 2
+    return int(np.nanargmin(dist))
+
+
+def get_available_depth_indices(borehole_index: int):
+    values = np.array(bukov_group["rock_temp"][:, borehole_index, :], dtype=float)
+    mask = np.any(np.isfinite(values), axis=0)
+    return [int(i) for i in np.where(mask)[0].tolist()]
+
+
+def format_depth(depth_value: float):
+    if np.isnan(depth_value):
+        return "NaN"
+    return f"{depth_value:.2f}"
+
+
+def update_depth_selector(x, y):
+    borehole_index = get_borehole_index(x, y)
+    available = get_available_depth_indices(borehole_index)
+    depth_selector.options = {format_depth(depth_arr[i]): i for i in available}
+    depth_selector.value = available
+    borehole_info.object = f"### Borehole {borehole_index}"
+
+
+def create_timeseries_from_tap_and_depths(x=None, y=None, value=None, **kwargs):
+    borehole_index = get_borehole_index(x, y)
+    selected_depths = value or []
+    if not selected_depths:
+        selected_depths = get_available_depth_indices(borehole_index)
+
+    times = pd.to_datetime(bukov_group["date_time"][:])
+    curves = []
+    values_by_depth = [
+        np.array(bukov_group["rock_temp"][:, borehole_index, depth_idx], dtype=float)
+        for depth_idx in selected_depths
+    ]
+    for col_idx, depth_idx in enumerate(selected_depths):
+        depth_val = depth_arr[depth_idx] if depth_idx < len(depth_arr) else depth_idx
+        label = f"{format_depth(depth_val)} m"
+        curves.append(hv.Curve((times, values_by_depth[col_idx]), 'time', 'temperature', label=label))
+
+    overlay = hv.Overlay(curves) if curves else hv.Curve([])
+    return overlay.opts(
+        width=600,
+        height=400,
+        responsive=True,
+        title=f"Temperature over Time (borehole {borehole_index})",
+        tools=['hover'],
+        legend_position='right'
+    )
+
+
+line = hv.DynamicMap(
+    create_timeseries_from_tap_and_depths,
+    streams=[tap_stream, streams.Params(depth_selector, parameters=['value'])]
 )
 
 # ============================================================================
@@ -332,12 +395,20 @@ map_points = gv.Points(map_df, kdims=['lon', 'lat'], vdims=['value']).opts(
     alpha=0.8,
     line_color='white', 
     line_width=1.5,
-    tools=['hover'], 
+    tools=['hover', 'tap'], 
     colorbar=True,
     width=600, 
     height=400, 
     title='Geographic Data View'
 )
+
+tap_stream.source = map_points
+def on_tap_event(*args, **kwargs):
+    update_depth_selector(tap_stream.x, tap_stream.y)
+
+
+tap_stream.param.watch(on_tap_event, ['x', 'y'])
+update_depth_selector(tap_stream.x, tap_stream.y)
 
 # Combine all map layers
 map_view = base_map * overlay * map_points
@@ -348,8 +419,9 @@ map_view = base_map * overlay * map_points
 
 # Wrap visualizations in Panel panes
 top_left = pn.pane.HoloViews(map_view, sizing_mode='stretch_both')
-top_right = pn.pane.Markdown(
-    "## Top Right View\n\nPlaceholder for additional view", 
+top_right = pn.Column(
+    borehole_info,
+    depth_selector,
     sizing_mode='stretch_both'
 )
 bottom_left = pn.pane.HoloViews(line, sizing_mode='stretch_both')
