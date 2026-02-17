@@ -387,37 +387,134 @@ def update_depth_selector(x, y):
     borehole_info.object = f"### Borehole {borehole_index}"
 
 
-def create_timeseries_from_tap_and_depths(x=None, y=None, value=None, **kwargs):
-    borehole_index = get_borehole_index(x, y)
-    selected_depths = value or []
-    if not selected_depths:
-        selected_depths = get_available_depth_indices(borehole_index)
-
-    times = to_datetime_index(bukov_group["date_time"][:], units=date_time_units)
+def build_timeseries_overlay(borehole_index, selected_depths, time_slice=None):
     curves = []
     values_by_depth = [
         np.array(bukov_group["rock_temp"][:, borehole_index, depth_idx], dtype=float)
         for depth_idx in selected_depths
     ]
+    times = date_time_index
+    if time_slice is not None:
+        start, end = time_slice
+        mask = (times >= start) & (times <= end)
+        times = times[mask]
+        values_by_depth = [vals[mask] for vals in values_by_depth]
     for col_idx, depth_idx in enumerate(selected_depths):
         depth_val = depth_arr[depth_idx] if depth_idx < len(depth_arr) else depth_idx
         label = f"{format_depth(depth_val)} m"
-        curves.append(hv.Curve((times, values_by_depth[col_idx]), 'time', 'temperature', label=label))
+        curve_df = pd.DataFrame({
+            "time": times,
+            "temperature": values_by_depth[col_idx]
+        })
+        curves.append(hv.Curve(curve_df, 'time', 'temperature', label=label))
 
-    overlay = hv.Overlay(curves) if curves else hv.Curve([])
+    return hv.Overlay(curves) if curves else hv.Curve([])
+
+
+def clamp_range(center, span):
+    min_t = date_time_index.min()
+    max_t = date_time_index.max()
+    total_span = max_t - min_t
+    if span >= total_span:
+        return (min_t, max_t)
+
+    start = center - span / 2
+    end = center + span / 2
+    if start < min_t:
+        start = min_t
+        end = min_t + span
+    if end > max_t:
+        end = max_t
+        start = max_t - span
+    return (start, end)
+
+
+full_span = date_time_index.max() - date_time_index.min()
+month_span = pd.Timedelta(days=30)
+day_span = pd.Timedelta(days=1)
+current_center = date_time_index.min() + (full_span / 2)
+
+range_left = streams.RangeX()
+range_mid = streams.RangeX()
+range_right = streams.RangeX()
+
+range_state = {
+    "left": clamp_range(current_center, full_span),
+    "mid": clamp_range(current_center, month_span),
+    "right": clamp_range(current_center, day_span),
+}
+
+_updating_ranges = False
+
+
+def on_range_change(event, source):
+    global current_center, _updating_ranges
+    if _updating_ranges:
+        return
+    if not event.new or event.new[0] is None or event.new[1] is None:
+        return
+
+    _updating_ranges = True
+    start, end = event.new
+    current_center = start + (end - start) / 2
+    range_state["left"] = clamp_range(current_center, full_span)
+    range_state["mid"] = clamp_range(current_center, month_span)
+    range_state["right"] = clamp_range(current_center, day_span)
+
+    range_left.event(x_range=range_state["left"])
+    range_mid.event(x_range=range_state["mid"])
+    range_right.event(x_range=range_state["right"])
+    _updating_ranges = False
+
+
+range_left.param.watch(lambda e: on_range_change(e, "left"), ["x_range"])
+range_mid.param.watch(lambda e: on_range_change(e, "mid"), ["x_range"])
+range_right.param.watch(lambda e: on_range_change(e, "right"), ["x_range"])
+
+range_left.event(x_range=range_state["left"])
+range_mid.event(x_range=range_state["mid"])
+range_right.event(x_range=range_state["right"])
+
+
+def create_timeseries_view(x=None, y=None, value=None, x_range=None, view="left", **kwargs):
+    borehole_index = get_borehole_index(x, y)
+    selected_depths = value or []
+    if not selected_depths:
+        selected_depths = get_available_depth_indices(borehole_index)
+
+    time_slice = range_state[view]
+    overlay = build_timeseries_overlay(borehole_index, selected_depths, time_slice=time_slice)
+    overlay = overlay.redim.range(time=range_state[view])
     return overlay.opts(
         width=600,
         height=400,
         responsive=True,
         title=f"Temperature over Time (borehole {borehole_index})",
         tools=['hover'],
-        legend_position='right'
+        legend_position='right',
+        framewise=True
     )
 
 
-line = hv.DynamicMap(
-    create_timeseries_from_tap_and_depths,
-    streams=[tap_stream, streams.Params(depth_selector, parameters=['value'])]
+line_left = hv.DynamicMap(
+    lambda x=None, y=None, value=None, x_range=None, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, x_range=x_range, view="left"
+    ),
+    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), range_left]
+)
+
+line_mid = hv.DynamicMap(
+    lambda x=None, y=None, value=None, x_range=None, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, x_range=x_range, view="mid"
+    ),
+    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), range_mid]
+)
+
+line_right = hv.DynamicMap(
+    lambda x=None, y=None, value=None, x_range=None, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, x_range=x_range, view="right"
+    ),
+    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), range_right]
 )
 
 # ============================================================================
@@ -472,7 +569,9 @@ top_right = pn.Column(
     depth_selector,
     sizing_mode='stretch_both'
 )
-bottom_left = pn.pane.HoloViews(line, sizing_mode='stretch_both')
+bottom_left = pn.pane.HoloViews(line_left, sizing_mode='stretch_both')
+bottom_mid = pn.pane.HoloViews(line_mid, sizing_mode='stretch_both')
+bottom_right = pn.pane.HoloViews(line_right, sizing_mode='stretch_both')
 
 # ============================================================================
 # GOLDENLAYOUT TEMPLATE
@@ -556,7 +655,7 @@ var config = {
                             }
                         ]
                     },
-                    // Bottom row: Full-width Temperature
+                    // Bottom row: Three synchronized views
                     {
                         type: 'row',
                         content:[
@@ -566,6 +665,24 @@ var config = {
                                 componentState: { 
                                     model: '{{ embed(roots.bottom_left) }}', 
                                     title: 'Bottom Left'
+                                },
+                                isClosable: false,
+                            },
+                            {
+                                type: 'component',
+                                componentName: 'view',
+                                componentState: { 
+                                    model: '{{ embed(roots.bottom_mid) }}', 
+                                    title: 'Bottom Mid'
+                                },
+                                isClosable: false,
+                            },
+                            {
+                                type: 'component',
+                                componentName: 'view',
+                                componentState: { 
+                                    model: '{{ embed(roots.bottom_right) }}', 
+                                    title: 'Bottom Right'
                                 },
                                 isClosable: false,
                             }
@@ -628,6 +745,8 @@ tmpl.add_panel('controller', controller)
 tmpl.add_panel('top_left', top_left)
 tmpl.add_panel('top_right', top_right)
 tmpl.add_panel('bottom_left', bottom_left)
+tmpl.add_panel('bottom_mid', bottom_mid)
+tmpl.add_panel('bottom_right', bottom_right)
 
 # Make template servable
 tmpl.servable(title='HoloViz Prototypes')
