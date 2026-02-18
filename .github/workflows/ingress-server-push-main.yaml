@@ -14,6 +14,7 @@ jobs:
       cancel-in-progress: false
     with:
       deploy: true
+      deploy: true
       tag: generate
       namespace: ingress-server-latest
       release-name: ingress-server-latest

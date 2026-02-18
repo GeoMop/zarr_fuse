@@ -55,10 +55,10 @@ ZF_S3_ENDPOINT_URL=S3_ENDPOINT_URL
 ZF_STORE_URL=s3://...
 
 # Queue
-QUEUE_DIR=./data/zarr_fuse
+QUEUE_DIR_PATH=./data/zarr_fuse
 
 # Config Path
-CONFIG_PATH=/home/stepanmoc/Projects/zarr_fuse/app/databuk/inputs
+CONFIG_DIR_PATH=/home/stepanmoc/Projects/zarr_fuse/app/databuk/inputs
 
 # Required for HTTP Basic Auth
 BASIC_AUTH_USERS_JSON={"alice":"password"}
@@ -71,8 +71,9 @@ LOG_LEVEL=DEBUG
 
 The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.
 
-### 2) Endpoints (`src/endpoints_config.yaml`)
+### 2) Endpoints (`inputs/endpoints_config.yaml`)
 
+#### Passive Scrapper
 ```yaml
 endpoints:
   - name: tree
@@ -86,6 +87,51 @@ endpoints:
   - name: sensor
     endpoint: /api/v1/sensor
     schema_path: schemas/sensor_schema_v1.yaml
+```
+
+#### Active Scrapper
+```yaml
+active_scrappers:
+  - name: chmi-aladin-1km
+    schema_path: schemas/hlavo_surface_schema.yaml
+    schema_node: chmi_aladin_10m
+    extract_fn: extract_chmi_grib
+    fn_module: inputs.extract.chmi
+
+    runs:
+      - cron: "*/1 * * * *"
+        set:
+          time: "00"
+      - cron: "52 11 * * *"
+        set:
+          time: "06"
+
+    request:
+      method: GET
+      url: "https://opendata.chmi.cz/meteorology/weather/nwp_aladin/CZ_1km/{time}/ALADCZ1K4opendata_{date}{time}_{quantity}.grb.bz2"
+      headers:
+        - header_name: "User-Agent"
+          header_value: "MyWeatherApp/1.0 (your_email@example.com)"
+
+    render:
+      - name: date
+        source: datetime_utc
+        format: "%Y%m%d"
+
+    iterate:
+      - name: quantity
+        source: schema
+        schema_node: "chmi_aladin_10m"
+        schema_regex: "VARS.*.df_col"
+
+      - name: dataframe_row
+        source: dataframe
+        dataframe_path: dataframes/chmi_surface_dataframe.csv
+        dataframe_has_header: true
+        outputs:
+          lat: dflat
+          lon: dflon
+          station_id: station
 ```
 
 Each entry creates two routes:
@@ -136,7 +182,7 @@ The image runs with **waitress** on port **8000**, as user **ingress** (UID `112
 
 ```bash
 docker run --rm -p 8000:8000 \
-  --env-file src/.env \
+  --env-file .env \
   zarr-fuse-ingress:latest
 ```
 
@@ -146,8 +192,8 @@ The container already includes `schemas/` and `endpoints_config.yaml` from the b
 If you want to override them without rebuilding, mount them as read-only volumes:
 
 ```bash
--v $(pwd)/src/schemas:/ingress-server/schemas:ro \
--v $(pwd)/src/endpoints_config.yaml:/ingress-server/endpoints_config.yaml:ro
+-v $(pwd)/inputs/schemas:/ingress-server/schemas:ro \
+-v $(pwd)/inputs/endpoints_config.yaml:/ingress-server/endpoints_config.yaml:ro
 ```
 
 ---

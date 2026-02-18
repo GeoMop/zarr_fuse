@@ -4,9 +4,10 @@ import shutil
 import logging
 
 from pathlib import Path
-from configs import ACCEPTED_DIR, FAILED_DIR, SUCCESS_DIR, STOP
-from io_utils import open_root, read_df_from_bytes
-from models import MetadataModel
+
+from .configs import STOP, get_settings
+from .io_utils import open_root, read_df_from_bytes
+from .models import MetadataModel
 
 LOG = logging.getLogger("worker")
 
@@ -36,12 +37,9 @@ def _move_tree_contents(src: Path, dst: Path):
             except OSError:
                 pass
 
-def _iter_accepted_files():
-    if not ACCEPTED_DIR.exists():
-        LOG.warning("Accepted directory does not exist: %s", ACCEPTED_DIR)
-        return
 
-    for root, _, files in os.walk(ACCEPTED_DIR):
+def _iter_accepted_files_in_dir(dir: Path):
+    for root, _, files in os.walk(dir):
         for name in files:
             if name.endswith(".meta.json"):
                 continue
@@ -49,27 +47,40 @@ def _iter_accepted_files():
             yield Path(root) / name
 
 
-def _load_metadata(data_path: Path) -> tuple[MetadataModel, str | None]:
+def _iter_accepted_files():
+    settings = get_settings()
+
+    if not settings.accepted_dir.exists():
+        LOG.warning("Accepted directory does not exist: %s", settings.accepted_dir)
+        yield from ()
+        return
+    yield from _iter_accepted_files_in_dir(settings.accepted_dir)
+
+
+def _load_metadata(data_path: Path) -> tuple[MetadataModel | None, str | None]:
     LOG.info("Loading meta for %s", data_path)
     meta_path = data_path.with_suffix(data_path.suffix + ".meta.json")
     try:
-        meta = MetadataModel.model_validate_json(meta_path.read_text(encoding="utf-8"))
-        if meta.dataset_name is None:
-            meta.dataset_name = "yr.no"
-        return meta, None
+        return MetadataModel.model_validate_json(meta_path.read_text(encoding="utf-8")), None
     except Exception as e:
         return None, f"Failed to load meta: {e}"
 
+
 def _target_dirs_for(data_path: Path) -> tuple[Path, Path]:
-    rel = data_path.relative_to(ACCEPTED_DIR)
-    return (SUCCESS_DIR / rel).parent, (FAILED_DIR / rel).parent
+    settings = get_settings()
+
+    rel = data_path.relative_to(settings.accepted_dir)
+    return (settings.success_dir / rel).parent, (settings.failed_dir / rel).parent
+
 
 def _process_one(data_path: Path) -> str | None:
     metadata, err = _load_metadata(data_path)
     if err:
         return err
+    assert metadata is not None
 
-    if not metadata.schema_path:
+    schema_path = metadata.get_schema_path()
+    if not schema_path.exists():
         return f"No schema for endpoint {metadata.endpoint_name}"
 
     df, err = read_df_from_bytes(
@@ -79,19 +90,19 @@ def _process_one(data_path: Path) -> str | None:
     if err:
         return f"Failed to read DataFrame: {err}"
 
-    root, err = open_root(Path(metadata.schema_path))
+    root, err = open_root(schema_path)
     if err:
         return f"Failed to open root: {err}"
 
-    if not metadata.node_path and metadata.dataset_name:
-        root[metadata.dataset_name].update(df)
-    elif not metadata.node_path and not metadata.dataset_name:
+    if not metadata.node_path and metadata.schema_node:
+        root[metadata.schema_node].update(df)
+    elif not metadata.node_path and not metadata.schema_node:
         root.update(df)
     # TODO: handle more complex node paths (e.g. /a/b/c)
-    elif not metadata.dataset_name:
+    elif not metadata.schema_node:
         root[metadata.node_path].update(df)
     else:
-        root[metadata.dataset_name][metadata.node_path].update(df)
+        root[metadata.schema_node][metadata.node_path].update(df)
     return None
 
 
@@ -135,9 +146,11 @@ def working_loop(poll_sleep: float = 30.0):
 
 
 def startup_recover():
-    if FAILED_DIR.exists():
+    settings = get_settings()
+
+    if settings.failed_dir.exists():
         LOG.info("Recovering: moving failed -> accepted")
-        _move_tree_contents(FAILED_DIR, ACCEPTED_DIR)
+        _move_tree_contents(settings.failed_dir, settings.accepted_dir)
 
 def install_signal_handlers():
     def _on_term(signum, frame):
