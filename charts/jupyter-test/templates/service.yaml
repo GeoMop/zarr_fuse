@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jupyter-test
+spec:
+  type: ClusterIP
+  selector:
+    app: jupyter-test
+  ports:
+    - name: jupyter-test-port
+      port: {{ .Values.app.externalPort }}
+      targetPort: {{ .Values.app.internalPort }}

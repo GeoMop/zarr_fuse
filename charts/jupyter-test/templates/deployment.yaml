@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jupyter-test
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: jupyter-test
+  template:
+    metadata:
+      labels:
+        app: jupyter-test
+    spec:
+      securityContext:
+        {{- toYaml .Values.securityContext.pod | nindent 8 }}
+      volumes:
+        - name: home-voila
+          emptyDir: {}
+      containers:
+        - name: jupyter-test
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          securityContext:
+            {{- toYaml .Values.securityContext.container | nindent 12 }}
+          volumeMounts:
+            - name: home-voila
+              mountPath: /home/voila
+          env:
+            - name: HOME
+              value: "/home/voila"
+          ports:
+            - containerPort: {{ .Values.app.internalPort }}

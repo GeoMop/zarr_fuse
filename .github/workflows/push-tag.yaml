@@ -1,0 +1,77 @@
+name: Push tag - conteinerize app and deploy to production environment
+on:
+  push:
+    tags:
+      - '*.*.*'
+env:
+  namespace: jupyter-test
+  repository: mocstepan/voila-app
+  registry: docker.io
+  approvers: jbrezmorf
+jobs:
+  containerize:
+    name: Containerize app
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/buildah/stable:v1.35.4
+      options: --privileged
+    defaults:
+      run:
+        working-directory: app/jupyter_test
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-containerize"
+      cancel-in-progress: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Move dependencies file
+        run: mv ../../pyproject.toml ./
+      - name: Containerize app
+        run: |
+          buildah login -u ${{ vars.DOCKER_USERNAME }} -p "${{ secrets.DOCKER_PASSWORD }}" ${{ env.registry }}
+          buildah build -t ${{ env.registry }}/${{ env.repository }}:${{ github.ref_name }} -f docker/Dockerfile .
+          buildah push ${{ env.registry }}/${{ env.repository}}:${{ github.ref_name }} docker://${{ env.registry }}/${{ env.repository }}:${{ github.ref_name }}
+          buildah logout ${{ env.registry }}
+  deploy:
+    name: Deploy app to e-infra rancher
+    runs-on: ubuntu-latest
+    container:
+      image: alpine/k8s:1.29.14
+    needs:
+      - containerize
+    permissions:
+      issues: write
+    env:
+      KUBECONFIG: ./kubeconfig.yaml
+    defaults:
+      run:
+        working-directory: charts
+    concurrency:
+      group: "${{ github.workflow }}-${{ github.ref }}-deploy"
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Wait for deployment approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.token }}
+          approvers: "${{ env.approvers }}"
+          minimum-approvals: 1
+          issue-title: "Production deployment approval: '${{ github.ref_name }}'"
+          issue-body: "Waiting for manual approval to deploy '${{ github.ref_name }}' to production. Comment 'deploy' to approve. Comment 'cancel' to cancel."
+          additional-approved-words: "deploy"
+          additional-denied-words: "cancel"
+      - name: Decode kubeconfig
+        run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
+      - name: Ensure that the namespace exists
+        run: kubectl create namespace --dry-run=client -o yaml '${{ env.namespace }}' | kubectl apply -f -
+      - name: Set context
+        run: kubectl config set-context --current --namespace="${{ env.namespace }}"
+      - name: Deploy app
+        run: |
+          helm upgrade jupyter-test-app jupyter-test \
+          --install --atomic --timeout 10m --namespace "${{ env.namespace }}" \
+          --set image.registry="${{ env.registry }}" \
+          --set image.repository="${{ env.repository }}" \
+          --set image.tag="${{ github.ref_name }}"
