@@ -496,6 +496,8 @@ def create_timeseries_view(x=None, y=None, value=None, x_range=None, center=None
         tools=['hover', 'xwheel_zoom', 'xpan', 'reset'],
         active_tools=['xwheel_zoom', 'xpan'],
         xlim=xlim,
+        axiswise=True,
+        shared_axes=False,
         legend_position='right',
         framewise=True
     )
