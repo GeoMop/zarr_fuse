@@ -432,7 +432,7 @@ def clamp_range(center, span):
 
 
 full_span = date_time_index.max() - date_time_index.min()
-mid_span = pd.Timedelta(days=90)
+mid_span = pd.Timedelta(days=30)
 right_span = pd.Timedelta(hours=24)
 
 center_state = {
