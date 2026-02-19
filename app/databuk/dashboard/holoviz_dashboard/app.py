@@ -349,6 +349,8 @@ print(
 
 # --- Line Plot: Temperature over time (linked to map tap + depth selection) ---
 tap_stream = streams.Tap(x=None, y=None)
+borehole_stream = streams.Stream.define("Borehole", borehole_index=0)()
+borehole_stream.event(borehole_index=0)
 
 depth_selector = pn.widgets.CheckBoxGroup(
     name="Depths (m)",
@@ -385,6 +387,7 @@ def update_depth_selector(x, y):
     depth_selector.options = {format_depth(depth_arr[i]): i for i in available}
     depth_selector.value = available
     borehole_info.object = f"### Borehole {borehole_index}"
+    return borehole_index
 
 
 def build_timeseries_overlay(borehole_index, selected_depths, time_slice=None):
@@ -444,11 +447,42 @@ center_stream.event(center=center_state["center"])
 left_range = streams.RangeX()
 mid_range = streams.RangeX()
 right_range = streams.RangeX()
+left_tap = streams.Tap()
+mid_tap = streams.Tap()
+right_tap = streams.Tap()
 
 _updating_center = False
+xlim_state = {
+    "mid": clamp_range(center_state["center"], mid_span),
+    "right": clamp_range(center_state["center"], right_span),
+}
 
 
-def update_center_from_range(event):
+def shift_window_to_include(center, span, current_xlim):
+    if current_xlim is None:
+        return clamp_range(center, span)
+    start, end = current_xlim
+    if start <= center <= end:
+        return (start, end)
+    if center < start:
+        start = center
+        end = center + span
+    else:
+        end = center
+        start = center - span
+
+    min_t = date_time_index.min()
+    max_t = date_time_index.max()
+    if start < min_t:
+        start = min_t
+        end = min_t + span
+    if end > max_t:
+        end = max_t
+        start = max_t - span
+    return (start, end)
+
+
+def update_center_from_range(event, source):
     global _updating_center
     if _updating_center:
         return
@@ -460,32 +494,65 @@ def update_center_from_range(event):
     _updating_center = True
     center_state["center"] = center
     center_stream.event(center=center)
+    if source == "left":
+        xlim_state["mid"] = shift_window_to_include(center, mid_span, xlim_state["mid"])
+        xlim_state["right"] = shift_window_to_include(center, right_span, xlim_state["right"])
+    elif source == "mid":
+        xlim_state["mid"] = (event.new[0], event.new[1])
+    elif source == "right":
+        xlim_state["right"] = (event.new[0], event.new[1])
     _updating_center = False
 
 
-left_range.param.watch(update_center_from_range, ["x_range"])
-mid_range.param.watch(update_center_from_range, ["x_range"])
-right_range.param.watch(update_center_from_range, ["x_range"])
+left_range.param.watch(lambda e: update_center_from_range(e, "left"), ["x_range"])
+mid_range.param.watch(lambda e: update_center_from_range(e, "mid"), ["x_range"])
+right_range.param.watch(lambda e: update_center_from_range(e, "right"), ["x_range"])
 
 
-def create_timeseries_view(x=None, y=None, value=None, x_range=None, center=None, view="left", **kwargs):
-    borehole_index = get_borehole_index(x, y)
+def update_center_from_tap(event, source):
+    global _updating_center
+    if _updating_center:
+        return
+    if event.new is None:
+        return
+
+    center = pd.to_datetime(event.new)
+    _updating_center = True
+    center_state["center"] = center
+    center_stream.event(center=center)
+    xlim_state["mid"] = clamp_range(center, mid_span)
+    xlim_state["right"] = clamp_range(center, right_span)
+    _updating_center = False
+
+
+left_tap.param.watch(lambda e: update_center_from_tap(e, "left"), ["x"])
+mid_tap.param.watch(lambda e: update_center_from_tap(e, "mid"), ["x"])
+right_tap.param.watch(lambda e: update_center_from_tap(e, "right"), ["x"])
+
+
+def create_timeseries_view(
+    x=None,
+    y=None,
+    value=None,
+    x_range=None,
+    center=None,
+    borehole_index=0,
+    view="left",
+    **kwargs,
+):
     selected_depths = value or []
     if not selected_depths:
         selected_depths = get_available_depth_indices(borehole_index)
 
     center_time = center or center_state["center"]
     if view == "left":
-        time_slice = None
         xlim = (date_time_index.min(), date_time_index.max())
     elif view == "mid":
-        time_slice = clamp_range(center_time, mid_span)
-        xlim = time_slice
+        xlim = xlim_state["mid"]
     else:
-        time_slice = clamp_range(center_time, right_span)
-        xlim = time_slice
+        xlim = xlim_state["right"]
 
-    overlay = build_timeseries_overlay(borehole_index, selected_depths, time_slice=time_slice)
+    overlay = build_timeseries_overlay(borehole_index, selected_depths, time_slice=None)
     overlay = overlay.redim.range(time=xlim)
     overlay = overlay * hv.VLine(center_time).opts(color='red', line_width=2)
     return overlay.opts(
@@ -493,7 +560,7 @@ def create_timeseries_view(x=None, y=None, value=None, x_range=None, center=None
         height=400,
         responsive=True,
         title=f"Temperature over Time (borehole {borehole_index})",
-        tools=['hover', 'xwheel_zoom', 'xpan', 'reset'],
+        tools=['hover', 'xwheel_zoom', 'xpan', 'tap', 'reset'],
         active_tools=['xwheel_zoom', 'xpan'],
         xlim=xlim,
         axiswise=True,
@@ -504,24 +571,42 @@ def create_timeseries_view(x=None, y=None, value=None, x_range=None, center=None
 
 
 line_left = hv.DynamicMap(
-    lambda x=None, y=None, value=None, x_range=None, center=None, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, x_range=x_range, center=center, view="left"
+    lambda x=None, y=None, value=None, x_range=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, x_range=x_range, center=center, borehole_index=borehole_index, view="left"
     ),
-    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), left_range, center_stream]
+    streams=[
+        borehole_stream,
+        streams.Params(depth_selector, parameters=['value']),
+        left_range,
+        left_tap,
+        center_stream,
+    ]
 )
 
 line_mid = hv.DynamicMap(
-    lambda x=None, y=None, value=None, x_range=None, center=None, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, x_range=x_range, center=center, view="mid"
+    lambda x=None, y=None, value=None, x_range=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, x_range=x_range, center=center, borehole_index=borehole_index, view="mid"
     ),
-    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), mid_range, center_stream]
+    streams=[
+        borehole_stream,
+        streams.Params(depth_selector, parameters=['value']),
+        mid_range,
+        mid_tap,
+        center_stream,
+    ]
 )
 
 line_right = hv.DynamicMap(
-    lambda x=None, y=None, value=None, x_range=None, center=None, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, x_range=x_range, center=center, view="right"
+    lambda x=None, y=None, value=None, x_range=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, x_range=x_range, center=center, borehole_index=borehole_index, view="right"
     ),
-    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), right_range, center_stream]
+    streams=[
+        borehole_stream,
+        streams.Params(depth_selector, parameters=['value']),
+        right_range,
+        right_tap,
+        center_stream,
+    ]
 )
 
 # ============================================================================
@@ -556,7 +641,8 @@ map_points = gv.Points(map_df, kdims=['lon', 'lat'], vdims=['value']).opts(
 
 tap_stream.source = map_points
 def on_tap_event(*args, **kwargs):
-    update_depth_selector(tap_stream.x, tap_stream.y)
+    borehole_index = update_depth_selector(tap_stream.x, tap_stream.y)
+    borehole_stream.event(borehole_index=borehole_index)
 
 
 tap_stream.param.watch(on_tap_event, ['x', 'y'])
