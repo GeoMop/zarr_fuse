@@ -483,30 +483,7 @@ def shift_window_to_include(center, span, current_xlim):
 
 
 def update_center_from_range(event, source):
-    global _updating_center
-    if _updating_center:
-        return
-    if not event.new or event.new[0] is None or event.new[1] is None:
-        return
-
-    start, end = event.new
-    center = start + (end - start) / 2
-    _updating_center = True
-    center_state["center"] = center
-    center_stream.event(center=center)
-    if source == "left":
-        xlim_state["mid"] = shift_window_to_include(center, mid_span, xlim_state["mid"])
-        xlim_state["right"] = shift_window_to_include(center, right_span, xlim_state["right"])
-    elif source == "mid":
-        xlim_state["mid"] = (event.new[0], event.new[1])
-    elif source == "right":
-        xlim_state["right"] = (event.new[0], event.new[1])
-    _updating_center = False
-
-
-left_range.param.watch(lambda e: update_center_from_range(e, "left"), ["x_range"])
-mid_range.param.watch(lambda e: update_center_from_range(e, "mid"), ["x_range"])
-right_range.param.watch(lambda e: update_center_from_range(e, "right"), ["x_range"])
+    return
 
 
 def update_center_from_tap(event, source):
@@ -520,8 +497,6 @@ def update_center_from_tap(event, source):
     _updating_center = True
     center_state["center"] = center
     center_stream.event(center=center)
-    xlim_state["mid"] = clamp_range(center, mid_span)
-    xlim_state["right"] = clamp_range(center, right_span)
     _updating_center = False
 
 
@@ -577,7 +552,6 @@ line_left = hv.DynamicMap(
     streams=[
         borehole_stream,
         streams.Params(depth_selector, parameters=['value']),
-        left_range,
         left_tap,
         center_stream,
     ]
@@ -590,7 +564,6 @@ line_mid = hv.DynamicMap(
     streams=[
         borehole_stream,
         streams.Params(depth_selector, parameters=['value']),
-        mid_range,
         mid_tap,
         center_stream,
     ]
@@ -603,7 +576,6 @@ line_right = hv.DynamicMap(
     streams=[
         borehole_stream,
         streams.Params(depth_selector, parameters=['value']),
-        right_range,
         right_tap,
         center_stream,
     ]
