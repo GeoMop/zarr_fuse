@@ -408,7 +408,9 @@ def build_timeseries_overlay(borehole_index, selected_depths, time_slice=None):
         })
         curves.append(hv.Curve(curve_df, 'time', 'temperature', label=label))
 
-    return hv.Overlay(curves) if curves else hv.Curve([])
+    if not curves:
+        curves = [hv.Curve([])]
+    return hv.Overlay(curves)
 
 
 def clamp_range(center, span):
@@ -430,91 +432,94 @@ def clamp_range(center, span):
 
 
 full_span = date_time_index.max() - date_time_index.min()
-month_span = pd.Timedelta(days=30)
-day_span = pd.Timedelta(days=1)
-current_center = date_time_index.min() + (full_span / 2)
+mid_span = pd.Timedelta(days=90)
+right_span = pd.Timedelta(hours=24)
 
-range_left = streams.RangeX()
-range_mid = streams.RangeX()
-range_right = streams.RangeX()
-
-range_state = {
-    "left": clamp_range(current_center, full_span),
-    "mid": clamp_range(current_center, month_span),
-    "right": clamp_range(current_center, day_span),
+center_state = {
+    "center": date_time_index.min() + (full_span / 2),
 }
+center_stream = streams.Stream.define("Center", center=None)()
+center_stream.event(center=center_state["center"])
 
-_updating_ranges = False
+left_range = streams.RangeX()
+mid_range = streams.RangeX()
+right_range = streams.RangeX()
+
+_updating_center = False
 
 
-def on_range_change(event, source):
-    global current_center, _updating_ranges
-    if _updating_ranges:
+def update_center_from_range(event):
+    global _updating_center
+    if _updating_center:
         return
     if not event.new or event.new[0] is None or event.new[1] is None:
         return
 
-    _updating_ranges = True
     start, end = event.new
-    current_center = start + (end - start) / 2
-    range_state["left"] = clamp_range(current_center, full_span)
-    range_state["mid"] = clamp_range(current_center, month_span)
-    range_state["right"] = clamp_range(current_center, day_span)
-
-    range_left.event(x_range=range_state["left"])
-    range_mid.event(x_range=range_state["mid"])
-    range_right.event(x_range=range_state["right"])
-    _updating_ranges = False
+    center = start + (end - start) / 2
+    _updating_center = True
+    center_state["center"] = center
+    center_stream.event(center=center)
+    _updating_center = False
 
 
-range_left.param.watch(lambda e: on_range_change(e, "left"), ["x_range"])
-range_mid.param.watch(lambda e: on_range_change(e, "mid"), ["x_range"])
-range_right.param.watch(lambda e: on_range_change(e, "right"), ["x_range"])
-
-range_left.event(x_range=range_state["left"])
-range_mid.event(x_range=range_state["mid"])
-range_right.event(x_range=range_state["right"])
+left_range.param.watch(update_center_from_range, ["x_range"])
+mid_range.param.watch(update_center_from_range, ["x_range"])
+right_range.param.watch(update_center_from_range, ["x_range"])
 
 
-def create_timeseries_view(x=None, y=None, value=None, x_range=None, view="left", **kwargs):
+def create_timeseries_view(x=None, y=None, value=None, x_range=None, center=None, view="left", **kwargs):
     borehole_index = get_borehole_index(x, y)
     selected_depths = value or []
     if not selected_depths:
         selected_depths = get_available_depth_indices(borehole_index)
 
-    time_slice = range_state[view]
+    center_time = center or center_state["center"]
+    if view == "left":
+        time_slice = None
+        xlim = (date_time_index.min(), date_time_index.max())
+    elif view == "mid":
+        time_slice = clamp_range(center_time, mid_span)
+        xlim = time_slice
+    else:
+        time_slice = clamp_range(center_time, right_span)
+        xlim = time_slice
+
     overlay = build_timeseries_overlay(borehole_index, selected_depths, time_slice=time_slice)
-    overlay = overlay.redim.range(time=range_state[view])
+    overlay = overlay.redim.range(time=xlim)
+    overlay = overlay * hv.VLine(center_time).opts(color='red', line_width=2)
     return overlay.opts(
         width=600,
         height=400,
         responsive=True,
         title=f"Temperature over Time (borehole {borehole_index})",
-        tools=['hover'],
+        tools=['hover', 'xwheel_zoom', 'xpan', 'reset'],
+        active_tools=['xwheel_zoom', 'xpan'],
+        xlim=xlim,
         legend_position='right',
         framewise=True
     )
 
 
 line_left = hv.DynamicMap(
-    lambda x=None, y=None, value=None, x_range=None, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, x_range=x_range, view="left"
+    lambda x=None, y=None, value=None, x_range=None, center=None, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, x_range=x_range, center=center, view="left"
     ),
-    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), range_left]
+    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), left_range, center_stream]
 )
 
 line_mid = hv.DynamicMap(
-    lambda x=None, y=None, value=None, x_range=None, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, x_range=x_range, view="mid"
+    lambda x=None, y=None, value=None, x_range=None, center=None, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, x_range=x_range, center=center, view="mid"
     ),
-    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), range_mid]
+    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), mid_range, center_stream]
 )
 
 line_right = hv.DynamicMap(
-    lambda x=None, y=None, value=None, x_range=None, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, x_range=x_range, view="right"
+    lambda x=None, y=None, value=None, x_range=None, center=None, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, x_range=x_range, center=center, view="right"
     ),
-    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), range_right]
+    streams=[tap_stream, streams.Params(depth_selector, parameters=['value']), right_range, center_stream]
 )
 
 # ============================================================================
