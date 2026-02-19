@@ -452,34 +452,6 @@ mid_tap = streams.Tap()
 right_tap = streams.Tap()
 
 _updating_center = False
-xlim_state = {
-    "mid": clamp_range(center_state["center"], mid_span),
-    "right": clamp_range(center_state["center"], right_span),
-}
-
-
-def shift_window_to_include(center, span, current_xlim):
-    if current_xlim is None:
-        return clamp_range(center, span)
-    start, end = current_xlim
-    if start <= center <= end:
-        return (start, end)
-    if center < start:
-        start = center
-        end = center + span
-    else:
-        end = center
-        start = center - span
-
-    min_t = date_time_index.min()
-    max_t = date_time_index.max()
-    if start < min_t:
-        start = min_t
-        end = min_t + span
-    if end > max_t:
-        end = max_t
-        start = max_t - span
-    return (start, end)
 
 
 def update_center_from_range(event, source):
@@ -498,6 +470,13 @@ def update_center_from_tap(event, source):
     center_state["center"] = center
     center_stream.event(center=center)
     _updating_center = False
+
+
+def make_xrange_hook(xlim):
+    def _hook(plot, element):
+        plot.state.x_range.start = xlim[0]
+        plot.state.x_range.end = xlim[1]
+    return _hook
 
 
 left_tap.param.watch(lambda e: update_center_from_tap(e, "left"), ["x"])
@@ -523,9 +502,9 @@ def create_timeseries_view(
     if view == "left":
         xlim = (date_time_index.min(), date_time_index.max())
     elif view == "mid":
-        xlim = xlim_state["mid"]
+        xlim = clamp_range(center_time, mid_span)
     else:
-        xlim = xlim_state["right"]
+        xlim = clamp_range(center_time, right_span)
 
     overlay = build_timeseries_overlay(borehole_index, selected_depths, time_slice=None)
     overlay = overlay.redim.range(time=xlim)
@@ -541,6 +520,7 @@ def create_timeseries_view(
         axiswise=True,
         shared_axes=False,
         legend_position='right',
+        hooks=[make_xrange_hook(xlim)],
         framewise=True
     )
 
