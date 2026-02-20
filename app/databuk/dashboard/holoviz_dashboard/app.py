@@ -443,6 +443,8 @@ center_state = {
 }
 center_stream = streams.Stream.define("Center", center=None)()
 center_stream.event(center=center_state["center"])
+center_state["force_mid"] = False
+center_state["force_right"] = False
 
 left_range = streams.RangeX()
 mid_range = streams.RangeX()
@@ -468,14 +470,19 @@ def update_center_from_tap(event, source):
     center = pd.to_datetime(event.new)
     _updating_center = True
     center_state["center"] = center
+    center_state["force_mid"] = True
+    center_state["force_right"] = True
     center_stream.event(center=center)
     _updating_center = False
 
 
-def make_xrange_hook(xlim):
+def make_xrange_hook(xlim, force_flag_key):
     def _hook(plot, element):
-        plot.state.x_range.start = xlim[0]
-        plot.state.x_range.end = xlim[1]
+        plot.state.x_range.bounds = xlim
+        if center_state.get(force_flag_key, False):
+            plot.state.x_range.start = xlim[0]
+            plot.state.x_range.end = xlim[1]
+            center_state[force_flag_key] = False
     return _hook
 
 
@@ -509,6 +516,10 @@ def create_timeseries_view(
     overlay = build_timeseries_overlay(borehole_index, selected_depths, time_slice=None)
     overlay = overlay.redim.range(time=xlim)
     overlay = overlay * hv.VLine(center_time).opts(color='red', line_width=2)
+    hooks = []
+    if view != "left":
+        force_key = "force_mid" if view == "mid" else "force_right"
+        hooks = [make_xrange_hook(xlim, force_key)]
     return overlay.opts(
         width=600,
         height=400,
@@ -520,7 +531,7 @@ def create_timeseries_view(
         axiswise=True,
         shared_axes=False,
         legend_position='right',
-        hooks=[make_xrange_hook(xlim)],
+        hooks=hooks,
         framewise=True
     )
 
