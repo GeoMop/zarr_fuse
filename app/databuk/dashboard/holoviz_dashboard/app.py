@@ -530,7 +530,7 @@ def create_timeseries_view(
         xlim=xlim,
         axiswise=True,
         shared_axes=False,
-        legend_position='right',
+        show_legend=False,
         hooks=hooks,
         framewise=True
     )
