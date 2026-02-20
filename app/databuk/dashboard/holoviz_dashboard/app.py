@@ -42,9 +42,6 @@ hv.renderer('bokeh').theme = 'dark_minimal'
 # ============================================================================
 # CONTROL PANEL COMPONENTS
 # ============================================================================
-# ============================================================================
-# CONTROL PANEL COMPONENTS
-# ============================================================================
 
 # Header with gradient background
 header = pn.pane.HTML("""
@@ -320,7 +317,7 @@ def load_bukov_timeseries(group, var_name: str = "rock_temp", borehole_index: in
 
 
 bukov_group = load_bukov_group()
-df = load_bukov_timeseries(bukov_group)
+_ = load_bukov_timeseries(bukov_group)
 map_df, overlay_bounds, lats_arr, lons_arr = load_bukov_map_data(bukov_group)
 depth_arr = np.array(bukov_group["depth"][:], dtype=float)
 date_time_units = bukov_group["date_time"].attrs.get("units")
@@ -446,18 +443,11 @@ center_stream.event(center=center_state["center"])
 center_state["force_mid"] = False
 center_state["force_right"] = False
 
-left_range = streams.RangeX()
-mid_range = streams.RangeX()
-right_range = streams.RangeX()
 left_tap = streams.Tap()
 mid_tap = streams.Tap()
 right_tap = streams.Tap()
 
 _updating_center = False
-
-
-def update_center_from_range(event, source):
-    return
 
 
 def update_center_from_tap(event, source):
@@ -495,7 +485,6 @@ def create_timeseries_view(
     x=None,
     y=None,
     value=None,
-    x_range=None,
     center=None,
     borehole_index=0,
     view="left",
@@ -537,8 +526,8 @@ def create_timeseries_view(
 
 
 line_left = hv.DynamicMap(
-    lambda x=None, y=None, value=None, x_range=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, x_range=x_range, center=center, borehole_index=borehole_index, view="left"
+    lambda x=None, y=None, value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, center=center, borehole_index=borehole_index, view="left"
     ),
     streams=[
         borehole_stream,
@@ -549,8 +538,8 @@ line_left = hv.DynamicMap(
 )
 
 line_mid = hv.DynamicMap(
-    lambda x=None, y=None, value=None, x_range=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, x_range=x_range, center=center, borehole_index=borehole_index, view="mid"
+    lambda x=None, y=None, value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, center=center, borehole_index=borehole_index, view="mid"
     ),
     streams=[
         borehole_stream,
@@ -561,8 +550,8 @@ line_mid = hv.DynamicMap(
 )
 
 line_right = hv.DynamicMap(
-    lambda x=None, y=None, value=None, x_range=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, x_range=x_range, center=center, borehole_index=borehole_index, view="right"
+    lambda x=None, y=None, value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
+        x=x, y=y, value=value, center=center, borehole_index=borehole_index, view="right"
     ),
     streams=[
         borehole_stream,
