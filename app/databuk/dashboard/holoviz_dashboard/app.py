@@ -53,8 +53,8 @@ header = pn.pane.HTML("""
             <span style="font-size: 20px;">🗄️</span>
         </div>
         <div>
-            <h2 style="margin: 0; font-size: 16px; font-weight: 700; color: white;">ZARR FUSE</h2>
-            <p style="margin: 0; font-size: 11px; color: #bfdbfe;">Data Platform</p>
+            <h2 style="margin: 0; font-size: 16px; font-weight: 700; color: white;">ZARR FUSE (mock)</h2>
+            <p style="margin: 0; font-size: 11px; color: #bfdbfe;">Data Platform (mock)</p>
         </div>
     </div>
 </div>
@@ -62,7 +62,7 @@ header = pn.pane.HTML("""
 
 # Store selector dropdown with custom styling
 store_selector = pn.widgets.Select(
-    name='📦 Store Name', 
+    name='📦 Store Name (mock)', 
     value='Mock Store A', 
     options=['Mock Store A', 'Mock Store B', 'Mock Store C'],
     width=320,
@@ -87,10 +87,10 @@ store_info = pn.pane.HTML("""
 <div style="background: #1e293b; padding: 12px; border-radius: 8px; margin: 8px 0;
             border-left: 3px solid #3b82f6;">
     <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 600;">
-        STORE URL
+        STORE URL (mock)
     </div>
     <div style="font-size: 12px; color: #e2e8f0; font-family: monospace;">
-        s3://mock-bucket/path/to/store.zarr
+        s3://mock-bucket/path/to/store.zarr (mock)
     </div>
 </div>
 """, sizing_mode='stretch_width')
@@ -99,16 +99,16 @@ store_info = pn.pane.HTML("""
 status_section = pn.pane.HTML("""
 <div style="background: #0f172a; padding: 12px; border-radius: 8px; margin: 8px 0;">
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-        <span style="font-size: 12px; color: #94a3b8; font-weight: 600;">SERVICE STATUS</span>
+        <span style="font-size: 12px; color: #94a3b8; font-weight: 600;">SERVICE STATUS (mock)</span>
         <div style="display: flex; align-items: center; gap: 6px;">
             <span style="width: 8px; height: 8px; background: #10b981; border-radius: 50%;
                         box-shadow: 0 0 10px #10b981;"></span>
-            <span style="font-size: 11px; color: #10b981; font-weight: 600;">Active</span>
+            <span style="font-size: 11px; color: #10b981; font-weight: 600;">Active (mock)</span>
         </div>
     </div>
     <div style="font-size: 10px; color: #64748b; display: flex; align-items: center; gap: 4px;">
         <span>🕐</span>
-        <span>Updated: """ + pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S') + """</span>
+        <span>Updated (mock): """ + pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S') + """</span>
     </div>
 </div>
 """, sizing_mode='stretch_width')
@@ -132,7 +132,7 @@ tree_view = pn.pane.HTML("""
 <div style="background: #1e293b; padding: 14px; border-radius: 8px; margin-top: 12px;">
     <div style="font-size: 13px; color: #f1f5f9; font-weight: 600; margin-bottom: 12px;
                 border-bottom: 1px solid #334155; padding-bottom: 8px;">
-        📁 DATA STRUCTURE
+        📁 DATA STRUCTURE (mock)
     </div>
     <div style="font-size: 11px; color: #cbd5e1;">
         <!-- Temperature group -->
@@ -142,7 +142,7 @@ tree_view = pn.pane.HTML("""
                           text-align: left; font-size: 11px; transition: all 0.2s;"
                     onmouseover="this.style.background='#475569'"
                     onmouseout="this.style.background='#334155'">
-                📂 temperature
+                📂 temperature (mock)
             </button>
             <div style="margin-left: 20px; margin-top: 4px;">
                 <button style="background: transparent; border: 1px solid #475569; color: #94a3b8;
@@ -150,14 +150,14 @@ tree_view = pn.pane.HTML("""
                               text-align: left; font-size: 11px; margin-bottom: 3px; transition: all 0.2s;"
                         onmouseover="this.style.background='#334155'; this.style.borderColor='#64748b'"
                         onmouseout="this.style.background='transparent'; this.style.borderColor='#475569'">
-                    📊 surface_temp
+                    📊 surface_temp (mock)
                 </button>
                 <button style="background: transparent; border: 1px solid #475569; color: #94a3b8;
                               padding: 4px 8px; border-radius: 4px; cursor: pointer; width: 100%;
                               text-align: left; font-size: 11px; margin-bottom: 3px; transition: all 0.2s;"
                         onmouseover="this.style.background='#334155'; this.style.borderColor='#64748b'"
                         onmouseout="this.style.background='transparent'; this.style.borderColor='#475569'">
-                    📊 air_temp
+                    📊 air_temp (mock)
                 </button>
             </div>
         </div>
@@ -168,7 +168,7 @@ tree_view = pn.pane.HTML("""
                           text-align: left; font-size: 11px; transition: all 0.2s;"
                     onmouseover="this.style.background='#475569'"
                     onmouseout="this.style.background='#334155'">
-                📂 pressure
+                📂 pressure (mock)
             </button>
             <div style="margin-left: 20px; margin-top: 4px;">
                 <button style="background: transparent; border: 1px solid #475569; color: #94a3b8;
@@ -176,7 +176,7 @@ tree_view = pn.pane.HTML("""
                               text-align: left; font-size: 11px; margin-bottom: 3px; transition: all 0.2s;"
                         onmouseover="this.style.background='#334155'; this.style.borderColor='#64748b'"
                         onmouseout="this.style.background='transparent'; this.style.borderColor='#475569'">
-                    📊 sea_level
+                    📊 sea_level (mock)
                 </button>
             </div>
         </div>
@@ -187,7 +187,7 @@ tree_view = pn.pane.HTML("""
                           text-align: left; font-size: 11px; transition: all 0.2s;"
                     onmouseover="this.style.background='#475569'"
                     onmouseout="this.style.background='#334155'">
-                📂 wind
+                📂 wind (mock)
             </button>
             <div style="margin-left: 20px; margin-top: 4px;">
                 <button style="background: transparent; border: 1px solid #475569; color: #94a3b8;
@@ -195,14 +195,14 @@ tree_view = pn.pane.HTML("""
                               text-align: left; font-size: 11px; margin-bottom: 3px; transition: all 0.2s;"
                         onmouseover="this.style.background='#334155'; this.style.borderColor='#64748b'"
                         onmouseout="this.style.background='transparent'; this.style.borderColor='#475569'">
-                    📊 u_component
+                    📊 u_component (mock)
                 </button>
                 <button style="background: transparent; border: 1px solid #475569; color: #94a3b8;
                               padding: 4px 8px; border-radius: 4px; cursor: pointer; width: 100%;
                               text-align: left; font-size: 11px; transition: all 0.2s;"
                         onmouseover="this.style.background='#334155'; this.style.borderColor='#64748b'"
                         onmouseout="this.style.background='transparent'; this.style.borderColor='#475569'">
-                    📊 v_component
+                    📊 v_component (mock)
                 </button>
             </div>
         </div>
