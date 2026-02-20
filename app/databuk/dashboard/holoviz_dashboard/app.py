@@ -34,7 +34,7 @@ CSS_FILES = [
 ]
 
 # Panel and HoloViews configuration
-pn.extension('bokeh', js_files=JS_FILES, css_files=CSS_FILES, 
+pn.extension(js_files=JS_FILES, css_files=CSS_FILES,
              design='material', theme='dark', sizing_mode="stretch_width")
 hv.extension('bokeh')
 hv.renderer('bokeh').theme = 'dark_minimal'
@@ -251,12 +251,6 @@ def load_bukov_map_data(group, var_name: str = "rock_temp", time_index: int = 0,
     lats = np.array(group["latitude"][:], dtype=float)
     lons = np.array(group["longitude"][:], dtype=float)
 
-    valid_mask = np.isfinite(lats) & np.isfinite(lons)
-    print(f"[Bukov] Total locations: {lats.size}, Valid locations: {int(valid_mask.sum())}")
-    if not valid_mask.all():
-        invalid_indices = np.where(~valid_mask)[0].tolist()
-        print(f"[Bukov] Invalid location indices: {invalid_indices}")
-
     if var_name not in group:
         raise KeyError(f"Variable '{var_name}' not found in Bukov group")
 
@@ -299,46 +293,12 @@ def to_datetime_index(values, units: str | None = None):
     return pd.to_datetime(arr, errors="coerce")
 
 
-def load_bukov_timeseries(group, var_name: str = "rock_temp", borehole_index: int = 0, depth_index: int = 0):
-    """Load a single-borehole time series for plots."""
-    if var_name not in group:
-        raise KeyError(f"Variable '{var_name}' not found in Bukov group")
-
-    units = group["date_time"].attrs.get("units")
-    times = to_datetime_index(group["date_time"][:], units=units)
-    values = np.array(group[var_name][:, borehole_index, depth_index], dtype=float)
-
-    return pd.DataFrame({
-        "time": times,
-        "x": np.arange(len(times)),
-        "y": values,
-        "temperature": values
-    })
-
-
 bukov_group = load_bukov_group()
-_ = load_bukov_timeseries(bukov_group)
 map_df, overlay_bounds, lats_arr, lons_arr = load_bukov_map_data(bukov_group)
 depth_arr = np.array(bukov_group["depth"][:], dtype=float)
 date_time_units = bukov_group["date_time"].attrs.get("units")
 date_time_values = bukov_group["date_time"][:]
 date_time_index = to_datetime_index(date_time_values, units=date_time_units)
-if len(date_time_index) >= 2:
-    step = date_time_index[1] - date_time_index[0]
-else:
-    step = None
-print(
-    "[Bukov] date_time range:",
-    date_time_index.min(),
-    "->",
-    date_time_index.max(),
-    "step:",
-    step,
-    "count:",
-    len(date_time_index),
-    "units:",
-    date_time_units,
-)
 
 # ============================================================================
 # INTERACTIVE VISUALIZATIONS
@@ -387,18 +347,13 @@ def update_depth_selector(x, y):
     return borehole_index
 
 
-def build_timeseries_overlay(borehole_index, selected_depths, time_slice=None):
+def build_timeseries_overlay(borehole_index, selected_depths):
     curves = []
     values_by_depth = [
         np.array(bukov_group["rock_temp"][:, borehole_index, depth_idx], dtype=float)
         for depth_idx in selected_depths
     ]
     times = date_time_index
-    if time_slice is not None:
-        start, end = time_slice
-        mask = (times >= start) & (times <= end)
-        times = times[mask]
-        values_by_depth = [vals[mask] for vals in values_by_depth]
     for col_idx, depth_idx in enumerate(selected_depths):
         depth_val = depth_arr[depth_idx] if depth_idx < len(depth_arr) else depth_idx
         label = f"{format_depth(depth_val)} m"
@@ -450,7 +405,7 @@ right_tap = streams.Tap()
 _updating_center = False
 
 
-def update_center_from_tap(event, source):
+def update_center_from_tap(event):
     global _updating_center
     if _updating_center:
         return
@@ -476,14 +431,12 @@ def make_xrange_hook(xlim, force_flag_key):
     return _hook
 
 
-left_tap.param.watch(lambda e: update_center_from_tap(e, "left"), ["x"])
-mid_tap.param.watch(lambda e: update_center_from_tap(e, "mid"), ["x"])
-right_tap.param.watch(lambda e: update_center_from_tap(e, "right"), ["x"])
+left_tap.param.watch(update_center_from_tap, ["x"])
+mid_tap.param.watch(update_center_from_tap, ["x"])
+right_tap.param.watch(update_center_from_tap, ["x"])
 
 
 def create_timeseries_view(
-    x=None,
-    y=None,
     value=None,
     center=None,
     borehole_index=0,
@@ -502,7 +455,7 @@ def create_timeseries_view(
     else:
         xlim = clamp_range(center_time, right_span)
 
-    overlay = build_timeseries_overlay(borehole_index, selected_depths, time_slice=None)
+    overlay = build_timeseries_overlay(borehole_index, selected_depths)
     overlay = overlay.redim.range(time=xlim)
     overlay = overlay * hv.VLine(center_time).opts(color='red', line_width=2)
     hooks = []
@@ -526,8 +479,8 @@ def create_timeseries_view(
 
 
 line_left = hv.DynamicMap(
-    lambda x=None, y=None, value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, center=center, borehole_index=borehole_index, view="left"
+    lambda value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
+        value=value, center=center, borehole_index=borehole_index, view="left"
     ),
     streams=[
         borehole_stream,
@@ -538,8 +491,8 @@ line_left = hv.DynamicMap(
 )
 
 line_mid = hv.DynamicMap(
-    lambda x=None, y=None, value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, center=center, borehole_index=borehole_index, view="mid"
+    lambda value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
+        value=value, center=center, borehole_index=borehole_index, view="mid"
     ),
     streams=[
         borehole_stream,
@@ -550,8 +503,8 @@ line_mid = hv.DynamicMap(
 )
 
 line_right = hv.DynamicMap(
-    lambda x=None, y=None, value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
-        x=x, y=y, value=value, center=center, borehole_index=borehole_index, view="right"
+    lambda value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
+        value=value, center=center, borehole_index=borehole_index, view="right"
     ),
     streams=[
         borehole_stream,
