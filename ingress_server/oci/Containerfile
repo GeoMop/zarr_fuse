@@ -32,12 +32,12 @@ RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@${za
 WORKDIR /ingress-server
 
 COPY --chown=ingress:ingress pyproject.toml ingress_server/ inputs/ ./
-COPY --chown=ingress:ingress oci/install_extras.sh ./scripts/install_extras.sh
+COPY --chown=ingress:ingress oci/install_extractor_dependencies.sh ./scripts/install_extractor_dependencies.sh
 
 RUN pip install --no-cache-dir .
 
-RUN  chmod +x ./scripts/install_extras.sh && \
-    ./scripts/install_extras.sh
+RUN  chmod +x ./scripts/install_extractor_dependencies.sh && \
+    ./scripts/install_extractor_dependencies.sh
 
 ENV CONFIG_DIR_PATH="/ingress-server/inputs"
 
