@@ -10,10 +10,11 @@ jobs:
     name: Build and deploy ingress server
     uses: ./.github/workflows/ingress-server-reusable-workflow.yaml
     concurrency:
-      group: "${{ github.workflow }}-${{ github.ref_name }}-build-and-deploy"
+      group: "${{ github.workflow }}-${{ github.head_ref }}-build-and-deploy"
       cancel-in-progress: false
     with:
       deploy: false
       push-container: false
       tag: generate
+      zarr-fuse-ref: ${{ github.head_ref }}
     secrets: inherit

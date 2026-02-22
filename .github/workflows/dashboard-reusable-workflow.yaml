@@ -36,7 +36,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Get version tag
         id: get_version_tag
         run: |
@@ -61,7 +61,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Containerize
         uses: ./.github/actions/containerize
         with:
@@ -87,7 +87,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Install dependencies
         run: npm ci
       - name: Build frontend
@@ -95,7 +95,7 @@ jobs:
           VITE_API_URL: "https://zarr-fuse-${{ inputs.release-name }}.dyn.cloud.e-infra.cz"
         run: npm run build
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dashboard-frontend
           path: app/databuk/dashboard/dist
@@ -117,9 +117,9 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Download artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: dashboard-frontend
           path: app/databuk/dashboard/dist
@@ -146,7 +146,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Lint helm chart
         uses: ./.github/actions/helm-lint
         with:
@@ -172,7 +172,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
       - name: Ensure that the namespace exists

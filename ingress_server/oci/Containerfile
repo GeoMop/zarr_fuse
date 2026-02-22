@@ -2,7 +2,7 @@ FROM docker.io/library/python:3.11-slim-bullseye
 
 ARG APP_VERSION="devel"
 
-ARG zarr_fuse_version="main"
+ARG zarr_fuse_branch="main"
 ARG git_version="1:2.30.2-1+deb11u5"
 ARG waitress_version="3.0.2"
 
@@ -25,7 +25,7 @@ RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server 
     apt-get update && apt-get install -y --no-install-recommends git=${git_version} && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@${zarr_fuse_version}" && \
+RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@${zarr_fuse_branch}" && \
     pip install --no-cache-dir waitress==${waitress_version}
 
 # --- Install ingress server ---

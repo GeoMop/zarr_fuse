@@ -14,7 +14,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Get version from tag
         id: get-version
@@ -36,4 +36,5 @@ jobs:
       namespace: ingress-server
       release-name: ingress-server
       s3-store-url: s3://app-databuk-release-service/bukov.zarr
+      zarr-fuse-ref: ${{ github.ref_name }}
     secrets: inherit
