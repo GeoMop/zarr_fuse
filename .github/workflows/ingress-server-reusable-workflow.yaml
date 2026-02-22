@@ -53,7 +53,7 @@ on:
         description: "Ref/branch/tag repozitáře GeoMop/zarr_fuse for external use"
         required: false
         type: string
-        default: ""
+        default: "main"
 jobs:
   get-version-tag:
     name: Get version tag
@@ -63,6 +63,9 @@ jobs:
     steps:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
+        with:
+          repository: GeoMop/zarr_fuse
+          ref: ${{ inputs.zarr-fuse-ref }}
 
       - name: Get version tag
         id: get_version_tag
@@ -78,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout caller repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Copy configuration files
         run: |
@@ -95,7 +98,7 @@ jobs:
 
           cp -r "$SRC_DIR"/. "$DEST_DIR"/
       - name: Upload configuration files as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ingress-server-configuration
           path: ci-inputs/
@@ -111,26 +114,21 @@ jobs:
       options: --privileged
     steps:
       - name: Checkout zarr_fuse
-        if: ${{ github.repository == 'GeoMop/zarr_fuse' }}
-        uses: actions/checkout@v4
-
-      - name: Checkout zarr_fuse for external use
-        if: ${{ github.repository != 'GeoMop/zarr_fuse' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}
 
       - name: Remove existing configuration files
         if: ${{ inputs.configuration-dir-path != '' }}
-        run: rm -rf ingress_server/src/inputs/*
+        run: rm -rf ingress_server/inputs/*
 
       - name: Download configuration files artifact
         if: ${{ inputs.configuration-dir-path != '' }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ingress-server-configuration
-          path: ingress_server/src/inputs/
+          path: ingress_server/inputs/
 
       - name: Containerize
         uses: ./.github/actions/containerize
@@ -154,12 +152,7 @@ jobs:
       - containerize
     steps:
       - name: Checkout zarr_fuse
-        if: ${{ github.repository == 'GeoMop/zarr_fuse' }}
-        uses: actions/checkout@v4
-
-      - name: Checkout zarr_fuse for external use
-        if: ${{ github.repository != 'GeoMop/zarr_fuse' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}
@@ -170,7 +163,7 @@ jobs:
           working-directory: ingress_server/charts/ingress-server
           values: --values values/minimal-required-values.yaml
 
-  eploy:
+  deploy:
     name: Deploy ingress server to e-infra rancher
     runs-on: ubuntu-latest
     if: ${{ inputs.deploy }}
@@ -186,12 +179,7 @@ jobs:
         working-directory: ingress_server/charts
     steps:
       - name: Checkout zarr_fuse
-        if: ${{ github.repository == 'GeoMop/zarr_fuse' }}
-        uses: actions/checkout@v4
-
-      - name: Checkout zarr_fuse for external use
-        if: ${{ github.repository != 'GeoMop/zarr_fuse' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
           ref: ${{ inputs.zarr-fuse-ref }}

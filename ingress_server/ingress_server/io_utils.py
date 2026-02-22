@@ -5,18 +5,15 @@ import uuid
 import json
 import csv
 import polars as pl
-
 import zarr_fuse as zf
-
 from pathlib import Path
-from extractor import apply_extractor_if_any
 from dotenv import load_dotenv
-
-from configs import ACCEPTED_DIR
-from models import MetadataModel, DataSourceConfig
 import logging
-
 LOG = logging.getLogger("io_utils")
+
+from .extractor import apply_extractor_if_any
+from .configs import get_settings
+from .models import MetadataModel, DataSourceConfig
 
 load_dotenv()
 
@@ -45,7 +42,7 @@ def save_data(
 
     meta_data = metadata.model_copy(update={"node_path": str(safe_child) if safe_child else None})
 
-    base = (ACCEPTED_DIR / meta_data.endpoint_name)
+    base = (get_settings().accepted_dir / meta_data.endpoint_name)
     suffix = ".csv" if "csv" in meta_data.content_type else ".json"
     msg_path = new_msg_path(base, suffix)
 

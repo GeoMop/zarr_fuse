@@ -10,6 +10,7 @@ readme = "README.md"
 urls = { Homepage = "https://github.com/geomop/zarr_fuse" }
 authors = [{ name = "Jan Brezina", email = "jan.brezina@tul.cz" }]
 license = { text = "BSD-3-Clause" }
+requires-python = ">=3.11"
 keywords = [
   "backend",
   "ingestion",
@@ -30,8 +31,6 @@ classifiers = [
   "License :: OSI Approved :: BSD License",
   "Programming Language :: Python :: 3",
 ]
-requires-python = ">=3.11"
-
 dependencies = [
   "PyYAML",
   "flask",
@@ -43,6 +42,11 @@ dependencies = [
   "pydantic",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest"]
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["ingress_server", "ingress_server.*"]
+
+[project.scripts]
+ingress_server = "ingress_server.main:main"
