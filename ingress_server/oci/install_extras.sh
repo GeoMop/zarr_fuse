@@ -1,4 +1,8 @@
 #!/bin/sh
+
+# The script is used to install extra dependencies for ingress server extractirs and is used
+# in the OCI (Dockerfile) to improve readability and maintainability of the Dockerfile.
+
 set -eu
 set -x
 
