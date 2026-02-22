@@ -3,10 +3,11 @@ import signal
 import shutil
 import logging
 
+import xarray as xr
 from pathlib import Path
 
 from .configs import STOP, get_settings
-from .io_utils import open_root, read_df_from_bytes
+from .io import open_root, read_df_from_bytes
 from .models import MetadataModel
 
 LOG = logging.getLogger("worker")
@@ -83,7 +84,7 @@ def _process_one(data_path: Path) -> str | None:
     if not schema_path.exists():
         return f"No schema for endpoint {metadata.endpoint_name}"
 
-    df, err = read_df_from_bytes(
+    obj, err = read_df_from_bytes(
         payload= data_path.read_bytes(),
         metadata=metadata,
     )
@@ -94,17 +95,20 @@ def _process_one(data_path: Path) -> str | None:
     if err:
         return f"Failed to open root: {err}"
 
-    if not metadata.node_path and metadata.schema_node:
-        root[metadata.schema_node].update(df)
-    elif not metadata.node_path and not metadata.schema_node:
-        root.update(df)
-    # TODO: handle more complex node paths (e.g. /a/b/c)
-    elif not metadata.schema_node:
-        root[metadata.node_path].update(df)
-    else:
-        root[metadata.schema_node][metadata.node_path].update(df)
-    return None
+    target = root
+    if metadata.dataset_name:
+        target = target[metadata.dataset_name]
 
+    if metadata.node_path:
+        for part in metadata.node_path.strip("/").split("/"):
+            if part:
+                target = target[part]
+
+    if isinstance(obj, xr.Dataset):
+        target.merge_ds(obj)
+    else:
+        target.update(obj)
+    return None
 
 def _save_to_queue(src: Path, dst: Path):
     dst.mkdir(parents=True, exist_ok=True)

@@ -8,7 +8,7 @@ from .configs import get_settings
 class DataSourceConfig(BaseModel):
     name: str
     schema_path: str
-    schema_node: str | None = None
+    dataset_name: str | None = None
     extract_fn: str | None = None
     fn_module: str | None = None
 
@@ -28,10 +28,10 @@ class EndpointConfig(BaseModel):
         if isinstance(data, dict) and "data_source" not in data:
             data = {**data, "data_source": {
                 "name": data.get("name"),
+                "dataset_name": data.get("dataset_name"),
                 "schema_path": data.get("schema_path"),
                 "extract_fn": data.get("extract_fn"),
                 "fn_module": data.get("fn_module"),
-                "schema_node": data.get("schema_node"),
             }}
         return data
 
@@ -41,7 +41,11 @@ class EndpointConfig(BaseModel):
 
     @property
     def schema_path(self) -> str:
-        return self.data_source.schema_path
+        return self.data_source.get_schema_path()
+
+    @property
+    def dataset_name(self) -> str:
+        return self.data_source.dataset_name
 
     @property
     def extract_fn(self) -> str | None:
@@ -65,7 +69,7 @@ class MetadataModel(BaseModel):
         description="Timestamp when the data was received",
     )
     dataframe_row: dict | None
-    schema_node: str | None = None
+    dataset_name: str | None = None
 
     def get_schema_path(self) -> Path:
         path = Path(self.schema_path)
@@ -92,5 +96,5 @@ class MetadataModel(BaseModel):
             extract_fn=data_source.extract_fn,
             fn_module=data_source.fn_module,
             dataframe_row=dataframe_row,
-            schema_node=data_source.schema_node,
+            dataset_name=data_source.dataset_name,
         )

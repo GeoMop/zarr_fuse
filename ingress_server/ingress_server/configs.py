@@ -1,5 +1,6 @@
 import os
 import yaml
+import logging
 
 from pathlib import Path
 from threading import Event
@@ -10,6 +11,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+LOG = logging.getLogger("configs")
 STOP = Event()
 
 @dataclass(frozen=True)
@@ -43,6 +45,7 @@ def init_settings(queue_dir: Path = None, config_dir: Path = None) -> Settings:
         else os.getenv("CONFIG_DIR_PATH", "inputs")
     ).resolve()
 
+    LOG.debug(f"Initializing settings with queue_dir={queue_dir_path}, config_dir={config_dir_path}")
     (queue_dir_path / "accepted").mkdir(parents=True, exist_ok=True)
     (queue_dir_path / "success").mkdir(parents=True, exist_ok=True)
     (queue_dir_path / "failed").mkdir(parents=True, exist_ok=True)
@@ -58,6 +61,12 @@ def get_settings() -> Settings:
     if _SETTINGS is None:
         _SETTINGS = init_settings()
     return _SETTINGS
+
+def get_config() -> Dict[str, Any]:
+    global CONFIG
+    if not CONFIG:
+        init_settings()
+    return CONFIG
 
 def config_dir() -> Path:
     return get_settings().config_dir

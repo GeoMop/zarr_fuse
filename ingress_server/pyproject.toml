@@ -40,6 +40,8 @@ dependencies = [
   "requests",
   "apscheduler",
   "pydantic",
+  "xarray",
+  "cfgrib",
 ]
 
 [project.optional-dependencies]

@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 
 from .auth import AUTH
 from .models import EndpointConfig
-from .io_utils import process_payload
-from .configs import init_settings, CONFIG, STOP
+from .io import process_payload
+from .configs import init_settings, get_config, STOP
 from .worker import startup_recover, install_signal_handlers, working_loop
 from .logging_setup import setup_logging
 from .active_scrapper.scheduler import add_scrapper_jobs
@@ -87,13 +87,15 @@ def create_upload_endpoint(config: EndpointConfig):
 # =========================
 def create_app():
     init_settings()
+    config = get_config()
+    LOG.debug("Configuration: %s", config)
 
-    for ep in CONFIG.get("endpoints", []):
+    for ep in config.get("endpoints", []):
         model = EndpointConfig.model_validate(ep)
         create_upload_endpoint(model)
         LOG.info("Created upload endpoint %s at %s", model.name, model.endpoint)
 
-    for scrapper in CONFIG.get("active_scrappers", []):
+    for scrapper in config.get("active_scrappers", []):
         model = ActiveScrapperConfig.model_validate(scrapper)
         add_scrapper_jobs(model, BG_SCHEDULER)
         LOG.info("Created active scrapper job %s for %s", model.name, model.request.url)
@@ -114,6 +116,7 @@ def _graceful_shutdown():
         t.join(timeout=10)
 
 def create_app_with_worker():
+
     startup_recover()
     install_signal_handlers()
     _start_worker_thread()

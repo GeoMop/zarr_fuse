@@ -8,7 +8,7 @@ from .active_scrapper_config_models import (
     RunConfig,
 )
 
-LOG = logging.getLogger("active-scrapper")
+LOG = logging.getLogger("active-scrapper.scheduler")
 
 
 def add_scrapper_jobs(scrapper: ActiveScrapperConfig, scheduler: BackgroundScheduler) -> None:

@@ -7,26 +7,32 @@ from pydantic import BaseModel, Field, model_validator
 from ..configs import get_settings
 from ..models import DataSourceConfig
 
+
 class RenderSource(str, Enum):
     DATETIME_UTC = "datetime_utc"
     DATETIME_LOCAL = "datetime_local"
     CONST = "const"
 
+
 class IterateSource(str, Enum):
     SCHEMA = "schema"
     DATAFRAME = "dataframe"
+
 
 class RunConfig(BaseModel):
     cron: str
     set: dict[str, str] = Field(default_factory=dict)
 
+
 class ActiveScrapperHeader(BaseModel):
     header_name: str
     header_value: str
 
+
 class QueryParamConfig(BaseModel):
     name: str
     value: str
+
 
 class RequestConfig(BaseModel):
     method: Literal["GET"] = "GET"
@@ -57,13 +63,14 @@ class RenderValue(BaseModel):
 class IterateSchemaConfig(BaseModel):
     name: str
     source: IterateSource = IterateSource.SCHEMA
-    schema_node: str | None = None
+    dataset_name: str | None = None
     schema_regex: str
     unique: bool = True
 
+
 class IterateDataframeConfig(BaseModel):
     name: str
-    source: Literal["dataframe"] = "dataframe"
+    source:  IterateSource = IterateSource.DATAFRAME
     dataframe_path: str
     dataframe_has_header: bool = True
     outputs: dict[str, str] = Field(default_factory=dict)
@@ -72,7 +79,9 @@ class IterateDataframeConfig(BaseModel):
         path = Path(self.dataframe_path)
         return path if path.is_absolute() else (get_settings().config_dir / path)
 
+
 IterateConfig = IterateSchemaConfig | IterateDataframeConfig
+
 
 class ActiveScrapperConfig(BaseModel):
     data_source: DataSourceConfig
@@ -87,7 +96,11 @@ class ActiveScrapperConfig(BaseModel):
 
     @property
     def schema_path(self) -> str:
-        return self.data_source.schema_path
+        return self.data_source.get_schema_path()
+
+    @property
+    def dataset_name(self) -> str:
+        return self.data_source.dataset_name
 
     @property
     def extract_fn(self) -> str | None:
@@ -103,10 +116,10 @@ class ActiveScrapperConfig(BaseModel):
         if isinstance(data, dict) and "data_source" not in data:
             data = {**data, "data_source": {
                 "name": data.get("name"),
+                "dataset_name": data.get("dataset_name"),
                 "schema_path": data.get("schema_path"),
                 "extract_fn": data.get("extract_fn"),
                 "fn_module": data.get("fn_module"),
-                "schema_node": data.get("schema_node"),
             }}
         return data
 

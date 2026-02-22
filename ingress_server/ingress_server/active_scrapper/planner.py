@@ -9,25 +9,25 @@ from .active_scrapper_config_models import (
     RunConfig,
 )
 
-LOG = logging.getLogger("active-scrapper")
+LOG = logging.getLogger("active-scrapper.planner")
 
 
 def build_contexts_for_run(
     scrapper_config: ActiveScrapperConfig,
     run_cfg: RunConfig,
 ) -> List[ExecutionContext]:
-    base = ExecutionContext(dict(run_cfg.set))
+    initial_ctx = ExecutionContext(dict(run_cfg.set))
+    rendered_ctx = apply_render_values(initial_ctx, scrapper_config.render)
 
-    base = apply_render_values(base, scrapper_config.render)
-
-    contexts: List[ExecutionContext] = [base]
+    contexts: List[ExecutionContext] = [rendered_ctx]
 
     for it in scrapper_config.iterate:
         next_contexts: List[ExecutionContext] = []
         for ctx in contexts:
             try:
-                for new_ctx in expand_iterate(ctx, it, scrapper_config.data_source):
-                    next_contexts.append(new_ctx)
+                next_contexts.extend(
+                    expand_iterate(ctx, it, scrapper_config.data_source)
+                )
             except Exception as e:
                 raise ExecutionContextError(
                     f"Failed to expand iterator '{getattr(it, 'name', '<unknown>')}' "

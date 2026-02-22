@@ -95,7 +95,7 @@ endpoints:
 active_scrappers:
   - name: chmi-aladin-1km
     schema_path: schemas/hlavo_surface_schema.yaml
-    schema_node: chmi_aladin_10m
+    dataset_name: chmi_aladin_10m
     extract_fn: extract_chmi_grib
     fn_module: inputs.extract.chmi
 
@@ -122,7 +122,7 @@ active_scrappers:
     iterate:
       - name: quantity
         source: schema
-        schema_node: "chmi_aladin_10m"
+        dataset_name: "chmi_aladin_10m"
         schema_regex: "VARS.*.df_col"
 
       - name: dataframe_row

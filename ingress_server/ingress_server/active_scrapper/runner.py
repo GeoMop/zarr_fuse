@@ -1,6 +1,9 @@
 import requests
 import logging
 
+from pathlib import Path
+from urllib.parse import urlparse
+
 from .active_scrapper_config_models import (
     ActiveScrapperConfig,
     RunConfig,
@@ -8,17 +11,27 @@ from .active_scrapper_config_models import (
 from .context import ExecutionContextError
 from .planner import build_contexts_for_run
 from .request_builder import build_request
-from ..io_utils import validate_response, process_payload
+from ..io import process_payload
 
-LOG = logging.getLogger("active-scrapper")
+LOG = logging.getLogger("active-scrapper.runner")
 
+
+def effective_content_type(http_ct: str | None, url: str) -> str:
+    ct = (http_ct or "").lower()
+    name = Path(urlparse(url).path).name.lower()
+
+    if name.endswith((".grb.bz2", ".grib.bz2", ".grb2.bz2", ".grib2.bz2")):
+        return "application/x-grib+bz2"
+    if name.endswith((".grb", ".grib", ".grb2", ".grib2")):
+        return "application/x-grib"
+    return ct
 
 def request_caller(
     name: str,
     url: str,
     headers: dict | None = None,
     params: dict | None = None,
-) -> tuple[requests.Response | None, str | None]:
+) -> requests.Response:
     try:
         response = requests.get(
             url=url,
@@ -28,16 +41,9 @@ def request_caller(
         )
         response.raise_for_status()
 
-        err = validate_response(
-            response.content,
-            response.headers.get("Content-Type", ""),
-        )
-        if err:
-            return None, f"Scrapper job {name} received invalid response from {url}: {err}"
-
-        return response, None
+        return response
     except Exception as e:
-        return None, f"Scrapper job {name} failed to fetch {url}: {e}"
+        raise ValueError(f"Scrapper job {name} failed to fetch {url}: {e}")
 
 
 def run_one_scheduled_run(scrapper: ActiveScrapperConfig, run_cfg: RunConfig) -> None:
@@ -62,25 +68,22 @@ def run_one_scheduled_run(scrapper: ActiveScrapperConfig, run_cfg: RunConfig) ->
 
     for ctx in contexts:
         try:
-            url, headers, params = build_request(scrapper.request, ctx)
+            url, headers, params = build_request(ctx, scrapper.request)
 
             merged_headers = dict(headers_static)
             merged_headers.update(headers)
 
-            resp, err = request_caller(
+            resp = request_caller(
                 name=scrapper.name,
                 url=url,
                 headers=merged_headers,
                 params=params,
             )
-            if err:
-                LOG.error(err)
-                continue
 
             success, perr = process_payload(
                 data_source=scrapper.data_source,
                 payload=resp.content,
-                content_type=resp.headers.get("Content-Type"),
+                content_type=effective_content_type(resp.headers.get("Content-Type"), url),
                 username=f"scrapper-{scrapper.name}",
                 dataframe_row=ctx.to_dict(),
             )

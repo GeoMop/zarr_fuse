@@ -8,48 +8,54 @@ from .active_scrapper_config_models import (
     RenderSource,
 )
 
-LOG = logging.getLogger("active-scrapper")
+LOG = logging.getLogger("active-scrapper.render")
+
 
 def apply_render_values(
     ctx: ExecutionContext,
     render_values: Iterable[RenderValue],
 ) -> ExecutionContext:
-    LOG.debug("Applying render values: %s", list(render_values))
-    out = ctx
-    for rv in render_values:
-        out = apply_render_value(out, rv)
-    return out
+    values = list(render_values)
+    LOG.debug("Applying %d render values: %s", len(values), [v.name for v in values])
 
-def datetime_utc(format: str) -> str:
-    LOG.debug("Rendering datetime_utc with format '%s'", format)
-    return datetime.now(timezone.utc).strftime(format)
+    current = ctx
+    for rv in values:
+        current = _apply_render_value(current, rv)
+    return current
 
-def datetime_local(format: str) -> str:
-    LOG.debug("Rendering datetime_local with format '%s'", format)
-    return datetime.now().astimezone().strftime(format)
+
+def datetime_utc(fmt: str) -> str:
+    if not fmt:
+        raise ExecutionContextError("Format string cannot be empty for datetime_utc render value")
+    LOG.debug("Rendering datetime_utc with format '%s'", fmt)
+    return datetime.now(timezone.utc).strftime(fmt)
+
+
+def datetime_local(fmt: str) -> str:
+    if not fmt:
+        raise ExecutionContextError("Format string cannot be empty for datetime_local render value")
+    LOG.debug("Rendering datetime_local with format '%s'", fmt)
+    return datetime.now().astimezone().strftime(fmt)
+
 
 def const(value: str) -> str:
     LOG.debug("Rendering const with value '%s'", value)
     return value
 
-def apply_render_value(ctx: ExecutionContext, rv: RenderValue) -> ExecutionContext:
+
+def _apply_render_value(ctx: ExecutionContext, rv: RenderValue) -> ExecutionContext:
     LOG.debug("Applying render value '%s' with source '%s'", rv.name, rv.source)
     if rv.name in ctx:
         raise ExecutionContextError(f"Render variable '{rv.name}' already exists in context")
 
-    if rv.source == RenderSource.CONST:
-        return ctx.with_value(rv.name, rv.value)
+    match rv.source:
+        case RenderSource.CONST:
+            value = const(rv.value)
+        case RenderSource.DATETIME_UTC:
+            value = datetime_utc(rv.format)
+        case RenderSource.DATETIME_LOCAL:
+            value = datetime_local(rv.format)
+        case _:
+            raise ExecutionContextError(f"Unsupported render source: {rv.source}")
 
-    if rv.source == RenderSource.DATETIME_UTC:
-        if not rv.format:
-            raise ExecutionContextError("Render source datetime_utc requires 'format'")
-        value = datetime.now(timezone.utc).strftime(rv.format)
-        return ctx.with_value(rv.name, value)
-
-    if rv.source == RenderSource.DATETIME_LOCAL:
-        if not rv.format:
-            raise ExecutionContextError("Render source datetime_local requires 'format'")
-        value = datetime.now().astimezone().strftime(rv.format)
-        return ctx.with_value(rv.name, value)
-
-    raise ExecutionContextError(f"Unsupported render source: {rv.source}")
+    return ctx.with_value(rv.name, value)

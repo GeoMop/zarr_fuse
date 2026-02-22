@@ -9,8 +9,8 @@ from .active_scrapper_config_models import (
 
 
 def build_request(
-    request_cfg: RequestConfig,
     ctx: ExecutionContext,
+    request_cfg: RequestConfig,
 ) -> Tuple[str, Dict[str, str], Dict[str, str]]:
     url = _render_string(request_cfg.url, ctx)
 
