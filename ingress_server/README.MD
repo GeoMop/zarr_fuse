@@ -28,8 +28,9 @@ There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
 ```
 .
 ├─ ingress_server/
-│  ├─ src/
+│  ├─ ingress_server/
 │  │  ├─ main.py                  # Flask backend server
+|  ├─ inputs/
 │  │  ├─ endpoints_config.yaml    # List of API endpoints and their schema paths
 │  │  └─ schemas/                 # Schema files (prod/ci_test)
 │  ├─ docs/
@@ -146,8 +147,7 @@ The container already includes `schemas/` and `endpoints_config.yaml` from the b
 If you want to override them without rebuilding, mount them as read-only volumes:
 
 ```bash
--v $(pwd)/inputs/schemas:/ingress-server/schemas:ro \
--v $(pwd)/inputs/endpoints_config.yaml:/ingress-server/endpoints_config.yaml:ro
+-v $(pwd)/inputs/:/ingress-server/:ro
 ```
 
 ---

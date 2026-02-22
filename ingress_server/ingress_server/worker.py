@@ -36,16 +36,6 @@ def _move_tree_contents(src: Path, dst: Path):
             except OSError:
                 pass
 
-
-def _iter_accepted_files_in_dir(dir: Path):
-    for root, _, files in os.walk(dir):
-        for name in files:
-            if name.endswith(".meta.json"):
-                continue
-            LOG.info("Found accepted file: %s", Path(root) / name)
-            yield Path(root) / name
-
-
 def _iter_accepted_files():
     settings = get_settings()
 
@@ -53,7 +43,17 @@ def _iter_accepted_files():
         LOG.warning("Accepted directory does not exist: %s", settings.accepted_dir)
         yield from ()
         return
-    yield from _iter_accepted_files_in_dir(settings.accepted_dir)
+
+    paths: list[Path] = []
+    for root, _, files in os.walk(settings.accepted_dir):
+        for name in files:
+            if name.endswith(".meta.json"):
+                continue
+            paths.append(Path(root) / name)
+
+    for path in sorted(paths, key=lambda p: p.name):
+        LOG.info("Found accepted file: %s", path)
+        yield path
 
 
 def _load_metadata(data_path: Path) -> tuple[MetadataModel | None, str | None]:
