@@ -1,3 +1,6 @@
+# Local zarr_fuse package (from repo root)
+-e ../../../..
+
 # Core dashboard stack
 panel>=1.4,<2.0
 holoviews>=1.19,<2.0

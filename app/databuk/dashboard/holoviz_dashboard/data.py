@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import zarr
+import zarr_fuse as zf
 
 
 @dataclass
@@ -57,9 +57,27 @@ def get_overlay_bounds_from_coords(
     return (lon_min - lon_pad, lat_min - lat_pad, lon_max + lon_pad, lat_max + lat_pad)
 
 
-def load_bukov_group(data_root: Path, group_name: str = "bukov"):
-    root = zarr.open_group(data_root, mode="r")
-    return root[group_name] if group_name in root else root
+def _default_schema_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "backend" / "schemas" / "bukov_schema.yaml"
+
+
+def load_bukov_node(data_root: Path, schema_path: Path | None = None):
+    schema_path = schema_path or _default_schema_path()
+    schema = zf.schema.deserialize(schema_path)
+    schema.ds.ATTRS["STORE_URL"] = str(data_root)
+    schema.ds.ATTRS.pop("S3_ENDPOINT_URL", None)
+    schema.ds.ATTRS.pop("S3_OPTIONS", None)
+    return zf.open_store(schema, MODE="r")
+
+
+def load_bukov_group(
+    data_root: Path,
+    group_name: str = "bukov",
+    schema_path: Path | None = None,
+):
+    root = load_bukov_node(data_root, schema_path=schema_path)
+    target = root[group_name] if group_name in root.children else root
+    return target.dataset
 
 
 def load_bukov_map_data(
@@ -85,8 +103,12 @@ def load_bukov_map_data(
     return map_df, overlay_bounds, lats, lons
 
 
-def load_bukov_data(data_root: Path, group_name: str = "bukov") -> BukovData:
-    group = load_bukov_group(data_root, group_name=group_name)
+def load_bukov_data(
+    data_root: Path,
+    group_name: str = "bukov",
+    schema_path: Path | None = None,
+) -> BukovData:
+    group = load_bukov_group(data_root, group_name=group_name, schema_path=schema_path)
     map_df, overlay_bounds, lats_arr, lons_arr = load_bukov_map_data(group)
     depth_arr = np.array(group["depth"][:], dtype=float)
     date_time_units = group["date_time"].attrs.get("units")

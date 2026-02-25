@@ -21,6 +21,7 @@ panel serve app.py --show
 
 - GeoViews uses Cartopy/Proj/GEOS. On Windows, these may require additional system packages.
 - If Cartopy install fails, verify that your Python distribution can install binary wheels.
+- The requirements install the local zarr_fuse package from the repo root.
 
 ## Files
 
