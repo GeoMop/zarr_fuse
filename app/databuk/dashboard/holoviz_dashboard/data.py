@@ -68,7 +68,6 @@ def _default_schema_path() -> Path:
 
 
 def load_bukov_node(
-    data_root: Path | None = None,
     schema_path: Path | None = None,
     store_url: str | None = None,
     s3_endpoint_url: str | None = None,
@@ -78,8 +77,6 @@ def load_bukov_node(
     schema = zf.schema.deserialize(schema_path)
     if store_url:
         schema.ds.ATTRS["STORE_URL"] = store_url
-    elif data_root is not None:
-        schema.ds.ATTRS["STORE_URL"] = str(data_root)
 
     if s3_endpoint_url:
         schema.ds.ATTRS["S3_ENDPOINT_URL"] = s3_endpoint_url
@@ -88,7 +85,6 @@ def load_bukov_node(
 
 
 def load_bukov_group(
-    data_root: Path | None,
     group_name: str = "bukov",
     schema_path: Path | None = None,
     store_url: str | None = None,
@@ -96,7 +92,6 @@ def load_bukov_group(
     mode: str = "r",
 ):
     root = load_bukov_node(
-        data_root,
         schema_path=schema_path,
         store_url=store_url,
         s3_endpoint_url=s3_endpoint_url,
@@ -130,7 +125,6 @@ def load_bukov_map_data(
 
 
 def load_bukov_data(
-    data_root: Path | None,
     group_name: str = "bukov",
     schema_path: Path | None = None,
     store_url: str | None = None,
@@ -138,7 +132,6 @@ def load_bukov_data(
     mode: str = "r",
 ) -> BukovData:
     group = load_bukov_group(
-        data_root,
         group_name=group_name,
         schema_path=schema_path,
         store_url=store_url,
@@ -163,20 +156,19 @@ def load_bukov_data(
 
 
 def load_data(source: str, **kwargs) -> BukovData:
-    if source == "local":
-        return load_bukov_data(**kwargs)
+    if source != "s3":
+        raise NotImplementedError("Only S3 data source is supported.")
 
-    if source == "s3":
-        endpoints_path = kwargs.pop("endpoints_path")
-        endpoint_name = kwargs.pop("endpoint_name", None)
-        endpoint = get_endpoint_config(endpoints_path, endpoint_name)
-        schema_path = Path(endpoints_path).parent / endpoint.schema_file
-        return load_bukov_data(
-            data_root=None,
-            schema_path=schema_path,
-            store_url=endpoint.store_url,
-            mode=kwargs.pop("mode", "r"),
-            **kwargs,
-        )
-
-    raise NotImplementedError(f"Unknown data source '{source}'")
+    endpoints_path = kwargs.pop("endpoints_path")
+    endpoint_name = kwargs.pop("endpoint_name", None)
+    endpoint = get_endpoint_config(endpoints_path, endpoint_name)
+    schema_path = Path(endpoint.schema_file)
+    if not schema_path.is_absolute():
+        schema_path = _dashboard_root() / schema_path
+    return load_bukov_data(
+        group_name=kwargs.pop("group_name", "bukov"),
+        schema_path=schema_path,
+        store_url=endpoint.store_url,
+        mode=kwargs.pop("mode", "r"),
+        **kwargs,
+    )

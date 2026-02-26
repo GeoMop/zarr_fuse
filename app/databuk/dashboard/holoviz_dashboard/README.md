@@ -1,6 +1,6 @@
 # HoloViz Dashboard
 
-Local Panel + HoloViews dashboard for Bukov Zarr data.
+Panel + HoloViews dashboard for Bukov Zarr data over S3.
 
 ## Quick start
 
@@ -10,6 +10,10 @@ From this folder:
 ./setup_env
 panel serve app.py --show
 ```
+
+## PowerShell helper
+
+Use scripts/start_dashboard.ps1 to set env vars and start the dashboard on Windows.
 
 ## S3 configuration
 
@@ -22,10 +26,9 @@ The dashboard reads S3 settings from the endpoint config and zarr_fuse environme
 	- ZF_S3_SECRET_KEY
 	- ZF_S3_ENDPOINT_URL (optional if schema already includes it)
 
-To switch sources:
+Set the endpoint:
 
 ```
-set HV_DASHBOARD_SOURCE=s3
 set HV_DASHBOARD_ENDPOINT=bukov_endpoint
 ```
 

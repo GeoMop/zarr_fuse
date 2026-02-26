@@ -47,15 +47,12 @@ hv.renderer("bokeh").theme = "dark_minimal"
 # DATA + UI + PLOTS
 # ============================================================================
 
-DATA_ROOT = Path(__file__).parent / "bukov.zarr" / "bukov.zarr"
 ENDPOINTS_PATH = Path(__file__).parent / "config" / "endpoints.yaml"
 
-DATA_SOURCE = os.getenv("HV_DASHBOARD_SOURCE", "s3")
 ENDPOINT_NAME = os.getenv("HV_DASHBOARD_ENDPOINT", "bukov_endpoint")
 
 data = load_data(
-    DATA_SOURCE,
-    data_root=DATA_ROOT,
+    "s3",
     group_name="bukov",
     endpoints_path=ENDPOINTS_PATH,
     endpoint_name=ENDPOINT_NAME,
