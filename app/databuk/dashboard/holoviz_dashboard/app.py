@@ -8,6 +8,7 @@ A Panel-based dashboard demonstrating:
 - Dashboard-style control panel
 """
 
+import os
 from pathlib import Path
 
 import holoviews as hv
@@ -47,7 +48,19 @@ hv.renderer("bokeh").theme = "dark_minimal"
 # ============================================================================
 
 DATA_ROOT = Path(__file__).parent / "bukov.zarr" / "bukov.zarr"
-data = load_data("local", data_root=DATA_ROOT, group_name="bukov")
+ENDPOINTS_PATH = Path(__file__).parent / "config" / "endpoints.yaml"
+
+DATA_SOURCE = os.getenv("HV_DASHBOARD_SOURCE", "s3")
+ENDPOINT_NAME = os.getenv("HV_DASHBOARD_ENDPOINT", "bukov_endpoint")
+
+data = load_data(
+    DATA_SOURCE,
+    data_root=DATA_ROOT,
+    group_name="bukov",
+    endpoints_path=ENDPOINTS_PATH,
+    endpoint_name=ENDPOINT_NAME,
+    mode="r",
+)
 
 controller = build_sidebar()
 depth_selector, borehole_info = build_depth_controls()

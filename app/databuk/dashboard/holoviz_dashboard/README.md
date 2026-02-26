@@ -11,6 +11,24 @@ From this folder:
 panel serve app.py --show
 ```
 
+## S3 configuration
+
+The dashboard reads S3 settings from the endpoint config and zarr_fuse environment variables.
+
+- Endpoint config: config/endpoints.yaml
+- Schema files: schemas/*.yaml (copy from backend or provide a local schema)
+- Environment variables used by zarr_fuse:
+	- ZF_S3_ACCESS_KEY
+	- ZF_S3_SECRET_KEY
+	- ZF_S3_ENDPOINT_URL (optional if schema already includes it)
+
+To switch sources:
+
+```
+set HV_DASHBOARD_SOURCE=s3
+set HV_DASHBOARD_ENDPOINT=bukov_endpoint
+```
+
 ## What setup_env does
 
 - Creates a local venv in ./venv

@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import zarr_fuse as zf
 
+from config.dashboard_config import get_endpoint_config
+
 
 @dataclass
 class BukovData:
@@ -57,25 +59,49 @@ def get_overlay_bounds_from_coords(
     return (lon_min - lon_pad, lat_min - lat_pad, lon_max + lon_pad, lat_max + lat_pad)
 
 
+def _dashboard_root() -> Path:
+    return Path(__file__).resolve().parent
+
+
 def _default_schema_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "backend" / "schemas" / "bukov_schema.yaml"
+    return _dashboard_root() / "schemas" / "bukov_schema.yaml"
 
 
-def load_bukov_node(data_root: Path, schema_path: Path | None = None):
+def load_bukov_node(
+    data_root: Path | None = None,
+    schema_path: Path | None = None,
+    store_url: str | None = None,
+    s3_endpoint_url: str | None = None,
+    mode: str = "r",
+):
     schema_path = schema_path or _default_schema_path()
     schema = zf.schema.deserialize(schema_path)
-    schema.ds.ATTRS["STORE_URL"] = str(data_root)
-    schema.ds.ATTRS.pop("S3_ENDPOINT_URL", None)
-    schema.ds.ATTRS.pop("S3_OPTIONS", None)
-    return zf.open_store(schema, MODE="r")
+    if store_url:
+        schema.ds.ATTRS["STORE_URL"] = store_url
+    elif data_root is not None:
+        schema.ds.ATTRS["STORE_URL"] = str(data_root)
+
+    if s3_endpoint_url:
+        schema.ds.ATTRS["S3_ENDPOINT_URL"] = s3_endpoint_url
+
+    return zf.open_store(schema, MODE=mode)
 
 
 def load_bukov_group(
-    data_root: Path,
+    data_root: Path | None,
     group_name: str = "bukov",
     schema_path: Path | None = None,
+    store_url: str | None = None,
+    s3_endpoint_url: str | None = None,
+    mode: str = "r",
 ):
-    root = load_bukov_node(data_root, schema_path=schema_path)
+    root = load_bukov_node(
+        data_root,
+        schema_path=schema_path,
+        store_url=store_url,
+        s3_endpoint_url=s3_endpoint_url,
+        mode=mode,
+    )
     target = root[group_name] if group_name in root.children else root
     return target.dataset
 
@@ -104,11 +130,21 @@ def load_bukov_map_data(
 
 
 def load_bukov_data(
-    data_root: Path,
+    data_root: Path | None,
     group_name: str = "bukov",
     schema_path: Path | None = None,
+    store_url: str | None = None,
+    s3_endpoint_url: str | None = None,
+    mode: str = "r",
 ) -> BukovData:
-    group = load_bukov_group(data_root, group_name=group_name, schema_path=schema_path)
+    group = load_bukov_group(
+        data_root,
+        group_name=group_name,
+        schema_path=schema_path,
+        store_url=store_url,
+        s3_endpoint_url=s3_endpoint_url,
+        mode=mode,
+    )
     map_df, overlay_bounds, lats_arr, lons_arr = load_bukov_map_data(group)
     depth_arr = np.array(group["depth"][:], dtype=float)
     date_time_units = group["date_time"].attrs.get("units")
@@ -130,4 +166,17 @@ def load_data(source: str, **kwargs) -> BukovData:
     if source == "local":
         return load_bukov_data(**kwargs)
 
-    raise NotImplementedError("Bucket data source not implemented yet")
+    if source == "s3":
+        endpoints_path = kwargs.pop("endpoints_path")
+        endpoint_name = kwargs.pop("endpoint_name", None)
+        endpoint = get_endpoint_config(endpoints_path, endpoint_name)
+        schema_path = Path(endpoints_path).parent / endpoint.schema_file
+        return load_bukov_data(
+            data_root=None,
+            schema_path=schema_path,
+            store_url=endpoint.store_url,
+            mode=kwargs.pop("mode", "r"),
+            **kwargs,
+        )
+
+    raise NotImplementedError(f"Unknown data source '{source}'")

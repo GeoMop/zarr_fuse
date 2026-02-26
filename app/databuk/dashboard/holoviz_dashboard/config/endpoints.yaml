@@ -1,0 +1,10 @@
+# S3 Endpoint Configuration for HoloViz dashboard
+# Replace store_url and schema_file as needed.
+
+bukov_endpoint:
+  reload_interval: 300
+  schema_file: "schemas/bukov_schema.yaml"
+  store_url: "s3://REPLACE_BUCKET/REPLACE_STORE.zarr"
+  description: "bukov_endpoint"
+  store_type: "zarr"
+  version: "1.0.0"

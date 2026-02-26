@@ -11,6 +11,7 @@ bokeh>=3.4,<4.0
 pandas>=2.1,<3.0
 numpy>=1.24,<3.0
 zarr>=3.0,<4.0
+pyyaml>=6.0,<7.0
 
 # GeoViews map/projection support (commonly required for tiles + overlays)
 cartopy>=0.22,<0.24
