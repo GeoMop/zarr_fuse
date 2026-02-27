@@ -1302,7 +1302,7 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     # coords_dict = Node._create_coords(schema.COORDS, coords_dict)
 
     df_multi_idx, coords_dict, var_data = coerce_df(schema, df, logger)
-    coord_sizes = [len(coord) for coord in coords_dict.values()]
+    coord_sizes = {c: len(v) for c, v in coords_dict.items()}
 
     # 4. form variables
     # Helper: for a given variable, build the pivoted array.
@@ -1311,7 +1311,7 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
         # Choose a dtype based on the column (floating or object)
         #dtype = column_vals.dtype if np.issubdtype(column_vals.dtype, np.floating) else object
         # Create an empty output array with fill_value.
-        result = np.full(coord_sizes, var_struc.na_value, dtype=column_vals.dtype)
+        result = np.full(list(coord_sizes.values()), var_struc.na_value, dtype=column_vals.dtype)
 
         mask_valid = var_struc.valid_mask(column_vals)
 
@@ -1321,6 +1321,14 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
         dims_to_eliminate = [d not in var_struc.coords for d in coords_dict.keys()]
         result_valid = np.ma.array(result, mask=~var_struc.valid_mask(result))
         np_var = eliminate_dims_if_equal(result_valid, dims_to_eliminate)
+
+        # possibly transpose axis according to variable coords order
+        b_keys = [k for k in coord_sizes.keys() if k in var_struc.coords] # coords axis order
+        a_keys = list(var_struc.coords)  # desired variable axis order
+        axis_of = {k: i for i, k in enumerate(b_keys)}
+        perm = [axis_of[k] for k in a_keys]
+        np_var = np_var.transpose(perm)
+
         data_var = Node._variable(var_struc, np_var, coords_dict)
         return data_var
 
