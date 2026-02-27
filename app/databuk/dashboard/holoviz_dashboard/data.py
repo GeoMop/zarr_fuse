@@ -10,6 +10,7 @@ from config.dashboard_config import get_endpoint_config
 
 @dataclass
 class BukovData:
+    node: object
     group: object
     map_df: pd.DataFrame
     overlay_bounds: tuple[float, float, float, float]
@@ -98,7 +99,7 @@ def load_bukov_group(
         mode=mode,
     )
     target = root[group_name] if group_name in root.children else root
-    return target.dataset
+    return target, target.dataset
 
 
 def load_bukov_map_data(
@@ -131,7 +132,7 @@ def load_bukov_data(
     s3_endpoint_url: str | None = None,
     mode: str = "r",
 ) -> BukovData:
-    group = load_bukov_group(
+    node, group = load_bukov_group(
         group_name=group_name,
         schema_path=schema_path,
         store_url=store_url,
@@ -145,6 +146,7 @@ def load_bukov_data(
     date_time_index = to_datetime_index(date_time_values, units=date_time_units)
 
     return BukovData(
+        node=node,
         group=group,
         map_df=map_df,
         overlay_bounds=overlay_bounds,

@@ -16,6 +16,7 @@ import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
 from holoviews import streams
 
+from config.dashboard_config import get_endpoint_config, load_endpoints
 from data import load_data
 from plots import build_map_view, build_timeseries_views
 from ui import build_depth_controls, build_sidebar
@@ -50,6 +51,8 @@ hv.renderer("bokeh").theme = "dark_minimal"
 ENDPOINTS_PATH = Path(__file__).parent / "config" / "endpoints.yaml"
 
 ENDPOINT_NAME = os.getenv("HV_DASHBOARD_ENDPOINT", "bukov_endpoint")
+ENDPOINTS = load_endpoints(ENDPOINTS_PATH)
+ENDPOINT = get_endpoint_config(ENDPOINTS_PATH, ENDPOINT_NAME)
 
 data = load_data(
     "s3",
@@ -59,7 +62,7 @@ data = load_data(
     mode="r",
 )
 
-controller = build_sidebar()
+controller = build_sidebar(ENDPOINT_NAME, ENDPOINT, data.node, endpoints=ENDPOINTS)
 depth_selector, borehole_info = build_depth_controls()
 
 tap_stream = streams.Tap(x=None, y=None)
