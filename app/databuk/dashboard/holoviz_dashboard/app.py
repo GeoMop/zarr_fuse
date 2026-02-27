@@ -9,14 +9,12 @@ A Panel-based dashboard demonstrating:
 """
 
 import os
-from pathlib import Path
 
 import holoviews as hv
 import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
 from holoviews import streams
 
-from config.dashboard_config import get_endpoint_config, load_endpoints
 from data import load_data
 from plots import build_map_view, build_timeseries_views
 from ui import build_depth_controls, build_sidebar
@@ -48,42 +46,48 @@ hv.renderer("bokeh").theme = "dark_minimal"
 # DATA + UI + PLOTS
 # ============================================================================
 
-ENDPOINTS_PATH = Path(__file__).parent / "config" / "endpoints.yaml"
-
+API_URL = "http://localhost:8000"
 ENDPOINT_NAME = os.getenv("HV_DASHBOARD_ENDPOINT", "bukov_endpoint")
-ENDPOINTS = load_endpoints(ENDPOINTS_PATH)
-ENDPOINT = get_endpoint_config(ENDPOINTS_PATH, ENDPOINT_NAME)
 
 data = load_data(
-    "s3",
-    group_name="bukov",
-    endpoints_path=ENDPOINTS_PATH,
+    "api",
+    api_url=API_URL,
     endpoint_name=ENDPOINT_NAME,
-    mode="r",
+    group_path="bukov",
 )
 
-controller = build_sidebar(ENDPOINT_NAME, ENDPOINT, data.node, endpoints=ENDPOINTS)
+ENDPOINTS = data.client.get_endpoints()
+ENDPOINT = ENDPOINTS.get(ENDPOINT_NAME) or data.client.get_endpoint(ENDPOINT_NAME)
+STRUCTURE = data.client.get_structure(ENDPOINT_NAME)
+
+controller, node_select = build_sidebar(
+    ENDPOINT_NAME, ENDPOINT, STRUCTURE, endpoints=ENDPOINTS
+)
 depth_selector, borehole_info = build_depth_controls()
 
 tap_stream = streams.Tap(x=None, y=None)
 borehole_stream = streams.Stream.define("Borehole", borehole_index=0)()
 borehole_stream.event(borehole_index=0)
 
-map_view = build_map_view(data, tap_stream)
+map_handlers = {"on_map_tap": lambda *_: None}
+
+map_view, map_state = build_map_view(data, tap_stream)
 line_left, line_mid, line_right, on_map_tap = build_timeseries_views(
     data,
     depth_selector,
     borehole_info,
     borehole_stream,
+    map_state,
 )
+map_handlers["on_map_tap"] = on_map_tap
 
 
 def on_tap_event(*_):
-    on_map_tap(tap_stream.x, tap_stream.y)
+    map_handlers["on_map_tap"](tap_stream.x, tap_stream.y)
 
 
 tap_stream.param.watch(on_tap_event, ["x", "y"])
-on_map_tap(tap_stream.x, tap_stream.y)
+map_handlers["on_map_tap"](tap_stream.x, tap_stream.y)
 
 # ============================================================================
 # PANE ASSEMBLY
@@ -98,6 +102,31 @@ top_right = pn.Column(
 bottom_left = pn.pane.HoloViews(line_left, sizing_mode="stretch_both")
 bottom_mid = pn.pane.HoloViews(line_mid, sizing_mode="stretch_both")
 bottom_right = pn.pane.HoloViews(line_right, sizing_mode="stretch_both")
+
+
+def refresh_views():
+    new_map_view, new_map_state = build_map_view(data, tap_stream)
+    new_line_left, new_line_mid, new_line_right, new_on_map_tap = build_timeseries_views(
+        data,
+        depth_selector,
+        borehole_info,
+        borehole_stream,
+        new_map_state,
+    )
+    map_handlers["on_map_tap"] = new_on_map_tap
+    top_left.object = new_map_view
+    bottom_left.object = new_line_left
+    bottom_mid.object = new_line_mid
+    bottom_right.object = new_line_right
+
+
+def on_node_change(event):
+    if event.new:
+        data.group_path = event.new
+        refresh_views()
+
+
+node_select.param.watch(on_node_change, ["value"])
 
 # ============================================================================
 # GOLDENLAYOUT TEMPLATE

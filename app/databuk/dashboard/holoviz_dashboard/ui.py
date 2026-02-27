@@ -30,38 +30,22 @@ def _format_range(values: np.ndarray) -> str:
     return f"{{{first}, ... , {last}}}"
 
 
-def _flatten_nodes(node, depth: int = 0, items=None):
+def _flatten_nodes(structure, depth: int = 0, items=None):
     if items is None:
         items = []
 
-    name = node.name or "root"
-    path = node.group_path or "/"
+    name = structure.get("name") or "root"
+    path = structure.get("path") or "/"
     label = f"{'  ' * depth}{name}"
     items.append((label, path))
 
-    try:
-        for child in node.children.values():
-            _flatten_nodes(child, depth + 1, items)
-    except Exception:
-        pass
+    for child in structure.get("children", []) or []:
+        _flatten_nodes(child, depth + 1, items)
 
     return items
 
 
-def _build_node_tree_dict(node):
-    name = node.name or "root"
-    children = {}
-    try:
-        for child in node.children.values():
-            child_name = child.name or "root"
-            children[child_name] = _build_node_tree_dict(child)
-    except Exception:
-        children = {}
-
-    return children
-
-
-def build_sidebar(endpoint_name, endpoint_config, node, endpoints=None):
+def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
     header = pn.pane.HTML("""
 <div style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
             padding: 12px 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
@@ -101,6 +85,7 @@ def build_sidebar(endpoint_name, endpoint_config, node, endpoints=None):
     """]
     )
 
+    store_url = endpoint_config.get("store_url", "") if isinstance(endpoint_config, dict) else ""
     store_info = pn.pane.HTML("""
 <div style="background: #1e293b; padding: 12px; border-radius: 8px; margin: 8px 0;
             border-left: 3px solid #3b82f6;">
@@ -108,7 +93,7 @@ def build_sidebar(endpoint_name, endpoint_config, node, endpoints=None):
         STORE URL
     </div>
     <div style="font-size: 12px; color: #e2e8f0; font-family: monospace;">
-        """ + endpoint_config.store_url + """
+        """ + store_url + """
     </div>
 </div>
 """, sizing_mode="stretch_width")
@@ -143,7 +128,7 @@ def build_sidebar(endpoint_name, endpoint_config, node, endpoints=None):
         },
     )
 
-    node_items = _flatten_nodes(node)
+    node_items = _flatten_nodes(structure)
     node_options = {label: path for label, path in node_items}
     first_value = node_items[0][1] if node_items else None
     tree_view = pn.widgets.Select(
@@ -166,7 +151,7 @@ def build_sidebar(endpoint_name, endpoint_config, node, endpoints=None):
         styles={"padding": "10px"},
     )
 
-    return controller
+    return controller, tree_view
 
 
 def build_depth_controls():

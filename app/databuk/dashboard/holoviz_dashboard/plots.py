@@ -7,17 +7,43 @@ from holoviews import streams
 from geoviews import tile_sources as gvts
 
 
+def _overlay_bounds_from_coords(lats: np.ndarray, lons: np.ndarray, pad_ratio: float = 0.05):
+    lat_min, lat_max = np.nanmin(lats), np.nanmax(lats)
+    lon_min, lon_max = np.nanmin(lons), np.nanmax(lons)
+    lat_pad = (lat_max - lat_min) * pad_ratio if lat_max > lat_min else 0.01
+    lon_pad = (lon_max - lon_min) * pad_ratio if lon_max > lon_min else 0.01
+    return (lon_min - lon_pad, lat_min - lat_pad, lon_max + lon_pad, lat_max + lat_pad)
+
+
 def build_map_view(data, tap_stream):
     base_map = gvts.OSM()
+    fig = data.client.get_map_data(
+        data.endpoint_name,
+        group_path=data.group_path,
+        variable="rock_temp",
+        time_index=0,
+        depth_index=0,
+    )
+    if fig.get("status") == "error":
+        raise ValueError(fig.get("reason", "Failed to load map data"))
 
-    overlay = gv.Rectangles([data.overlay_bounds]).opts(
+    lats = np.array(fig.get("lat", []), dtype=float)
+    lons = np.array(fig.get("lon", []), dtype=float)
+    values = np.array(fig.get("values", []), dtype=float)
+    map_df = pd.DataFrame({"lon": lons, "lat": lats, "value": values})
+    if len(lats) == 0 or len(lons) == 0:
+        overlay_bounds = (-1.0, -1.0, 1.0, 1.0)
+    else:
+        overlay_bounds = _overlay_bounds_from_coords(lats, lons)
+
+    overlay = gv.Rectangles([overlay_bounds]).opts(
         alpha=0.2,
         color="orange",
         line_width=2,
         line_color="red",
     )
 
-    map_points = gv.Points(data.map_df, kdims=["lon", "lat"], vdims=["value"]).opts(
+    map_points = gv.Points(map_df, kdims=["lon", "lat"], vdims=["value"]).opts(
         color="value",
         cmap="viridis",
         size=10,
@@ -31,53 +57,85 @@ def build_map_view(data, tap_stream):
     )
 
     tap_stream.source = map_points
-    return base_map * overlay * map_points
+    map_state = {"lats": lats, "lons": lons}
+    return base_map * overlay * map_points, map_state
 
 
-def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream):
-    group = data.group
-    depth_arr = data.depth_arr
-    date_time_index = data.date_time_index
-    lats_arr = data.lats
-    lons_arr = data.lons
-
-    def get_borehole_index(x, y):
-        if x is None or y is None:
-            return 0
-        dist = (lons_arr - x) ** 2 + (lats_arr - y) ** 2
-        return int(np.nanargmin(dist))
-
-    def get_available_depth_indices(borehole_index: int):
-        values = np.array(group["rock_temp"][:, borehole_index, :], dtype=float)
-        mask = np.any(np.isfinite(values), axis=0)
-        return [int(i) for i in np.where(mask)[0].tolist()]
+def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream, map_state):
+    timeseries_state = {
+        "times": pd.to_datetime([]),
+        "depths": np.array([]),
+        "series": [],
+        "borehole_index": 0,
+    }
 
     def format_depth(depth_value: float):
         if np.isnan(depth_value):
             return "NaN"
         return f"{depth_value:.2f}"
 
-    def update_depth_selector(x, y):
-        borehole_index = get_borehole_index(x, y)
-        available = get_available_depth_indices(borehole_index)
-        depth_selector.options = {format_depth(depth_arr[i]): i for i in available}
+    def _default_coords():
+        lats = map_state.get("lats")
+        lons = map_state.get("lons")
+        if lats is None or lons is None:
+            lats = np.array([])
+            lons = np.array([])
+        if len(lats) == 0 or len(lons) == 0:
+            return 0.0, 0.0
+        return float(lats[0]), float(lons[0])
+
+    def _update_depth_selector(depths, series, borehole_index):
+        available = []
+        for idx, values in enumerate(series):
+            if np.any(np.isfinite(values)):
+                available.append(idx)
+        if not available:
+            available = list(range(len(series)))
+
+        depth_selector.options = {
+            format_depth(depths[i]) if i < len(depths) else str(i): i
+            for i in available
+        }
         depth_selector.value = available
         borehole_info.object = f"### Borehole {borehole_index}"
+
+    def _fetch_timeseries(lat, lon):
+        fig = data.client.get_timeseries_data(
+            data.endpoint_name,
+            group_path=data.group_path,
+            lat=lat,
+            lon=lon,
+            variable="rock_temp",
+        )
+        if fig.get("status") == "error":
+            raise ValueError(fig.get("reason", "Failed to load timeseries"))
+
+        times = pd.to_datetime(fig.get("times", []))
+        depths = np.array(fig.get("depths", []), dtype=float)
+        series = [np.array(values, dtype=float) for values in fig.get("series", [])]
+        borehole_index = int(fig.get("borehole_index", 0))
+
+        timeseries_state["times"] = times
+        timeseries_state["depths"] = depths
+        timeseries_state["series"] = series
+        timeseries_state["borehole_index"] = borehole_index
+        _update_depth_selector(depths, series, borehole_index)
         return borehole_index
 
-    def build_timeseries_overlay(borehole_index, selected_depths):
+    def build_timeseries_overlay(selected_depths):
         curves = []
-        values_by_depth = [
-            np.array(group["rock_temp"][:, borehole_index, depth_idx], dtype=float)
-            for depth_idx in selected_depths
-        ]
-        times = date_time_index
-        for col_idx, depth_idx in enumerate(selected_depths):
-            depth_val = depth_arr[depth_idx] if depth_idx < len(depth_arr) else depth_idx
+        times = timeseries_state["times"]
+        depths = timeseries_state["depths"]
+        series = timeseries_state["series"]
+
+        for depth_idx in selected_depths:
+            if depth_idx >= len(series):
+                continue
+            depth_val = depths[depth_idx] if depth_idx < len(depths) else depth_idx
             label = f"{format_depth(depth_val)} m"
             curve_df = pd.DataFrame({
                 "time": times,
-                "temperature": values_by_depth[col_idx],
+                "temperature": series[depth_idx],
             })
             curves.append(hv.Curve(curve_df, "time", "temperature", label=label))
 
@@ -86,8 +144,11 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream)
         return hv.Overlay(curves)
 
     def clamp_range(center, span):
-        min_t = date_time_index.min()
-        max_t = date_time_index.max()
+        times = timeseries_state["times"]
+        if len(times) == 0:
+            return (pd.Timestamp("1970-01-01"), pd.Timestamp("1970-01-02"))
+        min_t = times.min()
+        max_t = times.max()
         total_span = max_t - min_t
         if span >= total_span:
             return (min_t, max_t)
@@ -102,17 +163,15 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream)
             start = max_t - span
         return (start, end)
 
-    full_span = date_time_index.max() - date_time_index.min()
     mid_span = pd.Timedelta(days=30)
     right_span = pd.Timedelta(hours=24)
 
     center_state = {
-        "center": date_time_index.min() + (full_span / 2),
+        "center": None,
         "force_mid": False,
         "force_right": False,
     }
     center_stream = streams.Stream.define("Center", center=None)()
-    center_stream.event(center=center_state["center"])
 
     left_tap = streams.Tap()
     mid_tap = streams.Tap()
@@ -148,20 +207,29 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream)
     mid_tap.param.watch(update_center_from_tap, ["x"])
     right_tap.param.watch(update_center_from_tap, ["x"])
 
-    def create_timeseries_view(value=None, center=None, borehole_index=0, view="left", **_):
+    def create_timeseries_view(value=None, center=None, view="left", **_):
         selected_depths = value or []
         if not selected_depths:
-            selected_depths = get_available_depth_indices(borehole_index)
+            selected_depths = list(range(len(timeseries_state["series"])))
+
+        times = timeseries_state["times"]
+        if len(times) == 0:
+            return hv.Overlay([hv.Curve([])])
+
+        if center_state["center"] is None:
+            full_span = times.max() - times.min()
+            center_state["center"] = times.min() + (full_span / 2)
+            center_stream.event(center=center_state["center"])
 
         center_time = center or center_state["center"]
         if view == "left":
-            xlim = (date_time_index.min(), date_time_index.max())
+            xlim = (times.min(), times.max())
         elif view == "mid":
             xlim = clamp_range(center_time, mid_span)
         else:
             xlim = clamp_range(center_time, right_span)
 
-        overlay = build_timeseries_overlay(borehole_index, selected_depths)
+        overlay = build_timeseries_overlay(selected_depths)
         overlay = overlay.redim.range(time=xlim)
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
         hooks = []
@@ -170,7 +238,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream)
             hooks = [make_xrange_hook(xlim, force_key)]
         return overlay.opts(
             responsive=True,
-            title=f"Temperature over Time (borehole {borehole_index})",
+            title=f"Temperature over Time (borehole {timeseries_state['borehole_index']})",
             tools=["hover", "xwheel_zoom", "xpan", "tap", "reset"],
             active_tools=["xwheel_zoom", "xpan"],
             xlim=xlim,
@@ -182,8 +250,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream)
         )
 
     line_left = hv.DynamicMap(
-        lambda value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
-            value=value, center=center, borehole_index=borehole_index, view="left"
+        lambda value=None, center=None, **kwargs: create_timeseries_view(
+            value=value, center=center, view="left"
         ),
         streams=[
             borehole_stream,
@@ -194,8 +262,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream)
     )
 
     line_mid = hv.DynamicMap(
-        lambda value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
-            value=value, center=center, borehole_index=borehole_index, view="mid"
+        lambda value=None, center=None, **kwargs: create_timeseries_view(
+            value=value, center=center, view="mid"
         ),
         streams=[
             borehole_stream,
@@ -206,8 +274,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream)
     )
 
     line_right = hv.DynamicMap(
-        lambda value=None, center=None, borehole_index=0, **kwargs: create_timeseries_view(
-            value=value, center=center, borehole_index=borehole_index, view="right"
+        lambda value=None, center=None, **kwargs: create_timeseries_view(
+            value=value, center=center, view="right"
         ),
         streams=[
             borehole_stream,
@@ -218,9 +286,11 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream)
     )
 
     def on_map_tap(x, y):
-        borehole_index = update_depth_selector(x, y)
+        if x is None or y is None:
+            y, x = _default_coords()
+        borehole_index = _fetch_timeseries(lat=float(y), lon=float(x))
         borehole_stream.event(borehole_index=borehole_index)
 
-    update_depth_selector(None, None)
+    on_map_tap(None, None)
 
     return line_left, line_mid, line_right, on_map_tap

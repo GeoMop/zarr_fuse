@@ -1,176 +1,108 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from pathlib import Path
+from typing import Any, Dict
 
-import numpy as np
-import pandas as pd
-import zarr_fuse as zf
-
-from config.dashboard_config import get_endpoint_config
+import requests
 
 
 @dataclass
-class BukovData:
-    node: object
-    group: object
-    map_df: pd.DataFrame
-    overlay_bounds: tuple[float, float, float, float]
-    lats: np.ndarray
-    lons: np.ndarray
-    depth_arr: np.ndarray
-    date_time_index: pd.DatetimeIndex
+class BackendData:
+    api_url: str
+    endpoint_name: str
+    group_path: str
+    client: BackendClient
 
 
-def to_datetime_index(values, units: str | None = None) -> pd.DatetimeIndex:
-    arr = np.array(values)
-    if np.issubdtype(arr.dtype, np.datetime64):
-        return pd.to_datetime(arr)
+class BackendClient:
+    def __init__(self, api_url: str):
+        self.api_url = api_url.rstrip("/")
 
-    if units and "since" in units:
-        unit_part, origin_part = units.split("since", 1)
-        unit_part = unit_part.strip().lower()
-        origin_part = origin_part.strip()
-        unit_map = {
-            "seconds": "s",
-            "second": "s",
-            "minutes": "m",
-            "minute": "m",
-            "hours": "h",
-            "hour": "h",
-            "days": "D",
-            "day": "D",
+    def _unwrap_figure(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if isinstance(payload, dict) and "figure" in payload:
+            return payload["figure"]
+        return payload
+
+    def get_endpoints(self) -> Dict[str, Any]:
+        resp = requests.get(f"{self.api_url}/config/endpoints", timeout=30)
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload.get("endpoints", payload)
+
+    def get_endpoint(self, endpoint_name: str) -> Dict[str, Any]:
+        resp = requests.get(
+            f"{self.api_url}/config/endpoints/{endpoint_name}", timeout=30
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload.get("endpoint", payload)
+
+    def get_structure(self, endpoint_name: str) -> Dict[str, Any]:
+        resp = requests.get(
+            f"{self.api_url}/s3/structure",
+            params={"endpoint": endpoint_name},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        return payload.get("structure", payload)
+
+    def get_map_data(
+        self,
+        endpoint_name: str,
+        group_path: str,
+        variable: str = "rock_temp",
+        time_index: int = 0,
+        depth_index: int = 0,
+    ) -> Dict[str, Any]:
+        payload = {
+            "plot_type": "map",
+            "endpoint": endpoint_name,
+            "node_path": group_path,
+            "selection": {
+                "variable": variable,
+                "time_index": time_index,
+                "depth_index": depth_index,
+            },
         }
-        unit_code = unit_map.get(unit_part, "s")
-        return pd.to_datetime(arr, unit=unit_code, origin=origin_part, utc=True).tz_convert(None)
+        resp = requests.post(f"{self.api_url}/s3/plot", json=payload, timeout=60)
+        resp.raise_for_status()
+        return self._unwrap_figure(resp.json())
 
-    if np.issubdtype(arr.dtype, np.integer) or np.issubdtype(arr.dtype, np.floating):
-        return pd.to_datetime(arr, unit="s", utc=True).tz_convert(None)
-
-    return pd.to_datetime(arr, errors="coerce")
-
-
-def get_overlay_bounds_from_coords(
-    lats: np.ndarray,
-    lons: np.ndarray,
-    pad_ratio: float = 0.05,
-) -> tuple[float, float, float, float]:
-    lat_min, lat_max = np.nanmin(lats), np.nanmax(lats)
-    lon_min, lon_max = np.nanmin(lons), np.nanmax(lons)
-    lat_pad = (lat_max - lat_min) * pad_ratio if lat_max > lat_min else 0.01
-    lon_pad = (lon_max - lon_min) * pad_ratio if lon_max > lon_min else 0.01
-    return (lon_min - lon_pad, lat_min - lat_pad, lon_max + lon_pad, lat_max + lat_pad)
-
-
-def _dashboard_root() -> Path:
-    return Path(__file__).resolve().parent
-
-
-def _default_schema_path() -> Path:
-    return _dashboard_root() / "schemas" / "bukov_schema.yaml"
+    def get_timeseries_data(
+        self,
+        endpoint_name: str,
+        group_path: str,
+        lat: float,
+        lon: float,
+        variable: str = "rock_temp",
+    ) -> Dict[str, Any]:
+        payload = {
+            "plot_type": "timeseries",
+            "endpoint": endpoint_name,
+            "node_path": group_path,
+            "selection": {
+                "variable": variable,
+                "lat_point": lat,
+                "lon_point": lon,
+            },
+        }
+        resp = requests.post(f"{self.api_url}/s3/plot", json=payload, timeout=60)
+        resp.raise_for_status()
+        return self._unwrap_figure(resp.json())
 
 
-def load_bukov_node(
-    schema_path: Path | None = None,
-    store_url: str | None = None,
-    s3_endpoint_url: str | None = None,
-    mode: str = "r",
-):
-    schema_path = schema_path or _default_schema_path()
-    schema = zf.schema.deserialize(schema_path)
-    if store_url:
-        schema.ds.ATTRS["STORE_URL"] = store_url
+def load_data(source: str, **kwargs) -> BackendData:
+    if source != "api":
+        raise NotImplementedError("Only API data source is supported.")
 
-    if s3_endpoint_url:
-        schema.ds.ATTRS["S3_ENDPOINT_URL"] = s3_endpoint_url
-
-    return zf.open_store(schema, MODE=mode)
-
-
-def load_bukov_group(
-    group_name: str = "bukov",
-    schema_path: Path | None = None,
-    store_url: str | None = None,
-    s3_endpoint_url: str | None = None,
-    mode: str = "r",
-):
-    root = load_bukov_node(
-        schema_path=schema_path,
-        store_url=store_url,
-        s3_endpoint_url=s3_endpoint_url,
-        mode=mode,
-    )
-    target = root[group_name] if group_name in root.children else root
-    return target, target.dataset
-
-
-def load_bukov_map_data(
-    group,
-    var_name: str = "rock_temp",
-    time_index: int = 0,
-    depth_index: int = 0,
-):
-    lats = np.array(group["latitude"][:], dtype=float)
-    lons = np.array(group["longitude"][:], dtype=float)
-
-    if var_name not in group:
-        raise KeyError(f"Variable '{var_name}' not found in Bukov group")
-
-    values = np.array(group[var_name][time_index, :, depth_index], dtype=float)
-
-    map_df = pd.DataFrame({
-        "lon": lons,
-        "lat": lats,
-        "value": values,
-    })
-    overlay_bounds = get_overlay_bounds_from_coords(lats, lons)
-    return map_df, overlay_bounds, lats, lons
-
-
-def load_bukov_data(
-    group_name: str = "bukov",
-    schema_path: Path | None = None,
-    store_url: str | None = None,
-    s3_endpoint_url: str | None = None,
-    mode: str = "r",
-) -> BukovData:
-    node, group = load_bukov_group(
-        group_name=group_name,
-        schema_path=schema_path,
-        store_url=store_url,
-        s3_endpoint_url=s3_endpoint_url,
-        mode=mode,
-    )
-    map_df, overlay_bounds, lats_arr, lons_arr = load_bukov_map_data(group)
-    depth_arr = np.array(group["depth"][:], dtype=float)
-    date_time_units = group["date_time"].attrs.get("units")
-    date_time_values = group["date_time"][:]
-    date_time_index = to_datetime_index(date_time_values, units=date_time_units)
-
-    return BukovData(
-        node=node,
-        group=group,
-        map_df=map_df,
-        overlay_bounds=overlay_bounds,
-        lats=lats_arr,
-        lons=lons_arr,
-        depth_arr=depth_arr,
-        date_time_index=date_time_index,
-    )
-
-
-def load_data(source: str, **kwargs) -> BukovData:
-    if source != "s3":
-        raise NotImplementedError("Only S3 data source is supported.")
-
-    endpoints_path = kwargs.pop("endpoints_path")
-    endpoint_name = kwargs.pop("endpoint_name", None)
-    endpoint = get_endpoint_config(endpoints_path, endpoint_name)
-    schema_path = Path(endpoint.schema_file)
-    if not schema_path.is_absolute():
-        schema_path = _dashboard_root() / schema_path
-    return load_bukov_data(
-        group_name=kwargs.pop("group_name", "bukov"),
-        schema_path=schema_path,
-        store_url=endpoint.store_url,
-        mode=kwargs.pop("mode", "r"),
-        **kwargs,
+    api_url = kwargs.pop("api_url")
+    endpoint_name = kwargs.pop("endpoint_name")
+    group_path = kwargs.pop("group_path", "bukov")
+    client = BackendClient(api_url)
+    return BackendData(
+        api_url=api_url,
+        endpoint_name=endpoint_name,
+        group_path=group_path,
+        client=client,
     )
