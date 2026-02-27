@@ -3,10 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
+import sys
 
 import numpy as np
 import pandas as pd
 import zarr_fuse as zf
+
+CONFIG_ROOT = Path(__file__).resolve().parents[3] / "app" / "databuk" / "dashboard" / "holoviz_dashboard"
+if str(CONFIG_ROOT) not in sys.path:
+    sys.path.insert(0, str(CONFIG_ROOT))
 
 from config.dashboard_config import get_endpoint_config, load_endpoints
 

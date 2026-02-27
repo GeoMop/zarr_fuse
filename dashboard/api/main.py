@@ -19,5 +19,13 @@ def create_app() -> FastAPI:
 
 app = create_app()
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-app.state.endpoints_path = BASE_DIR / "config" / "endpoints.yaml"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+app.state.endpoints_path = (
+    REPO_ROOT
+    / "app"
+    / "databuk"
+    / "dashboard"
+    / "holoviz_dashboard"
+    / "config"
+    / "endpoints.yaml"
+)

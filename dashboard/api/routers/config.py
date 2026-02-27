@@ -1,4 +1,11 @@
+from pathlib import Path
+import sys
+
 from fastapi import APIRouter, Request
+
+CONFIG_ROOT = Path(__file__).resolve().parents[3] / "app" / "databuk" / "dashboard" / "holoviz_dashboard"
+if str(CONFIG_ROOT) not in sys.path:
+    sys.path.insert(0, str(CONFIG_ROOT))
 
 from config.dashboard_config import get_endpoint_config, load_endpoints
 

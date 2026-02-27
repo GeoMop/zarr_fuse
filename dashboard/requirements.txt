@@ -1,5 +1,5 @@
 # Local zarr_fuse package (from repo root)
--e ../../../..
+-e ..
 
 # Core dashboard stack
 panel>=1.4,<2.0

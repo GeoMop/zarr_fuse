@@ -13,14 +13,14 @@ panel serve app.py --show
 
 ## PowerShell helper
 
-Use scripts/start_dashboard.ps1 to set env vars and start the dashboard on Windows.
+Use scripts/start_dashboard.ps1 to start the dashboard on Windows.
 
 ## S3 configuration
 
 The dashboard reads S3 settings from the endpoint config and zarr_fuse environment variables.
 
-- Endpoint config: config/endpoints.yaml
-- Schema files: schemas/*.yaml (copy from backend or provide a local schema)
+- Endpoint config: app/databuk/dashboard/holoviz_dashboard/config/endpoints.yaml
+- Schema files: app/databuk/dashboard/holoviz_dashboard/schemas/*.yaml
 - Environment variables used by zarr_fuse:
 	- ZF_S3_ACCESS_KEY
 	- ZF_S3_SECRET_KEY
