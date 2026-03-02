@@ -879,9 +879,6 @@ class Node:
 
         # --- Phase 1: Dive (split by dimension) ---
         # We create a dict to hold the extension subset for each dimension.
-        #if ds_existing.attrs.get('__empty__', False):
-        #    ds_update.attrs.pop('__empty__', None)
-        #    return self.write_ds(ds_update, mode="w"), {}
 
         if '__empty__' in ds_existing.attrs and ds_existing.attrs['__empty__']:
             ds_update.attrs.update(ds_existing.attrs)
