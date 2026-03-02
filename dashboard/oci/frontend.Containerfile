@@ -15,7 +15,8 @@ ENV PIP_NO_CACHE_DIR=1
 WORKDIR /app
 COPY . /app
 
-RUN pip install --no-cache-dir -r /app/dashboard/requirements.txt
+WORKDIR /app/dashboard
+RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 5006
-CMD ["panel", "serve", "/app/dashboard/app.py", "--address", "0.0.0.0", "--port", "5006", "--allow-websocket-origin=*" ]
+CMD ["panel", "serve", "app.py", "--address", "0.0.0.0", "--port", "5006", "--allow-websocket-origin=*" ]

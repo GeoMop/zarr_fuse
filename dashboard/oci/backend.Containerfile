@@ -15,7 +15,8 @@ ENV PIP_NO_CACHE_DIR=1
 WORKDIR /app
 COPY . /app
 
-RUN pip install --no-cache-dir -r /app/dashboard/requirements.txt
+WORKDIR /app/dashboard
+RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 8000
-CMD ["uvicorn", "dashboard.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
