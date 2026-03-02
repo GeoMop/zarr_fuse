@@ -120,6 +120,6 @@ jobs:
           --install --atomic --timeout 10m --namespace zarr-fuse-dashboard-development \
           --set backend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
           --set frontend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
-          --set backend.s3.secrets.accessKey="${{ secrets.ZF_S3_ACCESS_KEY }}" \
-          --set backend.s3.secrets.secretKey="${{ secrets.ZF_S3_SECRET_KEY }}" \
-          --set backend.s3.endpointUrl="${{ secrets.ZF_S3_ENDPOINT_URL }}"
+          --set backend.s3.secrets.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
+          --set backend.s3.secrets.secretKey="${{ secrets.S3_SECRET_KEY }}" \
+          --set backend.s3.endpointUrl="${{ secrets.S3_ENDPOINT_URL }}"
