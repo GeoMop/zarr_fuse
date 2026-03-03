@@ -46,7 +46,7 @@ hv.renderer("bokeh").theme = "dark_minimal"
 # DATA + UI + PLOTS
 # ============================================================================
 
-API_URL = "http://localhost:8000"
+API_URL = os.getenv("HV_API_URL", "http://localhost:8000")
 ENDPOINT_NAME = os.getenv("HV_DASHBOARD_ENDPOINT", "bukov_endpoint")
 
 data = load_data(

@@ -29,3 +29,8 @@ app.state.endpoints_path = (
     / "config"
     / "endpoints.yaml"
 )
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
