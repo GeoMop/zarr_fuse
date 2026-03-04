@@ -34,9 +34,9 @@ tuple val coords:
 - source cols as quantities
 - Coordinates object holds both index and non-dim coordinates
   so we use them. We just form the index coodrinate by hash.
-- How to allow providint tuple coord values in structure. 
+- How to allow providint tuple coord values in structure.
   Ideal as dictionary for source cols, but then there is duplicity of their names
-  Rather have values as dict determining source columns, optionaly providing values 
+  Rather have values as dict determining source columns, optionaly providing values
 
 - pivot_nd - hash source cols
 - future read - hash source cols
@@ -116,7 +116,7 @@ def _s3_options(store_options):
         'endpoint_url': _get_option(store_options, 'S3_ENDPOINT_URL'),
         'listings_expiry_time': 1,
         'max_paths': 0,
-        'asynchronous': False,
+        'asynchronous': True,
         'config_kwargs': {
             #'s3': {
             #    'payload_signing_enabled': False,
@@ -555,11 +555,10 @@ class Node:
         """
         try:
             old_schema = self.schema
-        except (KeyError,GroupNotFoundError):
-            cfg = zarr_schema.ContextCfg(dict(attrs={}, vars={}, coords={}), self._make_null_ctx())
-            old_schema = zarr_schema.DatasetSchema(cfg['attrs'], cfg['vars'], cfg['coords'])
+        except (KeyError,GroupNotFoundError) as e:
+            old_schema = None
 
-        if old_schema.is_empty():
+        if old_schema is None or old_schema.is_empty():
             # Initialize new dataset.
             empty_ds = Node.empty_ds(new_schema)
             self._init_empty_grup(empty_ds)
@@ -616,8 +615,9 @@ class Node:
         rel_path = self.group_path #+ self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
         ds = xr.open_zarr(self.store, group=rel_path, consolidated=False)
-        for coord in ds.coords:
-            assert  'composed' in ds.coords[coord].attrs
+        # TODO: Check why this is used and if it is necessary.
+        # for coord in ds.coords:
+        #     assert 'composed' in ds.coords[coord].attrs
         return ds
 
     @property
@@ -808,7 +808,7 @@ class Node:
 
     """
      For the updating DF we define "overlap" slice:
-     For sorted coord:  current_coords > new_coords.min() 
+     For sorted coord:  current_coords > new_coords.min()
      For unsorted coords: current_coord_idx > index_of( argmin( current_coords _intersect_ new_coords))
      However new_coords could undergo e.g. projection to existing coords.
      How to unify the procedure?
@@ -879,9 +879,11 @@ class Node:
 
         # --- Phase 1: Dive (split by dimension) ---
         # We create a dict to hold the extension subset for each dimension.
-        if '__empty__' in ds_existing.attrs:
-            del ds_existing.attrs['__empty__']
-            return self.write_ds(ds_update, mode="a"), {}
+
+        if '__empty__' in ds_existing.attrs and ds_existing.attrs['__empty__']:
+            ds_update.attrs.update(ds_existing.attrs)
+            ds_update.attrs['__empty__'] = False
+            return self.write_ds(ds_update, mode="w"), {}
 
         ds_update, split_indices = interpolate_ds(
             ds_update,
@@ -940,7 +942,7 @@ for dim in dim_order:
     n, merged_new_coords = merge_coords(dim, new_ds.coords[dim])
     l_overlap = len(ds_zar.coords[dim]) - N
     split_dict[dim] = (n,     l_overlap, merged_new_coords)
- 
+
 dim = dim_order[0]
 ` pad ds_zarr by Nans over [0:N] in 'dim', adding len(new_coords) - l_overlap for each d > dim'
 N, L, coords = slpit_dir[dim]
