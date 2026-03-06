@@ -112,6 +112,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
 
     center_state = {
         "center": None,
+        "force_left": True,
         "force_mid": False,
         "force_right": False,
     }
@@ -138,10 +139,10 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         center_stream.event(center=center)
         _updating_center = False
 
-    def make_xrange_hook(xlim, force_flag_key):
+    def make_xrange_hook(xlim, force_flag_key=None):
         def _hook(plot, element):
             plot.state.x_range.bounds = xlim
-            if center_state.get(force_flag_key, False):
+            if force_flag_key and center_state.get(force_flag_key, False):
                 plot.state.x_range.start = xlim[0]
                 plot.state.x_range.end = xlim[1]
                 center_state[force_flag_key] = False
@@ -176,8 +177,9 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         overlay = build_timeseries_overlay(selected_depths)
         overlay = overlay.redim.range(time=xlim)
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
-        hooks = []
-        if view != "left":
+        if view == "left":
+            hooks = [make_xrange_hook(xlim, "force_left")]
+        else:
             force_key = "force_mid" if view == "mid" else "force_right"
             hooks = [make_xrange_hook(xlim, force_key)]
         return overlay.opts(
