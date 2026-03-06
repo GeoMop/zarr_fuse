@@ -48,7 +48,9 @@ set HV_DASHBOARD_ENDPOINT=bukov_endpoint
 
 - app.py: Panel app entrypoint
 - data.py: Zarr Fuse data loading helpers
-- plots.py: Map and time-series builders
+- map_views.py: Map view builder
+- multi_time_views.py: Multi-scale time-series views
+- composed.py: Dashboard composition and wiring
 - ui.py: Sidebar and depth controls
 - requirements.txt: Python dependencies
 - setup_env: Bash setup helper
