@@ -22,9 +22,9 @@ The dashboard reads S3 settings from the endpoint config and zarr_fuse environme
 - Endpoint config: app/databuk/dashboard/holoviz_dashboard/config/endpoints.yaml
 - Schema files: app/databuk/dashboard/holoviz_dashboard/schemas/*.yaml
 - Environment variables used by zarr_fuse:
-	- ZF_S3_ACCESS_KEY
-	- ZF_S3_SECRET_KEY
-	- ZF_S3_ENDPOINT_URL (optional if schema already includes it)
+  - ZF_S3_ACCESS_KEY
+  - ZF_S3_SECRET_KEY
+  - ZF_S3_ENDPOINT_URL (optional if schema already includes it)
 
 Set the endpoint:
 
@@ -47,7 +47,7 @@ set HV_DASHBOARD_ENDPOINT=bukov_endpoint
 ## Files
 
 - app.py: Panel app entrypoint
-- data.py: Bukov data loading helpers
+- data.py: Zarr Fuse data loading helpers
 - plots.py: Map and time-series builders
 - ui.py: Sidebar and depth controls
 - requirements.txt: Python dependencies
