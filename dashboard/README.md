@@ -32,6 +32,16 @@ Set the endpoint:
 set HV_DASHBOARD_ENDPOINT=bukov_endpoint
 ```
 
+## Bukov overlay
+
+The Bukov map overlay is loaded from dashboard/config/bukov_endpoint.
+You can override or disable it with:
+
+- HV_OVERLAY_GEOREF: path to a georef JSON file
+- HV_OVERLAY_IMAGE: path to a PNG image
+- HV_OVERLAY_MAX_PIXELS: optional max pixel count before downscaling (default 25,000,000)
+- HV_OVERLAY_ENABLED: set to 0/false/no to disable the overlay
+
 ## What setup_env does
 
 - Creates a local venv in ./venv

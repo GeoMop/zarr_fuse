@@ -1,0 +1,48 @@
+# S3 Endpoint Configuration
+# Multiple endpoint support - each endpoint represents a different Zarr store
+
+
+# JB proposed change of the Endpoint 1 to production bukov endpoint
+"bukov_endpoint":
+  reload_interval: 300  # Cache TTL in seconds (5 minutes)
+  # Following is the copy of:
+  # apps/databuk/inputs/schemas/bukov_schema.yaml
+  # TODO: remove after rafactoring dashboard out of the databuk  
+  schema_file: "schemas/bukov_schema.yaml"
+  # Used for titles right now, the schema vars are used in open_store
+  store_url: "s3://bukov/store_latlon_2024.zarr"
+  # TODO: Read description from the schema ?
+  description: "bukov_endpoint"
+  # TODO: Do we have other store_types ?
+  store_type: "zarr"
+  version: "1.0.0"  
+
+# Endpoint 2:
+"surface_data_endpoint":
+  reload_interval: 300  # Cache TTL in seconds (5 minutes)
+  schema_file: "schemas/surface_schema.yaml"
+  store_url: "s3://hlavo-release/surface_v3.zarr"
+  description: "surface_data_endpoint"
+  store_type: "zarr"
+  version: "1.0.0"
+
+# Endpoint 3: 
+"test_endpoint":
+  reload_interval: 300  # Cache TTL in seconds (5 minutes)
+  schema_file: "schemas/test_schema.yaml"
+  store_url: "s3://hlavo-release/test_store.zarr"
+  # TODO: move bukov.zarr to test_store.zatt
+  # - copy bukov/store_2024.zarr -> hlavo_store/bukov.zarr
+  description: "test_endpoint"
+  store_type: "zarr"
+  version: "1.0.0"
+
+
+# Notes:
+# - S3 credentials are loaded from environment variables:
+#   * S3_BUCKET_NAME
+#   * S3_ACCESS_KEY
+#   * S3_SECRET_KEY
+#   * S3_ENDPOINT_URL
+# - reload_interval determines cache TTL for each endpoint
+# - Each endpoint gets its own ServiceAPI instance with isolated state
