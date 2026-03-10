@@ -1,11 +1,13 @@
 import holoviews as hv
 import numpy as np
 import pandas as pd
+import time
 
 from holoviews import streams
 
 
 def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream, map_state):
+    start_total = time.perf_counter()
     timeseries_state = {
         "times": pd.to_datetime([]),
         "depths": np.array([]),
@@ -44,6 +46,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         borehole_info.object = f"### Borehole {borehole_index}"
 
     def _fetch_timeseries(lat, lon):
+        start = time.perf_counter()
         fig = data.client.get_timeseries_data(
             data.endpoint_name,
             group_path=data.group_path,
@@ -64,6 +67,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         timeseries_state["series"] = series
         timeseries_state["borehole_index"] = borehole_index
         _update_depth_selector(depths, series, borehole_index)
+        print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return borehole_index
 
     def build_timeseries_overlay(selected_depths):
@@ -238,5 +242,5 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         borehole_stream.event(borehole_index=borehole_index)
 
     on_map_tap(None, None)
-
+    print(f"[timing] build_timeseries_views: {time.perf_counter() - start_total:.3f}s")
     return line_left, line_mid, line_right, on_map_tap

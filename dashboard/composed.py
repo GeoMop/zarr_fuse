@@ -1,4 +1,5 @@
 import os
+import time
 
 import holoviews as hv
 import panel as pn
@@ -9,6 +10,7 @@ from data import load_data
 from map_views import build_map_view
 from multi_time_views import build_timeseries_views
 from ui import build_depth_controls, build_sidebar
+
 
 JS_FILES = {
     "jquery": "https://code.jquery.com/jquery-1.11.1.min.js",
@@ -31,6 +33,7 @@ hv.renderer("bokeh").theme = "dark_minimal"
 
 
 def build_dashboard():
+    start_total = time.perf_counter()
     endpoint_name = os.getenv("HV_DASHBOARD_ENDPOINT", "bukov_endpoint")
 
     data = load_data(
@@ -263,4 +266,5 @@ myLayout.init();
     tmpl.add_panel("bottom_mid", bottom_mid)
     tmpl.add_panel("bottom_right", bottom_right)
 
+    print(f"[timing] build_dashboard: {time.perf_counter() - start_total:.3f}s")
     return tmpl

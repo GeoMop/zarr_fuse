@@ -3,11 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import sys
+import time
 from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
 import zarr_fuse as zf
+
+def _timer_log(message: str, duration: float) -> None:
+    print(f"[timing] {message}: {duration:.3f}s")
 
 CONFIG_ROOT = Path(__file__).resolve().parents[1] / "app" / "databuk" / "dashboard" / "holoviz_dashboard"
 if str(CONFIG_ROOT) not in sys.path:
@@ -95,14 +99,17 @@ class LocalClient:
         time_index: int = 0,
         depth_index: int = 0,
     ) -> Dict[str, Any]:
+        start = time.perf_counter()
         node = self._get_group(endpoint_name, group_path)
         ds = node.dataset
         if variable not in ds:
+            _timer_log("get_map_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": f"Variable '{variable}' not found"}
 
         lat = ds.get("latitude")
         lon = ds.get("longitude")
         if lat is None or lon is None:
+            _timer_log("get_map_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": "latitude/longitude not found"}
 
         data_var = ds[variable]
@@ -113,7 +120,7 @@ class LocalClient:
 
         values = np.array(data_var.values).astype(float).ravel()
         values = np.where(np.isfinite(values), values, np.nan)
-        return {
+        result = {
             "status": "success",
             "lat": _to_json_floats(lat.values),
             "lon": _to_json_floats(lon.values),
@@ -122,6 +129,8 @@ class LocalClient:
             "time_index": time_index,
             "depth_index": depth_index,
         }
+        _timer_log("get_map_data", time.perf_counter() - start)
+        return result
 
     def get_timeseries_data(
         self,
@@ -131,14 +140,17 @@ class LocalClient:
         lon: float,
         variable: str = "rock_temp",
     ) -> Dict[str, Any]:
+        start = time.perf_counter()
         node = self._get_group(endpoint_name, group_path)
         ds = node.dataset
         if variable not in ds:
+            _timer_log("get_timeseries_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": f"Variable '{variable}' not found"}
 
         lat_var = ds.get("latitude")
         lon_var = ds.get("longitude")
         if lat_var is None or lon_var is None:
+            _timer_log("get_timeseries_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": "latitude/longitude not found"}
 
         lats = np.array(lat_var.values, dtype=float).ravel()
@@ -165,8 +177,7 @@ class LocalClient:
             series = [_to_json_floats(values)]
         else:
             series = [_to_json_floats(values[:, i]) for i in range(values.shape[1])]
-
-        return {
+        result = {
             "status": "success",
             "times": time_values,
             "depths": _to_json_floats(depth_values),
@@ -174,6 +185,8 @@ class LocalClient:
             "variable": variable,
             "borehole_index": idx,
         }
+        _timer_log("get_timeseries_data", time.perf_counter() - start)
+        return result
 
 
 def _to_json_floats(values: Any) -> list:

@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import time
 
 import cartopy.crs as ccrs
 import geoviews as gv
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 def _load_bukov_overlay():
+    start = time.perf_counter()
     if os.getenv("HV_OVERLAY_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
         logger.info("Overlay disabled via HV_OVERLAY_ENABLED.")
         return None
@@ -90,11 +92,14 @@ def _load_bukov_overlay():
             float(np.nanmax(lats[valid])),
         )
 
-        return gv.RGB(np.asarray(image), bounds=bounds, crs=ccrs.PlateCarree()).opts(alpha=0.9)
+        overlay = gv.RGB(np.asarray(image), bounds=bounds, crs=ccrs.PlateCarree()).opts(alpha=0.9)
+        print(f"[timing] overlay load: {time.perf_counter() - start:.3f}s")
+        return overlay
     except Exception:
         logger.exception("Failed to load overlay image.")
         return None
 def build_map_view(data, tap_stream):
+    start = time.perf_counter()
     base_map = gvts.OSM()
     overlay_image = _load_bukov_overlay() if data.endpoint_name == "bukov_endpoint" else None
     fig = data.client.get_map_data(
@@ -129,5 +134,9 @@ def build_map_view(data, tap_stream):
     tap_stream.source = map_points
     map_state = {"lats": lats, "lons": lons}
     if overlay_image is not None:
-        return base_map * overlay_image * map_points, map_state
-    return base_map * map_points, map_state
+        result = base_map * overlay_image * map_points, map_state
+        print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
+        return result
+    result = base_map * map_points, map_state
+    print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
+    return result
