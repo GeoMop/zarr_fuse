@@ -2,6 +2,7 @@ import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
+from ..app_config import AppConfig
 from .runner import run_one_scheduled_run
 from .active_scrapper_config_models import (
     ActiveScrapperConfig,
@@ -11,32 +12,37 @@ from .active_scrapper_config_models import (
 LOG = logging.getLogger("active-scrapper.scheduler")
 
 
-def add_scrapper_jobs(scrapper: ActiveScrapperConfig, scheduler: BackgroundScheduler) -> None:
+def add_scrapper_jobs(
+    app_config: AppConfig,
+    scrapper: ActiveScrapperConfig,
+    scheduler: BackgroundScheduler
+) -> None:
     if not scrapper.runs:
         LOG.warning("Scrapper %s has no runs configured - no jobs registered", scrapper.name)
         return
 
-    for idx, run_cfg in enumerate(scrapper.runs, start=1):
-        _add_one_job(scheduler, scrapper, run_cfg, idx)
+    for run_idx, run_cfg in enumerate(scrapper.runs, start=1):
+        _add_one_job(app_config, scheduler, scrapper, run_cfg, run_idx)
 
     LOG.info("Registered %d job(s) for scrapper %s", len(scrapper.runs), scrapper.name)
 
 
 def _add_one_job(
+    app_config: AppConfig,
     scheduler: BackgroundScheduler,
     scrapper: ActiveScrapperConfig,
     run_cfg: RunConfig,
-    idx: int,
+    run_idx: int,
 ) -> None:
     cron = run_cfg.cron
     minute, hour, day, month, dow = cron.split()
 
-    job_id = f"scrapper-{scrapper.name}-{idx}"
+    job_id = f"scrapper-{scrapper.name}-{run_idx}"
 
     scheduler.add_job(
         run_one_scheduled_run,
         trigger="cron",
-        args=[scrapper, run_cfg],
+        args=[app_config, scrapper, run_cfg],
         minute=minute,
         hour=hour,
         day=day,

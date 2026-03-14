@@ -7,7 +7,7 @@ from pathlib import Path
 
 from ..models import MetadataModel
 from .content_type import classify_content_type, get_content_type_suffix
-from ..configs import get_settings
+from ..app_config import AppConfig
 from .validate import sanitize_node_path
 
 LOG = logging.getLogger("io.files")
@@ -43,13 +43,15 @@ def save_data_and_metadata(meta_data: MetadataModel, payload: bytes, base: Path)
         return f"Failed to save data to {msg_path}: {e}"
 
     try:
-        meta_path = msg_path.parent / (msg_path.name + ".meta.json")
+        meta_path = msg_path.parent / f"{msg_path.name}.meta.json"
         _atomic_write(meta_path, meta_data.model_dump_json().encode("utf-8"))
     except Exception as e:
         return f"Failed to save metadata to {meta_path}: {e}"
     return None
 
+
 def save_data(
+    app_config: AppConfig,
     metadata: MetadataModel,
     payload: bytes,
 ) -> str | None:
@@ -60,7 +62,7 @@ def save_data(
 
     meta_data = metadata.model_copy(update={"node_path": str(safe_child) if safe_child else None})
 
-    base = (get_settings().accepted_dir / meta_data.endpoint_name)
+    base = app_config.accepted_dir / meta_data.endpoint_name
     err = save_data_and_metadata(
         meta_data=meta_data,
         payload=payload,

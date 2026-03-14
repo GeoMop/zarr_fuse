@@ -30,14 +30,6 @@ class ExecutionContext:
         for v in values:
             yield self.with_value(key, v)
 
-    def render(self, template: str) -> str:
-        try:
-            return template.format(**self.values)
-        except KeyError as e:
-            raise ExecutionContextError(
-                f"Template requires missing context variable: {e.args[0]}"
-            ) from e
-
     def get(self, key: str, default: Any = None) -> Any:
         return self.values.get(key, default)
 

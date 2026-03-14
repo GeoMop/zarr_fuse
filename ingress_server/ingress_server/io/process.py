@@ -1,11 +1,7 @@
-import json
 import logging
-import zarr_fuse as zf
-
-from pathlib import Path
-from urllib.parse import urlparse
 
 from ..models import MetadataModel, DataSourceConfig
+from ..app_config import AppConfig
 from .validate import validate_response
 from .files import save_data
 
@@ -13,6 +9,7 @@ LOG = logging.getLogger("io.process")
 
 
 def process_payload(
+    app_config: AppConfig,
     data_source: DataSourceConfig,
     payload: bytes,
     content_type: str,
@@ -33,6 +30,7 @@ def process_payload(
     )
 
     err = save_data(
+        app_config=app_config,
         metadata=metadata,
         payload=payload,
     )
@@ -40,13 +38,3 @@ def process_payload(
         return False, err
 
     return True, None
-
-
-def open_root(schema_path: Path) -> tuple[zf.Node | None, str | None]:
-    opts = {
-        "S3_OPTIONS": json.dumps({
-            "config_kwargs": {"s3": {"addressing_style": "path"}}
-        }),
-    }
-
-    return zf.open_store(schema_path, **opts), None

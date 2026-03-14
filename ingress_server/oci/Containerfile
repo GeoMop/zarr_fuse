@@ -39,7 +39,7 @@ RUN pip install --no-cache-dir .
 RUN  chmod +x ./scripts/install_extractor_dependencies.sh && \
     ./scripts/install_extractor_dependencies.sh
 
-ENV CONFIG_DIR_PATH="/ingress-server/inputs"
+ENV CONFIG_PATH="/ingress-server/inputs/endpoints_config.yaml"
 
 USER ingress
 EXPOSE 8000

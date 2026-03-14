@@ -1,22 +1,25 @@
 import requests
 import logging
 
+from typing import List
 from pathlib import Path
 from urllib.parse import urlparse
 
+from ..io import process_payload
+from ..app_config import AppConfig
+from .context import ExecutionContext, ExecutionContextError
+from .iterate import expand_iterate
+from .render import apply_render_values
+from .request_builder import build_request
 from .active_scrapper_config_models import (
     ActiveScrapperConfig,
     RunConfig,
 )
-from .context import ExecutionContextError
-from .planner import build_contexts_for_run
-from .request_builder import build_request
-from ..io import process_payload
 
 LOG = logging.getLogger("active-scrapper.runner")
 
 
-def effective_content_type(http_ct: str | None, url: str) -> str:
+def _effective_content_type(http_ct: str | None, url: str) -> str:
     ct = (http_ct or "").lower()
     name = Path(urlparse(url).path).name.lower()
 
@@ -26,7 +29,8 @@ def effective_content_type(http_ct: str | None, url: str) -> str:
         return "application/x-grib"
     return ct
 
-def request_caller(
+
+def _request_caller(
     name: str,
     url: str,
     headers: dict | None = None,
@@ -46,9 +50,46 @@ def request_caller(
         raise ValueError(f"Scrapper job {name} failed to fetch {url}: {e}")
 
 
-def run_one_scheduled_run(scrapper: ActiveScrapperConfig, run_cfg: RunConfig) -> None:
+def _build_contexts_for_run(
+    app_config: AppConfig,
+    scrapper_config: ActiveScrapperConfig,
+    run_cfg: RunConfig,
+) -> List[ExecutionContext]:
+    initial_ctx = ExecutionContext(dict(run_cfg.set))
+    rendered_ctx = apply_render_values(initial_ctx, scrapper_config.render)
+
+    contexts: List[ExecutionContext] = [rendered_ctx]
+
+    for it in scrapper_config.iterate:
+        next_contexts: List[ExecutionContext] = []
+        for ctx in contexts:
+            try:
+                next_contexts.extend(
+                    expand_iterate(app_config, ctx, it, scrapper_config.data_source)
+                )
+            except Exception as e:
+                raise ExecutionContextError(
+                    f"Failed to expand iterator '{getattr(it, 'name', '<unknown>')}' "
+                    f"for scrapper '{scrapper_config.name}': {e}"
+                ) from e
+
+        contexts = next_contexts
+
+        if not contexts:
+            LOG.warning(
+                "Iterator '%s' produced 0 contexts for scrapper '%s' (run cron=%s).",
+                getattr(it, "name", "<unknown>"),
+                scrapper_config.name,
+                run_cfg.cron,
+            )
+            break
+
+    return contexts
+
+
+def run_one_scheduled_run(app_config: AppConfig, scrapper: ActiveScrapperConfig, run_cfg: RunConfig) -> None:
     try:
-        contexts = build_contexts_for_run(scrapper, run_cfg)
+        contexts = _build_contexts_for_run(app_config, scrapper, run_cfg)
     except Exception as e:
         LOG.error("Scrapper %s failed to build contexts for cron=%s: %s", scrapper.name, run_cfg.cron, e)
         return
@@ -73,7 +114,7 @@ def run_one_scheduled_run(scrapper: ActiveScrapperConfig, run_cfg: RunConfig) ->
             merged_headers = dict(headers_static)
             merged_headers.update(headers)
 
-            resp = request_caller(
+            resp = _request_caller(
                 name=scrapper.name,
                 url=url,
                 headers=merged_headers,
@@ -81,9 +122,10 @@ def run_one_scheduled_run(scrapper: ActiveScrapperConfig, run_cfg: RunConfig) ->
             )
 
             success, perr = process_payload(
+                app_config=app_config,
                 data_source=scrapper.data_source,
                 payload=resp.content,
-                content_type=effective_content_type(resp.headers.get("Content-Type"), url),
+                content_type=_effective_content_type(resp.headers.get("Content-Type"), url),
                 username=f"scrapper-{scrapper.name}",
                 dataframe_row=ctx.to_dict(),
             )

@@ -16,7 +16,8 @@ def setup_logging():
 
     root = logging.getLogger()
     root.setLevel(log_level)
-    root.handlers = [handler]
+    root.handlers.clear()
+    root.addHandler(handler)
     root.propagate = False
 
     return handler

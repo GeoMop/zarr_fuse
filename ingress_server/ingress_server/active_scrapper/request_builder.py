@@ -21,28 +21,25 @@ def build_request(
 
 
 def _build_headers(headers_cfg: list[ActiveScrapperHeader], ctx: ExecutionContext) -> Dict[str, str]:
-    out: Dict[str, str] = {}
-    for h in headers_cfg:
-        name = h.header_name
-        value = _render_string(h.header_value, ctx)
-        out[name] = value
-    return out
+    return {
+        h.header_name: _render_string(h.header_value, ctx)
+        for h in headers_cfg
+    }
 
 
 def _build_query_params(params_cfg: list[QueryParamConfig], ctx: ExecutionContext) -> Dict[str, str]:
-    out: Dict[str, str] = {}
-    for p in params_cfg:
-        name = p.name
-        value = _render_string(p.value, ctx)
-        out[name] = value
-    return out
+    return {
+        h.name: _render_string(h.value, ctx)
+        for h in params_cfg
+    }
 
 
 def _render_string(template: str, ctx: ExecutionContext) -> str:
     try:
-        return ctx.render(template)
-    except ExecutionContextError as e:
+        return template.format(**ctx.values)
+    except KeyError as e:
         raise ExecutionContextError(
             f"Failed to render template '{template}'. "
-            f"Context={ctx.to_dict()}. Error: {e}"
+            f"Missing context variable: {e.args[0]}. "
+            f"Context={ctx.to_dict()}"
         ) from e

@@ -2,21 +2,22 @@ import time
 from pathlib import Path
 from pydantic import BaseModel, Field, model_validator
 
-from .configs import get_settings
+def _resolve_path(path_str: str, config_dir: Path) -> Path:
+    path = Path(path_str)
+    if path.is_absolute():
+        return path
+    return config_dir / path
 
 
 class DataSourceConfig(BaseModel):
     name: str
     schema_path: str
-    dataset_name: str | None = None
+    target_node: str | None = None
     extract_fn: str | None = None
     fn_module: str | None = None
 
-    def get_schema_path(self) -> Path:
-        path = Path(self.schema_path)
-        if path.is_absolute():
-            return path
-        return get_settings().config_dir / path
+    def resolve_schema_path(self, config_dir: Path) -> Path:
+        return _resolve_path(self.schema_path, config_dir)
 
 class EndpointConfig(BaseModel):
     data_source: DataSourceConfig
@@ -26,13 +27,16 @@ class EndpointConfig(BaseModel):
     @classmethod
     def _inflate_data_source(cls, data):
         if isinstance(data, dict) and "data_source" not in data:
-            data = {**data, "data_source": {
-                "name": data.get("name"),
-                "dataset_name": data.get("dataset_name"),
-                "schema_path": data.get("schema_path"),
-                "extract_fn": data.get("extract_fn"),
-                "fn_module": data.get("fn_module"),
-            }}
+            data = {
+                **data,
+                "data_source": {
+                    "name": data.get("name"),
+                    "target_node": data.get("target_node"),
+                    "schema_path": data.get("schema_path"),
+                    "extract_fn": data.get("extract_fn"),
+                    "fn_module": data.get("fn_module"),
+                },
+            }
         return data
 
     @property
@@ -40,12 +44,8 @@ class EndpointConfig(BaseModel):
         return self.data_source.name
 
     @property
-    def schema_path(self) -> str:
-        return self.data_source.get_schema_path()
-
-    @property
-    def dataset_name(self) -> str:
-        return self.data_source.dataset_name
+    def target_node(self) -> str | None:
+        return self.data_source.target_node
 
     @property
     def extract_fn(self) -> str | None:
@@ -69,13 +69,10 @@ class MetadataModel(BaseModel):
         description="Timestamp when the data was received",
     )
     dataframe_row: dict | None
-    dataset_name: str | None = None
+    target_node: str | None = None
 
-    def get_schema_path(self) -> Path:
-        path = Path(self.schema_path)
-        if path.is_absolute():
-            return path
-        return get_settings().config_dir / path
+    def resolve_schema_path(self, config_dir: Path) -> Path:
+        return _resolve_path(self.schema_path, config_dir)
 
     @classmethod
     def from_data_source(
@@ -96,5 +93,5 @@ class MetadataModel(BaseModel):
             extract_fn=data_source.extract_fn,
             fn_module=data_source.fn_module,
             dataframe_row=dataframe_row,
-            dataset_name=data_source.dataset_name,
+            target_node=data_source.target_node,
         )

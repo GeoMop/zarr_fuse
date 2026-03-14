@@ -1,133 +1,232 @@
-# ZarrFuse Ingress – Backend & Docker/OCI
+# ZarrFuse Ingress Server
 
-Backend-only Flask service running in a container with **gunicorn**.
-The image contains both the `zarr_fuse` library and the ingress server code.
-The service accepts CSV/JSON uploads and merges them into an S3-backed Zarr store using `zarr-fuse`.
-There is **no UI**; interaction happens via HTTP endpoints (multipart uploads).
+Flask-based ingress service for collecting, validating, and storing scientific
+data into an S3-backed Zarr store using **zarr-fuse**.
 
----
+The server supports:
 
-## URLS:
+- Passive ingestion endpoints for CSV/JSON uploads
+- Active scrapers for scheduled data downloads
+- Schema-based validation
+- S3-backed Zarr storage
 
-- **Production:** https://zarr-fuse-ingress-server.dyn.cloud.e-infra.cz/health
-- **Latest (main):** https://zarr-fuse-ingress-server-latest.dyn.cloud.e-infra.cz/health
-
-
-## Overview
-
-- **Purpose:** Ingest tabular data (CSV/JSON) and merge it into a Zarr dataset on S3.
-- **Where to write:** S3 endpoint and path are defined in the *schema* (`ATTRS.s3_url`, `ATTRS.store_path`).
-- **How endpoints are defined:** via `endpoints_config.yaml`.
-- **Auth:** Basic HTTP authentication (Flask-HTTPAuth) is enabled; credentials via environment variables. S3 credentials also come from environment.
-- **Swagger/OpenAPI:** Generated dynamically from `endpoints_config.yaml` using `tools/gen_swagger.py`.
+Deployment documentation is available in `doc/ingress-server-deployment.md`
 
 ---
 
-## Repository Layout
+# Overview
 
+The ingress server provides a backend service that accepts tabular data and
+merges it into a Zarr dataset stored in object storage (S3-compatible).
+
+Data can enter the system in two ways:
+- **Passive ingestion** – external systems push CSV/JSON data via HTTP endpoints
+- **Active scraping** – scheduled jobs periodically download external datasets
+
+---
+
+# Architecture
+
+```text
+External Data Source
+        │
+        │ HTTP / Scheduled Requests
+        ▼
+Ingress Server (Flask)
+        │
+        │ Validation + Extraction
+        ▼
+zarr-fuse
+        │
+        ▼
+S3-backed Zarr Store
 ```
-.
-├─ ingress_server/
-│  ├─ ingress_server/
-│  │  ├─ main.py                  # Flask backend server
-|  ├─ inputs/
-│  │  ├─ endpoints_config.yaml    # List of API endpoints and their schema paths
-│  │  └─ schemas/                 # Schema files (prod/ci_test)
-│  ├─ docs/
-│  │  └─ swagger.yaml             # Generated OpenAPI spec
-│  ├─ tools/
-│  │  └─ gen_swagger.py           # Swagger generator script
-│  ├─ oci/
-│  │  ├─ Dockerfile               # Container build
-│  └─ pyproject.toml              # Project metadata & dependencies
+
+Key components:
+
+| Component           | Purpose                              |
+| ------------------- | ------------------------------------ |
+| Flask API           | Receives HTTP ingestion requests     |
+| Active scrapers     | Scheduled data downloads             |
+| Extractor functions | Convert payloads to dataframe format |
+| zarr-fuse           | Merge data into Zarr datasets        |
+| S3 object storage   | Persistent dataset storage           |
+
+---
+
+# Repository Layout
+
+```text
+  ingress_server/
+  ├── charts
+  │   └── ingress-server
+  │       ├── Chart.yaml
+  │       ├── templates
+  │       │   ├── deployment.yaml
+  │       │   ├── ingress.yaml
+  │       │   ├── pvc.yaml
+  │       │   ├── secret.yaml
+  │       │   └── service.yaml
+  │       ├── values
+  │       │   └── minimal-required-values.yaml
+  │       └── values.yaml
+  │
+  ├── docs
+  │   └── swagger.yaml
+  │
+  ├── ingress_server
+  │   ├── active_scrapper
+  │   │   ├── active_scrapper_config_models.py
+  │   │   ├── context.py
+  │   │   ├── iterate.py
+  │   │   ├── planner.py
+  │   │   ├── render.py
+  │   │   ├── request_builder.py
+  │   │   ├── runner.py
+  │   │   └── scheduler.py
+  │   │
+  │   ├── io
+  │   │   ├── content_type.py
+  │   │   ├── dataframe.py
+  │   │   ├── extractor.py
+  │   │   ├── files.py
+  │   │   ├── process.py
+  │   │   └── validate.py
+  │   │
+  │   ├── auth.py
+  │   ├── configs.py
+  │   ├── logging_setup.py
+  │   ├── main.py
+  │   ├── models.py
+  │   ├── types.py
+  │   └── worker.py
+  │
+  ├── inputs
+  │   ├── dataframes
+  │   │   └── hlavo_surface_dataframe.csv
+  │   ├── endpoints_config.yaml
+  │   ├── extract
+  │   │   └── chmi_aladin_1km_extract.py
+  │   ├── requirements.txt
+  │   └── schemas
+  │       └── chmi-aladin-1km-schema.yaml
+  │
+  ├── oci
+  │   ├── Containerfile
+  │   └── install_extractor_dependencies.sh
+  │
+  ├── tools
+  │   ├── request_example.py
+  │   └── swagger_gen.py
+  │
+  ├── tests
+  │   └── test_worker_smoke.py
+  │
+  ├── pyproject.toml
+  └── README.md
 ```
 
 ---
 
-## Configuration
+# Configuration
 
-### 1) Environment (.env)
+Application configuration is defined in YAML files located in the
+configuration directory.
 
-```ini
-# Required
-ZF_S3_ACCESS_KEY=YOUR_ACCESS_KEY
-ZF_S3_SECRET_KEY=YOUR_SECRET_KEY
-ZF_S3_ENDPOINT_URL=S3_ENDPOINT_URL
-ZF_STORE_URL=s3://...
-
-# Queue
-QUEUE_DIR_PATH=./data/zarr_fuse
-
-# Config Path
-CONFIG_DIR_PATH=/home/stepanmoc/Projects/zarr_fuse/app/databuk/inputs
-
-# Required for HTTP Basic Auth
-BASIC_AUTH_USERS_JSON={"alice":"password"}
-
-# Extra
-PORT=8000
-LOG_LEVEL=DEBUG
-
+Main configuration file:
+```text
+inputs/endpoints_config.yaml
 ```
+This file defines:
 
-The server reads **S3 credentials** from environment, while **S3 endpoint** and **store path** come from the schema.
+- passive ingestion endpoints
+- active scraping jobs
 
-### 2) Endpoints (`inputs/endpoints_config.yaml`)
+---
 
-#### Passive Scrapper
+# Endpoints Configuration
+
+## Passive Scraper
+
+Passive endpoints accept incoming data pushed via HTTP requests.
+
+Example configuration:
 ```yaml
 endpoints:
-  - name: tree
-    endpoint: /api/v1/tree
-    schema_path: schemas/tree_schema_v1.yaml
-
-  - name: weather
-    endpoint: /api/v1/weather
-    schema_path: schemas/weather_schema_v1.yaml
-
-  - name: sensor
-    endpoint: /api/v1/sensor
-    schema_path: schemas/sensor_schema_v1.yaml
+  # HTTP endpoints that accept incoming data pushed from external systems.
+  - name: endpoint-name                         # Logical endpoint name
+    endpoint: /api/endpoint-name                # URL path exposed by the ingress server
+    schema_path: schemas/schema.yaml            # Path to the schema describing the target dataset
+    target_node: chmi_aladin_10m                # Target node in the Zarr store
+    extract_fn: extract_function_name           # Extractor function applied to the incoming payload
+    fn_module: inputs.extractor.bukov_extractor # Python module containing the extractor function
 ```
 
-#### Active Scrapper
+This creates two API routes:
+```http
+POST /api/{endpoint}
+POST /api/{endpoint}/{node_path}
+```
+
+Uploaded data is validated and merged into the configured Zarr dataset.
+
+---
+
+## Active Scraper
+
+Active scrapers periodically download data from external sources and ingest
+them into the Zarr store.
+
+Example configuration:
 ```yaml
 active_scrappers:
-  - name: chmi-aladin-1km
-    schema_path: schemas/hlavo_surface_schema.yaml
-    dataset_name: chmi_aladin_10m
-    extract_fn: extract_chmi_grib
-    fn_module: inputs.extract.chmi
+  # Periodic jobs that fetch data from remote sources and push it into the pipeline.
+  - name: chmi-aladin-1km                       # Logical scrapper name
+    schema_path: schemas/hlavo_surface_schema.yaml  # Path to the schema describing the target dataset
+    target_node: chmi_aladin_10m                # Target node in the Zarr store
+    extract_fn: extract_chmi_grib               # Extractor function applied to the downloaded payload
+    fn_module: inputs.extract.chmi              # Python module containing the extractor function
 
     runs:
-      - cron: "*/1 * * * *"
+      # Execution schedule definitions.
+      # Each item defines one cron-based run and its fixed parameter values.
+      - cron: "*/1 * * * *"                     # Run every minute
         set:
-          time: "00"
-      - cron: "52 11 * * *"
-        set:
-          time: "06"
+          time: "00"                            # Fixed value available during rendering
 
     request:
-      method: GET
+      # HTTP request definition used to download the remote payload.
+      # Placeholders in {braces} are resolved from rendered or iterated values.
+      method: GET                               # HTTP method
       url: "https://opendata.chmi.cz/meteorology/weather/nwp_aladin/CZ_1km/{time}/ALADCZ1K4opendata_{date}{time}_{quantity}.grb.bz2"
+
       headers:
+        # Optional HTTP headers sent with the request.
         - header_name: "User-Agent"
           header_value: "MyWeatherApp/1.0 (your_email@example.com)"
 
     render:
+      # Values rendered before the request is executed.
+      # These values can be referenced from the request template.
       - name: date
-        source: datetime_utc
+        source: datetime_utc                    # Value source
         format: "%Y%m%d"
 
+      - name: unknown
+        source: const
+        value: "unknown"
+
     iterate:
+      # Iteration sources that produce multiple request executions.
       - name: quantity
         source: schema
-        dataset_name: "chmi_aladin_10m"
+        target_node: "chmi_aladin_10m"
         schema_regex: "VARS.*.df_col"
 
+      # Iterate over rows from a CSV dataframe.
       - name: dataframe_row
         source: dataframe
-        dataframe_path: dataframes/chmi_surface_dataframe.csv
+        dataframe_path: dataframes/hlavo_surface_dataframe.csv
         dataframe_has_header: true
         outputs:
           lat: dflat
@@ -135,137 +234,112 @@ active_scrappers:
           station_id: station
 ```
 
-Each entry creates two routes:
+---
 
-- `POST {endpoint}` — updates the root (`/`) of the Zarr tree
-- `POST {endpoint}/{node_path}` — updates a specific node (e.g. `/api/v1/tree/a/b/c`)
+# Environment Variables
 
-### 3) Schema (example)
+The application uses environment variables for S3 configuration, authentication and runtime settings.
 
-```yaml
-ATTRS:
-  description: Weather schema
-  s3_url: https://s3.cl4.du.cesnet.cz
-  store_path: test/test.zarr  # bucket + filename (can include subdirs)
+For local development a template file is provided:
+
+```
+.env-template
 ```
 
-`store_path` is in the form `bucket_name/path_in_bucket`.
+Create your local environment file:
+
+```bash
+cp .env-template .env
+```
+
+Example `.env` configuration:
+
+```env
+ZF_S3_ACCESS_KEY=key
+ZF_S3_SECRET_KEY=key
+ZF_S3_ENDPOINT_URL=http://localhost:9000
+
+ZF_STORE_URL=s3://
+
+QUEUE_DIR=./var/zarr_fuse
+
+BASIC_AUTH_USERS_JSON={"test":"test"}
+
+PORT=8000
+LOG_LEVEL=INFO
+
+# Optional overrides
+# CONFIG_PATH=inputs
+# QUEUE_DIR_PATH=./var/zarr_fuse
+# CONFIG_PATH=/path/to/config
+```
+
+### Variable Description
+
+| Variable                | Description                     |
+| ----------------------- | ------------------------------- |
+| `ZF_S3_ACCESS_KEY`      | S3 access key                   |
+| `ZF_S3_SECRET_KEY`      | S3 secret key                   |
+| `ZF_S3_ENDPOINT_URL`    | S3 endpoint URL                 |
+| `ZF_STORE_URL`          | Zarr store location             |
+| `QUEUE_DIR`             | Local ingestion queue directory |
+| `BASIC_AUTH_USERS_JSON` | Basic auth users in JSON format |
+| `PORT`                  | HTTP server port                |
+| `LOG_LEVEL`             | Logging level                   |
 
 ---
 
-## Running Locally (without Docker)
+# Running Locally
 
+Install dependencies:
 ```bash
-# Install latest pip & dependencies
 pip install -U pip
 pip install .
-
-# Run the server
-cd src
-python main.py
 ```
 
----
-
-## Build (Docker/OCI)
-
+Run the server:
 ```bash
-docker build -t zarr-fuse-ingress \
-  -t zarr-fuse-ingress
-  -f oci/Containerfile .
+python -m ingress_server.main
 ```
+
+Server will start at: `http://localhost:8000`
 
 ---
 
-## Run (Docker, local)
+# Docker / OCI Build
 
-The image runs with **waitress** on port **8000**, as user **ingress** (UID `11233`).
+Build container image:
+```bash
+docker build -f oci/Containerfile -t zarr-fuse-ingress .
+```
 
+Run container:
 ```bash
 docker run --rm -p 8000:8000 \
   --env-file .env \
-  zarr-fuse-ingress:latest
-```
-
-### Mounting schemas/config without rebuild
-
-The container already includes `schemas/` and `endpoints_config.yaml` from the build context.
-If you want to override them without rebuilding, mount them as read-only volumes:
-
-```bash
--v $(pwd)/inputs/:/ingress-server/:ro
+  zarr-fuse-ingress
 ```
 
 ---
 
-## Generate Swagger
+# Swagger / OpenAPI
 
+Swagger specification can be generated from the configuration:
 ```bash
-python tools/gen_swagger.py
-# Output will be in docs/swagger.yaml
+python tools/swagger_gen.py
+```
+
+Output:
+```text
+docs/swagger.yaml
 ```
 
 ---
 
-## API
+# Deployment
 
-- Base URL: `http://localhost:8000`
-- Content-Type: `multipart/form-data`
-- Form field: `file` (CSV or JSON)
-- Authentication: HTTP Basic Auth (`HTTP_USER` / `HTTP_PASS` from environment)
-
-### Endpoints
-
-- `POST /api/v1/{name}`
-- `POST /api/v1/{name}/{node_path}`
-
-Where `{name}` is one of the configured names (`tree`, `weather`, `sensor`)
-and `{node_path}` is a Zarr node path like `level1/level2`.
-
----
-
-## Examples
-
-### Python example:
-
-You can also use python exmplae in `tools/request_test.py`
-
-### Upload to **tree**
-
-```bash
-curl -X POST http://localhost:8000/api/v1/tree \
-   -H "Content-Type: text/csv" \
-   -u test:test \
-   --data-binary @src/test_data/tree/default.csv
+Deployment to Kubernetes (Helm, CI/CD pipelines, namespaces, URLs)
+is documented in:
+```text
+doc/ingress-server-deployment.md
 ```
-
-### Upload to **weather**
-
-```bash
-curl -X POST http://localhost:8000/api/v1/weather \
-   -H "Content-Type: text/csv" \
-   -u test:test \
-   -d @src/test_data/weather/default.csv
-```
-
-### Upload to **sensor**
-
-```bash
-curl -X POST http://localhost:8000/api/v1/sensor \
-   -H "Content-Type: text/csv" \
-   -u test:test \
-   -d @src/test_data/sensor/default.csv
-```
-
----
-
-## Error Responses
-
-- `400 Bad Request` — missing file, unsupported type, schema misconfiguration, or update errors.
-- Response contains:
-  ```json
-  {
-    "error": "Error message",
-    "trace": "Stack trace"
-  }
-  ```

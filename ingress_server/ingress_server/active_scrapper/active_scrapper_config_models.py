@@ -4,8 +4,14 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from ..configs import get_settings
 from ..models import DataSourceConfig
+
+
+def _resolve_path(path_str: str, config_dir: Path) -> Path:
+    path = Path(path_str)
+    if path.is_absolute():
+        return path
+    return config_dir / path
 
 
 class RenderSource(str, Enum):
@@ -48,7 +54,7 @@ class RenderValue(BaseModel):
     value: str | None = None
 
     @model_validator(mode="after")
-    def _validate_render(self):
+    def _validate_variables(self):
         if self.source == RenderSource.CONST:
             if self.value is None:
                 raise ValueError("render source=const requires 'value'")
@@ -63,21 +69,20 @@ class RenderValue(BaseModel):
 class IterateSchemaConfig(BaseModel):
     name: str
     source: IterateSource = IterateSource.SCHEMA
-    dataset_name: str | None = None
+    target_node: str | None = None
     schema_regex: str
     unique: bool = True
 
 
 class IterateDataframeConfig(BaseModel):
     name: str
-    source:  IterateSource = IterateSource.DATAFRAME
+    source: IterateSource = IterateSource.DATAFRAME
     dataframe_path: str
     dataframe_has_header: bool = True
     outputs: dict[str, str] = Field(default_factory=dict)
 
-    def get_dataframe_path(self) -> Path:
-        path = Path(self.dataframe_path)
-        return path if path.is_absolute() else (get_settings().config_dir / path)
+    def resolve_dataframe_path(self, config_dir: Path) -> Path:
+        return _resolve_path(self.dataframe_path, config_dir)
 
 
 IterateConfig = IterateSchemaConfig | IterateDataframeConfig
@@ -95,12 +100,8 @@ class ActiveScrapperConfig(BaseModel):
         return self.data_source.name
 
     @property
-    def schema_path(self) -> str:
-        return self.data_source.get_schema_path()
-
-    @property
-    def dataset_name(self) -> str:
-        return self.data_source.dataset_name
+    def target_node(self) -> str | None:
+        return self.data_source.target_node
 
     @property
     def extract_fn(self) -> str | None:
@@ -114,13 +115,16 @@ class ActiveScrapperConfig(BaseModel):
     @classmethod
     def _inflate_data_source(cls, data):
         if isinstance(data, dict) and "data_source" not in data:
-            data = {**data, "data_source": {
-                "name": data.get("name"),
-                "dataset_name": data.get("dataset_name"),
-                "schema_path": data.get("schema_path"),
-                "extract_fn": data.get("extract_fn"),
-                "fn_module": data.get("fn_module"),
-            }}
+            data = {
+                **data,
+                "data_source": {
+                    "name": data.get("name"),
+                    "target_node": data.get("target_node"),
+                    "schema_path": data.get("schema_path"),
+                    "extract_fn": data.get("extract_fn"),
+                    "fn_module": data.get("fn_module"),
+                },
+            }
         return data
 
     @model_validator(mode="after")
@@ -132,7 +136,11 @@ class ActiveScrapperConfig(BaseModel):
         for r in self.runs:
             run_keys |= set(r.set.keys())
 
-        overlaps = (render_names & iterate_names) | (render_names & run_keys) | (iterate_names & run_keys)
+        overlaps = (
+            (render_names & iterate_names)
+            | (render_names & run_keys)
+            | (iterate_names & run_keys)
+        )
         if overlaps:
             raise ValueError(f"Variables defined in multiple places: {sorted(overlaps)}")
 
