@@ -1,6 +1,8 @@
 import logging
-from collections.abc import Callable
 from typing import Awaitable
+from collections.abc import Callable
+
+from pydantic import BaseModel
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -11,6 +13,10 @@ from ..io import process_payload
 from ..app_config import AppConfig
 
 LOG = logging.getLogger(__name__)
+
+
+class AcceptedResponse(BaseModel):
+    status: str
 
 
 async def _upload_node(
@@ -97,20 +103,43 @@ def register_passive_scrapper(
     endpoint_config: EndpointConfig,
 ) -> None:
     handler = make_upload_handler(app_config, endpoint_config)
-    base_path = endpoint_config.endpoint.rstrip("/")
+    base_path = endpoint_config.endpoint.rstrip("/") or "/"
+
+    common_kwargs = {
+        "methods": ["POST"],
+        "tags": ["passive-scraper"],
+        "response_model": AcceptedResponse,
+        "response_description": "Payload accepted for processing",
+        "status_code": 202,
+        "responses": {
+            400: {"description": "Invalid payload"},
+            500: {"description": "Internal processing error"},
+        },
+    }
 
     app.add_api_route(
         base_path,
         handler,
-        methods=["POST"],
         name=f"upload_node_root_{endpoint_config.name.replace('-', '_')}",
+        summary=f"Upload payload to endpoint {endpoint_config.name}",
+        description=(
+            f"Accepts payload for endpoint '{endpoint_config.name}'. "
+            "Payload is validated and queued for processing."
+        ),
+        **common_kwargs,
     )
 
     app.add_api_route(
         f"{base_path}/{{node_path:path}}",
         handler,
-        methods=["POST"],
         name=f"upload_node_sub_{endpoint_config.name.replace('-', '_')}",
+        summary=f"Upload payload to subnode of endpoint {endpoint_config.name}",
+        description=(
+            f"Accepts payload for endpoint '{endpoint_config.name}' for a specific node path. "
+            "The 'node_path' path parameter selects the target subnode. "
+            "Payload is validated and queued for processing."
+        ),
+        **common_kwargs,
     )
 
     LOG.info(
