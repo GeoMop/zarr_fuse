@@ -6,7 +6,7 @@ data into an S3-backed Zarr store using **zarr-fuse**.
 The server supports:
 
 - Passive ingestion endpoints for CSV/JSON uploads
-- Active scrapers for scheduled data downloads
+- Active scrappers for scheduled data downloads
 - Schema-based validation
 - S3-backed Zarr storage
 
@@ -47,7 +47,7 @@ Key components:
 | Component           | Purpose                              |
 | ------------------- | ------------------------------------ |
 | Flask API           | Receives HTTP ingestion requests     |
-| Active scrapers     | Scheduled data downloads             |
+| Active scrappers    | Scheduled data downloads             |
 | Extractor functions | Convert payloads to dataframe format |
 | zarr-fuse           | Merge data into Zarr datasets        |
 | S3 object storage   | Persistent dataset storage           |
@@ -174,7 +174,7 @@ Uploaded data is validated and merged into the configured Zarr dataset.
 
 ## Active Scraper
 
-Active scrapers periodically download data from external sources and ingest
+Active scrappers periodically download data from external sources and ingest
 them into the Zarr store.
 
 Example configuration:

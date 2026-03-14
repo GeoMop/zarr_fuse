@@ -12,7 +12,7 @@ from .active_scrapper_config_models import (
 LOG = logging.getLogger(__name__)
 
 
-def add_scrapper_jobs(
+def register_active_scrapper(
     app_config: AppConfig,
     scrapper: ActiveScrapperConfig,
     scheduler: BackgroundScheduler,

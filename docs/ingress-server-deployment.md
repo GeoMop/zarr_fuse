@@ -154,7 +154,7 @@ inputs/
 Defines:
 
 - passive ingestion endpoints
-- active scrapers
+- active scrappers
 - request rendering and iteration logic
 
 See detailed examples in:
