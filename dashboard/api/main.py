@@ -19,6 +19,7 @@ def create_app() -> FastAPI:
 
 app = create_app()
 
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 app.state.endpoints_path = (
     REPO_ROOT
