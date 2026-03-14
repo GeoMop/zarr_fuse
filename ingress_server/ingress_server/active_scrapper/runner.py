@@ -1,3 +1,4 @@
+import time
 import requests
 import logging
 
@@ -35,19 +36,49 @@ def _request_caller(
     url: str,
     headers: dict | None = None,
     params: dict | None = None,
+    max_attempts: int = 5,
 ) -> requests.Response:
-    try:
-        response = requests.get(
-            url=url,
-            params=params,
-            headers=headers,
-            timeout=30,
-        )
-        response.raise_for_status()
+    last_error = None
 
-        return response
-    except Exception as e:
-        raise ValueError(f"Scrapper job {name} failed to fetch {url}: {e}")
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = requests.get(
+                url=url,
+                params=params,
+                headers=headers,
+                timeout=30,
+            )
+
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                if retry_after and retry_after.isdigit():
+                    sleep_s = int(retry_after)
+                else:
+                    sleep_s = min(2 ** (attempt - 1), 30)
+
+                LOG.warning(
+                    "Scrapper %s got 429 for %s, retrying in %ss (attempt %s/%s)",
+                    name, url, sleep_s, attempt, max_attempts
+                )
+                time.sleep(sleep_s)
+                continue
+
+            response.raise_for_status()
+            return response
+
+        except requests.RequestException as e:
+            last_error = e
+            if attempt == max_attempts:
+                break
+
+            sleep_s = min(2 ** (attempt - 1), 30)
+            LOG.warning(
+                "Scrapper %s request failed for %s: %s. Retrying in %ss (attempt %s/%s)",
+                name, url, e, sleep_s, attempt, max_attempts
+            )
+            time.sleep(sleep_s)
+
+    raise ValueError(f"Scrapper job {name} failed to fetch {url}: {last_error}")
 
 
 def _build_contexts_for_run(

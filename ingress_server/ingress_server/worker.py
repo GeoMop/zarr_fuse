@@ -9,7 +9,7 @@ from pathlib import Path
 from collections.abc import Iterator
 
 from .app_config import AppConfig
-from .io import open_root, read_df_from_bytes
+from .io import read_df_from_bytes
 from .models import MetadataModel
 
 LOG = logging.getLogger("worker")
@@ -92,9 +92,10 @@ def _process_one(app_config: AppConfig, data_path: Path) -> str | None:
     if err:
         return f"Failed to read DataFrame: {err}"
 
-    root, err = zf.open_store(schema_path)
-    if err:
-        return f"Failed to open root: {err}"
+    try:
+        root = zf.open_store(schema_path)
+    except Exception as e:
+        return f"Failed to open root: {e}"
 
     target = root
     for path_value in (metadata.target_node, metadata.node_path):

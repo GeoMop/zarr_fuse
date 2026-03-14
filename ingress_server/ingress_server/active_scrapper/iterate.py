@@ -110,18 +110,40 @@ def _expand_dataframe(
     except Exception as e:
         raise ExecutionContextError(f"Failed to read dataframe {df_path}: {e}") from e
 
+    required_columns = list(df_cfg.outputs.values())
+    missing_headers = [col for col in required_columns if col not in df.columns]
+    if missing_headers:
+        raise ExecutionContextError(
+            f"Dataframe {df_path} is missing required columns {missing_headers}. "
+            f"Available columns: {df.columns}"
+        )
+
+    yielded = 0
+
     for row in df.iter_rows(named=True):
         mapping = {}
-        missing = []
+        null_values = []
+
         for ctx_key, col_name in df_cfg.outputs.items():
-            val = row.get(col_name)
-            if val is None:
-                missing.append(col_name)
+            val = row[col_name]
+            if val is None or (isinstance(val, str) and not val.strip()):
+                null_values.append(col_name)
             mapping[ctx_key] = val
 
-        if missing:
-            raise ExecutionContextError(
-                f"Row in dataframe {df_path} is missing columns {missing} required for outputs mapping: {row}"
+        if null_values:
+            row_id = row.get("profile_code") or row.get("idx") or "<unknown>"
+            LOG.warning(
+                "Skipping row %s in dataframe %s because required columns %s are empty/null",
+                row_id,
+                df_path,
+                null_values,
             )
+            continue
 
+        yielded += 1
         yield ctx.with_values(mapping)
+
+    if yielded == 0:
+        raise ExecutionContextError(
+            f"Dataframe {df_path} did not contain any valid rows for outputs mapping {df_cfg.outputs}"
+        )

@@ -181,35 +181,45 @@ Example configuration:
 ```yaml
 active_scrappers:
   # Periodic jobs that fetch data from remote sources and push it into the pipeline.
-  - name: chmi-aladin-1km                       # Logical scrapper name
-    schema_path: schemas/hlavo_surface_schema.yaml  # Path to the schema describing the target dataset
-    target_node: chmi_aladin_10m                # Target node in the Zarr store
-    extract_fn: extract_chmi_grib               # Extractor function applied to the downloaded payload
-    fn_module: inputs.extract.chmi              # Python module containing the extractor function
+  - name: chmi-aladin-1km                         # Logical scrapper identifier
+    schema_path: schemas/hlavo_surface_schema.yaml  # Path to schema describing the target dataset
+    target_node: chmi_aladin_10m                  # Target node in the Zarr store
+    extract_fn: extract_chmi_grib                 # Extractor function used to process the downloaded payload
+    fn_module: inputs.extract.chmi                # Python module containing the extractor
 
     runs:
       # Execution schedule definitions.
-      # Each item defines one cron-based run and its fixed parameter values.
-      - cron: "*/1 * * * *"                     # Run every minute
+      # Each item defines one cron schedule and optional fixed values.
+      - cron: "*/1 * * * *"                       # Run every minute
         set:
-          time: "00"                            # Fixed value available during rendering
+          time: "00"                              # Fixed parameter available during rendering
 
     request:
       # HTTP request definition used to download the remote payload.
-      # Placeholders in {braces} are resolved from rendered or iterated values.
-      method: GET                               # HTTP method
+      # Placeholders in {braces} are resolved from values produced by
+      # render, iterate, or run-set variables.
+      method: GET                                 # HTTP method
       url: "https://opendata.chmi.cz/meteorology/weather/nwp_aladin/CZ_1km/{time}/ALADCZ1K4opendata_{date}{time}_{quantity}.grb.bz2"
 
       headers:
-        # Optional HTTP headers sent with the request.
+        # Optional HTTP headers included in the request.
         - header_name: "User-Agent"
           header_value: "MyWeatherApp/1.0 (your_email@example.com)"
 
+      query_params:
+        # Query parameters appended to the request URL (?name=value).
+        # Values are rendered using the same template context as the URL.
+        - name: lat
+          value: "{dflat}"
+        - name: lon
+          value: "{dflon}"
+
     render:
-      # Values rendered before the request is executed.
-      # These values can be referenced from the request template.
+      # Values rendered once before request execution.
+      # These values are added to the template context and can be referenced
+      # in the request URL, headers, or query parameters.
       - name: date
-        source: datetime_utc                    # Value source
+        source: datetime_utc                      # Source of the value
         format: "%Y%m%d"
 
       - name: unknown
@@ -217,21 +227,24 @@ active_scrappers:
         value: "unknown"
 
     iterate:
-      # Iteration sources that produce multiple request executions.
-      - name: quantity
-        source: schema
-        target_node: "chmi_aladin_10m"
-        schema_regex: "VARS.*.df_col"
+      # Iteration sources produce multiple request executions.
+      # Each produced value extends the template context.
 
-      # Iterate over rows from a CSV dataframe.
-      - name: dataframe_row
-        source: dataframe
-        dataframe_path: dataframes/hlavo_surface_dataframe.csv
-        dataframe_has_header: true
+      - name: quantity                            # Name of the iteration context
+        source: schema                            # Source type
+        target_node: "chmi_aladin_10m"            # Target node in the schema
+        schema_regex: "VARS.*.df_col"             # Iterate over matching values from the schema
+
+      - name: dataframe_row                                     # Name of the iteration context
+        source: dataframe                                       # Source type
+        dataframe_path: dataframes/hlavo_surface_dataframe.csv  # Path to CSV file
+        dataframe_has_header: true                              # Indicates that the CSV contains a header row
+        # Mapping of template variable names to dataframe column names.
+        # Example: template variable 'dflat' will receive the value from column 'dflat'.
         outputs:
-          lat: dflat
-          lon: dflon
-          station_id: station
+          dflat: dflat
+          dflon: dflon
+
 ```
 
 ---
