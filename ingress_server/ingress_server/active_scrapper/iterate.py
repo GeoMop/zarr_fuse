@@ -1,0 +1,165 @@
+import yaml
+import logging
+
+import polars as pl
+from pathlib import Path
+from typing import Any
+from collections.abc import Iterable
+
+from ..app_config import AppConfig
+from .context import ExecutionContext, ExecutionContextError
+from .active_scrapper_config_models import (
+    IterateConfig,
+    IterateSchemaConfig,
+    IterateDataframeConfig,
+    DataSourceConfig,
+)
+
+LOG = logging.getLogger(__name__)
+
+
+def expand_iterate(
+    app_config: AppConfig,
+    ctx: ExecutionContext,
+    it: IterateConfig,
+    data_source: DataSourceConfig,
+) -> Iterable[ExecutionContext]:
+    if isinstance(it, IterateSchemaConfig):
+        return _expand_schema(app_config, ctx, it, data_source)
+
+    if isinstance(it, IterateDataframeConfig):
+        return _expand_dataframe(app_config, ctx, it)
+
+    raise ExecutionContextError(f"Unsupported iterate config type: {type(it)}")
+
+
+def _expand_schema(
+    app_config: AppConfig,
+    ctx: ExecutionContext,
+    it: IterateSchemaConfig,
+    data_source: DataSourceConfig,
+) -> Iterable[ExecutionContext]:
+    schema_file = data_source.resolve_schema_path(app_config.config_dir)
+    target_node = it.target_node or data_source.target_node
+
+    LOG.debug(
+        "Expanding schema iterator name=%s schema_file=%s target_node=%s schema_regex=%s",
+        it.name,
+        schema_file,
+        target_node,
+        it.schema_regex,
+    )
+
+    values = _schema_extract_values(
+        schema_file=schema_file,
+        target_node=target_node,
+        schema_regex=it.schema_regex,
+    )
+
+    return ctx.branch(it.name, values)
+
+
+def _schema_extract_values(
+    schema_file: Path,
+    target_node: str | None,
+    schema_regex: str,
+) -> list[Any]:
+    try:
+        doc = yaml.safe_load(schema_file.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ExecutionContextError(
+            f"Failed to read schema file {schema_file}: {exc}"
+        ) from exc
+
+    if not isinstance(doc, dict):
+        raise ExecutionContextError(f"Schema file {schema_file} is not a YAML mapping")
+
+    if target_node:
+        node = doc.get(target_node)
+        if not isinstance(node, dict):
+            raise ExecutionContextError(
+                f"Schema node '{target_node}' not found in {schema_file}"
+            )
+    else:
+        node = doc
+
+    return extract_by_path(node, schema_regex)
+
+
+def extract_by_path(obj: Any, path: str) -> list[Any]:
+    parts = [p for p in path.split(".") if p]
+    current: list[Any] = [obj]
+
+    for part in parts:
+        next_level: list[Any] = []
+
+        if part == "*":
+            for item in current:
+                if isinstance(item, dict):
+                    next_level.extend(item.values())
+                elif isinstance(item, list):
+                    next_level.extend(item)
+            current = next_level
+            continue
+
+        for item in current:
+            if isinstance(item, dict) and part in item:
+                next_level.append(item[part])
+
+        current = next_level
+
+    return current
+
+
+def _expand_dataframe(
+    app_config: AppConfig,
+    ctx: ExecutionContext,
+    df_cfg: IterateDataframeConfig,
+) -> Iterable[ExecutionContext]:
+    if not df_cfg.outputs:
+        raise ExecutionContextError("dataframe iterator requires non-empty 'outputs' mapping")
+
+    df_path = df_cfg.resolve_dataframe_path(app_config.config_dir)
+
+    try:
+        df = pl.read_csv(df_path, has_header=df_cfg.dataframe_has_header)
+    except Exception as exc:
+        raise ExecutionContextError(f"Failed to read dataframe {df_path}: {exc}") from exc
+
+    required_columns = list(df_cfg.outputs.values())
+    missing_headers = [col for col in required_columns if col not in df.columns]
+    if missing_headers:
+        raise ExecutionContextError(
+            f"Dataframe {df_path} is missing required columns {missing_headers}. "
+            f"Available columns: {df.columns}"
+        )
+
+    yielded = 0
+
+    for row in df.iter_rows(named=True):
+        mapping = {}
+        null_values = []
+
+        for ctx_key, col_name in df_cfg.outputs.items():
+            val = row[col_name]
+            if val is None or (isinstance(val, str) and not val.strip()):
+                null_values.append(col_name)
+            mapping[ctx_key] = val
+
+        if null_values:
+            row_id = row.get("profile_code") or row.get("idx") or "<unknown>"
+            LOG.warning(
+                "Skipping row %s in dataframe %s because required columns %s are empty/null",
+                row_id,
+                df_path,
+                null_values,
+            )
+            continue
+
+        yielded += 1
+        yield ctx.with_values(mapping)
+
+    if yielded == 0:
+        raise ExecutionContextError(
+            f"Dataframe {df_path} did not contain any valid rows for outputs mapping {df_cfg.outputs}"
+        )
