@@ -21,6 +21,9 @@ spec:
     spec:
       securityContext:
         {{- toYaml .Values.frontend.securityContext.pod | nindent 8 }}
+      volumes:
+        - name: app-home
+          emptyDir: {}
       containers:
         - name: {{ .Values.frontend.name }}
           image: "{{ .Values.registry.host }}/{{ .Values.frontend.image.name }}:{{ .Values.frontend.image.tag }}"
@@ -31,6 +34,13 @@ spec:
           env:
             - name: HV_API_URL
               value: "http://{{ .Values.backend.name }}:{{ .Values.backend.service.internalPort.number }}"
+            - name: HOME
+              value: /home
+            - name: MPLCONFIGDIR
+              value: /home/app/.config/matplotlib
+          volumeMounts:
+            - name: app-home
+              mountPath: /home/app
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           securityContext:
