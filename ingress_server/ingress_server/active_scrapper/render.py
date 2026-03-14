@@ -1,5 +1,5 @@
 import logging
-from typing import Iterable
+from collections.abc import Iterable
 from datetime import datetime, timezone
 
 from .context import ExecutionContext, ExecutionContextError
@@ -8,7 +8,7 @@ from .active_scrapper_config_models import (
     RenderSource,
 )
 
-LOG = logging.getLogger("active-scrapper.render")
+LOG = logging.getLogger(__name__)
 
 
 def apply_render_values(
@@ -27,19 +27,16 @@ def apply_render_values(
 def datetime_utc(fmt: str) -> str:
     if not fmt:
         raise ExecutionContextError("Format string cannot be empty for datetime_utc render value")
-    LOG.debug("Rendering datetime_utc with format '%s'", fmt)
     return datetime.now(timezone.utc).strftime(fmt)
 
 
 def datetime_local(fmt: str) -> str:
     if not fmt:
         raise ExecutionContextError("Format string cannot be empty for datetime_local render value")
-    LOG.debug("Rendering datetime_local with format '%s'", fmt)
     return datetime.now().astimezone().strftime(fmt)
 
 
 def const(value: str) -> str:
-    LOG.debug("Rendering const with value '%s'", value)
     return value
 
 

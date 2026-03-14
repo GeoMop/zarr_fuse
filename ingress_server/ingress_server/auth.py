@@ -5,7 +5,7 @@ import logging
 from flask_httpauth import HTTPBasicAuth
 from dotenv import load_dotenv
 
-LOG = logging.getLogger("auth")
+LOG = logging.getLogger(__name__)
 load_dotenv()
 
 def _parse_users_json(raw: str | None) -> dict:

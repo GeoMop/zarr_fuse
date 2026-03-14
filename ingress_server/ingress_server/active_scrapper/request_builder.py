@@ -1,5 +1,3 @@
-from typing import Dict, Tuple
-
 from .context import ExecutionContext, ExecutionContextError
 from .active_scrapper_config_models import (
     RequestConfig,
@@ -11,7 +9,7 @@ from .active_scrapper_config_models import (
 def build_request(
     ctx: ExecutionContext,
     request_cfg: RequestConfig,
-) -> Tuple[str, Dict[str, str], Dict[str, str]]:
+) -> tuple[str, dict[str, str], dict[str, str]]:
     url = _render_string(request_cfg.url, ctx)
 
     headers = _build_headers(request_cfg.headers, ctx)
@@ -20,14 +18,14 @@ def build_request(
     return url, headers, params
 
 
-def _build_headers(headers_cfg: list[ActiveScrapperHeader], ctx: ExecutionContext) -> Dict[str, str]:
+def _build_headers(headers_cfg: list[ActiveScrapperHeader], ctx: ExecutionContext) -> dict[str, str]:
     return {
         h.header_name: _render_string(h.header_value, ctx)
         for h in headers_cfg
     }
 
 
-def _build_query_params(params_cfg: list[QueryParamConfig], ctx: ExecutionContext) -> Dict[str, str]:
+def _build_query_params(params_cfg: list[QueryParamConfig], ctx: ExecutionContext) -> dict[str, str]:
     return {
         h.name: _render_string(h.value, ctx)
         for h in params_cfg

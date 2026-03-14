@@ -3,7 +3,8 @@ import logging
 
 import polars as pl
 from pathlib import Path
-from typing import Iterable, Any
+from typing import Any
+from collections.abc import Iterable
 
 from ..app_config import AppConfig
 from .context import ExecutionContext, ExecutionContextError
@@ -14,7 +15,7 @@ from .active_scrapper_config_models import (
     DataSourceConfig,
 )
 
-LOG = logging.getLogger("active-scrapper.iterate")
+LOG = logging.getLogger(__name__)
 
 
 def expand_iterate(
@@ -38,9 +39,16 @@ def _expand_schema(
     it: IterateSchemaConfig,
     data_source: DataSourceConfig,
 ) -> Iterable[ExecutionContext]:
-    LOG.info("Schema path for iterator '%s': %s", it.name, data_source.schema_path)
     schema_file = data_source.resolve_schema_path(app_config.config_dir)
     target_node = it.target_node or data_source.target_node
+
+    LOG.debug(
+        "Expanding schema iterator name=%s schema_file=%s target_node=%s schema_regex=%s",
+        it.name,
+        schema_file,
+        target_node,
+        it.schema_regex,
+    )
 
     values = _schema_extract_values(
         schema_file=schema_file,
@@ -56,7 +64,13 @@ def _schema_extract_values(
     target_node: str | None,
     schema_regex: str,
 ) -> list[Any]:
-    doc = yaml.safe_load(schema_file.read_text(encoding="utf-8"))
+    try:
+        doc = yaml.safe_load(schema_file.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise ExecutionContextError(
+            f"Failed to read schema file {schema_file}: {exc}"
+        ) from exc
+
     if not isinstance(doc, dict):
         raise ExecutionContextError(f"Schema file {schema_file} is not a YAML mapping")
 
@@ -91,6 +105,7 @@ def extract_by_path(obj: Any, path: str) -> list[Any]:
         for item in current:
             if isinstance(item, dict) and part in item:
                 next_level.append(item[part])
+
         current = next_level
 
     return current
@@ -105,10 +120,11 @@ def _expand_dataframe(
         raise ExecutionContextError("dataframe iterator requires non-empty 'outputs' mapping")
 
     df_path = df_cfg.resolve_dataframe_path(app_config.config_dir)
+
     try:
         df = pl.read_csv(df_path, has_header=df_cfg.dataframe_has_header)
-    except Exception as e:
-        raise ExecutionContextError(f"Failed to read dataframe {df_path}: {e}") from e
+    except Exception as exc:
+        raise ExecutionContextError(f"Failed to read dataframe {df_path}: {exc}") from exc
 
     required_columns = list(df_cfg.outputs.values())
     missing_headers = [col for col in required_columns if col not in df.columns]

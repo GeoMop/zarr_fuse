@@ -1,17 +1,10 @@
 from enum import Enum
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from ..models import DataSourceConfig
-
-
-def _resolve_path(path_str: str, config_dir: Path) -> Path:
-    path = Path(path_str)
-    if path.is_absolute():
-        return path
-    return config_dir / path
+from ..models import DataSourceConfig, ConfigurationError, resolve_path
 
 
 class RenderSource(str, Enum):
@@ -57,12 +50,16 @@ class RenderValue(BaseModel):
     def _validate_variables(self):
         if self.source == RenderSource.CONST:
             if self.value is None:
-                raise ValueError("render source=const requires 'value'")
+                raise ConfigurationError("render source=const requires 'value'")
+            if self.format is not None:
+                raise ConfigurationError("render source=const does not support 'format'")
+
         elif self.source in {RenderSource.DATETIME_UTC, RenderSource.DATETIME_LOCAL}:
             if self.value is not None:
-                raise ValueError(f"render source={self.source} does not support 'value'")
-            elif self.format is None:
-                raise ValueError(f"render source={self.source} requires 'format' (strftime)")
+                raise ConfigurationError(f"render source={self.source} does not support 'value'")
+            if self.format is None:
+                raise ConfigurationError(f"render source={self.source} requires 'format' (strftime)")
+
         return self
 
 
@@ -82,7 +79,7 @@ class IterateDataframeConfig(BaseModel):
     outputs: dict[str, str] = Field(default_factory=dict)
 
     def resolve_dataframe_path(self, config_dir: Path) -> Path:
-        return _resolve_path(self.dataframe_path, config_dir)
+        return resolve_path(self.dataframe_path, config_dir)
 
 
 IterateConfig = IterateSchemaConfig | IterateDataframeConfig
@@ -113,28 +110,32 @@ class ActiveScrapperConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _inflate_data_source(cls, data):
-        if isinstance(data, dict) and "data_source" not in data:
-            data = {
-                **data,
-                "data_source": {
-                    "name": data.get("name"),
-                    "target_node": data.get("target_node"),
-                    "schema_path": data.get("schema_path"),
-                    "extract_fn": data.get("extract_fn"),
-                    "fn_module": data.get("fn_module"),
-                },
-            }
-        return data
+    def _inflate_data_source(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        if "data_source" in data:
+            return data
+
+        return {
+            **data,
+            "data_source": {
+                "name": data.get("name"),
+                "target_node": data.get("target_node"),
+                "schema_path": data.get("schema_path"),
+                "extract_fn": data.get("extract_fn"),
+                "fn_module": data.get("fn_module"),
+            },
+        }
 
     @model_validator(mode="after")
-    def _validate_variables(self):
+    def _validate_variables(self) -> "ActiveScrapperConfig":
         render_names = {r.name for r in self.render}
         iterate_names = {i.name for i in self.iterate}
 
         run_keys: set[str] = set()
         for r in self.runs:
-            run_keys |= set(r.set.keys())
+            run_keys.update(r.set.keys())
 
         overlaps = (
             (render_names & iterate_names)
@@ -142,6 +143,6 @@ class ActiveScrapperConfig(BaseModel):
             | (iterate_names & run_keys)
         )
         if overlaps:
-            raise ValueError(f"Variables defined in multiple places: {sorted(overlaps)}")
+            raise ConfigurationError(f"Variables defined in multiple places: {sorted(overlaps)}")
 
         return self

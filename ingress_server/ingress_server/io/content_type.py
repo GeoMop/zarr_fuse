@@ -18,7 +18,7 @@ def classify_content_type(content_type: str | None) -> SupportedContentType | No
     if "csv" in ct:
         return SupportedContentType.CSV
 
-    is_grib = ("grib" in ct) or ("x-grib" in ct) or ("grb" in ct)
+    is_grib = ("grib" in ct) or ("grb" in ct)
     is_bz2 = ("bz2" in ct) or ("bzip2" in ct)
 
     if is_grib and is_bz2:
@@ -30,7 +30,7 @@ def classify_content_type(content_type: str | None) -> SupportedContentType | No
 
     return None
 
-def get_content_type_suffix(kind: SupportedContentType) -> str | None:
+def get_content_type_suffix(kind: SupportedContentType) -> str:
     match kind:
         case SupportedContentType.JSON:
             return ".json"
@@ -42,5 +42,3 @@ def get_content_type_suffix(kind: SupportedContentType) -> str | None:
             return ".grib.bz2"
         case SupportedContentType.OCTET_STREAM:
             return ".bin"
-        case _:
-            return None

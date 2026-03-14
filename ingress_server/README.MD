@@ -282,9 +282,9 @@ PORT=8000
 LOG_LEVEL=INFO
 
 # Optional overrides
-# CONFIG_PATH=inputs
 # QUEUE_DIR_PATH=./var/zarr_fuse
 # CONFIG_PATH=/path/to/config
+# WORKER_POLL_INTERVAL
 ```
 
 ### Variable Description
@@ -299,6 +299,7 @@ LOG_LEVEL=INFO
 | `BASIC_AUTH_USERS_JSON` | Basic auth users in JSON format |
 | `PORT`                  | HTTP server port                |
 | `LOG_LEVEL`             | Logging level                   |
+| `WORKER_POLL_INTERVAL`  | Worker poll interval in seconds |
 
 ---
 

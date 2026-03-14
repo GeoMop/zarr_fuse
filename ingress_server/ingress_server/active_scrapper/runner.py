@@ -2,7 +2,6 @@ import time
 import requests
 import logging
 
-from typing import List
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -17,7 +16,7 @@ from .active_scrapper_config_models import (
     RunConfig,
 )
 
-LOG = logging.getLogger("active-scrapper.runner")
+LOG = logging.getLogger(__name__)
 
 
 def _effective_content_type(http_ct: str | None, url: str) -> str:
@@ -58,7 +57,11 @@ def _request_caller(
 
                 LOG.warning(
                     "Scrapper %s got 429 for %s, retrying in %ss (attempt %s/%s)",
-                    name, url, sleep_s, attempt, max_attempts
+                    name,
+                    url,
+                    sleep_s,
+                    attempt,
+                    max_attempts,
                 )
                 time.sleep(sleep_s)
                 continue
@@ -66,15 +69,20 @@ def _request_caller(
             response.raise_for_status()
             return response
 
-        except requests.RequestException as e:
-            last_error = e
+        except requests.RequestException as exc:
+            last_error = exc
             if attempt == max_attempts:
                 break
 
             sleep_s = min(2 ** (attempt - 1), 30)
             LOG.warning(
                 "Scrapper %s request failed for %s: %s. Retrying in %ss (attempt %s/%s)",
-                name, url, e, sleep_s, attempt, max_attempts
+                name,
+                url,
+                exc,
+                sleep_s,
+                attempt,
+                max_attempts,
             )
             time.sleep(sleep_s)
 
@@ -85,24 +93,24 @@ def _build_contexts_for_run(
     app_config: AppConfig,
     scrapper_config: ActiveScrapperConfig,
     run_cfg: RunConfig,
-) -> List[ExecutionContext]:
+) -> list[ExecutionContext]:
     initial_ctx = ExecutionContext(dict(run_cfg.set))
     rendered_ctx = apply_render_values(initial_ctx, scrapper_config.render)
 
-    contexts: List[ExecutionContext] = [rendered_ctx]
+    contexts: list[ExecutionContext] = [rendered_ctx]
 
     for it in scrapper_config.iterate:
-        next_contexts: List[ExecutionContext] = []
+        next_contexts: list[ExecutionContext] = []
         for ctx in contexts:
             try:
                 next_contexts.extend(
                     expand_iterate(app_config, ctx, it, scrapper_config.data_source)
                 )
-            except Exception as e:
+            except Exception as exc:
                 raise ExecutionContextError(
                     f"Failed to expand iterator '{getattr(it, 'name', '<unknown>')}' "
-                    f"for scrapper '{scrapper_config.name}': {e}"
-                ) from e
+                    f"for scrapper '{scrapper_config.name}': {exc}"
+                ) from exc
 
         contexts = next_contexts
 
@@ -121,12 +129,20 @@ def _build_contexts_for_run(
 def run_one_scheduled_run(app_config: AppConfig, scrapper: ActiveScrapperConfig, run_cfg: RunConfig) -> None:
     try:
         contexts = _build_contexts_for_run(app_config, scrapper, run_cfg)
-    except Exception as e:
-        LOG.error("Scrapper %s failed to build contexts for cron=%s: %s", scrapper.name, run_cfg.cron, e)
+    except ExecutionContextError as exc:
+        LOG.error(
+            "Scrapper %s failed to build contexts for cron=%s: %s",
+            scrapper.name,
+            run_cfg.cron,
+            exc,
+        )
         return
-
-    if not contexts:
-        LOG.warning("Scrapper %s produced 0 contexts for cron=%s", scrapper.name, run_cfg.cron)
+    except Exception:
+        LOG.exception(
+            "Scrapper %s unexpectedly failed to build contexts for cron=%s",
+            scrapper.name,
+            run_cfg.cron,
+        )
         return
 
     LOG.info(
@@ -152,7 +168,7 @@ def run_one_scheduled_run(app_config: AppConfig, scrapper: ActiveScrapperConfig,
                 params=params,
             )
 
-            success, perr = process_payload(
+            process_payload(
                 app_config=app_config,
                 data_source=scrapper.data_source,
                 payload=resp.content,
@@ -160,10 +176,24 @@ def run_one_scheduled_run(app_config: AppConfig, scrapper: ActiveScrapperConfig,
                 username=f"scrapper-{scrapper.name}",
                 dataframe_row=ctx.to_dict(),
             )
-            if not success:
-                LOG.error("Scrapper %s failed to save payload for ctx=%s: %s", scrapper.name, ctx.to_dict(), perr)
 
-        except ExecutionContextError as e:
-            LOG.error("Scrapper %s context/render error for ctx=%s: %s", scrapper.name, ctx.to_dict(), e)
-        except Exception as e:
-            LOG.exception("Scrapper %s unexpected error for ctx=%s: %s", scrapper.name, ctx.to_dict(), e)
+        except ExecutionContextError as exc:
+            LOG.error(
+                "Scrapper %s context/render error for ctx=%s: %s",
+                scrapper.name,
+                ctx.to_dict(),
+                exc,
+            )
+        except ValueError as exc:
+            LOG.warning(
+                "Scrapper %s rejected payload for ctx=%s: %s",
+                scrapper.name,
+                ctx.to_dict(),
+                exc,
+            )
+        except Exception:
+            LOG.exception(
+                "Scrapper %s unexpected error for ctx=%s",
+                scrapper.name,
+                ctx.to_dict(),
+            )

@@ -9,13 +9,13 @@ from .active_scrapper_config_models import (
     RunConfig,
 )
 
-LOG = logging.getLogger("active-scrapper.scheduler")
+LOG = logging.getLogger(__name__)
 
 
 def add_scrapper_jobs(
     app_config: AppConfig,
     scrapper: ActiveScrapperConfig,
-    scheduler: BackgroundScheduler
+    scheduler: BackgroundScheduler,
 ) -> None:
     if not scrapper.runs:
         LOG.warning("Scrapper %s has no runs configured - no jobs registered", scrapper.name)
@@ -35,7 +35,11 @@ def _add_one_job(
     run_idx: int,
 ) -> None:
     cron = run_cfg.cron
-    minute, hour, day, month, dow = cron.split()
+    try:
+        minute, hour, day, month, dow = cron.split()
+    except ValueError as exc:
+        raise ValueError(f"Invalid cron expression for scrapper {scrapper.name}: {cron}") from exc
+
 
     job_id = f"scrapper-{scrapper.name}-{run_idx}"
 
@@ -51,12 +55,4 @@ def _add_one_job(
         id=job_id,
         replace_existing=True,
         name=f"{scrapper.name} [{cron}]",
-    )
-
-    LOG.info(
-        "Added job %s for scrapper=%s cron=%s set=%s",
-        job_id,
-        scrapper.name,
-        cron,
-        getattr(run_cfg, "set", {}),
     )

@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable
+from collections.abc import Iterable
+from typing import Any, Self
 
 
 class ExecutionContextError(RuntimeError):
@@ -8,14 +9,14 @@ class ExecutionContextError(RuntimeError):
 
 @dataclass(frozen=True)
 class ExecutionContext:
-    values: Dict[str, Any] = field(default_factory=dict)
+    values: dict[str, Any] = field(default_factory=dict)
 
-    def with_value(self, key: str, value: Any) -> "ExecutionContext":
+    def with_value(self, key: str, value: Any) -> Self:
         if key in self.values:
             raise ExecutionContextError(f"Context variable '{key}' already exists")
         return ExecutionContext({**self.values, key: value})
 
-    def with_values(self, mapping: Dict[str, Any]) -> "ExecutionContext":
+    def with_values(self, mapping: dict[str, Any]) -> Self:
         overlap = set(mapping) & set(self.values)
         if overlap:
             raise ExecutionContextError(
@@ -23,22 +24,26 @@ class ExecutionContext:
             )
         return ExecutionContext({**self.values, **mapping})
 
-    def branch(self, key: str, values: Iterable[Any]) -> Iterable["ExecutionContext"]:
+    def branch(self, key: str, values: Iterable[Any]) -> Iterable[Self]:
         if key in self.values:
-            raise ExecutionContextError(f"Context variable '{key}' already exists")
+            raise ExecutionContextError(
+                f"Context variable '{key}' already exists"
+            )
 
-        for v in values:
-            yield self.with_value(key, v)
+        for value in values:
+            yield self.with_value(key, value)
 
     def get(self, key: str, default: Any = None) -> Any:
         return self.values.get(key, default)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return dict(self.values)
 
     def require(self, key: str) -> Any:
         if key not in self.values:
-            raise ExecutionContextError(f"Missing required context variable: '{key}'")
+            raise ExecutionContextError(
+                f"Missing required context variable: '{key}'"
+            )
         return self.values[key]
 
     def __getitem__(self, key: str) -> Any:
@@ -48,5 +53,5 @@ class ExecutionContext:
         return key in self.values
 
     def __repr__(self) -> str:
-        items = ", ".join(f"{k}={v!r}" for k, v in sorted(self.values.items()))
+        items = ", ".join(f"{key}={value!r}" for key, value in sorted(self.values.items()))
         return f"<ExecutionContext {items}>"

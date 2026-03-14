@@ -6,7 +6,7 @@ import os
 class UTCFormatter(logging.Formatter):
     converter = time.gmtime
 
-def setup_logging():
+def setup_logging() -> None:
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     fmt = "%(asctime)sZ %(levelname)s %(name)s %(message)s"
     datefmt = "%Y-%m-%dT%H:%M:%S"
@@ -18,6 +18,3 @@ def setup_logging():
     root.setLevel(log_level)
     root.handlers.clear()
     root.addHandler(handler)
-    root.propagate = False
-
-    return handler

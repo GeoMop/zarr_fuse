@@ -1,8 +1,18 @@
 import time
+
+from typing import Any
 from pathlib import Path
 from pydantic import BaseModel, Field, model_validator
 
-def _resolve_path(path_str: str, config_dir: Path) -> Path:
+
+class ConfigurationError(ValueError):
+    """Raised when active scrapper configuration is invalid."""
+
+
+def resolve_path(path_str: str, config_dir: Path) -> Path:
+    if not path_str or not path_str.strip():
+        raise ConfigurationError("Path must not be empty")
+
     path = Path(path_str)
     if path.is_absolute():
         return path
@@ -17,7 +27,7 @@ class DataSourceConfig(BaseModel):
     fn_module: str | None = None
 
     def resolve_schema_path(self, config_dir: Path) -> Path:
-        return _resolve_path(self.schema_path, config_dir)
+        return resolve_path(self.schema_path, config_dir)
 
 class EndpointConfig(BaseModel):
     data_source: DataSourceConfig
@@ -25,19 +35,23 @@ class EndpointConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _inflate_data_source(cls, data):
-        if isinstance(data, dict) and "data_source" not in data:
-            data = {
-                **data,
-                "data_source": {
-                    "name": data.get("name"),
-                    "target_node": data.get("target_node"),
-                    "schema_path": data.get("schema_path"),
-                    "extract_fn": data.get("extract_fn"),
-                    "fn_module": data.get("fn_module"),
-                },
-            }
-        return data
+    def _inflate_data_source(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        if "data_source" in data:
+            return data
+
+        return {
+            **data,
+            "data_source": {
+                "name": data.get("name"),
+                "target_node": data.get("target_node"),
+                "schema_path": data.get("schema_path"),
+                "extract_fn": data.get("extract_fn"),
+                "fn_module": data.get("fn_module"),
+            },
+        }
 
     @property
     def name(self) -> str:
@@ -72,7 +86,7 @@ class MetadataModel(BaseModel):
     target_node: str | None = None
 
     def resolve_schema_path(self, config_dir: Path) -> Path:
-        return _resolve_path(self.schema_path, config_dir)
+        return resolve_path(self.schema_path, config_dir)
 
     @classmethod
     def from_data_source(
