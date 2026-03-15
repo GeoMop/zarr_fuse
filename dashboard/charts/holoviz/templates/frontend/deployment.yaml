@@ -46,23 +46,17 @@ spec:
           securityContext:
             {{- toYaml .Values.frontend.securityContext.container | nindent 12 }}
           startupProbe:
-            httpGet:
-              path: "/"
-              port: http
+            tcpSocket:
+              port: {{ .Values.frontend.service.internalPort.name | quote }}
             periodSeconds: 5
-            successThreshold: 1
             failureThreshold: 72
           livenessProbe:
-            httpGet:
-              path: "/"
-              port: http
+            tcpSocket:
+              port: {{ .Values.frontend.service.internalPort.name | quote }}
             periodSeconds: 30
-            successThreshold: 1
             failureThreshold: 10
           readinessProbe:
-            httpGet:
-              path: "/"
-              port: http
+            tcpSocket:
+              port: {{ .Values.frontend.service.internalPort.name | quote }}
             periodSeconds: 30
-            successThreshold: 1
             failureThreshold: 10
