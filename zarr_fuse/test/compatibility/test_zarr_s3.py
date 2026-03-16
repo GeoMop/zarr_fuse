@@ -1,4 +1,4 @@
-#import zarr
+import zarr
 import s3fs
 
 import asyncio
@@ -141,4 +141,5 @@ def main():
 
 #loop_issue_s3fs_sync()
 #loop_issue_fsspec_sync()
-loop_issue_fsspec_async()
+if __name__ == "__main__":
+    loop_issue_fsspec_async()
