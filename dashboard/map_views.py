@@ -1,14 +1,11 @@
-import json
 import logging
 import os
-from pathlib import Path
 import time
 
 import cartopy.crs as ccrs
-import geoviews as gv
+import geoviews as gv 
 import numpy as np
 import pandas as pd
-from PIL import Image
 
 from geoviews import tile_sources as gvts
 
@@ -16,92 +13,24 @@ logger = logging.getLogger(__name__)
 
 
 def _load_bukov_overlay():
-    start = time.perf_counter()
     if os.getenv("HV_OVERLAY_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
         logger.info("Overlay disabled via HV_OVERLAY_ENABLED.")
         return None
 
-    base_dir = Path(__file__).resolve().parent / "config" / "bukov_endpoint"
-    georef_path = Path(os.getenv("HV_OVERLAY_GEOREF", base_dir / "bukov_georef.json"))
-    image_path = Path(os.getenv("HV_OVERLAY_IMAGE", base_dir / "12p_final.png"))
-
-    if not georef_path.is_file() or not image_path.is_file():
-        logger.info("Overlay files not found: %s , %s", georef_path, image_path)
+    tile_url = os.getenv("HV_OVERLAY_TILE_URL", "http://localhost:8000/{Z}/{X}/{Y}.png").strip()
+    if not tile_url:
+        logger.info("No overlay tile URL configured.")
         return None
 
-    try:
-        with georef_path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
+    logger.info("Using tiled overlay: %s", tile_url)
+    return gv.WMTS(tile_url).opts(alpha=0.9)
 
-        image = Image.open(image_path).convert("RGBA")
-        width, height = image.size
-        orig_width, orig_height = width, height
 
-        max_pixels = int(os.getenv("HV_OVERLAY_MAX_PIXELS", "25000000"))
-        pixels = width * height
-        if pixels > max_pixels:
-            scale = (max_pixels / float(pixels)) ** 0.5
-            new_width = max(1, int(width * scale))
-            new_height = max(1, int(height * scale))
-            logger.warning(
-                "Overlay image is large (%s px). Downscaling to %sx%s.",
-                pixels,
-                new_width,
-                new_height,
-            )
-            image = image.resize((new_width, new_height), Image.LANCZOS)
-            width, height = image.size
-
-        src_pts = []
-        dst_pts = []
-        for pt in data.get("points", []):
-            if pt.get("enable", True):
-                src_pts.append([pt["sourceX"], abs(pt["sourceY"])])
-                dst_pts.append([pt["mapX"], pt["mapY"]])
-
-        if len(src_pts) < 3:
-            logger.warning("Overlay georef does not contain enough points.")
-            return None
-
-        src = np.array(src_pts, dtype=float)
-        dst = np.array(dst_pts, dtype=float)
-        A = np.c_[src, np.ones(len(src))]
-        transform_matrix, _, _, _ = np.linalg.lstsq(A, dst, rcond=None)
-
-        corners_px = np.array(
-            [
-                [0, 0, 1],
-                [orig_width, 0, 1],
-                [orig_width, orig_height, 1],
-                [0, orig_height, 1],
-            ]
-        )
-        corners_geo = corners_px @ transform_matrix
-        lons = corners_geo[:, 0]
-        lats = corners_geo[:, 1]
-
-        valid = np.isfinite(lons) & np.isfinite(lats)
-        if not np.any(valid):
-            logger.warning("Overlay georef produced invalid bounds.")
-            return None
-
-        bounds = (
-            float(np.nanmin(lons[valid])),
-            float(np.nanmin(lats[valid])),
-            float(np.nanmax(lons[valid])),
-            float(np.nanmax(lats[valid])),
-        )
-
-        overlay = gv.RGB(np.asarray(image), bounds=bounds, crs=ccrs.PlateCarree()).opts(alpha=0.9)
-        print(f"[timing] overlay load: {time.perf_counter() - start:.3f}s")
-        return overlay
-    except Exception:
-        logger.exception("Failed to load overlay image.")
-        return None
 def build_map_view(data, tap_stream):
     start = time.perf_counter()
     base_map = gvts.OSM()
-    overlay_image = _load_bukov_overlay() if data.endpoint_name == "bukov_endpoint" else None
+    overlay_layer = _load_bukov_overlay() if data.endpoint_name == "bukov_endpoint" else None
+
     fig = data.client.get_map_data(
         data.endpoint_name,
         group_path=data.group_path,
@@ -115,6 +44,7 @@ def build_map_view(data, tap_stream):
     lats = np.array(fig.get("lat", []), dtype=float)
     lons = np.array(fig.get("lon", []), dtype=float)
     values = np.array(fig.get("values", []), dtype=float)
+
     map_df = pd.DataFrame({"lon": lons, "lat": lats, "value": values})
     map_points = gv.Points(
         map_df, kdims=["lon", "lat"], vdims=["value"], crs=ccrs.PlateCarree()
@@ -133,10 +63,12 @@ def build_map_view(data, tap_stream):
 
     tap_stream.source = map_points
     map_state = {"lats": lats, "lons": lons}
-    if overlay_image is not None:
-        result = base_map * overlay_image * map_points, map_state
+
+    if overlay_layer is not None:
+        result = base_map * overlay_layer * map_points, map_state
         print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
         return result
+
     result = base_map * map_points, map_state
     print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
     return result

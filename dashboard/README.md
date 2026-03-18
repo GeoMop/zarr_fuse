@@ -35,8 +35,10 @@ set HV_DASHBOARD_ENDPOINT=bukov_endpoint
 ## Bukov overlay
 
 The Bukov map overlay is loaded from dashboard/config/bukov_endpoint.
-You can override or disable it with:
+Detailed information can be found here: 
+- dashboard\tile_pyramid_README.md
 
+You can override or disable it with:
 - HV_OVERLAY_GEOREF: path to a georef JSON file
 - HV_OVERLAY_IMAGE: path to a PNG image
 - HV_OVERLAY_MAX_PIXELS: optional max pixel count before downscaling (default 25,000,000)
