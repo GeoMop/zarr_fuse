@@ -97,6 +97,11 @@ dev = [
     "jupyter"
     # any additional development tools
 ]
+voila-vizualization = [
+    "jupyterlab",
+    "voila",
+    "matplotlib",
+]
 
 [project.scripts]
 zf = "zf.cli:main"
