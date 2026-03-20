@@ -778,6 +778,7 @@ class Node:
             self.logger.error(dup_dict)
 
         return written_ds
+
     def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode
         rel_path = self.group_path  # + self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
@@ -795,15 +796,15 @@ class Node:
         return written_ds
 
     def write_ds(self, ds, **kwargs):
-        rel_path = self.group_path # + self.PATH_SEP + "dataset"
-        rel_path = rel_path.strip(self.PATH_SEP)
-        #path_store = zarr.open_group(self.store, mode=mode, path=rel_path)
-        #ds.to_zarr(path_store,  **kwargs)
-        ds.to_zarr(self.store, group = rel_path, consolidated=False, **kwargs)
+        ds = self._ensure_schema_attrs(ds)
 
-        # written_ds = xr.open_zarr(self.store, group=rel_path)
-        # assert '__structure__' in ds.attrs
-        # assert '__structure__' in written_ds.attrs
+        rel_path = self.group_path.strip(self.PATH_SEP)
+        ds.to_zarr(self.store, group=rel_path, consolidated=False, **kwargs)
+
+        grp = zarr.open_group(self.store, path=rel_path, mode="a")
+        grp.attrs.clear()
+        grp.attrs.update(dict(ds.attrs))
+
         return ds
 
     """
@@ -815,6 +816,17 @@ class Node:
     """
 
 
+    def _ensure_schema_attrs(self, ds: xr.Dataset) -> xr.Dataset:
+        ds = ds.copy()
+        attrs = dict(ds.attrs)
+
+        attrs["__structure__"] = zarr_schema.serialize(self.schema)
+
+        for key, value in self.schema.ATTRS.items():
+            attrs.setdefault(key, value)
+
+        ds.attrs = attrs
+        return ds
 
     def merge_ds(self, ds_update: xr.Dataset) -> xr.Dataset:
         """
@@ -879,11 +891,9 @@ class Node:
 
         # --- Phase 1: Dive (split by dimension) ---
         # We create a dict to hold the extension subset for each dimension.
-
-        if '__empty__' in ds_existing.attrs and ds_existing.attrs['__empty__']:
-            ds_update.attrs.update(ds_existing.attrs)
-            ds_update.attrs['__empty__'] = False
-            return self.write_ds(ds_update, mode="w"), {}
+        if ds_existing.attrs.get('__empty__', False):
+            ds_update.attrs.pop('__empty__', None)
+            return self.write_ds(ds_update, mode="a"), {}
 
         ds_update, split_indices = interpolate_ds(
             ds_update,
