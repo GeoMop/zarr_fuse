@@ -5,8 +5,8 @@
   "username": "scrapper-testing",
   "received_at": "2025-11-24T01:15:03Z",
   "schema_path": "schemas/testing.yaml",
-  "dataset_name": "testing",
-  "extract_fn": "normalize_yrno_forecast",
+  "target_node": "testing",
+  "extract_fn": "normalize",
   "fn_module": "inputs.extract.hlavo_extract",
   "dataframe_row": {
     "idx": "26",

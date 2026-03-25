@@ -779,6 +779,7 @@ class Node:
 
         return written_ds
 
+
     def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode
         rel_path = self.group_path  # + self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
@@ -796,14 +797,13 @@ class Node:
         return written_ds
 
     def write_ds(self, ds, **kwargs):
-        ds = self._ensure_schema_attrs(ds)
+        ds.attrs = self.ensure_schema_attrs(ds.attrs)
 
         rel_path = self.group_path.strip(self.PATH_SEP)
         ds.to_zarr(self.store, group=rel_path, consolidated=False, **kwargs)
 
-        grp = zarr.open_group(self.store, path=rel_path, mode="a")
-        grp.attrs.clear()
-        grp.attrs.update(dict(ds.attrs))
+        grp = zarr.open_group(self.store, path=rel_path, mode="r")
+        assert dict(grp.attrs) == dict(ds.attrs)
 
         return ds
 
@@ -816,17 +816,17 @@ class Node:
     """
 
 
-    def _ensure_schema_attrs(self, ds: xr.Dataset) -> xr.Dataset:
-        ds = ds.copy()
-        attrs = dict(ds.attrs)
+    def ensure_schema_attrs(self, attrs: zarr_schema.Attrs) -> zarr_schema.Attrs:
+        """
+        Update
+        :param ds:
+        :return:
+        """
+        merge_attrs = dict(self.schema.ATTRS)
+        merge_attrs.update(attrs)
+        merge_attrs["__structure__"] = zarr_schema.serialize(self.schema)
 
-        attrs["__structure__"] = zarr_schema.serialize(self.schema)
-
-        for key, value in self.schema.ATTRS.items():
-            attrs.setdefault(key, value)
-
-        ds.attrs = attrs
-        return ds
+        return merge_attrs
 
     def merge_ds(self, ds_update: xr.Dataset) -> xr.Dataset:
         """
@@ -891,6 +891,9 @@ class Node:
 
         # --- Phase 1: Dive (split by dimension) ---
         # We create a dict to hold the extension subset for each dimension.
+        if ds_existing.attrs.get('__empty__', False):
+            ds_update.attrs.pop('__empty__', None)
+            return self.write_ds(ds_update, mode="a"), {}
         if ds_existing.attrs.get('__empty__', False):
             ds_update.attrs.pop('__empty__', None)
             return self.write_ds(ds_update, mode="a"), {}

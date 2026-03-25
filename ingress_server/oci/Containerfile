@@ -25,8 +25,7 @@ RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server 
     apt-get update && apt-get install -y --no-install-recommends git=${git_version} && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@${zarr_fuse_branch}" && \
-    pip install --no-cache-dir waitress==${waitress_version}
+RUN pip install --no-cache-dir "git+https://github.com/GeoMop/zarr_fuse.git@${zarr_fuse_branch}"
 
 # --- Install ingress server ---
 WORKDIR /ingress-server
@@ -39,9 +38,9 @@ RUN pip install --no-cache-dir .
 RUN  chmod +x ./scripts/install_extractor_dependencies.sh && \
     ./scripts/install_extractor_dependencies.sh
 
-ENV CONFIG_DIR_PATH="/ingress-server/inputs"
+ENV CONFIG_PATH="/ingress-server/inputs/endpoints_config.yaml"
 
 USER ingress
 EXPOSE 8000
 
-CMD ["waitress-serve", "--host", "0.0.0.0", "--port", "8000", "--call", "ingress_server.main:create_app_with_worker"]
+CMD ["python", "-m", "ingress_server.main"]
