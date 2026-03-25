@@ -63,9 +63,6 @@ jobs:
     steps:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
-        with:
-          repository: GeoMop/zarr_fuse
-          ref: ${{ inputs.zarr-fuse-ref }}
 
       - name: Get version tag
         id: get_version_tag
