@@ -779,6 +779,7 @@ class Node:
 
         return written_ds
 
+
     def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode
         rel_path = self.group_path  # + self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
@@ -890,6 +891,9 @@ class Node:
 
         # --- Phase 1: Dive (split by dimension) ---
         # We create a dict to hold the extension subset for each dimension.
+        if ds_existing.attrs.get('__empty__', False):
+            ds_update.attrs.pop('__empty__', None)
+            return self.write_ds(ds_update, mode="a"), {}
         if ds_existing.attrs.get('__empty__', False):
             ds_update.attrs.pop('__empty__', None)
             return self.write_ds(ds_update, mode="a"), {}
