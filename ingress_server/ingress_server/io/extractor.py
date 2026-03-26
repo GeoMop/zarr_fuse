@@ -4,7 +4,7 @@ from importlib import import_module
 from collections.abc import Callable
 
 from ..models import MetadataModel
-from ..types import DataObject
+from ..data_types import DataObject
 
 LOG = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ import xarray as xr
 
 from pathlib import Path
 
-from ..types import DataObject
+from ..data_types import DataObject
 from ..models import MetadataModel
 from .extractor import apply_extractor
 from .content_type import classify_content_type, SupportedContentType
