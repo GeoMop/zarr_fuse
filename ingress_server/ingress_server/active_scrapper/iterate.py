@@ -137,7 +137,7 @@ def _expand_dataframe(
     yielded = 0
 
     for row in df.iter_rows(named=True):
-        mapping = {}
+        mapping = dict(row)
         null_values = []
 
         for ctx_key, col_name in df_cfg.outputs.items():
