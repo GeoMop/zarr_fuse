@@ -97,9 +97,9 @@ resources:
   # -- Resource limits
   limits:
     # -- CPU limit
-    cpu: 250m
+    cpu: 500m
     # -- Memory limit
-    memory: 256Mi
+    memory: 512Mi
 
 # -- Security context configuration
 # @default -- ~
