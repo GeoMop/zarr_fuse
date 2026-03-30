@@ -40,7 +40,7 @@ s3 = boto3.client(
     aws_access_key_id=ACCESS_KEY,
     aws_secret_access_key=SECRET_KEY,
     endpoint_url=ENDPOINT_URL,
-)
+)   
 
 cache: dict[str, dict] = {}
 

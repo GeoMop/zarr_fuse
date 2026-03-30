@@ -17,7 +17,7 @@ def _load_bukov_overlay():
         logger.info("Overlay disabled via HV_OVERLAY_ENABLED.")
         return None
 
-    tile_url = os.getenv("HV_OVERLAY_TILE_URL", "http://localhost:8000/{Z}/{X}/{Y}.png").strip()
+    tile_url = os.getenv("HV_OVERLAY_TILE_URL", "/tiles/{Z}/{X}/{Y}.png").strip()
     if not tile_url:
         logger.info("No overlay tile URL configured.")
         return None
