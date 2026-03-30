@@ -13,9 +13,14 @@ import zarr_fuse as zf
 def _timer_log(message: str, duration: float) -> None:
     print(f"[timing] {message}: {duration:.3f}s")
 
-CONFIG_ROOT = Path(__file__).resolve().parents[1] / "app" / "databuk" / "dashboard" / "holoviz_dashboard"
-if str(CONFIG_ROOT) not in sys.path:
-    sys.path.insert(0, str(CONFIG_ROOT))
+
+# Set CONFIG_ROOT to the dashboard directory
+CONFIG_ROOT = Path(__file__).resolve().parent
+
+# Update sys.path if needed (for config import)
+CONFIG_CONFIG_PATH = CONFIG_ROOT / "config"
+if str(CONFIG_CONFIG_PATH) not in sys.path:
+    sys.path.insert(0, str(CONFIG_CONFIG_PATH))
 
 from config.dashboard_config import get_endpoint_config, load_endpoints
 
@@ -205,6 +210,7 @@ def load_data(source: str, **kwargs) -> DashboardData:
     if source not in {"local", "direct", "zarr_fuse"}:
         raise NotImplementedError("Only local zarr_fuse data sources are supported.")
 
+    # Default to dashboard/config/endpoints.yaml
     endpoints_path = kwargs.pop(
         "endpoints_path",
         CONFIG_ROOT / "config" / "endpoints.yaml",
