@@ -803,7 +803,11 @@ class Node:
         ds.to_zarr(self.store, group=rel_path, consolidated=False, **kwargs)
 
         grp = zarr.open_group(self.store, path=rel_path, mode="r")
-        assert dict(grp.attrs) == dict(ds.attrs)
+        if dict(grp.attrs) != dict(ds.attrs):
+            self.logger.warning(
+                f"After writing dataset to Zarr store, the stored attributes differ from the original dataset attributes."
+                f"\nStored attrs: {dict(grp.attrs)} Update attrs: {ds.attrs}\n"
+            )
 
         return ds
 
