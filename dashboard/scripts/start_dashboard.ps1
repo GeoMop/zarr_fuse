@@ -9,7 +9,7 @@ $env:ZF_S3_ENDPOINT_URL = ""
 # Run dashboard
 Push-Location (Join-Path $PSScriptRoot "..")
 try {
-	panel serve app.py --show
+    python serve_dashboard.py
 } finally {
-	Pop-Location
+    Pop-Location
 }
