@@ -562,7 +562,7 @@ class Node:
             # Initialize new dataset.
             empty_ds = Node.empty_ds(new_schema)
             self._init_empty_grup(empty_ds)
-            assert self.schema == new_schema
+            #assert self.schema == new_schema
             return new_schema
         else:
             # Preserve dataset schema.

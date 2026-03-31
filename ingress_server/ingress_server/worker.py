@@ -68,6 +68,11 @@ def _iter_accepted_files(app_config: AppConfig) -> Iterator[Path]:
 
 
 def _load_metadata(data_path: Path) -> MetadataModel:
+    # TODO_SM: either resolve all paths during formation of MetadataModel, or keep the raw paths and resolve them during processing.
+    # The current approach is  inconsistent.
+    # TODO_SM: metadata should contain endpoint_config.yaml path in order to set the PYTHON_PATH for the fn_module import.
+    # The extraction now fails for because fn_module is not found.
+
     meta_path = data_path.with_suffix(data_path.suffix + ".meta.json")
     try:
         return MetadataModel.model_validate_json(meta_path.read_text(encoding="utf-8"))
@@ -146,7 +151,11 @@ def working_loop(app_config: AppConfig, poll_sleep: float = 30.0) -> None:
     while not app_config.stop_event.is_set():
         progressed = False
 
+        # TODO SM: refactor the loop body in order to
+        # call out of the infinite loop
         for data_path in list(_iter_accepted_files(app_config)):
+
+            # TODO SM: why we need this hack to preemptively interrupt the loop?
             if app_config.stop_event.is_set():
                 break
 
