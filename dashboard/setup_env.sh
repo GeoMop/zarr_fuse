@@ -11,7 +11,6 @@ then
     rm -rf "$VENV_DIR"
 fi
 
-
 # Check if virtual environment directory already exists
 if [ -d "$VENV_DIR" ]; then
     echo "Virtual environment already exists."
