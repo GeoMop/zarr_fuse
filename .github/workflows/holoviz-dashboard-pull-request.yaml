@@ -2,7 +2,7 @@ name: HoloViz Dashboard - pull request
 on:
   pull_request:
     branches:
-      - "**"
+      - "MF_HoloViz_integration"
     paths:
       - dashboard/**
   workflow_dispatch:
