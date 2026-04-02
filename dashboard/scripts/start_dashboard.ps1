@@ -1,10 +1,16 @@
-# PowerShell script to set environment variables and start the HoloViz dashboard
+# Load .env file
+$envFile = Join-Path $PSScriptRoot ".env"
 
+if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+        if ($_ -match '^\s*#' -or $_ -match '^\s*$') {
+            return
+        }
 
-$env:ZF_S3_ACCESS_KEY = ""
-$env:ZF_S3_SECRET_KEY = ""
-$env:ZF_S3_ENDPOINT_URL = ""
-
+        $key, $value = $_ -split '=', 2
+        [System.Environment]::SetEnvironmentVariable($key.Trim(), $value.Trim(), "Process")
+    }
+}
 
 # Run dashboard
 Push-Location (Join-Path $PSScriptRoot "..")

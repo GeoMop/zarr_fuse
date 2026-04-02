@@ -1,6 +1,18 @@
 # HoloViz Dashboard
 
+
 Panel + HoloViews dashboard for Bukov Zarr data over S3.
+
+## Environment Variables (.env)
+
+The dashboard supports configuration via a `.env` file in this directory. Copy `.env.example` to `.env` and fill in your S3 credentials and endpoint:
+
+```
+cp .env.example .env
+# Edit .env and set your values
+```
+
+The dashboard uses [python-dotenv](https://pypi.org/project/python-dotenv/) to load these variables automatically.
 
 ## Quick start
 
@@ -15,19 +27,19 @@ panel serve app.py --show
 
 Use scripts/start_dashboard.ps1 to start the dashboard on Windows.
 
+
 ## S3 configuration
 
-The dashboard reads S3 settings from the endpoint config and zarr_fuse environment variables.
+The dashboard reads S3 settings from the endpoint config and the following environment variables (set in your `.env` file):
 
-- Endpoint config: app/databuk/dashboard/holoviz_dashboard/config/endpoints.yaml
-- Schema files: app/databuk/dashboard/holoviz_dashboard/schemas/*.yaml
-- Environment variables used by zarr_fuse:
-  - ZF_S3_ACCESS_KEY
-  - ZF_S3_SECRET_KEY
-  - ZF_S3_ENDPOINT_URL (optional if schema already includes it)
+- `ZF_S3_ACCESS_KEY`
+- `ZF_S3_SECRET_KEY`
+- `ZF_S3_ENDPOINT_URL` (optional if schema already includes it)
 
-Set the endpoint:
+Endpoint config: `dashboard/config/endpoints.yaml`
+Schema files: `dashboard/schemas/*.yaml`
 
+Set the endpoint (Windows):
 ```
 set HV_DASHBOARD_ENDPOINT=bukov_endpoint
 ```
@@ -50,8 +62,10 @@ You can override or disable it with:
 - Installs requirements from requirements.txt
 - Registers a Jupyter kernel named "HoloViz Dashboard"
 
+
 ## Requirements notes
 
+- The dashboard requires `python-dotenv` (now included in requirements.txt) for .env support.
 - GeoViews uses Cartopy/Proj/GEOS. On Windows, these may require additional system packages.
 - If Cartopy install fails, verify that your Python distribution can install binary wheels.
 - The requirements install the local zarr_fuse package from the repo root.
