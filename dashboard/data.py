@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 import sys
 import time
@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 import zarr_fuse as zf
+
 
 def _timer_log(message: str, duration: float) -> None:
     print(f"[timing] {message}: {duration:.3f}s")
@@ -36,7 +37,7 @@ class DashboardData:
 class EndpointHandle:
     name: str
     schema_path: Path
-    store_url: str
+    store_uri: str
 
 
 class LocalClient:
@@ -47,28 +48,36 @@ class LocalClient:
 
     def get_endpoints(self) -> Dict[str, Any]:
         endpoints = load_endpoints(self.endpoints_path)
-        return {name: endpoint.__dict__ for name, endpoint in endpoints.items()}
+        return {name: asdict(endpoint) for name, endpoint in endpoints.items()}
 
     def get_endpoint(self, endpoint_name: str) -> Dict[str, Any]:
         endpoint = get_endpoint_config(self.endpoints_path, endpoint_name)
-        return endpoint.__dict__
+        return asdict(endpoint)
+
+    def _endpoint_config(self, endpoint_name: Optional[str]):
+        if endpoint_name is None:
+            raise ValueError("endpoint_name is required")
+        return get_endpoint_config(self.endpoints_path, endpoint_name)
 
     def _endpoint_handle(self, endpoint_name: Optional[str]) -> EndpointHandle:
-        endpoints = load_endpoints(self.endpoints_path)
-        if endpoint_name is None:
-            endpoint_name = next(iter(endpoints.keys()))
-        endpoint = get_endpoint_config(self.endpoints_path, endpoint_name)
-        schema_path = Path(endpoint.schema_file)
+        endpoint = self._endpoint_config(endpoint_name)
+        schema_path = Path(endpoint.schema.file)
         if not schema_path.is_absolute():
             schema_path = self.base_dir / schema_path
-        return EndpointHandle(endpoint_name, schema_path, endpoint.store_url)
+
+        return EndpointHandle(
+            name=endpoint.name,
+            schema_path=schema_path,
+            store_uri=endpoint.source.uri,
+        )
 
     def _open_node(self, endpoint_name: Optional[str]) -> Any:
         handle = self._endpoint_handle(endpoint_name)
         if handle.name in self._nodes:
             return self._nodes[handle.name]
+
         schema = zf.schema.deserialize(handle.schema_path)
-        schema.ds.ATTRS["STORE_URL"] = handle.store_url
+        schema.ds.ATTRS["STORE_URL"] = handle.store_uri
         node = zf.open_store(schema, MODE="r")
         self._nodes[handle.name] = node
         return node
@@ -77,6 +86,7 @@ class LocalClient:
         node = self._open_node(endpoint_name)
         if not group_path or group_path == "/":
             return node
+
         path_parts = [p for p in group_path.strip("/").split("/") if p]
         for part in path_parts:
             if part not in node.children:
@@ -100,28 +110,41 @@ class LocalClient:
         self,
         endpoint_name: Optional[str],
         group_path: str,
-        variable: str = "rock_temp",
+        variable: Optional[str] = None,
         time_index: int = 0,
         depth_index: int = 0,
     ) -> Dict[str, Any]:
         start = time.perf_counter()
+        endpoint = self._endpoint_config(endpoint_name)
+        fields = endpoint.schema.fields
+
+        variable = variable or endpoint.defaults.metric
+        lat_field = fields.lat or "latitude"
+        lon_field = fields.lon or "longitude"
+        time_field = fields.time or "date_time"
+        depth_field = fields.depth or "depth"
+
+        if not variable:
+            _timer_log("get_map_data failed", time.perf_counter() - start)
+            return {"status": "error", "reason": "No default metric configured"}
+
         node = self._get_group(endpoint_name, group_path)
         ds = node.dataset
         if variable not in ds:
             _timer_log("get_map_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": f"Variable '{variable}' not found"}
 
-        lat = ds.get("latitude")
-        lon = ds.get("longitude")
+        lat = ds.get(lat_field)
+        lon = ds.get(lon_field)
         if lat is None or lon is None:
             _timer_log("get_map_data failed", time.perf_counter() - start)
-            return {"status": "error", "reason": "latitude/longitude not found"}
+            return {"status": "error", "reason": f"{lat_field}/{lon_field} not found"}
 
         data_var = ds[variable]
-        if "date_time" in data_var.dims:
-            data_var = data_var.isel(date_time=time_index)
-        if "depth" in data_var.dims:
-            data_var = data_var.isel(depth=depth_index)
+        if time_field in data_var.dims:
+            data_var = data_var.isel({time_field: time_index})
+        if depth_field in data_var.dims:
+            data_var = data_var.isel({depth_field: depth_index})
 
         values = np.array(data_var.values).astype(float).ravel()
         values = np.where(np.isfinite(values), values, np.nan)
@@ -143,20 +166,34 @@ class LocalClient:
         group_path: str,
         lat: float,
         lon: float,
-        variable: str = "rock_temp",
+        variable: Optional[str] = None,
     ) -> Dict[str, Any]:
         start = time.perf_counter()
+        endpoint = self._endpoint_config(endpoint_name)
+        fields = endpoint.schema.fields
+
+        variable = variable or endpoint.defaults.metric
+        lat_field = fields.lat or "latitude"
+        lon_field = fields.lon or "longitude"
+        time_field = fields.time or "date_time"
+        depth_field = fields.depth or "depth"
+        entity_field = fields.entity or "borehole"
+
+        if not variable:
+            _timer_log("get_timeseries_data failed", time.perf_counter() - start)
+            return {"status": "error", "reason": "No default metric configured"}
+
         node = self._get_group(endpoint_name, group_path)
         ds = node.dataset
         if variable not in ds:
             _timer_log("get_timeseries_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": f"Variable '{variable}' not found"}
 
-        lat_var = ds.get("latitude")
-        lon_var = ds.get("longitude")
+        lat_var = ds.get(lat_field)
+        lon_var = ds.get(lon_field)
         if lat_var is None or lon_var is None:
             _timer_log("get_timeseries_data failed", time.perf_counter() - start)
-            return {"status": "error", "reason": "latitude/longitude not found"}
+            return {"status": "error", "reason": f"{lat_field}/{lon_field} not found"}
 
         lats = np.array(lat_var.values, dtype=float).ravel()
         lons = np.array(lon_var.values, dtype=float).ravel()
@@ -164,15 +201,15 @@ class LocalClient:
         idx = int(np.nanargmin(dist))
 
         data_var = ds[variable]
-        if "borehole" in data_var.dims:
-            data_var = data_var.isel(borehole=idx)
+        if entity_field in data_var.dims:
+            data_var = data_var.isel({entity_field: idx})
 
-        times = ds.get("date_time")
+        times = ds.get(time_field)
         time_values = []
         if times is not None:
             time_values = pd.to_datetime(times.values).astype(str).tolist()
 
-        depths = ds.get("depth")
+        depths = ds.get(depth_field)
         depth_values = []
         if depths is not None:
             depth_values = np.array(depths.values, dtype=float).tolist()
@@ -182,6 +219,7 @@ class LocalClient:
             series = [_to_json_floats(values)]
         else:
             series = [_to_json_floats(values[:, i]) for i in range(values.shape[1])]
+
         result = {
             "status": "success",
             "times": time_values,
@@ -210,14 +248,16 @@ def load_data(source: str, **kwargs) -> DashboardData:
     if source not in {"local", "direct", "zarr_fuse"}:
         raise NotImplementedError("Only local zarr_fuse data sources are supported.")
 
-    # Default to dashboard/config/endpoints.yaml
     endpoints_path = kwargs.pop(
         "endpoints_path",
         CONFIG_ROOT / "config" / "endpoints.yaml",
     )
     endpoint_name = kwargs.pop("endpoint_name")
-    group_path = kwargs.pop("group_path", "bukov")
     client = LocalClient(endpoints_path)
+
+    endpoint = get_endpoint_config(Path(endpoints_path), endpoint_name)
+    group_path = kwargs.pop("group_path", None) or endpoint.defaults.group_path or "/"
+
     return DashboardData(
         endpoint_name=endpoint_name,
         group_path=group_path,

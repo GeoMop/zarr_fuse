@@ -85,15 +85,19 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
     """]
     )
 
-    store_url = endpoint_config.get("store_url", "") if isinstance(endpoint_config, dict) else ""
+    store_uri = ""
+    if isinstance(endpoint_config, dict):
+        source_config = endpoint_config.get("source", {}) or {}
+        store_uri = source_config.get("uri", "")
+
     store_info = pn.pane.HTML("""
 <div style="background: #1e293b; padding: 12px; border-radius: 8px; margin: 8px 0;
             border-left: 3px solid #3b82f6;">
     <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 600;">
-        STORE URL
+        STORE URI
     </div>
     <div style="font-size: 12px; color: #e2e8f0; font-family: monospace;">
-        """ + store_url + """
+        """ + store_uri + """
     </div>
 </div>
 """, sizing_mode="stretch_width")

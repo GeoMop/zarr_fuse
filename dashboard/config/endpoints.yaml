@@ -1,48 +1,62 @@
-# S3 Endpoint Configuration
-# Multiple endpoint support - each endpoint represents a different Zarr store
-
-
-# JB proposed change of the Endpoint 1 to production bukov endpoint
-"bukov_endpoint":
-  reload_interval: 300  # Cache TTL in seconds (5 minutes)
-  # Following is the copy of:
-  # apps/databuk/inputs/schemas/bukov_schema.yaml
-  # TODO: remove after rafactoring dashboard out of the databuk  
-  schema_file: "schemas/bukov_schema.yaml"
-  # Used for titles right now, the schema vars are used in open_store
-  store_url: "s3://bukov/store_latlon_2024.zarr"
-  # TODO: Read description from the schema ?
-  description: "bukov_endpoint"
-  # TODO: Do we have other store_types ?
-  store_type: "zarr"
-  version: "1.0.0"  
-
-# Endpoint 2:
-"surface_data_endpoint":
-  reload_interval: 300  # Cache TTL in seconds (5 minutes)
-  schema_file: "schemas/surface_schema.yaml"
-  store_url: "s3://hlavo-release/surface_v3.zarr"
-  description: "surface_data_endpoint"
-  store_type: "zarr"
+bukov_endpoint:
+  description: "Bukov production endpoint"
   version: "1.0.0"
+  reload_interval: 300
 
-# Endpoint 3: 
-"test_endpoint":
-  reload_interval: 300  # Cache TTL in seconds (5 minutes)
-  schema_file: "schemas/test_schema.yaml"
-  store_url: "s3://hlavo-release/test_store.zarr"
-  # TODO: move bukov.zarr to test_store.zatt
-  # - copy bukov/store_2024.zarr -> hlavo_store/bukov.zarr
-  description: "test_endpoint"
-  store_type: "zarr"
-  version: "1.0.0"
+  source:
+    type: "s3"
+    store_type: "zarr"
+    uri: "s3://bukov/store_latlon_2024.zarr"
 
+  schema:
+    file: "schemas/bukov_schema.yaml"
+    fields:
+      lat: "latitude"
+      lon: "longitude"
+      time: "date_time"
+      depth: "depth"
+      entity: "borehole"
 
-# Notes:
-# - S3 credentials are loaded from environment variables:
-#   * S3_BUCKET_NAME
-#   * S3_ACCESS_KEY
-#   * S3_SECRET_KEY
-#   * S3_ENDPOINT_URL
-# - reload_interval determines cache TTL for each endpoint
-# - Each endpoint gets its own ServiceAPI instance with isolated state
+  defaults:
+    metric: "rock_temp"
+    group_path: "bukov"
+
+  labels:
+    metric: "Temperature"
+    y_axis: "Temperature"
+    entity: "Borehole"
+    depth_unit: "m"
+
+  visualization:
+    map:
+      center_lat: 50.0
+      center_lon: 14.0
+      zoom: 8
+      title: "Geographic Data View"
+      cmap: "viridis"
+      point_size: 10
+      alpha: 0.8
+    timeseries:
+      middle_window_days: 30
+      right_window_hours: 24
+    overlay:
+      enabled: true
+      image_path: "config/bukov_endpoint/overlay.png"
+      georef_path: "config/bukov_endpoint/bukov_georef.json"
+      tile_url: "/tiles/{Z}/{X}/{Y}.png"
+
+  tile_build:
+    enabled: true
+    source_image: "config/bukov_endpoint/overlay.png"
+    georef_file: "config/bukov_endpoint/bukov_georef.json"
+    vrt_file: "config/bukov_endpoint/overlay_gcps.vrt"
+    warped_tif: "config/bukov_endpoint/overlay_3857.tif"
+    rgba_vrt: "config/bukov_endpoint/overlay_3857_rgba.vrt"
+    tiles_dir: "config/bukov_endpoint/tiles"
+    tile_scheme: "xyz"
+    min_zoom: 0
+    max_zoom: 20
+    target_srs: "EPSG:3857"
+    gcp_srs: "EPSG:4326"
+    resampling: "near"
+    add_alpha: true

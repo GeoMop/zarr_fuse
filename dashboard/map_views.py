@@ -3,7 +3,7 @@ import os
 import time
 
 import cartopy.crs as ccrs
-import geoviews as gv 
+import geoviews as gv
 import numpy as np
 import pandas as pd
 
@@ -12,12 +12,19 @@ from geoviews import tile_sources as gvts
 logger = logging.getLogger(__name__)
 
 
-def _load_bukov_overlay():
+def _load_overlay(endpoint_config):
     if os.getenv("HV_OVERLAY_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
         logger.info("Overlay disabled via HV_OVERLAY_ENABLED.")
         return None
 
-    tile_url = os.getenv("HV_OVERLAY_TILE_URL", "/tiles/{Z}/{X}/{Y}.png").strip()
+    visualization_config = endpoint_config.get("visualization", {}) or {}
+    overlay_config = visualization_config.get("overlay", {}) or {}
+
+    if not overlay_config.get("enabled", False):
+        logger.info("Overlay disabled in endpoint config.")
+        return None
+
+    tile_url = overlay_config.get("tile_url") or os.getenv("HV_OVERLAY_TILE_URL", "").strip()
     if not tile_url:
         logger.info("No overlay tile URL configured.")
         return None
@@ -29,12 +36,22 @@ def _load_bukov_overlay():
 def build_map_view(data, tap_stream):
     start = time.perf_counter()
     base_map = gvts.OSM()
-    overlay_layer = _load_bukov_overlay() if data.endpoint_name == "bukov_endpoint" else None
+
+    endpoint_config = data.client.get_endpoint(data.endpoint_name)
+    defaults_config = endpoint_config.get("defaults", {}) or {}
+    visualization_config = endpoint_config.get("visualization", {}) or {}
+    map_config = visualization_config.get("map", {}) or {}
+
+    overlay_layer = _load_overlay(endpoint_config)
+
+    default_metric = defaults_config.get("metric")
+    if not default_metric:
+        raise ValueError(f"No default metric configured for endpoint '{data.endpoint_name}'")
 
     fig = data.client.get_map_data(
         data.endpoint_name,
         group_path=data.group_path,
-        variable="rock_temp",
+        variable=default_metric,
         time_index=0,
         depth_index=0,
     )
@@ -50,19 +67,25 @@ def build_map_view(data, tap_stream):
         map_df, kdims=["lon", "lat"], vdims=["value"], crs=ccrs.PlateCarree()
     ).opts(
         color="value",
-        cmap="viridis",
-        size=10,
-        alpha=0.8,
+        cmap=map_config.get("cmap", "viridis"),
+        size=map_config.get("point_size", 10),
+        alpha=map_config.get("alpha", 0.8),
         line_color="white",
         line_width=1.5,
         tools=["hover", "tap"],
         colorbar=True,
         responsive=True,
-        title="Geographic Data View",
+        title=map_config.get("title", "Geographic Data View"),
     )
 
     tap_stream.source = map_points
-    map_state = {"lats": lats, "lons": lons}
+    map_state = {
+        "lats": lats,
+        "lons": lons,
+        "center_lat": map_config.get("center_lat"),
+        "center_lon": map_config.get("center_lon"),
+        "zoom": map_config.get("zoom"),
+    }
 
     if overlay_layer is not None:
         result = base_map * overlay_layer * map_points, map_state

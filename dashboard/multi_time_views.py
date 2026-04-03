@@ -8,11 +8,28 @@ from holoviews import streams
 
 def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream, map_state):
     start_total = time.perf_counter()
+    endpoint_config = data.client.get_endpoint(data.endpoint_name)
+    defaults_config = endpoint_config.get("defaults", {}) or {}
+    labels_config = endpoint_config.get("labels", {}) or {}
+    visualization_config = endpoint_config.get("visualization", {}) or {}
+    timeseries_config = visualization_config.get("timeseries", {}) or {}
+
+    default_metric = defaults_config.get("metric")
+    if not default_metric:
+        raise ValueError(f"No default metric configured for endpoint '{data.endpoint_name}'")
+
+    metric_label = labels_config.get("metric", "Metric")
+    y_axis_label = labels_config.get("y_axis", metric_label)
+    entity_label = labels_config.get("entity", "Entity")
+    depth_unit = labels_config.get("depth_unit", "")
+    middle_window_days = timeseries_config.get("middle_window_days", 30)
+    right_window_hours = timeseries_config.get("right_window_hours", 24)
+
     timeseries_state = {
         "times": pd.to_datetime([]),
         "depths": np.array([]),
         "series": [],
-        "borehole_index": 0,
+        "entity_index": 0,
     }
 
     def format_depth(depth_value: float):
@@ -30,7 +47,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             return 0.0, 0.0
         return float(lats[0]), float(lons[0])
 
-    def _update_depth_selector(depths, series, borehole_index):
+    def _update_depth_selector(depths, series, entity_index):
         available = []
         for idx, values in enumerate(series):
             if np.any(np.isfinite(values)):
@@ -39,11 +56,11 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             available = list(range(len(series)))
 
         depth_selector.options = {
-            format_depth(depths[i]) if i < len(depths) else str(i): i
+            f"{format_depth(depths[i])} {depth_unit}".strip() if i < len(depths) else str(i): i
             for i in available
         }
         depth_selector.value = available
-        borehole_info.object = f"### Borehole {borehole_index}"
+        borehole_info.object = f"### {entity_label} {entity_index}"
 
     def _fetch_timeseries(lat, lon):
         start = time.perf_counter()
@@ -52,7 +69,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             group_path=data.group_path,
             lat=lat,
             lon=lon,
-            variable="rock_temp",
+            variable=default_metric,
         )
         if fig.get("status") == "error":
             raise ValueError(fig.get("reason", "Failed to load timeseries"))
@@ -60,15 +77,15 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         times = pd.to_datetime(fig.get("times", []))
         depths = np.array(fig.get("depths", []), dtype=float)
         series = [np.array(values, dtype=float) for values in fig.get("series", [])]
-        borehole_index = int(fig.get("borehole_index", 0))
+        entity_index = int(fig.get("borehole_index", 0))
 
         timeseries_state["times"] = times
         timeseries_state["depths"] = depths
         timeseries_state["series"] = series
-        timeseries_state["borehole_index"] = borehole_index
-        _update_depth_selector(depths, series, borehole_index)
+        timeseries_state["entity_index"] = entity_index
+        _update_depth_selector(depths, series, entity_index)
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
-        return borehole_index
+        return entity_index
 
     def build_timeseries_overlay(selected_depths):
         curves = []
@@ -80,12 +97,12 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             if depth_idx >= len(series):
                 continue
             depth_val = depths[depth_idx] if depth_idx < len(depths) else depth_idx
-            label = f"{format_depth(depth_val)} m"
+            label = f"{format_depth(depth_val)} {depth_unit}".strip()
             curve_df = pd.DataFrame({
                 "time": times,
-                "temperature": series[depth_idx],
+                y_axis_label: series[depth_idx],
             })
-            curves.append(hv.Curve(curve_df, "time", "temperature", label=label))
+            curves.append(hv.Curve(curve_df, "time", y_axis_label, label=label))
 
         if not curves:
             curves = [hv.Curve([])]
@@ -111,8 +128,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             start = max_t - span
         return (start, end)
 
-    mid_span = pd.Timedelta(days=30)
-    right_span = pd.Timedelta(hours=24)
+    mid_span = pd.Timedelta(days=middle_window_days)
+    right_span = pd.Timedelta(hours=right_window_hours)
 
     center_state = {
         "center": None,
@@ -188,7 +205,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             hooks = [make_xrange_hook(xlim, force_key)]
         return overlay.opts(
             responsive=True,
-            title=f"Temperature over Time (borehole {timeseries_state['borehole_index']})",
+            title=f"{metric_label} over Time ({entity_label.lower()} {timeseries_state['entity_index']})",
             tools=["hover", "xwheel_zoom", "xpan", "tap", "reset"],
             active_tools=["xwheel_zoom", "xpan"],
             xlim=xlim,
@@ -238,8 +255,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     def on_map_tap(x, y):
         if x is None or y is None:
             y, x = _default_coords()
-        borehole_index = _fetch_timeseries(lat=float(y), lon=float(x))
-        borehole_stream.event(borehole_index=borehole_index)
+        entity_index = _fetch_timeseries(lat=float(y), lon=float(x))
+        borehole_stream.event(borehole_index=entity_index)
 
     on_map_tap(None, None)
     print(f"[timing] build_timeseries_views: {time.perf_counter() - start_total:.3f}s")

@@ -34,12 +34,14 @@ hv.renderer("bokeh").theme = "dark_minimal"
 
 def build_dashboard():
     start_total = time.perf_counter()
-    endpoint_name = os.getenv("HV_DASHBOARD_ENDPOINT", "bukov_endpoint")
+    endpoint_name = os.getenv("HV_DASHBOARD_ENDPOINT")
+
+    if not endpoint_name:
+        raise ValueError("HV_DASHBOARD_ENDPOINT is required")
 
     data = load_data(
         "local",
         endpoint_name=endpoint_name,
-        group_path="bukov",
     )
 
     endpoints = data.client.get_endpoints()

@@ -11,7 +11,7 @@ def build_gcp_args(points):
             continue
 
         pixel_x = float(pt["sourceX"])
-        pixel_y = abs(float(pt["sourceY"]))   # keep same convention as your old code
+        pixel_y = abs(float(pt["sourceY"]))
         lon = float(pt["mapX"])
         lat = float(pt["mapY"])
 
@@ -20,11 +20,19 @@ def build_gcp_args(points):
 
 
 def main():
-    base_dir = Path(__file__).resolve().parent.parent / "config" / "bukov_endpoint"
-    georef_path = base_dir / "bukov_georef.json"
-    image_path = base_dir / "12p_final.png"
-    vrt_path = base_dir / "bukov_gcps.vrt"
+    if len(sys.argv) < 4:
+        raise ValueError(
+            "Usage: python prepare_gcps.py <endpoint_dir> <georef_filename> <image_filename> [output_vrt_filename]"
+        )
 
+    endpoint_dir = Path(sys.argv[1]).resolve()
+    georef_path = endpoint_dir / sys.argv[2]
+    image_path = endpoint_dir / sys.argv[3]
+    vrt_filename = sys.argv[4] if len(sys.argv) > 4 else "overlay_gcps.vrt"
+    vrt_path = endpoint_dir / vrt_filename
+
+    if not endpoint_dir.is_dir():
+        raise FileNotFoundError(f"Missing endpoint directory: {endpoint_dir}")
     if not georef_path.is_file():
         raise FileNotFoundError(f"Missing georef file: {georef_path}")
     if not image_path.is_file():
