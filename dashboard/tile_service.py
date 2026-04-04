@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 import boto3
+import yaml
 from tornado.web import RequestHandler, HTTPError
 
 ACCESS_KEY = os.getenv("ZF_S3_ACCESS_KEY")
@@ -17,11 +18,60 @@ PREFIX = os.getenv("TILE_PREFIX", "test_tiles/")
 DEFAULT_EXPIRES_IN = 300
 EXPIRY_BUFFER_SECONDS = 30
 
-# Use user cache directory or temp directory for cache file (not package directory)
-CACHE_DIR = Path(os.getenv(
-    "ZF_CACHE_DIR",
-    tempfile.gettempdir()
-))
+
+def _resolve_endpoints_path() -> Path:
+    env_path = os.getenv("ENDPOINTS_PATH")
+    if env_path:
+        return Path(env_path)
+    return Path(__file__).resolve().parent / "config" / "endpoints.yaml"
+
+
+def _cache_dir_from_endpoints() -> str | None:
+    endpoint_name = os.getenv("HV_DASHBOARD_ENDPOINT")
+    if not endpoint_name:
+        return None
+
+    endpoints_path = _resolve_endpoints_path()
+    if not endpoints_path.exists():
+        return None
+
+    try:
+        with endpoints_path.open("r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+    except Exception:
+        return None
+
+    endpoint = config.get(endpoint_name)
+    if not isinstance(endpoint, dict):
+        return None
+
+    tile_build = endpoint.get("tile_build", {})
+    if not isinstance(tile_build, dict):
+        return None
+
+    cache_dir = tile_build.get("cache_dir")
+    if not isinstance(cache_dir, str) or not cache_dir.strip():
+        return None
+
+    expanded = os.path.expandvars(os.path.expanduser(cache_dir.strip()))
+    candidate = Path(expanded)
+    if candidate.is_absolute():
+        return str(candidate)
+
+    # Relative paths are resolved against the project base dir (parent of config dir).
+    base_dir = endpoints_path.parent.parent
+    return str(base_dir / candidate)
+
+
+# Cache location precedence:
+# 1) ZF_CACHE_DIR env var
+# 2) tile_build.cache_dir in endpoints.yaml for selected endpoint
+# 3) OS temp directory
+CACHE_DIR = Path(
+    os.getenv("ZF_CACHE_DIR")
+    or _cache_dir_from_endpoints()
+    or tempfile.gettempdir()
+)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_FILE = CACHE_DIR / "tile_url_cache.json"
 

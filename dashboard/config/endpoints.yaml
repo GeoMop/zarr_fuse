@@ -59,4 +59,5 @@ bukov_endpoint:
     target_srs: "EPSG:3857"
     gcp_srs: "EPSG:4326"
     resampling: "near"
+    cache_dir: "C:/Users/fatih/Documents/GitHub/zarr_fuse/dashboard/.cache_tiles"
     add_alpha: true
