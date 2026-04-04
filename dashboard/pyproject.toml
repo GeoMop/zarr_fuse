@@ -53,7 +53,7 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/geomop/zarr_fuse"
 Repository = "https://github.com/geomop/zarr_fuse"
-Contact = "mailto:jan.brezina@tul.cz"
+Contact = "https://github.com/GeoMop/zarr_fuse/issues"
 
 [project.scripts]
 zf-dashboard = "serve_dashboard:main"
