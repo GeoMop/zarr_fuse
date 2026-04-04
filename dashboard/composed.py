@@ -1,5 +1,6 @@
 import os
 import time
+from pathlib import Path
 
 import holoviews as hv
 import panel as pn
@@ -11,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from data import load_data
+from config.dashboard_config import load_endpoints
 from map_views import build_map_view
 from multi_time_views import build_timeseries_views
 from ui import build_depth_controls, build_sidebar
@@ -41,7 +43,16 @@ def build_dashboard():
     endpoint_name = os.getenv("HV_DASHBOARD_ENDPOINT")
 
     if not endpoint_name:
-        raise ValueError("HV_DASHBOARD_ENDPOINT is required")
+        endpoints_path = Path(
+            os.getenv(
+                "ENDPOINTS_PATH",
+                str(Path(__file__).resolve().parent / "config" / "endpoints.yaml"),
+            )
+        )
+        endpoints = load_endpoints(endpoints_path)
+        if not endpoints:
+            raise ValueError(f"No endpoints configured in {endpoints_path}")
+        endpoint_name = next(iter(endpoints.keys()))
 
     data = load_data(
         "local",
