@@ -1,82 +1,178 @@
 # HoloViz Dashboard
 
+Panel + HoloViews dashboard for Zarr Fuse endpoints configured via YAML and environment variables.
 
-Panel + HoloViews dashboard for Bukov Zarr data over S3.
+## Installation
+
+### From monorepo (development)
+
+```bash
+cd zarr_fuse/dashboard
+pip install -e .
+```
+
+This installs the package in editable mode with all dependencies from `pyproject.toml`.
+
+### As standalone package
+
+```bash
+pip install zarr-fuse-dashboard
+```
+
+## Configuration
+
+The dashboard is configured via:
+1. **YAML endpoints file** (`endpoints.yaml`) - defines data sources
+2. **Environment variables** - runtime config and S3 credentials
+
+### Required Environment Variables
+
+```bash
+# Required: Which endpoint to load from endpoints.yaml
+HV_DASHBOARD_ENDPOINT=bukov_endpoint
+
+# Optional: Path to your endpoints.yaml file
+# Default: packaged config/endpoints.yaml
+ENDPOINTS_PATH=/path/to/your/endpoints.yaml
+
+# S3 credentials (if using S3 data sources)
+ZF_S3_ACCESS_KEY=your_access_key
+ZF_S3_SECRET_KEY=your_secret_key
+ZF_S3_ENDPOINT_URL=https://s3.example.com  # optional
+
+# Optional: Customize server binding
+SERVE_BIND=0.0.0.0        # default: 0.0.0.0
+SERVE_PORT=5006           # default: 5006
+
+# Optional: Tile service configuration
+TILE_BUCKET=my-bucket           # default: app-databuk-test-service
+TILE_PREFIX=my_tiles/           # default: test_tiles/
+ZF_CACHE_DIR=/tmp/zf_tiles      # default: system temp dir
+```
+
+### Quick Start (Using default Bukov config)
+
+From dashboard folder (monorepo):
+```bash
+# Create .env with your S3 credentials
+cp .env.example .env
+# Edit .env and set ZF_S3_* values
+
+# Set which endpoint to use
+export HV_DASHBOARD_ENDPOINT=bukov_endpoint
+
+# Start dashboard
+zf-dashboard
+```
+
+**On Windows:**
+```powershell
+# Use the PowerShell helper script
+.\scripts\start_dashboard.ps1
+```
+
+## Using Custom Data Sources
+
+For a new project with your own data, provide your own `endpoints.yaml`:
+
+```bash
+# Point to your config
+export ENDPOINTS_PATH=/path/to/my_project/config/endpoints.yaml
+export HV_DASHBOARD_ENDPOINT=my_endpoint
+
+# Start dashboard
+zf-dashboard
+```
+
+Your `endpoints.yaml` should follow this structure:
+
+```yaml
+my_endpoint:
+  description: "My data source"
+  version: "1.0.0"
+  
+  source:
+    type: "s3"
+    store_type: "zarr"
+    uri: "s3://my-bucket/my-store.zarr"
+  
+  schema:
+    file: "schemas/my_schema.yaml"
+    fields:
+      lat: "latitude"
+      lon: "longitude"
+      time: "time"
+      depth: "depth"
+      entity: "station"
+  
+  defaults:
+    metric: "temperature"
+    group_path: "/"
+  
+  labels:
+    metric: "Temperature (°C)"
+    depth_unit: "meters"
+```
 
 ## Environment Variables (.env)
 
-The dashboard supports configuration via a `.env` file in this directory. Copy `.env.example` to `.env` and fill in your S3 credentials and endpoint:
+You can also use a `.env` file in your working directory instead of exporting env vars:
 
-```
+```bash
 cp .env.example .env
 # Edit .env and set your values
 ```
 
-The dashboard uses [python-dotenv](https://pypi.org/project/python-dotenv/) to load these variables automatically.
+The dashboard uses [python-dotenv](https://pypi.org/project/python-dotenv/) to auto-load these at startup.
 
-## Quick start
+## Configuration Files
 
-From this folder:
+- `config/endpoints.yaml` - Endpoint definitions (packaged default)
+- `config/dashboard_config.py` - Config parsing and validation logic
+- `schemas/` - Zarr schema files referenced in endpoints.yaml
+- `.env.example` - Template for environment variables
 
-```
-./setup_env
-panel serve app.py --show
-```
+## Building Tiles (Optional)
 
-## PowerShell helper
+For map overlay support, tiles can be pre-built:
 
-Use scripts/start_dashboard.ps1 to start the dashboard on Windows.
-
-
-## S3 configuration
-
-The dashboard reads S3 settings from the endpoint config and the following environment variables (set in your `.env` file):
-
-- `ZF_S3_ACCESS_KEY`
-- `ZF_S3_SECRET_KEY`
-- `ZF_S3_ENDPOINT_URL` (optional if schema already includes it)
-
-Endpoint config: `dashboard/config/endpoints.yaml`
-Schema files: `dashboard/schemas/*.yaml`
-
-Set the endpoint (Windows):
-```
-set HV_DASHBOARD_ENDPOINT=bukov_endpoint
+```yaml
+tile_build:
+  enabled: true
+  source_image: "my_overlay.png"
+  georef_file: "my_georef.json"
+  tiles_dir: "config/tiles"
 ```
 
-## Bukov overlay
+See `tile_pyramid_README.md` for details.
 
-The Bukov map overlay is loaded from dashboard/config/bukov_endpoint.
-Detailed information can be found here: 
-- dashboard\tile_pyramid_README.md
+## File Organization
 
-You can override or disable it with:
-- HV_OVERLAY_GEOREF: path to a georef JSON file
-- HV_OVERLAY_IMAGE: path to a PNG image
-- HV_OVERLAY_MAX_PIXELS: optional max pixel count before downscaling (default 25,000,000)
-- HV_OVERLAY_ENABLED: set to 0/false/no to disable the overlay
+- `app.py` - Main Panel app (called by `zf-dashboard`)
+- `composed.py` - Dashboard layout and widget wiring
+- `data.py` - Zarr Fuse data loading helpers
+- `map_views.py` - Geographic map visualizations
+- `multi_time_views.py` - Time-series plots
+- `ui.py` - Sidebar controls and depth selector
+- `tile_service.py` - S3 tile URL presigning (Tornado handler)
+- `serve_dashboard.py` - Entrypoint for console script
+- `config/dashboard_config.py` - Configuration parsing
+- `api/main.py` - FastAPI application (experimental)
 
-## What setup_env does
+## Requirements
 
-- Creates a local venv in ./venv
-- Installs requirements from requirements.txt
-- Registers a Jupyter kernel named "HoloViz Dashboard"
+- Python >= 3.11
+- GeoViews uses Cartopy/Proj/GEOS which may require system packages on some systems
+- On Windows, ensure you have binary wheel support for geospatial packages
+- If Cartopy install fails, verify you're using a Python distribution that supports wheels
 
+## Troubleshooting
 
-## Requirements notes
+### "ENDPOINTS_PATH not found"
+Set `ENDPOINTS_PATH` env var pointing to your `endpoints.yaml` file.
 
-- The dashboard requires `python-dotenv` (now included in requirements.txt) for .env support.
-- GeoViews uses Cartopy/Proj/GEOS. On Windows, these may require additional system packages.
-- If Cartopy install fails, verify that your Python distribution can install binary wheels.
-- The requirements install the local zarr_fuse package from the repo root.
+### "HV_DASHBOARD_ENDPOINT is required"
+Set `HV_DASHBOARD_ENDPOINT` env var to match an endpoint name in your `endpoints.yaml`.
 
-## Files
-
-- app.py: Panel app entrypoint
-- data.py: Zarr Fuse data loading helpers
-- map_views.py: Map view builder
-- multi_time_views.py: Multi-scale time-series views
-- composed.py: Dashboard composition and wiring
-- ui.py: Sidebar and depth controls
-- requirements.txt: Python dependencies
-- setup_env: Bash setup helper
+### S3 connection fails
+Verify `ZF_S3_ACCESS_KEY`, `ZF_S3_SECRET_KEY`, and `ZF_S3_ENDPOINT_URL` are set correctly.

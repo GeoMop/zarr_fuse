@@ -5,6 +5,10 @@ import holoviews as hv
 import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
 from holoviews import streams
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if present
+load_dotenv()
 
 from data import load_data
 from map_views import build_map_view

@@ -1,5 +1,9 @@
-# Local zarr_fuse package (from repo root)
--e .
+# This file is for development/monorepo use.
+# For standalone installation, use: pip install zarr-fuse-dashboard
+# 
+# If using from monorepo root:
+# - From repo root: pip install -e ./dashboard
+# - Dependencies will be resolved from pyproject.toml
 
 # Core dashboard stack
 panel>=1.4,<2.0
@@ -26,3 +30,9 @@ pyshp>=2.3,<3.0
 # Optional but recommended: faster geometry operations / spatial indexing
 pygeos; python_version < "3.11"
 rtree>=1.0,<2.0
+
+# zarr_fuse package (use local monorepo version)
+zarr-fuse>=0.2.0
+
+# Environment loading
+python-dotenv>=1.0,<2.0

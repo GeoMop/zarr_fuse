@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import tempfile
 from pathlib import Path
 
 import boto3
@@ -10,12 +11,19 @@ ACCESS_KEY = os.getenv("ZF_S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("ZF_S3_SECRET_KEY")
 ENDPOINT_URL = os.getenv("ZF_S3_ENDPOINT_URL")
 
-BUCKET_NAME = "app-databuk-test-service"
-PREFIX = "test_tiles/"
+# Externalize bucket/prefix from environment or defaults
+BUCKET_NAME = os.getenv("TILE_BUCKET", "app-databuk-test-service")
+PREFIX = os.getenv("TILE_PREFIX", "test_tiles/")
 DEFAULT_EXPIRES_IN = 300
 EXPIRY_BUFFER_SECONDS = 30
 
-CACHE_FILE = Path(__file__).resolve().parent / "tile_url_cache.json"
+# Use user cache directory or temp directory for cache file (not package directory)
+CACHE_DIR = Path(os.getenv(
+    "ZF_CACHE_DIR",
+    tempfile.gettempdir()
+))
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+CACHE_FILE = CACHE_DIR / "tile_url_cache.json"
 
 s3 = boto3.client(
     "s3",

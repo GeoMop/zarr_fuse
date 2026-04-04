@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 import zarr_fuse as zf
+import os
 
 
 def _timer_log(message: str, duration: float) -> None:
@@ -18,11 +19,7 @@ def _timer_log(message: str, duration: float) -> None:
 # Set CONFIG_ROOT to the dashboard directory
 CONFIG_ROOT = Path(__file__).resolve().parent
 
-# Update sys.path if needed (for config import)
-CONFIG_CONFIG_PATH = CONFIG_ROOT / "config"
-if str(CONFIG_CONFIG_PATH) not in sys.path:
-    sys.path.insert(0, str(CONFIG_CONFIG_PATH))
-
+# Import config directly (no sys.path manipulation needed with proper package structure)
 from config.dashboard_config import get_endpoint_config, load_endpoints
 
 
@@ -248,14 +245,27 @@ def load_data(source: str, **kwargs) -> DashboardData:
     if source not in {"local", "direct", "zarr_fuse"}:
         raise NotImplementedError("Only local zarr_fuse data sources are supported.")
 
+    # Support ENDPOINTS_PATH environment variable for external project configuration
     endpoints_path = kwargs.pop(
         "endpoints_path",
-        CONFIG_ROOT / "config" / "endpoints.yaml",
+        os.getenv(
+            "ENDPOINTS_PATH",
+            str(CONFIG_ROOT / "config" / "endpoints.yaml")
+        ),
     )
+    endpoints_path = Path(endpoints_path)
+    
     endpoint_name = kwargs.pop("endpoint_name")
+    
+    if not endpoints_path.exists():
+        raise FileNotFoundError(
+            f"Endpoints file not found: {endpoints_path}. "
+            "Set ENDPOINTS_PATH environment variable to point to your endpoints.yaml"
+        )
+    
     client = LocalClient(endpoints_path)
 
-    endpoint = get_endpoint_config(Path(endpoints_path), endpoint_name)
+    endpoint = get_endpoint_config(endpoints_path, endpoint_name)
     group_path = kwargs.pop("group_path", None) or endpoint.defaults.group_path or "/"
 
     return DashboardData(
