@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "Reusable HoloViz dashboard for Zarr Fuse endpoints configured via YAML and environment variables."
 readme = "README.md"
 authors = [
-  { name = "Mehmet Fatih Akbaş", email = "fatihakbas733@gmail.com" }
+  { name = "Mehmet Fatih Akbas", email = "fatihakbas733@gmail.com" },
+  { name = "Jan Brezina", email = "jan.brezina@tul.cz" }
 ]
 license = { text = "BSD-3-Clause" }
 keywords = ["dashboard", "holoviz", "panel", "zarr", "fastapi"]
