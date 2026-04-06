@@ -25,9 +25,10 @@ def process_payload(
         username=username,
         node_path=node_path,
         dataframe_row=dataframe_row,
+        config_dir=app_config.config_dir,
     )
 
-    err = save_data(
+    save_data(
         app_config=app_config,
         metadata=metadata,
         payload=payload,

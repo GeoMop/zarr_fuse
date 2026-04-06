@@ -11,6 +11,7 @@ from ..data_types import DataObject
 from ..models import MetadataModel
 from .extractor import apply_extractor
 from .content_type import classify_content_type, SupportedContentType
+from ..app_config import AppConfig
 
 LOG = logging.getLogger(__name__)
 
@@ -32,10 +33,18 @@ def _read_grib_from_bytes(payload: bytes, is_bz2: bool) -> xr.Dataset:
         raise
 
 
-def read_df_from_bytes(payload: bytes, metadata: MetadataModel) -> DataObject:
+def read_df_from_bytes(
+    payload: bytes,
+    metadata: MetadataModel,
+    fallback_config_dir: Path | None = None,
+) -> DataObject:
     try:
         if metadata.extract_fn and metadata.fn_module:
-            return apply_extractor(payload=payload, metadata=metadata)
+            return apply_extractor(
+                payload=payload,
+                metadata=metadata,
+                fallback_config_dir=fallback_config_dir,
+            )
 
         ct = classify_content_type(metadata.content_type)
         if ct is None:
