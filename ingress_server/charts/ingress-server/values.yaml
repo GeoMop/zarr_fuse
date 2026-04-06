@@ -23,12 +23,15 @@ deployment:
   # -- Number of replicas
   replicaCount: 1
   # -- Queue configuration
+  # @default -- ~
   queue:
     # -- Path to the queue directory
     path: /var/zarr_fuse
   # -- Deployment secrets
+  # @default -- ~
   secrets:
     # -- S3 credentials
+    # @default -- ~
     s3:
       # -- S3 store URL (e.g., s3://bucket-name/path/to/store.zarr)
       # -- Replaced during deploy
@@ -43,11 +46,27 @@ deployment:
       # -- Replaced during deploy
       secretKey: ""
     # -- Basic authentication configuration
+    # @default -- ~
     basicAuth:
       # -- JSON string of users for basic auth
       # -- Example: '{"user1": "password1", "user2": "password2"}'
       # -- Replaced during deploy
       usersJson: ""
+    # -- Active scrapper failure notification configuration
+    # @default -- ~
+    smtp:
+      # -- Comma-separated list of email addresses to notify when an active scrapper fails (e.g., "user1@example.com,user2@example.com")
+      notifyTo: ""
+      # -- SMTP host for sending notifications
+      host: smtp.gmail.com
+      # -- SMTP port for sending notifications
+      port: 587
+      # -- SMTP email address to send notifications from
+      from: ""
+      # -- SMTP username for authentication
+      user: ""
+      # -- SMTP password for authentication
+      password: ""
 
 persistence:
   enabled: true
