@@ -703,10 +703,11 @@ class Node:
 
         # --- Coordinates ---
         for cname, c_schema in schema.COORDS.items():
-            c_schema.validate_ds_coord(ds.coords.get(cname, None), path_str, self.logger)
             if cname not in ds.coords:
-                self.logger.error(
-                    KeyError(f"Source dataset is missing coordinate '{cname}'."))
+                raise ValueError(
+                    f"Dataset for node '{path_str}' is missing coordinate '{cname}' "
+                    f"required by schema."
+                )
 
             coord = ds.coords[cname]
             # In your own code you always create coords as 1D with dim == name
@@ -714,6 +715,11 @@ class Node:
                 raise ValueError(
                     f"Coordinate '{cname}' for node '{path_str}' must be 1D with "
                     f"dimension '{cname}', got dims={coord.dims}."
+                )
+            if coord.isnull().any():
+                raise ValueError(
+                    f"Coordinate '{cname}' for node '{path_str}' contains NaN/NaT "
+                    f"values, which are not allowed."
                 )
 
         # --- Variables ---

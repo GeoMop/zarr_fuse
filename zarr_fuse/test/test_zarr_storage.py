@@ -112,6 +112,65 @@ def test_open_store(smart_tmp_path, options):
     assert "__structure__" in ds.attrs
 
 
+def test_update_from_ds_writes_schema_compatible_dataset():
+    schema = zf.schema.deserialize(inputs_dir / "schema_open_store_tst.yaml")
+
+    class DummyNode:
+        _validate_ds_against_schema = zf.Node._validate_ds_against_schema
+        update_from_ds = zf.Node.update_from_ds
+
+        def __init__(self, ds_schema):
+            self._schema = ds_schema
+            self.group_path = ""
+            self.logger = logging.getLogger("test_update_from_ds")
+            self.merged = None
+
+        @property
+        def schema(self):
+            return self._schema
+
+        def merge_ds(self, ds_update):
+            self.merged = ds_update
+            return ds_update, {}
+
+    node = DummyNode(schema.ds)
+
+    ds = xr.Dataset(
+        data_vars={
+            "temperature": (("time",), np.array([280.0, 281.0])),
+        },
+        coords={
+            "time": np.array([1000, 1001]),
+        },
+    )
+
+    written_ds = node.update_from_ds(ds)
+
+    assert node.merged is ds
+    npt.assert_array_equal(written_ds.coords["time"].values, np.array([1000, 1001]))
+    npt.assert_array_equal(written_ds["temperature"].values, np.array([280.0, 281.0]))
+
+    ds_bad_dims = xr.Dataset(
+        data_vars={
+            "temperature": (("sample",), np.array([280.0, 281.0])),
+        },
+        coords={
+            "time": ("sample", np.array([1000, 1001])),
+        },
+    )
+    with pytest.raises(ValueError, match=r"Coordinate 'time'.*must be 1D with dimension 'time'"):
+        node.update_from_ds(ds_bad_dims)
+
+    ds_bad_coord_values = xr.Dataset(
+        data_vars={
+            "temperature": (("time",), np.array([280.0, 281.0])),
+        },
+        coords={
+            "time": np.array([1000.0, np.nan]),
+        },
+    )
+    with pytest.raises(ValueError, match=r"Coordinate 'time'.*contains NaN/NaT values"):
+        node.update_from_ds(ds_bad_coord_values)
 
 
 def sync_remove_store(storage_options, path):
