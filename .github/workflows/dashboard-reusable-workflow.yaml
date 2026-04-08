@@ -175,6 +175,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Decode kubeconfig
         run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
+      - name: Ensure that the namespace exists
+        run: kubectl create namespace --dry-run=client -o yaml ${{ inputs.namespace }} | kubectl apply -f -
       - name: Set context
         run: kubectl config set-context --current --namespace=${{ inputs.namespace }}
       - name: Deploy app
