@@ -53,6 +53,7 @@ backend:
 frontend:
   name: holoviz-frontend
   replicaCount: 1
+  endpointName: bukov_endpoint
   image:
     name: jbrezmorf/zarr-fuse-holoviz-frontend
     tag: latest

@@ -34,6 +34,8 @@ spec:
           env:
             - name: HV_API_URL
               value: "http://{{ .Values.backend.name }}:{{ .Values.backend.service.internalPort.number }}"
+            - name: HV_DASHBOARD_ENDPOINT
+              value: {{ .Values.frontend.endpointName | quote }}
             - name: HOME
               value: /home
             - name: MPLCONFIGDIR
