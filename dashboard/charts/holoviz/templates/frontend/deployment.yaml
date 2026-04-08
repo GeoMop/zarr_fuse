@@ -31,6 +31,9 @@ spec:
           ports:
             - name: {{ .Values.frontend.service.internalPort.name | quote }}
               containerPort: {{ .Values.frontend.service.internalPort.number | int }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.backend.name }}-secrets
           env:
             - name: HV_API_URL
               value: "http://{{ .Values.backend.name }}:{{ .Values.backend.service.internalPort.number }}"
