@@ -16,7 +16,8 @@ from bokeh.util.serialization import make_globally_unique_id
 from holoviews import streams
 
 from data import load_data
-from plots import build_map_view, build_timeseries_views
+from map_views import build_map_view
+from multi_time_views import build_timeseries_views
 from ui import build_depth_controls, build_sidebar
 
 # ============================================================================
