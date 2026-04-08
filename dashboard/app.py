@@ -248,7 +248,6 @@ var config = {
     }]
 };
 
-
 // Initialize GoldenLayout
 {%% if context == 'notebook' %%}
     var myLayout = new GoldenLayout( config, '#' + '{{slicer_id}}' );
