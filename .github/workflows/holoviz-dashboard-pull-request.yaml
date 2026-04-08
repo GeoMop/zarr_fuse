@@ -6,6 +6,7 @@ on:
       - "MF_HoloViz_integration"
     paths:
       - dashboard/**
+      - .github/workflows/**
   workflow_dispatch:
 
 jobs:
