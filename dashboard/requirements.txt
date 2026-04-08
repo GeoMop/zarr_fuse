@@ -31,8 +31,8 @@ pyshp>=2.3,<3.0
 pygeos; python_version < "3.11"
 rtree>=1.0,<2.0
 
-# zarr_fuse package (use local monorepo version)
-zarr-fuse>=0.2.0
+# zarr_fuse package from the monorepo root
+-e ..
 
 # Environment loading
 python-dotenv>=1.0,<2.0
