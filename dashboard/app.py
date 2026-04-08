@@ -47,15 +47,13 @@ hv.renderer("bokeh").theme = "dark_minimal"
 # DATA + UI + PLOTS
 # ============================================================================
 
-API_URL = os.getenv("HV_API_URL", "http://localhost:8000")
 ENDPOINT_NAME = os.getenv("HV_DASHBOARD_ENDPOINT")
 
 if not ENDPOINT_NAME:
     raise ValueError("HV_DASHBOARD_ENDPOINT is required")
 
 data = load_data(
-    "api",
-    api_url=API_URL,
+    "local",
     endpoint_name=ENDPOINT_NAME,
 )
 
