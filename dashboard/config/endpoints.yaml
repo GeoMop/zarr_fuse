@@ -23,11 +23,10 @@ bukov_endpoint:
 
   visualization:
     map:
-      center_lat: 50.0
-      center_lon: 14.0
-      zoom: 8
+      center_lat: 49.459
+      center_lon: 16.225
+      zoom: 14
       title: "Geographic Data View"
-      cmap: "viridis"
       point_size: 10
       alpha: 0.8
     timeseries:

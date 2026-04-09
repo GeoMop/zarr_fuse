@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import time
 
@@ -10,6 +11,20 @@ import pandas as pd
 from geoviews import tile_sources as gvts
 
 logger = logging.getLogger(__name__)
+
+
+def _lonlat_to_web_mercator(lon: float, lat: float) -> tuple[float, float]:
+    # Clamp latitude to Web Mercator's valid range.
+    lat = max(min(lat, 85.05112878), -85.05112878)
+    r = 6378137.0
+    x = r * math.radians(lon)
+    y = r * math.log(math.tan(math.pi / 4.0 + math.radians(lat) / 2.0))
+    return x, y
+
+
+def _zoom_to_span_meters(zoom: int) -> float:
+    world_width_m = 40075016.68557849
+    return world_width_m / (2 ** zoom)
 
 
 def _load_overlay(endpoint_config):
@@ -67,31 +82,53 @@ def build_map_view(data, tap_stream):
         map_df, kdims=["lon", "lat"], vdims=["value"], crs=ccrs.PlateCarree()
     ).opts(
         color="value",
-        cmap=map_config["cmap"],
+        cmap="viridis",
         size=map_config["point_size"],
         alpha=map_config["alpha"],
         line_color="white",
         line_width=1.5,
         tools=["hover", "tap"],
-        colorbar=True,
+        colorbar=False,
         responsive=True,
         title=map_config["title"],
     )
 
     tap_stream.source = map_points
+
+    center_lat = map_config["center_lat"]
+    center_lon = map_config["center_lon"]
+    zoom = int(map_config["zoom"])
+    center_x, center_y = _lonlat_to_web_mercator(center_lon, center_lat)
+    span_m = _zoom_to_span_meters(zoom)
+    half_span = span_m / 2.0
+    xlim = (center_x - half_span, center_x + half_span)
+    ylim = (center_y - half_span, center_y + half_span)
+
     map_state = {
         "lats": lats,
         "lons": lons,
-        "center_lat": map_config["center_lat"],
-        "center_lon": map_config["center_lon"],
-        "zoom": map_config["zoom"],
+        "center_lat": center_lat,
+        "center_lon": center_lon,
+        "zoom": zoom,
     }
 
     if overlay_layer is not None:
-        result = base_map * overlay_layer * map_points, map_state
+        map_view = (base_map * overlay_layer * map_points).opts(
+            xlim=xlim,
+            ylim=ylim,
+            framewise=True,
+            axiswise=True,
+        )
+        result = map_view, map_state
         print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
         return result
 
-    result = base_map * map_points, map_state
+    map_view = (base_map * map_points).opts(
+        xlim=xlim,
+        ylim=ylim,
+        framewise=True,
+        axiswise=True,
+    )
+    result = map_view, map_state
     print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
     return result

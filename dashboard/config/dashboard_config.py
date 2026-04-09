@@ -49,7 +49,6 @@ class MapConfig:
     center_lon: Optional[float] = None
     zoom: Optional[int] = None
     title: Optional[str] = None
-    cmap: Optional[str] = None
     point_size: Optional[int] = None
     alpha: Optional[float] = None
 
@@ -208,7 +207,6 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
                 center_lon=map_data["center_lon"],
                 zoom=map_data["zoom"],
                 title=map_data["title"],
-                cmap=map_data["cmap"],
                 point_size=map_data["point_size"],
                 alpha=map_data["alpha"],
             ),
