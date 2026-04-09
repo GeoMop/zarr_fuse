@@ -11,6 +11,7 @@ class SourceConfig:
     type: str
     store_type: str
     uri: str
+    schema_path: Optional[str] = None
 
 
 @dataclass
@@ -152,8 +153,9 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any]) ->
         if not source_data.get(field_name):
             raise ValueError(f"Endpoint '{endpoint_name}' is missing source.{field_name}")
 
-    if not schema_data.get("file"):
-        raise ValueError(f"Endpoint '{endpoint_name}' is missing schema.file")
+    schema_file = source_data.get("schema_path") or schema_data.get("file")
+    if not schema_file:
+        raise ValueError(f"Endpoint '{endpoint_name}' is missing source.schema_path")
 
     return EndpointConfig(
         name=endpoint_name,
@@ -164,9 +166,10 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any]) ->
             type=source_data["type"],
             store_type=source_data["store_type"],
             uri=source_data["uri"],
+            schema_path=schema_file,
         ),
         schema=SchemaConfig(
-            file=schema_data["file"],
+            file=schema_file,
             fields=SchemaFieldsConfig(
                 lat=schema_fields_data.get("lat"),
                 lon=schema_fields_data.get("lon"),
