@@ -18,7 +18,7 @@ bukov_endpoint:
       entity: "borehole"
 
   defaults:
-    metric: "rock_temp"
+    display_variable: "rock_temp"
     group_path: "bukov"
 
   labels:

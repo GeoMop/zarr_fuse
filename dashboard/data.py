@@ -115,7 +115,7 @@ class LocalClient:
         endpoint = self._endpoint_config(endpoint_name)
         fields = endpoint.schema.fields
 
-        variable = variable or endpoint.defaults.metric
+        variable = variable or endpoint.defaults.display_variable
         lat_field = fields.lat or "latitude"
         lon_field = fields.lon or "longitude"
         time_field = fields.time or "date_time"
@@ -123,7 +123,7 @@ class LocalClient:
 
         if not variable:
             _timer_log("get_map_data failed", time.perf_counter() - start)
-            return {"status": "error", "reason": "No default metric configured"}
+            return {"status": "error", "reason": "No default display variable configured"}
 
         node = self._get_group(endpoint_name, group_path)
         ds = node.dataset
@@ -169,7 +169,7 @@ class LocalClient:
         endpoint = self._endpoint_config(endpoint_name)
         fields = endpoint.schema.fields
 
-        variable = variable or endpoint.defaults.metric
+        variable = variable or endpoint.defaults.display_variable
         lat_field = fields.lat or "latitude"
         lon_field = fields.lon or "longitude"
         time_field = fields.time or "date_time"
@@ -178,7 +178,7 @@ class LocalClient:
 
         if not variable:
             _timer_log("get_timeseries_data failed", time.perf_counter() - start)
-            return {"status": "error", "reason": "No default metric configured"}
+            return {"status": "error", "reason": "No default display variable configured"}
 
         node = self._get_group(endpoint_name, group_path)
         ds = node.dataset

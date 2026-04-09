@@ -14,9 +14,9 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     visualization_config = endpoint_config.get("visualization", {}) or {}
     timeseries_config = visualization_config.get("timeseries", {}) or {}
 
-    default_metric = defaults_config.get("metric")
-    if not default_metric:
-        raise ValueError(f"No default metric configured for endpoint '{data.endpoint_name}'")
+    default_display_variable = defaults_config.get("display_variable")
+    if not default_display_variable:
+        raise ValueError(f"No default display variable configured for endpoint '{data.endpoint_name}'")
 
     metric_label = labels_config.get("metric", "Metric")
     y_axis_label = labels_config.get("y_axis", metric_label)
@@ -69,7 +69,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             group_path=data.group_path,
             lat=lat,
             lon=lon,
-            variable=default_metric,
+            variable=default_display_variable,
         )
         if fig.get("status") == "error":
             raise ValueError(fig.get("reason", "Failed to load timeseries"))

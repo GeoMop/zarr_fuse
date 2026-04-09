@@ -31,7 +31,7 @@ class SchemaConfig:
 
 @dataclass
 class DefaultsConfig:
-    metric: Optional[str] = None
+    display_variable: Optional[str] = None
     group_path: Optional[str] = None
 
 
@@ -179,7 +179,7 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any]) ->
             ),
         ),
         defaults=DefaultsConfig(
-            metric=defaults_data.get("metric"),
+            display_variable=defaults_data.get("display_variable"),
             group_path=defaults_data.get("group_path"),
         ),
         labels=LabelsConfig(

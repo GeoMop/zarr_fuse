@@ -44,14 +44,14 @@ def build_map_view(data, tap_stream):
 
     overlay_layer = _load_overlay(endpoint_config)
 
-    default_metric = defaults_config.get("metric")
-    if not default_metric:
-        raise ValueError(f"No default metric configured for endpoint '{data.endpoint_name}'")
+    default_display_variable = defaults_config.get("display_variable")
+    if not default_display_variable:
+        raise ValueError(f"No default display variable configured for endpoint '{data.endpoint_name}'")
 
     fig = data.client.get_map_data(
         data.endpoint_name,
         group_path=data.group_path,
-        variable=default_metric,
+        variable=default_display_variable,
         time_index=0,
         depth_index=0,
     )
