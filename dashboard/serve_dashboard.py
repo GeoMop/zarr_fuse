@@ -20,12 +20,18 @@ def main() -> None:
     # Read configuration from environment variables
     bind_address = os.getenv("SERVE_BIND", "0.0.0.0")
     bind_port = int(os.getenv("SERVE_PORT", "5006"))
+    allow_websocket_origin = [
+        origin.strip()
+        for origin in os.getenv("BOKEH_ALLOW_WS_ORIGIN", "localhost:5006").split(",")
+        if origin.strip()
+    ]
     
     pn.serve(
         {"/": build_dashboard, "/app": build_dashboard},
         address=bind_address,
         port=bind_port,
         show=False,
+        allow_websocket_origin=allow_websocket_origin,
         extra_patterns=ROUTES,
     )
 

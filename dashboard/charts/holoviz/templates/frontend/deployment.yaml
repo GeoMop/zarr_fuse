@@ -39,6 +39,8 @@ spec:
               value: "http://{{ .Values.backend.name }}:{{ .Values.backend.service.internalPort.number }}"
             - name: HV_DASHBOARD_ENDPOINT
               value: {{ .Values.frontend.endpointName | quote }}
+            - name: BOKEH_ALLOW_WS_ORIGIN
+              value: {{ printf "%s.dyn.cloud.e-infra.cz" (printf "zarr-fuse-%s" .Release.Name) | quote }}
             - name: ZF_CACHE_DIR
               value: {{ .Values.frontend.cacheDir | quote }}
             - name: HOME
