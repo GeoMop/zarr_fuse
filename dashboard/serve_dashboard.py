@@ -22,7 +22,7 @@ def main() -> None:
     bind_port = int(os.getenv("SERVE_PORT", "5006"))
     
     pn.serve(
-        {"/": build_dashboard},
+        {"/": build_dashboard, "/app": build_dashboard},
         address=bind_address,
         port=bind_port,
         show=False,
