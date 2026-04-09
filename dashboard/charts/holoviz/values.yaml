@@ -54,6 +54,7 @@ frontend:
   name: holoviz-frontend
   replicaCount: 1
   endpointName: bukov_endpoint
+  cacheDir: /tmp/zf_tiles
   image:
     name: jbrezmorf/zarr-fuse-holoviz-frontend
     tag: latest

@@ -39,6 +39,8 @@ spec:
               value: "http://{{ .Values.backend.name }}:{{ .Values.backend.service.internalPort.number }}"
             - name: HV_DASHBOARD_ENDPOINT
               value: {{ .Values.frontend.endpointName | quote }}
+            - name: ZF_CACHE_DIR
+              value: {{ .Values.frontend.cacheDir | quote }}
             - name: HOME
               value: /home
             - name: MPLCONFIGDIR
