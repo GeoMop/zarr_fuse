@@ -19,7 +19,7 @@ class SchemaFieldsConfig:
     lat: Optional[str] = None
     lon: Optional[str] = None
     time: Optional[str] = None
-    depth: Optional[str] = None
+    vertical: Optional[str] = None
     entity: Optional[str] = None
 
 
@@ -132,7 +132,7 @@ def _process_environment_variables(data: Any) -> Any:
 
 def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any]) -> EndpointConfig:
     source_data = endpoint_data.get("source")
-    schema_data = endpoint_data.get("schema")
+    schema_data = endpoint_data.get("variable_map")
     schema_fields_data = schema_data.get("fields", {}) if isinstance(schema_data, dict) else {}
     defaults_data = endpoint_data.get("defaults", {})
     labels_data = endpoint_data.get("labels", {})
@@ -146,7 +146,7 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any]) ->
         raise ValueError(f"Endpoint '{endpoint_name}' is missing required 'source' block")
 
     if not isinstance(schema_data, dict):
-        raise ValueError(f"Endpoint '{endpoint_name}' is missing required 'schema' block")
+        raise ValueError(f"Endpoint '{endpoint_name}' is missing required 'variable_map' block")
 
     required_source_fields = ["type", "store_type", "uri"]
     for field_name in required_source_fields:
@@ -174,7 +174,7 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any]) ->
                 lat=schema_fields_data.get("lat"),
                 lon=schema_fields_data.get("lon"),
                 time=schema_fields_data.get("time"),
-                depth=schema_fields_data.get("depth"),
+                vertical=schema_fields_data.get("vertical"),
                 entity=schema_fields_data.get("entity"),
             ),
         ),

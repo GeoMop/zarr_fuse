@@ -119,7 +119,7 @@ class LocalClient:
         lat_field = fields.lat or "latitude"
         lon_field = fields.lon or "longitude"
         time_field = fields.time or "date_time"
-        depth_field = fields.depth or "depth"
+        depth_field = fields.vertical or "depth"
 
         if not variable:
             _timer_log("get_map_data failed", time.perf_counter() - start)
@@ -173,7 +173,7 @@ class LocalClient:
         lat_field = fields.lat or "latitude"
         lon_field = fields.lon or "longitude"
         time_field = fields.time or "date_time"
-        depth_field = fields.depth or "depth"
+        depth_field = fields.vertical or "depth"
         entity_field = fields.entity or "borehole"
 
         if not variable:

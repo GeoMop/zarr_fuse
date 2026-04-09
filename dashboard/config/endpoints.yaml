@@ -9,12 +9,12 @@ bukov_endpoint:
     uri: "s3://bukov/store_latlon_2024.zarr"
     schema_path: "schemas/bukov_schema.yaml"
 
-  schema:
+  variable_map:
     fields:
       lat: "latitude"
       lon: "longitude"
       time: "date_time"
-      depth: "depth"
+      vertical: "depth"
       entity: "borehole"
 
   defaults:
