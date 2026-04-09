@@ -45,11 +45,16 @@ def _cache_dir_from_endpoints() -> str | None:
     if not isinstance(endpoint, dict):
         return None
 
-    tile_build = endpoint.get("tile_build", {})
-    if not isinstance(tile_build, dict):
-        return None
+    visualization = endpoint.get("visualization", {})
+    overlay = visualization.get("overlay", {}) if isinstance(visualization, dict) else {}
+    cache_dir = overlay.get("cache_dir") if isinstance(overlay, dict) else None
 
-    cache_dir = tile_build.get("cache_dir")
+    # Backward compatibility for older endpoint configs.
+    if not isinstance(cache_dir, str) or not cache_dir.strip():
+        tile_build = endpoint.get("tile_build", {})
+        if isinstance(tile_build, dict):
+            cache_dir = tile_build.get("cache_dir")
+
     if not isinstance(cache_dir, str) or not cache_dir.strip():
         return None
 
@@ -65,7 +70,7 @@ def _cache_dir_from_endpoints() -> str | None:
 
 # Cache location precedence:
 # 1) ZF_CACHE_DIR env var
-# 2) tile_build.cache_dir in endpoints.yaml for selected endpoint
+# 2) visualization.overlay.cache_dir in endpoints.yaml for selected endpoint
 # 3) OS temp directory
 CACHE_DIR = Path(
     os.getenv("ZF_CACHE_DIR")

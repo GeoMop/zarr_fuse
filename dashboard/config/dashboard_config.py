@@ -62,8 +62,6 @@ class TimeSeriesConfig:
 @dataclass
 class OverlayConfig:
     enabled: bool = False
-    image_path: Optional[str] = None
-    georef_path: Optional[str] = None
     tile_url: Optional[str] = None
 
 
@@ -216,8 +214,6 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
             ),
             overlay=OverlayConfig(
                 enabled=overlay_data["enabled"],
-                image_path=overlay_data["image_path"],
-                georef_path=overlay_data["georef_path"],
                 tile_url=overlay_data["tile_url"],
             ),
         ),
