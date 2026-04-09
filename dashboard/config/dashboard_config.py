@@ -30,17 +30,17 @@ class SchemaConfig:
 
 
 @dataclass
-class DefaultsConfig:
+class SchemaDisplayConfig:
     display_variable: Optional[str] = None
-    group_path: Optional[str] = None
+    display_unit: Optional[str] = None
+    entity_name: Optional[str] = None
+    vertical_name: Optional[str] = None
 
 
 @dataclass
-class LabelsConfig:
-    metric: Optional[str] = None
-    y_axis: Optional[str] = None
-    entity: Optional[str] = None
-    depth_unit: Optional[str] = None
+class DefaultsConfig:
+    display_variable: Optional[str] = None
+    group_path: Optional[str] = None
 
 
 @dataclass
@@ -101,8 +101,8 @@ class EndpointConfig:
     version: str
     source: SourceConfig
     schema: SchemaConfig
+    schema_display: SchemaDisplayConfig = field(default_factory=SchemaDisplayConfig)
     defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
-    labels: LabelsConfig = field(default_factory=LabelsConfig)
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
     tile_build: TileBuildConfig = field(default_factory=TileBuildConfig)
 
@@ -130,12 +130,41 @@ def _process_environment_variables(data: Any) -> Any:
     return data
 
 
-def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any]) -> EndpointConfig:
+def _read_schema_display(schema_path: Path, display_variable: Optional[str]) -> SchemaDisplayConfig:
+    if not schema_path.exists():
+        return SchemaDisplayConfig(display_variable=display_variable)
+
+    try:
+        with schema_path.open("r", encoding="utf-8") as file:
+            schema = yaml.safe_load(file) or {}
+    except Exception:
+        return SchemaDisplayConfig(display_variable=display_variable)
+
+    group_name = next((key for key in schema.keys() if key != "ATTRS"), None)
+    if not group_name:
+        return SchemaDisplayConfig(display_variable=display_variable)
+
+    group_data = schema.get(group_name, {}) or {}
+    vars_data = group_data.get("VARS", {}) or {}
+    coords_data = group_data.get("COORDS", {}) or {}
+
+    variable_data = vars_data.get(display_variable or "", {}) if isinstance(vars_data, dict) else {}
+    entity_data = coords_data.get("borehole", {}) if isinstance(coords_data, dict) else {}
+    vertical_data = coords_data.get("depth", {}) if isinstance(coords_data, dict) else {}
+
+    return SchemaDisplayConfig(
+        display_variable=display_variable,
+        display_unit=variable_data.get("unit"),
+        entity_name=(entity_data.get("df_col") or "borehole") if isinstance(entity_data, dict) else "borehole",
+        vertical_name=(vertical_data.get("df_col") or "depth") if isinstance(vertical_data, dict) else "depth",
+    )
+
+
+def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], base_dir: Path) -> EndpointConfig:
     source_data = endpoint_data.get("source")
     schema_data = endpoint_data.get("variable_map")
     schema_fields_data = schema_data.get("fields", {}) if isinstance(schema_data, dict) else {}
     defaults_data = endpoint_data.get("defaults", {})
-    labels_data = endpoint_data.get("labels", {})
     visualization_data = endpoint_data.get("visualization", {})
     map_data = visualization_data.get("map", {})
     timeseries_data = visualization_data.get("timeseries", {})
@@ -156,6 +185,12 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any]) ->
     schema_file = source_data.get("schema_path") or schema_data.get("file")
     if not schema_file:
         raise ValueError(f"Endpoint '{endpoint_name}' is missing source.schema_path")
+
+    schema_file_path = Path(schema_file)
+    if not schema_file_path.is_absolute():
+        schema_file_path = base_dir / schema_file_path
+
+    schema_display = _read_schema_display(schema_file_path, defaults_data.get("display_variable"))
 
     return EndpointConfig(
         name=endpoint_name,
@@ -178,15 +213,10 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any]) ->
                 entity=schema_fields_data.get("entity"),
             ),
         ),
+        schema_display=schema_display,
         defaults=DefaultsConfig(
             display_variable=defaults_data.get("display_variable"),
             group_path=defaults_data.get("group_path"),
-        ),
-        labels=LabelsConfig(
-            metric=labels_data.get("metric"),
-            y_axis=labels_data.get("y_axis"),
-            entity=labels_data.get("entity"),
-            depth_unit=labels_data.get("depth_unit"),
         ),
         visualization=VisualizationConfig(
             map=MapConfig(
@@ -238,13 +268,14 @@ def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
     if not isinstance(config, dict):
         raise ValueError(f"Invalid endpoint configuration format in {config_path}")
 
+    base_dir = config_path.parent.parent
     endpoints: Dict[str, EndpointConfig] = {}
     for endpoint_name, endpoint_data in config.items():
         if not isinstance(endpoint_data, dict):
             raise ValueError(f"Endpoint '{endpoint_name}' must be a mapping/object")
 
         processed_data = _process_environment_variables(endpoint_data)
-        endpoints[endpoint_name] = _build_endpoint_config(endpoint_name, processed_data)
+        endpoints[endpoint_name] = _build_endpoint_config(endpoint_name, processed_data, base_dir)
 
     return endpoints
 

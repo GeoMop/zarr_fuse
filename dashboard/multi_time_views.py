@@ -10,7 +10,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     start_total = time.perf_counter()
     endpoint_config = data.client.get_endpoint(data.endpoint_name)
     defaults_config = endpoint_config.get("defaults", {}) or {}
-    labels_config = endpoint_config.get("labels", {}) or {}
+    schema_display = endpoint_config.get("schema_display", {}) or {}
     visualization_config = endpoint_config.get("visualization", {}) or {}
     timeseries_config = visualization_config.get("timeseries", {}) or {}
 
@@ -18,10 +18,10 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     if not default_display_variable:
         raise ValueError(f"No default display variable configured for endpoint '{data.endpoint_name}'")
 
-    metric_label = labels_config.get("metric", "Metric")
-    y_axis_label = labels_config.get("y_axis", metric_label)
-    entity_label = labels_config.get("entity", "Entity")
-    depth_unit = labels_config.get("depth_unit", "")
+    metric_label = schema_display.get("display_variable") or default_display_variable
+    display_unit = schema_display.get("display_unit") or ""
+    y_axis_label = f"{metric_label} ({display_unit})".strip() if display_unit else metric_label
+    entity_label = schema_display.get("entity_name") or "borehole"
     middle_window_days = timeseries_config.get("middle_window_days", 30)
     right_window_hours = timeseries_config.get("right_window_hours", 24)
 
@@ -56,7 +56,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             available = list(range(len(series)))
 
         depth_selector.options = {
-            f"{format_depth(depths[i])} {depth_unit}".strip() if i < len(depths) else str(i): i
+            f"{format_depth(depths[i])}" if i < len(depths) else str(i): i
             for i in available
         }
         depth_selector.value = available
@@ -97,7 +97,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             if depth_idx >= len(series):
                 continue
             depth_val = depths[depth_idx] if depth_idx < len(depths) else depth_idx
-            label = f"{format_depth(depth_val)} {depth_unit}".strip()
+            label = f"{format_depth(depth_val)}"
             curve_df = pd.DataFrame({
                 "time": times,
                 y_axis_label: series[depth_idx],

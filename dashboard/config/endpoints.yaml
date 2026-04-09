@@ -21,12 +21,6 @@ bukov_endpoint:
     display_variable: "rock_temp"
     group_path: "bukov"
 
-  labels:
-    metric: "Temperature"
-    y_axis: "Temperature"
-    entity: "Borehole"
-    depth_unit: "m"
-
   visualization:
     map:
       center_lat: 50.0
