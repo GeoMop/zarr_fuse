@@ -116,10 +116,10 @@ class LocalClient:
         fields = endpoint.schema.fields
 
         variable = variable or endpoint.defaults.display_variable
-        lat_field = fields.lat or "latitude"
-        lon_field = fields.lon or "longitude"
-        time_field = fields.time or "date_time"
-        depth_field = fields.vertical or "depth"
+        lat_field = fields.lat
+        lon_field = fields.lon
+        time_field = fields.time
+        depth_field = fields.vertical
 
         if not variable:
             _timer_log("get_map_data failed", time.perf_counter() - start)
@@ -170,11 +170,11 @@ class LocalClient:
         fields = endpoint.schema.fields
 
         variable = variable or endpoint.defaults.display_variable
-        lat_field = fields.lat or "latitude"
-        lon_field = fields.lon or "longitude"
-        time_field = fields.time or "date_time"
-        depth_field = fields.vertical or "depth"
-        entity_field = fields.entity or "borehole"
+        lat_field = fields.lat
+        lon_field = fields.lon
+        time_field = fields.time
+        depth_field = fields.vertical
+        entity_field = fields.entity
 
         if not variable:
             _timer_log("get_timeseries_data failed", time.perf_counter() - start)
@@ -201,15 +201,11 @@ class LocalClient:
         if entity_field in data_var.dims:
             data_var = data_var.isel({entity_field: idx})
 
-        times = ds.get(time_field)
-        time_values = []
-        if times is not None:
-            time_values = pd.to_datetime(times.values).astype(str).tolist()
+        times = ds[time_field]
+        time_values = pd.to_datetime(times.values).astype(str).tolist()
 
-        depths = ds.get(depth_field)
-        depth_values = []
-        if depths is not None:
-            depth_values = np.array(depths.values, dtype=float).tolist()
+        depths = ds[depth_field]
+        depth_values = np.array(depths.values, dtype=float).tolist()
 
         values = np.array(data_var.values, dtype=float)
         if values.ndim == 1:
@@ -266,7 +262,9 @@ def load_data(source: str, **kwargs) -> DashboardData:
     client = LocalClient(endpoints_path)
 
     endpoint = get_endpoint_config(endpoints_path, endpoint_name)
-    group_path = kwargs.pop("group_path", None) or endpoint.defaults.group_path or "/"
+    group_path = kwargs.pop("group_path", None) or endpoint.defaults.group_path
+    if not group_path:
+        raise ValueError("group_path is required (set defaults.group_path or pass group_path explicitly)")
 
     return DashboardData(
         endpoint_name=endpoint_name,

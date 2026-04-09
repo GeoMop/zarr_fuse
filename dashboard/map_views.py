@@ -17,14 +17,14 @@ def _load_overlay(endpoint_config):
         logger.info("Overlay disabled via HV_OVERLAY_ENABLED.")
         return None
 
-    visualization_config = endpoint_config.get("visualization", {}) or {}
-    overlay_config = visualization_config.get("overlay", {}) or {}
+    visualization_config = endpoint_config["visualization"]
+    overlay_config = visualization_config["overlay"]
 
-    if not overlay_config.get("enabled", False):
+    if not overlay_config["enabled"]:
         logger.info("Overlay disabled in endpoint config.")
         return None
 
-    tile_url = overlay_config.get("tile_url") or os.getenv("HV_OVERLAY_TILE_URL", "").strip()
+    tile_url = overlay_config["tile_url"] or os.getenv("HV_OVERLAY_TILE_URL", "").strip()
     if not tile_url:
         logger.info("No overlay tile URL configured.")
         return None
@@ -38,13 +38,13 @@ def build_map_view(data, tap_stream):
     base_map = gvts.OSM()
 
     endpoint_config = data.client.get_endpoint(data.endpoint_name)
-    defaults_config = endpoint_config.get("defaults", {}) or {}
-    visualization_config = endpoint_config.get("visualization", {}) or {}
-    map_config = visualization_config.get("map", {}) or {}
+    defaults_config = endpoint_config["defaults"]
+    visualization_config = endpoint_config["visualization"]
+    map_config = visualization_config["map"]
 
     overlay_layer = _load_overlay(endpoint_config)
 
-    default_display_variable = defaults_config.get("display_variable")
+    default_display_variable = defaults_config["display_variable"]
     if not default_display_variable:
         raise ValueError(f"No default display variable configured for endpoint '{data.endpoint_name}'")
 
@@ -55,36 +55,36 @@ def build_map_view(data, tap_stream):
         time_index=0,
         depth_index=0,
     )
-    if fig.get("status") == "error":
-        raise ValueError(fig.get("reason", "Failed to load map data"))
+    if fig["status"] == "error":
+        raise ValueError(fig["reason"])
 
-    lats = np.array(fig.get("lat", []), dtype=float)
-    lons = np.array(fig.get("lon", []), dtype=float)
-    values = np.array(fig.get("values", []), dtype=float)
+    lats = np.array(fig["lat"], dtype=float)
+    lons = np.array(fig["lon"], dtype=float)
+    values = np.array(fig["values"], dtype=float)
 
     map_df = pd.DataFrame({"lon": lons, "lat": lats, "value": values})
     map_points = gv.Points(
         map_df, kdims=["lon", "lat"], vdims=["value"], crs=ccrs.PlateCarree()
     ).opts(
         color="value",
-        cmap=map_config.get("cmap", "viridis"),
-        size=map_config.get("point_size", 10),
-        alpha=map_config.get("alpha", 0.8),
+        cmap=map_config["cmap"],
+        size=map_config["point_size"],
+        alpha=map_config["alpha"],
         line_color="white",
         line_width=1.5,
         tools=["hover", "tap"],
         colorbar=True,
         responsive=True,
-        title=map_config.get("title", "Geographic Data View"),
+        title=map_config["title"],
     )
 
     tap_stream.source = map_points
     map_state = {
         "lats": lats,
         "lons": lons,
-        "center_lat": map_config.get("center_lat"),
-        "center_lon": map_config.get("center_lon"),
-        "zoom": map_config.get("zoom"),
+        "center_lat": map_config["center_lat"],
+        "center_lon": map_config["center_lon"],
+        "zoom": map_config["zoom"],
     }
 
     if overlay_layer is not None:

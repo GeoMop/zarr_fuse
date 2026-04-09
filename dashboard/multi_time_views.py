@@ -9,21 +9,22 @@ from holoviews import streams
 def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream, map_state):
     start_total = time.perf_counter()
     endpoint_config = data.client.get_endpoint(data.endpoint_name)
-    defaults_config = endpoint_config.get("defaults", {}) or {}
-    schema_display = endpoint_config.get("schema_display", {}) or {}
-    visualization_config = endpoint_config.get("visualization", {}) or {}
-    timeseries_config = visualization_config.get("timeseries", {}) or {}
+    defaults_config = endpoint_config["defaults"]
+    schema_display = endpoint_config["schema_display"]
+    schema_config = endpoint_config["schema"]
+    fields_config = schema_config["fields"]
+    time_dim = fields_config["time"]
+    visualization_config = endpoint_config["visualization"]
+    timeseries_config = visualization_config["timeseries"]
 
-    default_display_variable = defaults_config.get("display_variable")
-    if not default_display_variable:
-        raise ValueError(f"No default display variable configured for endpoint '{data.endpoint_name}'")
+    default_display_variable = defaults_config["display_variable"]
 
-    metric_label = schema_display.get("display_variable") or default_display_variable
-    display_unit = schema_display.get("display_unit") or ""
+    metric_label = schema_display["display_variable"]
+    display_unit = schema_display["display_unit"]
     y_axis_label = f"{metric_label} ({display_unit})".strip() if display_unit else metric_label
-    entity_label = schema_display.get("entity_name") or "borehole"
-    middle_window_days = timeseries_config.get("middle_window_days", 30)
-    right_window_hours = timeseries_config.get("right_window_hours", 24)
+    entity_label = schema_display["entity_name"]
+    middle_window_days = timeseries_config["middle_window_days"]
+    right_window_hours = timeseries_config["right_window_hours"]
 
     timeseries_state = {
         "times": pd.to_datetime([]),
@@ -99,10 +100,10 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             depth_val = depths[depth_idx] if depth_idx < len(depths) else depth_idx
             label = f"{format_depth(depth_val)}"
             curve_df = pd.DataFrame({
-                "time": times,
+                time_dim: times,
                 y_axis_label: series[depth_idx],
             })
-            curves.append(hv.Curve(curve_df, "time", y_axis_label, label=label))
+            curves.append(hv.Curve(curve_df, time_dim, y_axis_label, label=label))
 
         if not curves:
             curves = [hv.Curve([])]
@@ -196,7 +197,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             xlim = clamp_range(center_time, right_span)
 
         overlay = build_timeseries_overlay(selected_depths)
-        overlay = overlay.redim.range(time=xlim)
+        overlay = overlay.redim.range(**{time_dim: xlim})
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
         if view == "left":
             hooks = [make_xrange_hook(xlim, "force_left")]

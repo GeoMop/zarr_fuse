@@ -131,60 +131,44 @@ def _process_environment_variables(data: Any) -> Any:
 
 
 def _read_schema_display(schema_path: Path, display_variable: Optional[str]) -> SchemaDisplayConfig:
-    if not schema_path.exists():
-        return SchemaDisplayConfig(display_variable=display_variable)
+    with schema_path.open("r", encoding="utf-8") as file:
+        schema = yaml.safe_load(file)
 
-    try:
-        with schema_path.open("r", encoding="utf-8") as file:
-            schema = yaml.safe_load(file) or {}
-    except Exception:
-        return SchemaDisplayConfig(display_variable=display_variable)
+    group_name = next(key for key in schema.keys() if key != "ATTRS")
 
-    group_name = next((key for key in schema.keys() if key != "ATTRS"), None)
-    if not group_name:
-        return SchemaDisplayConfig(display_variable=display_variable)
+    group_data = schema[group_name]
+    vars_data = group_data["VARS"]
+    coords_data = group_data["COORDS"]
 
-    group_data = schema.get(group_name, {}) or {}
-    vars_data = group_data.get("VARS", {}) or {}
-    coords_data = group_data.get("COORDS", {}) or {}
-
-    variable_data = vars_data.get(display_variable or "", {}) if isinstance(vars_data, dict) else {}
-    entity_data = coords_data.get("borehole", {}) if isinstance(coords_data, dict) else {}
-    vertical_data = coords_data.get("depth", {}) if isinstance(coords_data, dict) else {}
+    variable_data = vars_data[display_variable]
+    entity_data = coords_data["borehole"]
+    vertical_data = coords_data["depth"]
 
     return SchemaDisplayConfig(
         display_variable=display_variable,
-        display_unit=variable_data.get("unit"),
-        entity_name=(entity_data.get("df_col") or "borehole") if isinstance(entity_data, dict) else "borehole",
-        vertical_name=(vertical_data.get("df_col") or "depth") if isinstance(vertical_data, dict) else "depth",
+        display_unit=variable_data["unit"],
+        entity_name=entity_data["df_col"],
+        vertical_name=vertical_data["df_col"],
     )
 
 
 def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], base_dir: Path) -> EndpointConfig:
-    source_data = endpoint_data.get("source")
-    schema_data = endpoint_data.get("variable_map")
-    schema_fields_data = schema_data.get("fields", {}) if isinstance(schema_data, dict) else {}
-    defaults_data = endpoint_data.get("defaults", {})
-    visualization_data = endpoint_data.get("visualization", {})
-    map_data = visualization_data.get("map", {})
-    timeseries_data = visualization_data.get("timeseries", {})
-    overlay_data = visualization_data.get("overlay", {})
-    tile_build_data = endpoint_data.get("tile_build", {})
-
-    if not isinstance(source_data, dict):
-        raise ValueError(f"Endpoint '{endpoint_name}' is missing required 'source' block")
-
-    if not isinstance(schema_data, dict):
-        raise ValueError(f"Endpoint '{endpoint_name}' is missing required 'variable_map' block")
+    source_data = endpoint_data["source"]
+    schema_data = endpoint_data["variable_map"]
+    schema_fields_data = schema_data["fields"]
+    defaults_data = endpoint_data["defaults"]
+    visualization_data = endpoint_data["visualization"]
+    map_data = visualization_data["map"]
+    timeseries_data = visualization_data["timeseries"]
+    overlay_data = visualization_data["overlay"]
+    tile_build_data = endpoint_data["tile_build"]
 
     required_source_fields = ["type", "store_type", "uri"]
     for field_name in required_source_fields:
         if not source_data.get(field_name):
             raise ValueError(f"Endpoint '{endpoint_name}' is missing source.{field_name}")
 
-    schema_file = source_data.get("schema_path") or schema_data.get("file")
-    if not schema_file:
-        raise ValueError(f"Endpoint '{endpoint_name}' is missing source.schema_path")
+    schema_file = source_data["schema_path"]
 
     schema_file_path = Path(schema_file)
     if not schema_file_path.is_absolute():
@@ -194,9 +178,9 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
 
     return EndpointConfig(
         name=endpoint_name,
-        reload_interval=endpoint_data.get("reload_interval", 300),
-        description=endpoint_data.get("description", endpoint_name),
-        version=endpoint_data.get("version", "1.0.0"),
+        reload_interval=endpoint_data["reload_interval"],
+        description=endpoint_data["description"],
+        version=endpoint_data["version"],
         source=SourceConfig(
             type=source_data["type"],
             store_type=source_data["store_type"],
@@ -206,54 +190,54 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
         schema=SchemaConfig(
             file=schema_file,
             fields=SchemaFieldsConfig(
-                lat=schema_fields_data.get("lat"),
-                lon=schema_fields_data.get("lon"),
-                time=schema_fields_data.get("time"),
-                vertical=schema_fields_data.get("vertical"),
-                entity=schema_fields_data.get("entity"),
+                lat=schema_fields_data["lat"],
+                lon=schema_fields_data["lon"],
+                time=schema_fields_data["time"],
+                vertical=schema_fields_data["vertical"],
+                entity=schema_fields_data["entity"],
             ),
         ),
         schema_display=schema_display,
         defaults=DefaultsConfig(
-            display_variable=defaults_data.get("display_variable"),
-            group_path=defaults_data.get("group_path"),
+            display_variable=defaults_data["display_variable"],
+            group_path=defaults_data["group_path"],
         ),
         visualization=VisualizationConfig(
             map=MapConfig(
-                center_lat=map_data.get("center_lat"),
-                center_lon=map_data.get("center_lon"),
-                zoom=map_data.get("zoom"),
-                title=map_data.get("title"),
-                cmap=map_data.get("cmap"),
-                point_size=map_data.get("point_size"),
-                alpha=map_data.get("alpha"),
+                center_lat=map_data["center_lat"],
+                center_lon=map_data["center_lon"],
+                zoom=map_data["zoom"],
+                title=map_data["title"],
+                cmap=map_data["cmap"],
+                point_size=map_data["point_size"],
+                alpha=map_data["alpha"],
             ),
             timeseries=TimeSeriesConfig(
-                middle_window_days=timeseries_data.get("middle_window_days"),
-                right_window_hours=timeseries_data.get("right_window_hours"),
+                middle_window_days=timeseries_data["middle_window_days"],
+                right_window_hours=timeseries_data["right_window_hours"],
             ),
             overlay=OverlayConfig(
-                enabled=overlay_data.get("enabled", False),
-                image_path=overlay_data.get("image_path"),
-                georef_path=overlay_data.get("georef_path"),
-                tile_url=overlay_data.get("tile_url"),
+                enabled=overlay_data["enabled"],
+                image_path=overlay_data["image_path"],
+                georef_path=overlay_data["georef_path"],
+                tile_url=overlay_data["tile_url"],
             ),
         ),
         tile_build=TileBuildConfig(
-            enabled=tile_build_data.get("enabled", False),
-            source_image=tile_build_data.get("source_image"),
-            georef_file=tile_build_data.get("georef_file"),
-            vrt_file=tile_build_data.get("vrt_file"),
-            warped_tif=tile_build_data.get("warped_tif"),
-            rgba_vrt=tile_build_data.get("rgba_vrt"),
-            tiles_dir=tile_build_data.get("tiles_dir"),
-            tile_scheme=tile_build_data.get("tile_scheme"),
-            min_zoom=tile_build_data.get("min_zoom"),
-            max_zoom=tile_build_data.get("max_zoom"),
-            target_srs=tile_build_data.get("target_srs"),
-            gcp_srs=tile_build_data.get("gcp_srs"),
-            resampling=tile_build_data.get("resampling"),
-            add_alpha=tile_build_data.get("add_alpha"),
+            enabled=tile_build_data["enabled"],
+            source_image=tile_build_data["source_image"],
+            georef_file=tile_build_data["georef_file"],
+            vrt_file=tile_build_data["vrt_file"],
+            warped_tif=tile_build_data["warped_tif"],
+            rgba_vrt=tile_build_data["rgba_vrt"],
+            tiles_dir=tile_build_data["tiles_dir"],
+            tile_scheme=tile_build_data["tile_scheme"],
+            min_zoom=tile_build_data["min_zoom"],
+            max_zoom=tile_build_data["max_zoom"],
+            target_srs=tile_build_data["target_srs"],
+            gcp_srs=tile_build_data["gcp_srs"],
+            resampling=tile_build_data["resampling"],
+            add_alpha=tile_build_data["add_alpha"],
         ),
     )
 
@@ -263,7 +247,7 @@ def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
     with config_path.open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file) or {}
+        config = yaml.safe_load(file)
 
     if not isinstance(config, dict):
         raise ValueError(f"Invalid endpoint configuration format in {config_path}")
