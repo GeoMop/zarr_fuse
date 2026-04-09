@@ -1,3 +1,4 @@
+# Should be tested and fully integrated to the dashboard, but this is the general structure for the tile building configuration. The actual implementation of tile building and serving would require additional code to generate tiles from the source image and serve them via a web server or similar mechanism.
 import boto3
 
 endpoint_url = ""
