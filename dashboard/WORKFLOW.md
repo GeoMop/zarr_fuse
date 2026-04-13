@@ -5,7 +5,7 @@
 ```
 Your New Project
     ↓
-    ├─→ pip install zarr-fuse + zarr-fuse-dashboard
+    ├─→ pip install zarr-fuse + zarr_fuse.dashboard
     ├─→ Create config/endpoints.yaml
     ├─→ Create schemas/my_schema.yaml
     ├─→ Create .env file
@@ -54,7 +54,7 @@ python -m venv venv
 source venv/bin/activate    # Windows: venv\Scripts\activate
 
 # Install both packages!
-pip install zarr-fuse zarr-fuse-dashboard
+pip install zarr-fuse zarr_fuse.dashboard
 ```
 
 ### Create configuration files

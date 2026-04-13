@@ -1,5 +1,5 @@
 # This file is for development/monorepo use.
-# For standalone installation, use: pip install zarr-fuse-dashboard
+# For standalone installation, use: pip install zarr_fuse.dashboard
 # 
 # If using from monorepo root:
 # - From repo root: pip install -e ./dashboard

@@ -218,7 +218,7 @@ dashboard/
 
 ```bash
 # 1. Install
-pip install zarr-fuse zarr-fuse-dashboard
+pip install zarr-fuse zarr_fuse.dashboard
 
 # 2. Create structure
 mkdir config schemas

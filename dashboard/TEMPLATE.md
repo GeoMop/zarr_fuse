@@ -155,7 +155,7 @@ root:
 # requirements.txt - Pin exact versions
 
 zarr-fuse==0.2.0
-zarr-fuse-dashboard==0.1.0
+zarr_fuse.dashboard==0.1.0
 
 # These are already in dashboard dependencies, but can pin if needed:
 # panel==1.4.0
@@ -178,7 +178,7 @@ python -m venv venv
 source venv/bin/activate          # On Windows: venv\Scripts\activate
 
 # 4. Install packages
-pip install zarr-fuse zarr-fuse-dashboard
+pip install zarr-fuse zarr_fuse.dashboard
 
 # 5. Create .env file (copy from File 1 above and customize)
 cat > .env << 'EOF'

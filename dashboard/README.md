@@ -16,7 +16,7 @@ This installs the package in editable mode with all dependencies from `pyproject
 ### As standalone package
 
 ```bash
-pip install zarr-fuse-dashboard
+pip install zarr_fuse.dashboard
 ```
 
 ## Configuration

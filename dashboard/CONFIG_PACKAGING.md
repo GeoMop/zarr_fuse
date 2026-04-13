@@ -2,7 +2,7 @@
 
 ## What Gets Packaged
 
-When `pip install zarr-fuse-dashboard` is run, the following are included:
+When `pip install zarr_fuse.dashboard` is run, the following are included:
 
 ### Package Directories (with __init__.py)
 ✓ `api/` - API module  

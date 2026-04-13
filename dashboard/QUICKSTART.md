@@ -30,7 +30,7 @@ my-data-dashboard/
 
 ## Step 2: Install Dependencies
 
-Install both **zarr_fuse** and **zarr-fuse-dashboard**:
+Install both **zarr_fuse** and **zarr_fuse.dashboard**:
 
 ```bash
 # Create virtual environment (recommended)
@@ -40,8 +40,8 @@ source venv/bin/activate    # On Windows: venv\Scripts\activate
 # Install zarr_fuse (core package)
 pip install zarr-fuse>=0.2.0
 
-# Install zarr-fuse-dashboard
-pip install zarr-fuse-dashboard
+# Install zarr_fuse.dashboard
+pip install zarr_fuse.dashboard
 
 # Verify both are installed
 pip list | grep zarr
@@ -50,7 +50,7 @@ pip list | grep zarr
 Expected output:
 ```
 zarr-fuse         0.2.0
-zarr-fuse-dashboard  0.1.0
+zarr_fuse.dashboard  0.1.0
 ```
 
 ## Step 3: Understand Your Data
@@ -285,7 +285,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install dependencies
-RUN pip install zarr-fuse>=0.2.0 zarr-fuse-dashboard
+RUN pip install zarr-fuse>=0.2.0 zarr_fuse.dashboard
 
 # Copy your config
 COPY config/ /app/config/
@@ -372,7 +372,7 @@ export HV_DASHBOARD_ENDPOINT=my_data  # Must match!
 
 ## Next Steps
 
-1. ✅ Install zarr-fuse and zarr-fuse-dashboard
+1. ✅ Install zarr-fuse and zarr_fuse.dashboard
 2. ✅ Create config/endpoints.yaml
 3. ✅ Create schemas/my_schema.yaml
 4. ✅ Set environment variables

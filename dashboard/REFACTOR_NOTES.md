@@ -126,7 +126,7 @@ This refactor maintains backward compatibility:
 ## Ready for Use
 
 The dashboard package is now ready for:
-✅ pip install zarr-fuse-dashboard  
+✅ pip install zarr_fuse.dashboard  
 ✅ Cross-project deployment  
 ✅ Environment-based configuration  
 ✅ Multiple instances  

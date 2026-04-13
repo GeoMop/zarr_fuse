@@ -1,13 +1,13 @@
-# Deploying zarr-fuse-dashboard in Another Project
+# Deploying zarr_fuse.dashboard in Another Project
 
-This guide shows how to use the zarr-fuse-dashboard package in a new project with your own data.
+This guide shows how to use the zarr_fuse.dashboard package in a new project with your own data.
 
 ## Installation
 
 ### Option 1: From PyPI (when published)
 
 ```bash
-pip install zarr-fuse-dashboard
+pip install zarr_fuse.dashboard
 ```
 
 ### Option 2: From this repository
