@@ -15,7 +15,8 @@ from dashboard.data import load_data
 from dashboard.config import load_endpoints
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
-from dashboard.ui import build_depth_controls, build_sidebar
+from dashboard.sidebar import build_sidebar
+from dashboard.ui import build_depth_controls
 
 
 JS_FILES = {
