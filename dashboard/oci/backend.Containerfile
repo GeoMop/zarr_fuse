@@ -16,7 +16,8 @@ WORKDIR /app
 COPY . /app
 
 WORKDIR /app/dashboard
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir .. \
+ && pip install --no-cache-dir .
 
 EXPOSE 8000
 CMD ["uvicorn", "dashboard.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

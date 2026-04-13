@@ -16,7 +16,8 @@ WORKDIR /app
 COPY . /app
 
 WORKDIR /app/dashboard
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir .. \
+ && pip install --no-cache-dir .
 
 EXPOSE 5006
 CMD ["zf-dashboard"]
