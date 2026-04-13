@@ -183,7 +183,8 @@ dashboard/
 ├── pyproject.toml              ← Package metadata
 ├── config/
 │   ├── endpoints.yaml          ← Default endpoints config
-│   └── dashboard_config.py     ← Config parsing
+│   └── [runtime config assets]
+├── config.py                   ← Config parsing
 ├── schemas/
 │   └── bukov_schema.yaml       ← Example schema
 ├── [source files]              ← Dashboard code

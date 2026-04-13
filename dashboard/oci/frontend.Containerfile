@@ -16,7 +16,7 @@ WORKDIR /app
 COPY . /app
 
 WORKDIR /app/dashboard
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir .
 
 EXPOSE 5006
-CMD ["python", "serve_dashboard.py"]
+CMD ["zf-dashboard"]

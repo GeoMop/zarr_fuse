@@ -15,17 +15,17 @@ When `pip install zarr_fuse.dashboard` is run, the following are included:
 ✓ `config/bukov_endpoint/*.png` - Overlay images  
 ✓ `schemas/*.yaml` - Schema files  
 
-### Module Files (py-modules list)
-✓ `app.py`, `composed.py`, `data.py`, `map_views.py`, `multi_time_views.py`, `serve_dashboard.py`, `tile_service.py`, `ui.py`  
+### Module Files (dashboard package modules)
+✓ `app.py`, `composed.py`, `config.py`, `data.py`, `map_views.py`, `multi_time_views.py`, `serve_dashboard.py`, `tile_service.py`, `ui.py`  
 
 ## Path Resolution Logic
 
 ### Default Config (packaged with package)
 ```
 When: ENDPOINTS_PATH not set
-Config location: {site-packages}/zarr_fuse_dashboard/config/endpoints.yaml
-Base dir: {site-packages}/zarr_fuse_dashboard
-Schema path: {site-packages}/zarr_fuse_dashboard/schemas/bukov_schema.yaml
+Config location: {site-packages}/dashboard/config/endpoints.yaml
+Base dir: {site-packages}/dashboard
+Schema path: {site-packages}/dashboard/schemas/bukov_schema.yaml
 Result: ✓ Works out of box
 ```
 
@@ -99,7 +99,7 @@ zf-dashboard
 ## Files Modified for Plug-and-Play
 
 - ✅ `schemas/__init__.py` - NEW (make schemas a package)
-- ✅ `config/__init__.py` - Makes config a package
+- ✅ `config.py` - Centralized config parsing module
 - ✅ `api/__init__.py` - Makes api a package
 - ✅ `pyproject.toml` - Updated to include `schemas` in package discovery
 - ✅ `data.py` - Path resolution logic verified

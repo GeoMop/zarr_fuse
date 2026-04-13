@@ -4,7 +4,7 @@
 
 ### 1. Package Structure (Core Fix)
 - ✅ Added `api/__init__.py` - makes api a proper Python package
-- ✅ Added `config/__init__.py` - makes config a proper Python package
+- ✅ Consolidated config parser into `config.py`
 - **Impact:** Enables proper imports and package discovery during installation
 
 ### 2. API Module (api/main.py)
@@ -91,8 +91,8 @@ dashboard/
 │   ├── __init__.py (NEW)
 │   └── main.py (UPDATED: env var config path)
 ├── config/
-│   ├── __init__.py (NEW)
-│   └── dashboard_config.py (unchanged)
+│   └── endpoints.yaml (packaged config data)
+├── config.py (UPDATED: config parsing module)
 ├── .env.example (UPDATED: more complete options)
 ├── serve_dashboard.py (UPDATED: dotenv, configurable host/port)
 ├── tile_service.py (UPDATED: env var config, temp cache dir)

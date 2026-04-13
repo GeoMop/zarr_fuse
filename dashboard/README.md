@@ -128,7 +128,7 @@ The dashboard uses [python-dotenv](https://pypi.org/project/python-dotenv/) to a
 ## Configuration Files
 
 - `config/endpoints.yaml` - Endpoint definitions (packaged default)
-- `config/dashboard_config.py` - Config parsing and validation logic
+- `config.py` - Config parsing and validation logic
 - `schemas/` - Zarr schema files referenced in endpoints.yaml
 - `.env.example` - Template for environment variables
 
@@ -156,7 +156,7 @@ See `tile_pyramid_README.md` for details.
 - `ui.py` - Sidebar controls and depth selector
 - `tile_service.py` - S3 tile URL presigning (Tornado handler)
 - `serve_dashboard.py` - Entrypoint for console script
-- `config/dashboard_config.py` - Configuration parsing
+- `config.py` - Configuration parsing
 - `api/main.py` - FastAPI application (experimental)
 
 ## Requirements
