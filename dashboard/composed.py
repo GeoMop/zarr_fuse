@@ -11,11 +11,11 @@ from dotenv import load_dotenv
 # Load environment variables from .env file if present
 load_dotenv()
 
-from data import load_data
-from config.dashboard_config import load_endpoints
-from map_views import build_map_view
-from multi_time_views import build_timeseries_views
-from ui import build_depth_controls, build_sidebar
+from dashboard.data import load_data
+from dashboard.config.dashboard_config import load_endpoints
+from dashboard.map_views import build_map_view
+from dashboard.multi_time_views import build_timeseries_views
+from dashboard.ui import build_depth_controls, build_sidebar
 
 
 JS_FILES = {

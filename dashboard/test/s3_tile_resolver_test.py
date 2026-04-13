@@ -6,7 +6,7 @@ from pathlib import Path
 
 import boto3
 
-from config.dashboard_config import get_endpoint_config
+from dashboard.config.dashboard_config import get_endpoint_config
 
 
 CONFIG_ROOT = Path(__file__).resolve().parent.parent

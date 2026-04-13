@@ -56,10 +56,10 @@ Write-Host "S3_ACCESS_KEY set:" ([bool]$env:S3_ACCESS_KEY)
 Write-Host "S3_SECRET_KEY set:" ([bool]$env:S3_SECRET_KEY)
 Write-Host "S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL"
 
-# Run dashboard
-Push-Location (Join-Path $PSScriptRoot "..")
+# Run dashboard from repository root so the dashboard package can be imported.
+Push-Location (Join-Path $PSScriptRoot "..\..")
 try {
-    python serve_dashboard.py
+    python -m dashboard.serve_dashboard
 } finally {
     Pop-Location
 }

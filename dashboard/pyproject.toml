@@ -58,23 +58,18 @@ Repository = "https://github.com/geomop/zarr_fuse"
 Contact = "https://github.com/GeoMop/zarr_fuse/issues"
 
 [project.scripts]
-zf-dashboard = "serve_dashboard:main"
+zf-dashboard = "dashboard.serve_dashboard:main"
 
 [tool.setuptools]
-py-modules = [
-  "app",
-  "composed",
-  "data",
-  "map_views",
-  "multi_time_views",
-  "serve_dashboard",
-  "tile_service",
-  "ui"
+packages = [
+  "dashboard",
+  "dashboard.api",
+  "dashboard.config",
+  "dashboard.schemas"
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["api", "api.*", "config", "config.*", "schemas", "schemas.*"]
+[tool.setuptools.package-dir]
+dashboard = "."
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.yml", "*.json", "*.geojson", "*.png", "*.jpg", "*.jpeg"]

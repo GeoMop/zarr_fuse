@@ -3,8 +3,8 @@ import os
 import panel as pn
 from dotenv import load_dotenv
 
-from composed import build_dashboard
-from tile_service import S3TileHandler
+from dashboard.composed import build_dashboard
+from dashboard.tile_service import S3TileHandler
 
 # Load environment variables from .env file if present
 load_dotenv()
