@@ -1,1 +1,0 @@
-"""Dashboard configuration module."""

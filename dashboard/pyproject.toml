@@ -64,7 +64,6 @@ zf-dashboard = "dashboard.serve_dashboard:main"
 packages = [
   "dashboard",
   "dashboard.api",
-  "dashboard.config",
   "dashboard.schemas"
 ]
 
@@ -72,7 +71,19 @@ packages = [
 dashboard = "."
 
 [tool.setuptools.package-data]
-"*" = ["*.yaml", "*.yml", "*.json", "*.geojson", "*.png", "*.jpg", "*.jpeg"]
+dashboard = [
+  "config/*.yaml",
+  "config/*.yml",
+  "config/**/*.yaml",
+  "config/**/*.yml",
+  "config/**/*.json",
+  "config/**/*.geojson",
+  "config/**/*.png",
+  "config/**/*.jpg",
+  "config/**/*.jpeg",
+  "schemas/*.yaml",
+  "schemas/*.yml"
+]
 
 [tool.pytest.ini_options]
 testpaths = ["test"]

@@ -20,7 +20,7 @@ def _timer_log(message: str, duration: float) -> None:
 CONFIG_ROOT = Path(__file__).resolve().parent
 
 # Import config directly (no sys.path manipulation needed with proper package structure)
-from dashboard.config.dashboard_config import get_endpoint_config, load_endpoints
+from dashboard.config import get_endpoint_config, load_endpoints
 
 
 @dataclass

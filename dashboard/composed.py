@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from dashboard.data import load_data
-from dashboard.config.dashboard_config import load_endpoints
+from dashboard.config import load_endpoints
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
 from dashboard.ui import build_depth_controls, build_sidebar
