@@ -132,6 +132,19 @@ The dashboard uses [python-dotenv](https://pypi.org/project/python-dotenv/) to a
 - `schemas/` - Zarr schema files referenced in endpoints.yaml
 - `.env.example` - Template for environment variables
 
+## Further Docs
+
+The detailed guides live in [docs/](docs):
+
+- [Quick Start](docs/QUICKSTART.md)
+- [Template Files](docs/TEMPLATE.md)
+- [Workflow](docs/WORKFLOW.md)
+- [Deployment](docs/DEPLOYMENT.md)
+- [Config Packaging](docs/CONFIG_PACKAGING.md)
+- [Refactor Notes](docs/REFACTOR_NOTES.md)
+- [Tile Pyramid Guide](docs/tile_pyramid_README.md)
+- [Docs Index](docs/DOCS_INDEX.md)
+
 ## Building Tiles (Optional)
 
 For map overlay support, tiles can be pre-built:
@@ -144,7 +157,7 @@ tile_build:
   tiles_dir: "config/tiles"
 ```
 
-See `tile_pyramid_README.md` for details.
+See [docs/tile_pyramid_README.md](docs/tile_pyramid_README.md) for details.
 
 ## File Organization
 
@@ -153,7 +166,7 @@ See `tile_pyramid_README.md` for details.
 - `data.py` - Zarr Fuse data loading helpers
 - `map_views.py` - Geographic map visualizations
 - `multi_time_views.py` - Time-series plots
-- `ui.py` - Sidebar controls and depth selector
+- `sidebar.py` - Sidebar controls and depth selector
 - `tile_service.py` - S3 tile URL presigning (Tornado handler)
 - `serve_dashboard.py` - Entrypoint for console script
 - `config.py` - Configuration parsing

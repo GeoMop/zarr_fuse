@@ -382,7 +382,7 @@ Your dashboard is now using your own data!
 
 ## Additional Resources
 
-- **Zarr Fuse Documentation:** See root [zarr_fuse README](../../../README.md)
+- **Zarr Fuse Documentation:** See root [zarr_fuse README](../../README.md)
 - **Dashboard Configuration:** See [CONFIG_PACKAGING.md](CONFIG_PACKAGING.md)
 - **Deployment Guide:** See [DEPLOYMENT.md](DEPLOYMENT.md)
 
