@@ -63,7 +63,7 @@ def build_dashboard():
     endpoint = endpoints.get(endpoint_name) or data.client.get_endpoint(endpoint_name)
     structure = data.client.get_structure(endpoint_name)
 
-    controller, node_select = build_sidebar(
+    controller, node_select, node_hint = build_sidebar(
         endpoint_name, endpoint, structure, endpoints=endpoints
     )
     depth_selector, borehole_info = build_depth_controls()
@@ -75,6 +75,25 @@ def build_dashboard():
     map_handlers = {"on_map_tap": lambda *_: None}
 
     map_view, map_state = build_map_view(data, tap_stream)
+
+    def update_data_warnings(state):
+        reason = (state or {}).get("data_error_reason")
+        if reason:
+            group_path = data.group_path
+            variable = (state or {}).get("variable") or "<unknown>"
+            message = (
+                f"No data for group '{group_path}' with variable '{variable}': {reason}. "
+                "Please select another dataset node from Data Structure."
+            )
+            node_hint.object = message
+            node_hint.visible = True
+            return
+
+        node_hint.object = ""
+        node_hint.visible = False
+
+    update_data_warnings(map_state)
+
     line_left, line_mid, line_right, on_map_tap = build_timeseries_views(
         data,
         depth_selector,
@@ -102,6 +121,7 @@ def build_dashboard():
 
     def refresh_views():
         new_map_view, new_map_state = build_map_view(data, tap_stream)
+        update_data_warnings(new_map_state)
         new_line_left, new_line_mid, new_line_right, new_on_map_tap = build_timeseries_views(
             data,
             depth_selector,

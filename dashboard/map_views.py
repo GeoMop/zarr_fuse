@@ -77,11 +77,13 @@ def build_map_view(data, tap_stream):
         lons = np.array([], dtype=float)
         values = np.array([], dtype=float)
         map_title = f"{map_config['title']} - {reason}"
+        data_error_reason = reason
     else:
         lats = np.array(fig["lat"], dtype=float)
         lons = np.array(fig["lon"], dtype=float)
         values = np.array(fig["values"], dtype=float)
         map_title = map_config["title"]
+        data_error_reason = None
 
     map_df = pd.DataFrame({"lon": lons, "lat": lats, "value": values})
     map_points = gv.Points(
@@ -116,6 +118,8 @@ def build_map_view(data, tap_stream):
         "center_lat": center_lat,
         "center_lon": center_lon,
         "zoom": zoom,
+        "variable": default_display_variable,
+        "data_error_reason": data_error_reason,
     }
 
     if overlay_layer is not None:

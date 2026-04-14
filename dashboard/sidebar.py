@@ -115,6 +115,13 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         sizing_mode="stretch_width",
     )
 
+    node_hint = pn.pane.Alert(
+        "",
+        alert_type="warning",
+        visible=False,
+        sizing_mode="stretch_width",
+    )
+
     controller = pn.Column(
         header,
         store_selector,
@@ -122,12 +129,13 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         status_section,
         reload_button,
         tree_view,
+        node_hint,
         pn.layout.VSpacer(),
         sizing_mode="stretch_width",
         styles={"padding": "10px"},
     )
 
-    return controller, tree_view
+    return controller, tree_view, node_hint
 
 
 def build_depth_controls():
