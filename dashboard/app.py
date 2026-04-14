@@ -116,7 +116,14 @@ map_handlers["on_map_tap"](tap_stream.x, tap_stream.y)
 # ============================================================================
 
 top_left = pn.pane.HoloViews(map_view, sizing_mode="stretch_both")
+loading_indicator = pn.Row(
+    pn.indicators.LoadingSpinner(value=True, width=24, height=24),
+    pn.pane.Markdown("Loading selected dataset...", styles={"color": "#dbeafe"}),
+    visible=False,
+    sizing_mode="stretch_width",
+)
 top_right = pn.Column(
+    loading_indicator,
     borehole_info,
     depth_selector,
     sizing_mode="stretch_both",
@@ -146,7 +153,19 @@ def refresh_views():
 def on_node_change(event):
     if event.new:
         data.group_path = event.new
-        refresh_views()
+        loading_indicator.visible = True
+
+        def _run_refresh():
+            try:
+                refresh_views()
+            finally:
+                loading_indicator.visible = False
+
+        doc = pn.state.curdoc
+        if doc is not None:
+            doc.add_next_tick_callback(_run_refresh)
+        else:
+            _run_refresh()
 
 
 node_select.param.watch(on_node_change, ["value"])
