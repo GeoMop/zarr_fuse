@@ -19,7 +19,7 @@ bukov_endpoint:
 
   defaults:
     display_variable: "rock_temp"
-    group_path: "bukov"
+    group_path: "/"
 
   visualization:
     map:

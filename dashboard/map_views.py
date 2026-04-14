@@ -70,12 +70,18 @@ def build_map_view(data, tap_stream):
         time_index=0,
         depth_index=0,
     )
-    if fig["status"] == "error":
-        raise ValueError(fig["reason"])
-
-    lats = np.array(fig["lat"], dtype=float)
-    lons = np.array(fig["lon"], dtype=float)
-    values = np.array(fig["values"], dtype=float)
+    if fig.get("status") == "error":
+        reason = fig.get("reason", "No map data available")
+        logger.warning("Map data unavailable for group '%s': %s", data.group_path, reason)
+        lats = np.array([], dtype=float)
+        lons = np.array([], dtype=float)
+        values = np.array([], dtype=float)
+        map_title = f"{map_config['title']} - {reason}"
+    else:
+        lats = np.array(fig["lat"], dtype=float)
+        lons = np.array(fig["lon"], dtype=float)
+        values = np.array(fig["values"], dtype=float)
+        map_title = map_config["title"]
 
     map_df = pd.DataFrame({"lon": lons, "lat": lats, "value": values})
     map_points = gv.Points(
@@ -90,7 +96,7 @@ def build_map_view(data, tap_stream):
         tools=["hover", "tap"],
         colorbar=False,
         responsive=True,
-        title=map_config["title"],
+        title=map_title,
     )
 
     tap_stream.source = map_points

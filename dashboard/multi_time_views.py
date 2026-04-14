@@ -73,7 +73,16 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             variable=default_display_variable,
         )
         if fig.get("status") == "error":
-            raise ValueError(fig.get("reason", "Failed to load timeseries"))
+            reason = fig.get("reason", "Failed to load timeseries")
+            timeseries_state["times"] = pd.to_datetime([])
+            timeseries_state["depths"] = np.array([])
+            timeseries_state["series"] = []
+            timeseries_state["entity_index"] = 0
+            depth_selector.options = {}
+            depth_selector.value = []
+            borehole_info.object = f"### No data ({reason})"
+            print(f"[timing] timeseries fetch failed: {time.perf_counter() - start:.3f}s")
+            return None
 
         times = pd.to_datetime(fig.get("times", []))
         depths = np.array(fig.get("depths", []), dtype=float)
@@ -257,7 +266,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         if x is None or y is None:
             y, x = _default_coords()
         entity_index = _fetch_timeseries(lat=float(y), lon=float(x))
-        borehole_stream.event(borehole_index=entity_index)
+        if entity_index is not None:
+            borehole_stream.event(borehole_index=entity_index)
 
     on_map_tap(None, None)
     print(f"[timing] build_timeseries_views: {time.perf_counter() - start_total:.3f}s")
