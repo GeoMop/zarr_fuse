@@ -236,7 +236,6 @@ def _to_json_floats(values: Any) -> list:
             out.append(float(value))
     return out
 
-
 def load_data(source: str, **kwargs) -> DashboardData:
     if source not in {"local", "direct", "zarr_fuse"}:
         raise NotImplementedError("Only local zarr_fuse data sources are supported.")
