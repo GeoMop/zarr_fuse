@@ -46,7 +46,13 @@ def build_dashboard():
         endpoints_path = Path(
             os.getenv(
                 "ENDPOINTS_PATH",
-                str(Path(__file__).resolve().parent / "config" / "endpoints.yaml"),
+                str(
+                    Path(__file__).resolve().parent.parent
+                    / "app"
+                    / "databuk"
+                    / "config"
+                    / "endpoints.yaml"
+                ),
             )
         )
         endpoints = load_endpoints(endpoints_path)

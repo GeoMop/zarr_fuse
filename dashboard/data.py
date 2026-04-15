@@ -246,7 +246,7 @@ def load_data(source: str, **kwargs) -> DashboardData:
         "endpoints_path",
         os.getenv(
             "ENDPOINTS_PATH",
-            str(CONFIG_ROOT / "config" / "endpoints.yaml")
+            str(CONFIG_ROOT.parent / "app" / "databuk" / "config" / "endpoints.yaml")
         ),
     )
     endpoints_path = Path(endpoints_path)

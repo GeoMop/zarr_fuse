@@ -7,7 +7,7 @@ bukov_endpoint:
     type: "s3"
     store_type: "zarr"
     uri: "s3://bukov/store_latlon_2024.zarr"
-    schema_path: "schemas/bukov_schema.yaml"
+    schema_path: "config/bukov_schema.yaml"
 
   variable_map:
     fields:

@@ -33,7 +33,7 @@ if ($env:ZF_S3_ENDPOINT_URL -and -not $env:S3_ENDPOINT_URL) {
 
 # If HV_DASHBOARD_ENDPOINT is not set, use the first endpoint defined in endpoints.yaml
 if (-not $env:HV_DASHBOARD_ENDPOINT) {
-    $endpointsFile = Join-Path (Join-Path $PSScriptRoot "..") "config\endpoints.yaml"
+    $endpointsFile = Join-Path (Join-Path $PSScriptRoot "..\..") "app\databuk\config\endpoints.yaml"
     Write-Host "Using endpoints file: $endpointsFile"
 
     if (Test-Path $endpointsFile) {
