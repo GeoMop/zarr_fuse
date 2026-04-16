@@ -6,14 +6,30 @@ import time
 from holoviews import streams
 
 
+def _resolve_fields_for_group(schema_config, group_path):
+    fields = schema_config.get("fields", {})
+    group_fields = schema_config.get("group_fields", {})
+    normalized = "/".join(part for part in (group_path or "").strip("/").split("/") if part)
+
+    path = normalized
+    while True:
+        if path in group_fields:
+            return group_fields[path]
+        if not path:
+            break
+        path = path.rsplit("/", 1)[0] if "/" in path else ""
+
+    return fields
+
+
 def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream, map_state):
     start_total = time.perf_counter()
     endpoint_config = data.client.get_endpoint(data.endpoint_name)
     defaults_config = endpoint_config["defaults"]
     schema_display = endpoint_config["schema_display"]
     schema_config = endpoint_config["schema"]
-    fields_config = schema_config["fields"]
-    time_dim = fields_config["time"]
+    fields_config = _resolve_fields_for_group(schema_config, data.group_path)
+    time_dim = fields_config.get("time") or "time"
     visualization_config = endpoint_config["visualization"]
     timeseries_config = visualization_config["timeseries"]
 

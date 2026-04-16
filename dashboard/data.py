@@ -20,7 +20,7 @@ def _timer_log(message: str, duration: float) -> None:
 CONFIG_ROOT = Path(__file__).resolve().parent
 
 # Import config directly (no sys.path manipulation needed with proper package structure)
-from dashboard.config import get_endpoint_config, load_endpoints
+from dashboard.config import get_endpoint_config, load_endpoints, resolve_schema_fields
 
 
 @dataclass
@@ -113,7 +113,7 @@ class LocalClient:
     ) -> Dict[str, Any]:
         start = time.perf_counter()
         endpoint = self._endpoint_config(endpoint_name)
-        fields = endpoint.schema.fields
+        fields = resolve_schema_fields(endpoint.schema, group_path)
 
         variable = variable or endpoint.defaults.display_variable
         lat_field = fields.lat
@@ -124,6 +124,10 @@ class LocalClient:
         if not variable:
             _timer_log("get_map_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": "No default display variable configured"}
+
+        if not lat_field or not lon_field:
+            _timer_log("get_map_data failed", time.perf_counter() - start)
+            return {"status": "error", "reason": "lat/lon mapping is not configured"}
 
         node = self._get_group(endpoint_name, group_path)
         ds = node.dataset
@@ -138,9 +142,9 @@ class LocalClient:
             return {"status": "error", "reason": f"{lat_field}/{lon_field} not found"}
 
         data_var = ds[variable]
-        if time_field in data_var.dims:
+        if time_field and time_field in data_var.dims:
             data_var = data_var.isel({time_field: time_index})
-        if depth_field in data_var.dims:
+        if depth_field and depth_field in data_var.dims:
             data_var = data_var.isel({depth_field: depth_index})
 
         values = np.array(data_var.values).astype(float).ravel()
@@ -167,7 +171,7 @@ class LocalClient:
     ) -> Dict[str, Any]:
         start = time.perf_counter()
         endpoint = self._endpoint_config(endpoint_name)
-        fields = endpoint.schema.fields
+        fields = resolve_schema_fields(endpoint.schema, group_path)
 
         variable = variable or endpoint.defaults.display_variable
         lat_field = fields.lat
@@ -179,6 +183,13 @@ class LocalClient:
         if not variable:
             _timer_log("get_timeseries_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": "No default display variable configured"}
+
+        if not lat_field or not lon_field or not time_field:
+            _timer_log("get_timeseries_data failed", time.perf_counter() - start)
+            return {
+                "status": "error",
+                "reason": "lat/lon/time mapping is not fully configured for this group",
+            }
 
         node = self._get_group(endpoint_name, group_path)
         ds = node.dataset
@@ -198,20 +209,23 @@ class LocalClient:
         idx = int(np.nanargmin(dist))
 
         data_var = ds[variable]
-        if entity_field in data_var.dims:
+        if entity_field and entity_field in data_var.dims:
             data_var = data_var.isel({entity_field: idx})
 
         times = ds[time_field]
         time_values = pd.to_datetime(times.values).astype(str).tolist()
-
-        depths = ds[depth_field]
-        depth_values = np.array(depths.values, dtype=float).tolist()
 
         values = np.array(data_var.values, dtype=float)
         if values.ndim == 1:
             series = [_to_json_floats(values)]
         else:
             series = [_to_json_floats(values[:, i]) for i in range(values.shape[1])]
+
+        if depth_field and depth_field in ds:
+            depths = ds[depth_field]
+            depth_values = np.array(depths.values, dtype=float).tolist()
+        else:
+            depth_values = [np.nan] * max(len(series), 1)
 
         result = {
             "status": "success",
