@@ -225,6 +225,15 @@ class LocalClient:
             _timer_log("get_timeseries_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": f"{lat_field}/{lon_field} not found"}
 
+        if time_field and time_field in lat_var.dims:
+            lat_var = lat_var.isel({time_field: 0})
+        if time_field and time_field in lon_var.dims:
+            lon_var = lon_var.isel({time_field: 0})
+        if depth_field and depth_field in lat_var.dims:
+            lat_var = lat_var.isel({depth_field: 0})
+        if depth_field and depth_field in lon_var.dims:
+            lon_var = lon_var.isel({depth_field: 0})
+
         lats = np.array(lat_var.values, dtype=float).ravel()
         lons = np.array(lon_var.values, dtype=float).ravel()
         dist = (lats - lat) ** 2 + (lons - lon) ** 2

@@ -20,7 +20,7 @@ profiles:
 
   defaults:
     display_variable: "moisture"
-    group_path: "Uhelna/profiles"
+    group_path: "/"
 
   visualization:
     map:
@@ -90,7 +90,7 @@ wells:
 
   defaults:
     display_variable: "water_depth"
-    group_path: "Uhelna/water_levels"
+    group_path: "/"
 
   visualization:
     map:

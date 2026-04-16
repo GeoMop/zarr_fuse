@@ -40,7 +40,7 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         value=endpoint_name,
         options=endpoint_options,
         width=320,
-        disabled=True,
+        disabled=False,
         stylesheets=["""
     select {
         background-color: #1e293b !important;
@@ -135,7 +135,7 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         styles={"padding": "10px"},
     )
 
-    return controller, tree_view, node_hint
+    return controller, store_selector, tree_view, node_hint, store_info
 
 
 def build_depth_controls():

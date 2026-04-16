@@ -69,7 +69,7 @@ def build_dashboard():
     endpoint = endpoints.get(endpoint_name) or data.client.get_endpoint(endpoint_name)
     structure = data.client.get_structure(endpoint_name)
 
-    controller, node_select, node_hint = build_sidebar(
+    controller, store_selector, node_select, node_hint, store_info = build_sidebar(
         endpoint_name, endpoint, structure, endpoints=endpoints
     )
     depth_selector, borehole_info = build_depth_controls()
@@ -81,6 +81,45 @@ def build_dashboard():
     map_handlers = {"on_map_tap": lambda *_: None}
 
     map_view, map_state = build_map_view(data, tap_stream)
+
+    def _refresh_sidebar_for_endpoint(selected_endpoint: str):
+        nonlocal endpoints, endpoint, structure
+        endpoints = data.client.get_endpoints()
+        endpoint = endpoints.get(selected_endpoint) or data.client.get_endpoint(selected_endpoint)
+        structure = data.client.get_structure(selected_endpoint)
+        node_items = []
+
+        def _flatten_nodes(local_structure, depth: int = 0, items=None):
+            if items is None:
+                items = []
+            name = local_structure.get("name") or "root"
+            path = local_structure.get("path") or "/"
+            label = f"{'  ' * depth}{name}"
+            items.append((label, path))
+            for child in local_structure.get("children", []) or []:
+                _flatten_nodes(child, depth + 1, items)
+            return items
+
+        node_items = _flatten_nodes(structure)
+        node_options = {label: path for label, path in node_items}
+        node_select.options = node_options
+        node_select.value = node_items[0][1] if node_items else "/"
+        store_info.object = (
+            "<div style='background: #1e293b; padding: 12px; border-radius: 8px; margin: 8px 0;"
+            " border-left: 3px solid #3b82f6;'>"
+            "<div style='font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 600;'>"
+            "STORE URI</div>"
+            f"<div style='font-size: 12px; color: #e2e8f0; font-family: monospace;'>{endpoint['source']['uri']}</div>"
+            "</div>"
+        )
+
+    def _switch_endpoint(selected_endpoint: str):
+        nonlocal data, endpoint_name, map_view, map_state, line_left, line_mid, line_right
+        endpoint_name = selected_endpoint
+        data.endpoint_name = selected_endpoint
+        data.group_path = "/"
+        _refresh_sidebar_for_endpoint(selected_endpoint)
+        refresh_views()
 
     def update_data_warnings(state):
         reason = (state or {}).get("data_error_reason")
@@ -148,6 +187,22 @@ def build_dashboard():
         bottom_mid.object = new_line_mid
         bottom_right.object = new_line_right
 
+    def on_store_change(event):
+        if event.new and event.new != endpoint_name:
+            loading_indicator.visible = True
+
+            def _run_switch():
+                try:
+                    _switch_endpoint(event.new)
+                finally:
+                    loading_indicator.visible = False
+
+            doc = pn.state.curdoc
+            if doc is not None:
+                doc.add_next_tick_callback(_run_switch)
+            else:
+                _run_switch()
+
     def on_node_change(event):
         if event.new:
             data.group_path = event.new
@@ -166,6 +221,7 @@ def build_dashboard():
                 _run_refresh()
 
     node_select.param.watch(on_node_change, ["value"])
+    store_selector.param.watch(on_store_change, ["value"])
 
     template = """
 {%% extends base %%}

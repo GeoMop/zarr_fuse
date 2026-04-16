@@ -35,10 +35,18 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
 
     default_display_variable = defaults_config["display_variable"]
 
-    metric_label = schema_display["display_variable"]
-    display_unit = schema_display["display_unit"]
-    y_axis_label = f"{metric_label} ({display_unit})".strip() if display_unit else metric_label
-    entity_label = schema_display["entity_name"]
+    metric_label = (
+        schema_display.get("display_variable")
+        or default_display_variable
+        or "value"
+    )
+    display_unit = schema_display.get("display_unit")
+    y_axis_label = f"{metric_label} ({display_unit})" if display_unit else metric_label
+    entity_label = (
+        schema_display.get("entity_name")
+        or fields_config.get("entity")
+        or "entity"
+    )
     middle_window_days = timeseries_config["middle_window_days"]
     right_window_hours = timeseries_config["right_window_hours"]
 
