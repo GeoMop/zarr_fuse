@@ -85,6 +85,61 @@ def build_map_view(data, tap_stream):
         map_title = map_config["title"]
         data_error_reason = None
 
+    valid_mask = np.isfinite(lats) & np.isfinite(lons) & np.isfinite(values)
+    if not np.all(valid_mask):
+        lats = lats[valid_mask]
+        lons = lons[valid_mask]
+        values = values[valid_mask]
+
+    if len(lats) == 0:
+        reason = fig.get("reason", "No valid map points available") if fig.get("status") == "error" else "No valid map points available"
+        logger.warning("Map data unavailable for group '%s': %s", data.group_path, reason)
+        map_state = {
+            "lats": lats,
+            "lons": lons,
+            "center_lat": map_config["center_lat"],
+            "center_lon": map_config["center_lon"],
+            "zoom": int(map_config["zoom"]),
+            "variable": default_display_variable,
+            "data_error_reason": reason,
+        }
+        empty_df = pd.DataFrame({"lon": [], "lat": [], "value": []})
+        map_points = gv.Points(
+            empty_df, kdims=["lon", "lat"], vdims=["value"], crs=ccrs.PlateCarree()
+        ).opts(
+            color="value",
+            cmap="viridis",
+            size=map_config["point_size"],
+            alpha=map_config["alpha"],
+            line_color="white",
+            line_width=1.5,
+            tools=["hover", "tap"],
+            colorbar=False,
+            responsive=True,
+            title=f"{map_config['title']} - {reason}",
+        )
+
+        tap_stream.source = map_points
+
+        center_lat = map_config["center_lat"]
+        center_lon = map_config["center_lon"]
+        zoom = int(map_config["zoom"])
+        center_x, center_y = _lonlat_to_web_mercator(center_lon, center_lat)
+        span_m = _zoom_to_span_meters(zoom)
+        half_span = span_m / 2.0
+        xlim = (center_x - half_span, center_x + half_span)
+        ylim = (center_y - half_span, center_y + half_span)
+
+        map_view = (base_map * map_points).opts(
+            xlim=xlim,
+            ylim=ylim,
+            framewise=True,
+            axiswise=True,
+        )
+        result = map_view, map_state
+        print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
+        return result
+
     map_df = pd.DataFrame({"lon": lons, "lat": lats, "value": values})
     map_points = gv.Points(
         map_df, kdims=["lon", "lat"], vdims=["value"], crs=ccrs.PlateCarree()

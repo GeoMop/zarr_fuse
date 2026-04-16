@@ -141,18 +141,40 @@ class LocalClient:
             _timer_log("get_map_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": f"{lat_field}/{lon_field} not found"}
 
+        if time_field and time_field in lat.dims:
+            lat = lat.isel({time_field: time_index})
+        if time_field and time_field in lon.dims:
+            lon = lon.isel({time_field: time_index})
+        if depth_field and depth_field in lat.dims:
+            lat = lat.isel({depth_field: depth_index})
+        if depth_field and depth_field in lon.dims:
+            lon = lon.isel({depth_field: depth_index})
+
         data_var = ds[variable]
         if time_field and time_field in data_var.dims:
             data_var = data_var.isel({time_field: time_index})
         if depth_field and depth_field in data_var.dims:
             data_var = data_var.isel({depth_field: depth_index})
 
+        lats = np.array(lat.values).astype(float).ravel()
+        lons = np.array(lon.values).astype(float).ravel()
         values = np.array(data_var.values).astype(float).ravel()
         values = np.where(np.isfinite(values), values, np.nan)
+
+        if len(lats) != len(lons) or len(lats) != len(values):
+            _timer_log("get_map_data failed", time.perf_counter() - start)
+            return {
+                "status": "error",
+                "reason": (
+                    "Coordinate/value lengths do not match "
+                    f"(lat={len(lats)}, lon={len(lons)}, values={len(values)})"
+                ),
+            }
+
         result = {
             "status": "success",
-            "lat": _to_json_floats(lat.values),
-            "lon": _to_json_floats(lon.values),
+            "lat": _to_json_floats(lats),
+            "lon": _to_json_floats(lons),
             "values": _to_json_floats(values),
             "variable": variable,
             "time_index": time_index,
