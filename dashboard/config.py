@@ -383,6 +383,9 @@ def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
     base_dir = config_path.parent.parent
     endpoints: Dict[str, EndpointConfig] = {}
     for endpoint_name, endpoint_data in config.items():
+        if isinstance(endpoint_name, str) and endpoint_name.startswith("_"):
+            continue
+
         if not isinstance(endpoint_data, dict):
             raise ValueError(f"Endpoint '{endpoint_name}' must be a mapping/object")
 
@@ -390,6 +393,31 @@ def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
         endpoints[endpoint_name] = _build_endpoint_config(endpoint_name, processed_data, base_dir)
 
     return endpoints
+
+
+def get_default_endpoint_name(config_path: Path) -> Optional[str]:
+    if not config_path.exists():
+        return None
+
+    with config_path.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    if not isinstance(config, dict):
+        return None
+
+    meta = config.get("_dashboard")
+    if not isinstance(meta, dict):
+        return None
+
+    default_endpoint = meta.get("default_endpoint")
+    if not isinstance(default_endpoint, str):
+        return None
+
+    endpoint_config = config.get(default_endpoint)
+    if isinstance(endpoint_config, dict):
+        return default_endpoint
+
+    return None
 
 
 def get_endpoint_config(config_path: Path, endpoint_name: Optional[str] = None) -> EndpointConfig:

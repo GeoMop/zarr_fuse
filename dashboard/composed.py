@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from dashboard.data import load_data
-from dashboard.config import load_endpoints
+from dashboard.config import get_default_endpoint_name, load_endpoints
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
 from dashboard.sidebar import build_depth_controls, build_sidebar
@@ -55,10 +55,14 @@ def build_dashboard():
                 ),
             )
         )
+        configured_default = get_default_endpoint_name(endpoints_path)
+        if configured_default:
+            endpoint_name = configured_default
+
         endpoints = load_endpoints(endpoints_path)
         if not endpoints:
             raise ValueError(f"No endpoints configured in {endpoints_path}")
-        endpoint_name = next(iter(endpoints.keys()))
+        endpoint_name = endpoint_name or next(iter(endpoints.keys()))
 
     data = load_data(
         "local",

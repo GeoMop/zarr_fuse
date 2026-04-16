@@ -31,27 +31,13 @@ if ($env:ZF_S3_ENDPOINT_URL -and -not $env:S3_ENDPOINT_URL) {
     [System.Environment]::SetEnvironmentVariable("S3_ENDPOINT_URL", $env:ZF_S3_ENDPOINT_URL, "Process")
 }
 
-# If HV_DASHBOARD_ENDPOINT is not set, use the first endpoint defined in endpoints.yaml
-if (-not $env:HV_DASHBOARD_ENDPOINT) {
-    $endpointsFile = Join-Path (Join-Path $PSScriptRoot "..\..") "app\databuk\config\endpoints.yaml"
-    Write-Host "Using endpoints file: $endpointsFile"
-
-    if (Test-Path $endpointsFile) {
-        $firstEndpoint = $null
-
-        Get-Content $endpointsFile | ForEach-Object {
-            if (-not $firstEndpoint -and $_ -match '^\s*([A-Za-z0-9_]+):\s*$') {
-                $firstEndpoint = $matches[1]
-            }
-        }
-
-        if ($firstEndpoint) {
-            [System.Environment]::SetEnvironmentVariable("HV_DASHBOARD_ENDPOINT", $firstEndpoint, "Process")
-        }
-    }
+$endpointsFile = Join-Path (Join-Path $PSScriptRoot "..\..") "app\databuk\config\endpoints.yaml"
+Write-Host "Using endpoints file: $endpointsFile"
+if ($env:HV_DASHBOARD_ENDPOINT) {
+    Write-Host "HV_DASHBOARD_ENDPOINT=$env:HV_DASHBOARD_ENDPOINT"
+} else {
+    Write-Host "HV_DASHBOARD_ENDPOINT=<auto from endpoints.yaml _dashboard.default_endpoint or first endpoint>"
 }
-
-Write-Host "HV_DASHBOARD_ENDPOINT=$env:HV_DASHBOARD_ENDPOINT"
 Write-Host "S3_ACCESS_KEY set:" ([bool]$env:S3_ACCESS_KEY)
 Write-Host "S3_SECRET_KEY set:" ([bool]$env:S3_SECRET_KEY)
 Write-Host "S3_ENDPOINT_URL=$env:S3_ENDPOINT_URL"

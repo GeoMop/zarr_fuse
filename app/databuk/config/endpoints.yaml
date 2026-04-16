@@ -1,3 +1,6 @@
+_dashboard:
+  default_endpoint: "wells"
+
 profiles:
   description: "HLAVO - moisture profiles"
   version: "1.0.0"
