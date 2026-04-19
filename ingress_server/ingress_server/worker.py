@@ -98,8 +98,7 @@ def _resolve_target(root: zf.Node, metadata: MetadataModel) -> zf.Node:
 def _process_one(app_config: AppConfig, data_path: Path) -> None:
     metadata = _load_metadata(data_path)
 
-    config_dir = metadata.config_dir or app_config.config_dir
-    schema_path = metadata.resolve_schema_path(config_dir)
+    schema_path = metadata.resolve_schema_path(app_config.config_dir)
     if not schema_path.exists():
         raise ValueError(f"No schema for endpoint {metadata.endpoint_name}: {schema_path}")
 
@@ -107,7 +106,7 @@ def _process_one(app_config: AppConfig, data_path: Path) -> None:
     obj = read_df_from_bytes(
         payload=payload,
         metadata=metadata,
-        fallback_config_dir=app_config.config_dir,
+        config_dir=app_config.config_dir,
     )
 
     try:

@@ -34,14 +34,13 @@ def _temporary_sys_path(path: Path | None):
                 pass
 
 
-def _resolve_extractor(metadata: MetadataModel, fallback_config_dir: Path | None = None) -> Callable[..., DataObject]:
+def _resolve_extractor(metadata: MetadataModel, config_dir: Path) -> Callable[..., DataObject]:
     if not metadata.fn_module:
         raise ValueError(f"Missing fn_module for endpoint {metadata.endpoint_name}")
 
     if not metadata.extract_fn:
         raise ValueError(f"Missing extract_fn for endpoint {metadata.endpoint_name}")
 
-    config_dir = metadata.config_dir or fallback_config_dir
     with _temporary_sys_path(config_dir):
         try:
             module = import_module(metadata.fn_module)
@@ -81,9 +80,9 @@ def _resolve_extractor(metadata: MetadataModel, fallback_config_dir: Path | None
 def apply_extractor(
     payload: bytes,
     metadata: MetadataModel,
-    fallback_config_dir: Path | None = None,
+    config_dir: Path,
 ) -> DataObject:
-    extractor = _resolve_extractor(metadata, fallback_config_dir)
+    extractor = _resolve_extractor(metadata, config_dir)
     metadata_dict = metadata.model_dump()
 
     LOG.info(

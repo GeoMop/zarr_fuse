@@ -84,7 +84,6 @@ class MetadataModel(BaseModel):
     )
     dataframe_row: dict | None
     target_node: str | None = None
-    config_dir: Path | None = None
 
     def resolve_schema_path(self, config_dir: Path) -> Path:
         return resolve_path(self.schema_path, config_dir)
@@ -98,7 +97,6 @@ class MetadataModel(BaseModel):
         username: str,
         node_path: str | None = None,
         dataframe_row: dict | None = None,
-        config_dir: Path | None = None,
     ) -> "MetadataModel":
         return cls(
             content_type=content_type,
@@ -109,6 +107,5 @@ class MetadataModel(BaseModel):
             extract_fn=data_source.extract_fn,
             fn_module=data_source.fn_module,
             dataframe_row=dataframe_row,
-            target_node=data_source.target_node,
-            config_dir=config_dir,
+            target_node=data_source.target_node
         )

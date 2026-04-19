@@ -24,8 +24,7 @@ def process_payload(
         content_type=content_type,
         username=username,
         node_path=node_path,
-        dataframe_row=dataframe_row,
-        config_dir=app_config.config_dir,
+        dataframe_row=dataframe_row
     )
 
     save_data(

@@ -136,3 +136,5 @@ securityContext:
     runAsUser: 11233
     # -- Group ID to run as
     runAsGroup: 11233
+    # -- FS group change policy
+    fsGroupChangePolicy: "OnRootMismatch"

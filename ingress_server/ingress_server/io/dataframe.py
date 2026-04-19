@@ -36,14 +36,14 @@ def _read_grib_from_bytes(payload: bytes, is_bz2: bool) -> xr.Dataset:
 def read_df_from_bytes(
     payload: bytes,
     metadata: MetadataModel,
-    fallback_config_dir: Path | None = None,
+    config_dir: Path,
 ) -> DataObject:
     try:
         if metadata.extract_fn and metadata.fn_module:
             return apply_extractor(
                 payload=payload,
                 metadata=metadata,
-                fallback_config_dir=fallback_config_dir,
+                config_dir=config_dir,
             )
 
         ct = classify_content_type(metadata.content_type)
