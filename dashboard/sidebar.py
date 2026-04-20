@@ -8,11 +8,17 @@ def _flatten_nodes(structure, depth: int = 0, items=None):
 
     name = structure.get("name") or "root"
     path = structure.get("path") or "/"
-    label = f"{'  ' * depth}{name}"
-    items.append((label, path))
+    children = structure.get("children", []) or []
 
-    for child in structure.get("children", []) or []:
-        _flatten_nodes(child, depth + 1, items)
+    # Skip rendering synthetic root if it only contains real child groups.
+    render_current = not (path == "/" and children)
+    if render_current:
+        label = f"{'  ' * depth}{name}"
+        items.append((label, path))
+
+    next_depth = depth + 1 if render_current else depth
+    for child in children:
+        _flatten_nodes(child, next_depth, items)
 
     return items
 

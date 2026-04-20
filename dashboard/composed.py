@@ -98,10 +98,16 @@ def build_dashboard():
                 items = []
             name = local_structure.get("name") or "root"
             path = local_structure.get("path") or "/"
-            label = f"{'  ' * depth}{name}"
-            items.append((label, path))
-            for child in local_structure.get("children", []) or []:
-                _flatten_nodes(child, depth + 1, items)
+            children = local_structure.get("children", []) or []
+
+            render_current = not (path == "/" and children)
+            if render_current:
+                label = f"{'  ' * depth}{name}"
+                items.append((label, path))
+
+            next_depth = depth + 1 if render_current else depth
+            for child in children:
+                _flatten_nodes(child, next_depth, items)
             return items
 
         node_items = _flatten_nodes(structure)

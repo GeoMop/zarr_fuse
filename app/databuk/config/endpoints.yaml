@@ -27,8 +27,8 @@ profiles:
 
   visualization:
     map:
-      center_lat: 50.869878
-      center_lon: 14.866236
+      center_lat: 50.8645
+      center_lon: 14.892
       zoom: 14
       title: "Uhelná site overview."
       point_size: 6
