@@ -40,29 +40,25 @@ hv.renderer("bokeh").theme = "dark_minimal"
 
 def build_dashboard():
     start_total = time.perf_counter()
-    endpoint_name = os.getenv("HV_DASHBOARD_ENDPOINT")
-
-    if not endpoint_name:
-        endpoints_path = Path(
-            os.getenv(
-                "ENDPOINTS_PATH",
-                str(
-                    Path(__file__).resolve().parent.parent
-                    / "app"
-                    / "databuk"
-                    / "config"
-                    / "endpoints.yaml"
-                ),
-            )
+    endpoints_path = Path(
+        os.getenv(
+            "ENDPOINTS_PATH",
+            str(
+                Path(__file__).resolve().parent.parent
+                / "app"
+                / "databuk"
+                / "config"
+                / "endpoints.yaml"
+            ),
         )
-        configured_default = get_default_endpoint_name(endpoints_path)
-        if configured_default:
-            endpoint_name = configured_default
+    )
 
-        endpoints = load_endpoints(endpoints_path)
-        if not endpoints:
-            raise ValueError(f"No endpoints configured in {endpoints_path}")
-        endpoint_name = endpoint_name or next(iter(endpoints.keys()))
+    configured_default = get_default_endpoint_name(endpoints_path)
+    endpoints = load_endpoints(endpoints_path)
+    if not endpoints:
+        raise ValueError(f"No endpoints configured in {endpoints_path}")
+
+    endpoint_name = configured_default or next(iter(endpoints.keys()))
 
     data = load_data(
         "local",
