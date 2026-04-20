@@ -29,6 +29,45 @@ def list_group_paths(structure: dict, prefix: str = "") -> list[str]:
     return paths
 
 
+def collect_group_paths(structure: dict) -> list[str]:
+    paths: list[str] = []
+
+    def walk(node: dict) -> None:
+        path = node.get("path") or "/"
+        paths.append(path)
+        for child in node.get("children", []) or []:
+            walk(child)
+
+    walk(structure)
+    return paths
+
+
+def _mask_secret(value: str | None) -> str:
+    if not value:
+        return "<missing>"
+    if len(value) <= 6:
+        return "***"
+    return f"{value[:3]}***{value[-3:]}"
+
+
+def print_credential_status() -> None:
+    zf_key = os.getenv("ZF_S3_ACCESS_KEY")
+    zf_secret = os.getenv("ZF_S3_SECRET_KEY")
+    zf_endpoint = os.getenv("ZF_S3_ENDPOINT_URL")
+    key = os.getenv("S3_ACCESS_KEY")
+    secret = os.getenv("S3_SECRET_KEY")
+    endpoint = os.getenv("S3_ENDPOINT_URL")
+
+    print("\n" + "=" * 72)
+    print("Credential status")
+    print(f"ZF_S3_ACCESS_KEY: {('set' if zf_key else 'missing')} ({_mask_secret(zf_key)})")
+    print(f"ZF_S3_SECRET_KEY: {('set' if zf_secret else 'missing')} ({_mask_secret(zf_secret)})")
+    print(f"ZF_S3_ENDPOINT_URL: {zf_endpoint or '<missing>'}")
+    print(f"S3_ACCESS_KEY: {('set' if key else 'missing')} ({_mask_secret(key)})")
+    print(f"S3_SECRET_KEY: {('set' if secret else 'missing')} ({_mask_secret(secret)})")
+    print(f"S3_ENDPOINT_URL: {endpoint or '<missing>'}")
+
+
 def _format_sample(values: np.ndarray, limit: int = 6) -> str:
     flat = values.ravel()
     clipped = flat[:limit]
@@ -87,6 +126,45 @@ def inspect_group_values(client: LocalClient, endpoint_name: str, group_path: st
             )
 
 
+def inspect_group_summary(client: LocalClient, endpoint_name: str, group_path: str) -> str:
+    try:
+        node = client._get_group(endpoint_name, group_path)
+        ds = node.dataset
+    except Exception as exc:  # noqa: BLE001
+        return f"{group_path}: error={type(exc).__name__}: {exc}"
+
+    data_var_count = len(ds.data_vars)
+    coord_count = len(ds.coords)
+    if data_var_count == 0:
+        return f"{group_path}: vars=0, coords={coord_count}"
+
+    finite_total = 0
+    sample_total = 0
+    for _, data_array in ds.data_vars.items():
+        indexers: dict[str, Any] = {
+            dim: slice(0, min(int(size), 3)) for dim, size in data_array.sizes.items()
+        }
+        try:
+            sample = np.array(data_array.isel(indexers).values)
+        except Exception:  # noqa: BLE001
+            continue
+
+        if sample.size == 0:
+            continue
+
+        if np.issubdtype(sample.dtype, np.number):
+            finite_total += int(np.isfinite(sample).sum())
+            sample_total += int(sample.size)
+        else:
+            finite_total += int(np.sum(sample != None))  # noqa: E711
+            sample_total += int(sample.size)
+
+    return (
+        f"{group_path}: vars={data_var_count}, coords={coord_count}, "
+        f"sample_non_null={finite_total}/{sample_total if sample_total else 0}"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Check endpoint store reachability and print group structure."
@@ -104,16 +182,28 @@ def main() -> int:
     parser.add_argument(
         "--check-values-endpoint",
         default=None,
-        help="Endpoint name for value check (e.g. profiles or wells)",
+        help="Endpoint name for value check.",
     )
     parser.add_argument(
         "--check-values-group",
         default=None,
-        help="Group path for value check (e.g. Uhelna/profiles)",
+        help="Group path for value check.",
+    )
+    parser.add_argument(
+        "--check-values-all",
+        action="store_true",
+        help="Run value checks for every reachable endpoint/group automatically.",
+    )
+    parser.add_argument(
+        "--full-report",
+        action="store_true",
+        help="Print credentials, endpoint reachability, groups, and per-group dataset summary.",
     )
     args = parser.parse_args()
 
     load_dotenv(args.env_file)
+    if args.full_report:
+        print_credential_status()
 
     endpoints_path = Path(args.endpoints)
     endpoints = load_endpoints(endpoints_path)
@@ -132,18 +222,40 @@ def main() -> int:
             print("Groups:")
             for line in list_group_paths(structure):
                 print(f"  {line}")
+
+            if args.full_report:
+                print("Group dataset summary:")
+                for group_path in collect_group_paths(structure):
+                    print(f"  - {inspect_group_summary(client, endpoint_name, group_path)}")
         except Exception as exc:  # noqa: BLE001
             print("Reachable: no")
             print(f"Error: {type(exc).__name__}: {exc}")
 
-    if args.check_values_endpoint and args.check_values_group:
+    if args.check_values_all:
+        for endpoint_name in endpoints.keys():
+            try:
+                structure = client.get_structure(endpoint_name)
+            except Exception as exc:  # noqa: BLE001
+                print(f"\nSkipping value checks for endpoint '{endpoint_name}': {type(exc).__name__}: {exc}")
+                continue
+
+            for group_path in collect_group_paths(structure):
+                inspect_group_values(
+                    client,
+                    endpoint_name=endpoint_name,
+                    group_path=group_path,
+                )
+    elif args.check_values_endpoint and args.check_values_group:
         inspect_group_values(
             client,
             endpoint_name=args.check_values_endpoint,
             group_path=args.check_values_group,
         )
     elif args.check_values_endpoint or args.check_values_group:
-        print("\nValue check skipped: provide both --check-values-endpoint and --check-values-group.")
+        print(
+            "\nValue check skipped: provide both --check-values-endpoint and --check-values-group, "
+            "or use --check-values-all."
+        )
 
     return 0
 
