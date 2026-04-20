@@ -141,35 +141,72 @@ class LocalClient:
             _timer_log("get_map_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": f"{lat_field}/{lon_field} not found"}
 
-        if time_field and time_field in lat.dims:
-            lat = lat.isel({time_field: time_index})
-        if time_field and time_field in lon.dims:
-            lon = lon.isel({time_field: time_index})
-        if depth_field and depth_field in lat.dims:
-            lat = lat.isel({depth_field: depth_index})
-        if depth_field and depth_field in lon.dims:
-            lon = lon.isel({depth_field: depth_index})
+        data_var_full = ds[variable]
 
-        data_var = ds[variable]
-        if time_field and time_field in data_var.dims:
-            data_var = data_var.isel({time_field: time_index})
-        if depth_field and depth_field in data_var.dims:
-            data_var = data_var.isel({depth_field: depth_index})
+        def _isel_if_has_dim(array, dim_name: Optional[str], index: int):
+            if dim_name and dim_name in array.dims:
+                return array.isel({dim_name: index})
+            return array
 
-        lats = np.array(lat.values).astype(float).ravel()
-        lons = np.array(lon.values).astype(float).ravel()
-        values = np.array(data_var.values).astype(float).ravel()
-        values = np.where(np.isfinite(values), values, np.nan)
+        def _candidate_indices(size: int, preferred: int) -> list[int]:
+            if size <= 1:
+                return [0]
+            preferred_idx = preferred if 0 <= preferred < size else 0
+            return [preferred_idx] + [i for i in range(size) if i != preferred_idx]
 
-        if len(lats) != len(lons) or len(lats) != len(values):
+        def _slice_map_arrays(t_idx: int, d_idx: int):
+            lat_sel = _isel_if_has_dim(_isel_if_has_dim(lat, time_field, t_idx), depth_field, d_idx)
+            lon_sel = _isel_if_has_dim(_isel_if_has_dim(lon, time_field, t_idx), depth_field, d_idx)
+            data_sel = _isel_if_has_dim(_isel_if_has_dim(data_var_full, time_field, t_idx), depth_field, d_idx)
+
+            lats_local = np.array(lat_sel.values, dtype=float).ravel()
+            lons_local = np.array(lon_sel.values, dtype=float).ravel()
+            values_local = np.array(data_sel.values, dtype=float).ravel()
+            values_local = np.where(np.isfinite(values_local), values_local, np.nan)
+
+            if len(lats_local) != len(lons_local) or len(lats_local) != len(values_local):
+                return None
+
+            valid_count = int(np.sum(np.isfinite(lats_local) & np.isfinite(lons_local) & np.isfinite(values_local)))
+            return lats_local, lons_local, values_local, valid_count
+
+        selected_time_index = time_index
+        selected_depth_index = depth_index
+        sliced = _slice_map_arrays(selected_time_index, selected_depth_index)
+
+        if sliced is None:
             _timer_log("get_map_data failed", time.perf_counter() - start)
             return {
                 "status": "error",
                 "reason": (
                     "Coordinate/value lengths do not match "
-                    f"(lat={len(lats)}, lon={len(lons)}, values={len(values)})"
+                    "for selected map slice"
                 ),
             }
+
+        lats, lons, values, valid_count = sliced
+
+        if valid_count == 0:
+            time_size = int(data_var_full.sizes.get(time_field, 1)) if time_field and time_field in data_var_full.dims else 1
+            depth_size = int(data_var_full.sizes.get(depth_field, 1)) if depth_field and depth_field in data_var_full.dims else 1
+
+            # Try other slices only when the selected one has no usable points.
+            for t_idx in _candidate_indices(time_size, selected_time_index):
+                for d_idx in _candidate_indices(depth_size, selected_depth_index):
+                    if t_idx == selected_time_index and d_idx == selected_depth_index:
+                        continue
+                    candidate = _slice_map_arrays(t_idx, d_idx)
+                    if candidate is None:
+                        continue
+                    cand_lats, cand_lons, cand_values, cand_valid = candidate
+                    if cand_valid > 0:
+                        lats, lons, values = cand_lats, cand_lons, cand_values
+                        selected_time_index = t_idx
+                        selected_depth_index = d_idx
+                        break
+                else:
+                    continue
+                break
 
         result = {
             "status": "success",
@@ -177,8 +214,8 @@ class LocalClient:
             "lon": _to_json_floats(lons),
             "values": _to_json_floats(values),
             "variable": variable,
-            "time_index": time_index,
-            "depth_index": depth_index,
+            "time_index": selected_time_index,
+            "depth_index": selected_depth_index,
         }
         _timer_log("get_map_data", time.perf_counter() - start)
         return result
