@@ -2,9 +2,11 @@ import panel as pn
 import pandas as pd
 
 
-def _flatten_nodes(structure, depth: int = 0, items=None):
+def _flatten_nodes(structure, depth: int = 0, items=None, prefixes=None, is_last: bool = True):
     if items is None:
         items = []
+    if prefixes is None:
+        prefixes = []
 
     name = structure.get("name") or "root"
     path = structure.get("path") or "/"
@@ -13,12 +15,19 @@ def _flatten_nodes(structure, depth: int = 0, items=None):
     # Skip rendering synthetic root if it only contains real child groups.
     render_current = not (path == "/" and children)
     if render_current:
-        label = f"{'  ' * depth}{name}"
+        branch = "".join(prefixes)
+        connector = "└─ " if is_last else "├─ "
+        label = f"{branch}{connector if branch else ''}{name}"
         items.append((label, path))
 
     next_depth = depth + 1 if render_current else depth
-    for child in children:
-        _flatten_nodes(child, next_depth, items)
+    next_prefixes = list(prefixes)
+    if render_current:
+        next_prefixes.append("   " if is_last else "│  ")
+
+    for index, child in enumerate(children):
+        child_is_last = index == len(children) - 1
+        _flatten_nodes(child, next_depth, items, next_prefixes, child_is_last)
 
     return items
 

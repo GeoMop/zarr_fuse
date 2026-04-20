@@ -15,7 +15,7 @@ from dashboard.data import load_data
 from dashboard.config import get_default_endpoint_name, load_endpoints
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
-from dashboard.sidebar import build_depth_controls, build_sidebar
+from dashboard.sidebar import build_depth_controls, build_sidebar, _flatten_nodes
 
 
 JS_FILES = {
@@ -91,25 +91,6 @@ def build_dashboard():
         endpoints = data.client.get_endpoints()
         endpoint = endpoints.get(selected_endpoint) or data.client.get_endpoint(selected_endpoint)
         structure = data.client.get_structure(selected_endpoint)
-        node_items = []
-
-        def _flatten_nodes(local_structure, depth: int = 0, items=None):
-            if items is None:
-                items = []
-            name = local_structure.get("name") or "root"
-            path = local_structure.get("path") or "/"
-            children = local_structure.get("children", []) or []
-
-            render_current = not (path == "/" and children)
-            if render_current:
-                label = f"{'  ' * depth}{name}"
-                items.append((label, path))
-
-            next_depth = depth + 1 if render_current else depth
-            for child in children:
-                _flatten_nodes(child, next_depth, items)
-            return items
-
         node_items = _flatten_nodes(structure)
         node_options = {label: path for label, path in node_items}
         node_select.options = node_options
