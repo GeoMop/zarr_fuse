@@ -31,6 +31,14 @@ spec:
           envFrom:
             - secretRef:
                 name: {{ .Values.backend.name }}-secrets
+          {{- with .Values.backend.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.backend.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
           securityContext:
@@ -56,3 +64,7 @@ spec:
             periodSeconds: 30
             successThreshold: 1
             failureThreshold: 10
+      {{- with .Values.backend.extraVolumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

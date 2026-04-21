@@ -24,6 +24,12 @@ backend:
       accessKey: "your-access-key"
       secretKey: "your-secret-key"
 
+  extraEnv: []
+
+  extraVolumes: []
+
+  extraVolumeMounts: []
+
   resources:
     requests:
       cpu: 125m
