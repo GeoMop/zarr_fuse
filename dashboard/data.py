@@ -1,26 +1,24 @@
 from __future__ import annotations
 
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-import sys
-import time
 from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
 import zarr_fuse as zf
-import os
+
+from dashboard.config import (
+    get_endpoint_config,
+    load_endpoints,
+    resolve_endpoints_path,
+    resolve_schema_fields,
+)
 
 
 def _timer_log(message: str, duration: float) -> None:
     print(f"[timing] {message}: {duration:.3f}s")
-
-
-# Set CONFIG_ROOT to the dashboard directory
-CONFIG_ROOT = Path(__file__).resolve().parent
-
-# Import config directly (no sys.path manipulation needed with proper package structure)
-from dashboard.config import get_endpoint_config, load_endpoints, resolve_schema_fields
 
 
 @dataclass
@@ -39,7 +37,7 @@ class EndpointHandle:
 
 class LocalClient:
     def __init__(self, endpoints_path: Path):
-        self.endpoints_path = Path(endpoints_path)
+        self.endpoints_path = Path(endpoints_path).expanduser().resolve()
         self.base_dir = self.endpoints_path.parent.parent
         self._nodes: Dict[str, Any] = {}
 
@@ -178,10 +176,7 @@ class LocalClient:
             _timer_log("get_map_data failed", time.perf_counter() - start)
             return {
                 "status": "error",
-                "reason": (
-                    "Coordinate/value lengths do not match "
-                    "for selected map slice"
-                ),
+                "reason": "Coordinate/value lengths do not match for selected map slice",
             }
 
         lats, lons, values, valid_count = sliced
@@ -190,7 +185,6 @@ class LocalClient:
             time_size = int(data_var_full.sizes.get(time_field, 1)) if time_field and time_field in data_var_full.dims else 1
             depth_size = int(data_var_full.sizes.get(depth_field, 1)) if depth_field and depth_field in data_var_full.dims else 1
 
-            # Try other slices only when the selected one has no usable points.
             for t_idx in _candidate_indices(time_size, selected_time_index):
                 for d_idx in _candidate_indices(depth_size, selected_depth_index):
                     if t_idx == selected_time_index and d_idx == selected_depth_index:
@@ -318,37 +312,43 @@ def _to_json_floats(values: Any) -> list:
             out.append(float(value))
     return out
 
-def load_data(source: str, **kwargs) -> DashboardData:
+
+def load_data(
+    source: str,
+    *,
+    endpoint_name: str,
+    endpoints_path: Optional[Path] = None,
+    group_path: Optional[str] = None,
+    **kwargs,
+) -> DashboardData:
     if source not in {"local", "direct", "zarr_fuse"}:
         raise NotImplementedError("Only local zarr_fuse data sources are supported.")
 
-    # Support ENDPOINTS_PATH environment variable for external project configuration
-    endpoints_path = kwargs.pop(
-        "endpoints_path",
-        os.getenv(
-            "ENDPOINTS_PATH",
-            str(CONFIG_ROOT.parent / "app" / "databuk" / "config" / "endpoints.yaml")
-        ),
+    if kwargs:
+        unexpected = ", ".join(sorted(kwargs.keys()))
+        raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
+
+    resolved_endpoints_path = (
+        Path(endpoints_path).expanduser().resolve()
+        if endpoints_path is not None
+        else resolve_endpoints_path()
     )
-    endpoints_path = Path(endpoints_path)
-    
-    endpoint_name = kwargs.pop("endpoint_name")
-    
-    if not endpoints_path.exists():
+
+    if not resolved_endpoints_path.exists():
         raise FileNotFoundError(
-            f"Endpoints file not found: {endpoints_path}. "
+            f"Endpoints file not found: {resolved_endpoints_path}. "
             "Set ENDPOINTS_PATH environment variable to point to your endpoints.yaml"
         )
-    
-    client = LocalClient(endpoints_path)
 
-    endpoint = get_endpoint_config(endpoints_path, endpoint_name)
-    group_path = kwargs.pop("group_path", None) or endpoint.defaults.group_path
-    if not group_path:
+    client = LocalClient(resolved_endpoints_path)
+
+    endpoint = get_endpoint_config(resolved_endpoints_path, endpoint_name)
+    resolved_group_path = group_path or endpoint.defaults.group_path
+    if not resolved_group_path:
         raise ValueError("group_path is required (set defaults.group_path or pass group_path explicitly)")
 
     return DashboardData(
         endpoint_name=endpoint_name,
-        group_path=group_path,
+        group_path=resolved_group_path,
         client=client,
     )

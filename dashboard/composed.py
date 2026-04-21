@@ -51,6 +51,7 @@ def build_dashboard():
     data = load_data(
         "local",
         endpoint_name=endpoint_name,
+        endpoints_path=endpoints_path,
     )
 
     endpoints = data.client.get_endpoints()
