@@ -109,6 +109,38 @@ FIELD_NAMES = {"lat", "lon", "time", "vertical", "entity"}
 REQUIRED_FIELD_NAMES = {"lat", "lon", "time", "entity"}
 
 
+def resolve_endpoints_path() -> Path:
+    """
+    Resolution order:
+    1. ENDPOINTS_PATH env var
+    2. Search upward from current working directory for:
+       - dashboard/config/endpoints.yaml
+       - config/endpoints.yaml
+    """
+    env_path = os.getenv("ENDPOINTS_PATH")
+    if env_path:
+        path = Path(env_path).expanduser().resolve()
+        if not path.exists():
+            raise FileNotFoundError(f"ENDPOINTS_PATH does not exist: {path}")
+        return path
+
+    cwd = Path.cwd().resolve()
+    for base in [cwd, *cwd.parents]:
+        for candidate in (
+            base / "dashboard" / "config" / "endpoints.yaml",
+            base / "config" / "endpoints.yaml",
+        ):
+            if candidate.exists():
+                return candidate
+
+    raise FileNotFoundError(
+        "Could not find endpoints.yaml. Checked:\n"
+        "1. ENDPOINTS_PATH env var\n"
+        "2. dashboard/config/endpoints.yaml\n"
+        "3. config/endpoints.yaml"
+    )
+
+
 def _normalize_group_path(group_path: Optional[str]) -> str:
     if not group_path or group_path == "/":
         return ""

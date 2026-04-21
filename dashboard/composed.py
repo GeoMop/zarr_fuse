@@ -1,22 +1,19 @@
-import os
 import time
-from pathlib import Path
 
 import holoviews as hv
 import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
-from holoviews import streams
 from dotenv import load_dotenv
+from holoviews import streams
+
+from dashboard.config import get_default_endpoint_name, load_endpoints, resolve_endpoints_path
+from dashboard.data import load_data
+from dashboard.map_views import build_map_view
+from dashboard.multi_time_views import build_timeseries_views
+from dashboard.sidebar import _flatten_nodes, build_depth_controls, build_sidebar
 
 # Load environment variables from .env file if present
 load_dotenv()
-
-from dashboard.data import load_data
-from dashboard.config import get_default_endpoint_name, load_endpoints
-from dashboard.map_views import build_map_view
-from dashboard.multi_time_views import build_timeseries_views
-from dashboard.sidebar import build_depth_controls, build_sidebar, _flatten_nodes
-
 
 JS_FILES = {
     "jquery": "https://code.jquery.com/jquery-1.11.1.min.js",
@@ -40,18 +37,9 @@ hv.renderer("bokeh").theme = "dark_minimal"
 
 def build_dashboard():
     start_total = time.perf_counter()
-    endpoints_path = Path(
-        os.getenv(
-            "ENDPOINTS_PATH",
-            str(
-                Path(__file__).resolve().parent.parent
-                / "app"
-                / "databuk"
-                / "config"
-                / "endpoints.yaml"
-            ),
-        )
-    )
+
+    endpoints_path = resolve_endpoints_path()
+    print(f"Using endpoints config: {endpoints_path}")
 
     configured_default = get_default_endpoint_name(endpoints_path)
     endpoints = load_endpoints(endpoints_path)
@@ -84,13 +72,16 @@ def build_dashboard():
 
     def _refresh_sidebar_for_endpoint(selected_endpoint: str):
         nonlocal endpoints, endpoint, structure
+
         endpoints = data.client.get_endpoints()
         endpoint = endpoints.get(selected_endpoint) or data.client.get_endpoint(selected_endpoint)
         structure = data.client.get_structure(selected_endpoint)
+
         node_items = _flatten_nodes(structure)
         node_options = {label: path for label, path in node_items}
         node_select.options = node_options
         node_select.value = node_items[0][1] if node_items else "/"
+
         store_info.object = (
             "<div style='background: #1e293b; padding: 12px; border-radius: 8px; margin: 8px 0;"
             " border-left: 3px solid #3b82f6;'>"
@@ -101,7 +92,8 @@ def build_dashboard():
         )
 
     def _switch_endpoint(selected_endpoint: str):
-        nonlocal data, endpoint_name, map_view, map_state, line_left, line_mid, line_right
+        nonlocal data, endpoint_name
+
         endpoint_name = selected_endpoint
         data.endpoint_name = selected_endpoint
         data.group_path = "/"
@@ -161,6 +153,7 @@ def build_dashboard():
     def refresh_views():
         new_map_view, new_map_state = build_map_view(data, tap_stream)
         update_data_warnings(new_map_state)
+
         new_line_left, new_line_mid, new_line_right, new_on_map_tap = build_timeseries_views(
             data,
             depth_selector,
@@ -168,6 +161,7 @@ def build_dashboard():
             borehole_stream,
             new_map_state,
         )
+
         map_handlers["on_map_tap"] = new_on_map_tap
         top_left.object = new_map_view
         bottom_left.object = new_line_left
@@ -215,7 +209,6 @@ def build_dashboard():
 {%% block contents %%}
 {%% set context = '%s' %%}
 
-<!-- Notebook-specific container -->
 {%% if context == 'notebook' %%}
     {%% set slicer_id = get_id() %%}
     <div id='{{slicer_id}}'></div>
@@ -228,7 +221,6 @@ def build_dashboard():
 </style>
 
 <script>
-// GoldenLayout configuration
 var config = {
     settings: {
         hasHeaders: true,
@@ -245,7 +237,6 @@ var config = {
     content: [{
         type: 'row',
         content:[
-            // Left sidebar: Controls
             {
                 type: 'component',
                 componentName: 'view',
@@ -257,11 +248,9 @@ var config = {
                 },
                 isClosable: false,
             },
-            // Right section: 2x2 grid
             {
                 type: 'column',
                 content: [
-                    // Top row: Map + Depths
                     {
                         type: 'row',
                         content:[
@@ -285,7 +274,6 @@ var config = {
                             }
                         ]
                     },
-                    // Bottom row: Three synchronized views
                     {
                         type: 'row',
                         content:[
@@ -324,32 +312,26 @@ var config = {
     }]
 };
 
-// Initialize GoldenLayout
 {%% if context == 'notebook' %%}
-    var myLayout = new GoldenLayout( config, '#' + '{{slicer_id}}' );
+    var myLayout = new GoldenLayout(config, '#' + '{{slicer_id}}');
     $('#' + '{{slicer_id}}').css({width: '100%%', height: '800px', margin: '0px'})
 {%% else %%}
-    var myLayout = new GoldenLayout( config );
+    var myLayout = new GoldenLayout(config);
 {%% endif %%}
 
-// Register component handler
-myLayout.registerComponent('view', function( container, componentState ){
-    const {width, css_classes} = componentState
+myLayout.registerComponent('view', function(container, componentState) {
+    const {width, css_classes} = componentState;
 
-    // Set initial width if specified
     if (width)
-      container.on('open', () => container.setSize(width, container.height))
+        container.on('open', () => container.setSize(width, container.height));
 
-    // Apply CSS classes
     if (css_classes)
-      css_classes.map((item) => container.getElement().addClass(item))
+        css_classes.map((item) => container.getElement().addClass(item));
 
-    // Set title and inject Panel model
-    container.setTitle(componentState.title)
+    container.setTitle(componentState.title);
     container.getElement().html(componentState.model);
 
-    // Trigger resize event for responsive plots
-    container.on('resize', () => window.dispatchEvent(new Event('resize')))
+    container.on('resize', () => window.dispatchEvent(new Event('resize')));
 });
 
 myLayout.init();

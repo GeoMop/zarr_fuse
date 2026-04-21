@@ -1,8 +1,6 @@
-import os
-from pathlib import Path
-from importlib import resources
-
 from fastapi import FastAPI
+
+from dashboard.config import resolve_endpoints_path
 
 
 # Router imports commented out until implemented
@@ -10,48 +8,6 @@ from fastapi import FastAPI
 # from api.routers import config_compat as config_compat_router
 # from api.routers import plot as plot_router
 # from api.routers import s3 as s3_router
-
-
-def resolve_endpoints_path() -> Path:
-    """
-    Resolution order:
-    1. ENDPOINTS_PATH env var
-    2. Search upwards from current working directory for:
-       - dashboard/config/endpoints.yaml
-       - config/endpoints.yaml
-    3. Packaged default inside this installed package
-    """
-    env_path = os.getenv("ENDPOINTS_PATH")
-    if env_path:
-        path = Path(env_path).expanduser().resolve()
-        if not path.exists():
-            raise FileNotFoundError(f"ENDPOINTS_PATH does not exist: {path}")
-        return path
-
-    cwd = Path.cwd().resolve()
-    for base in [cwd, *cwd.parents]:
-        candidates = [
-            base / "dashboard" / "config" / "endpoints.yaml",
-            base / "config" / "endpoints.yaml",
-        ]
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-
-    try:
-        packaged = resources.files("api.config").joinpath("endpoints.yaml")
-        if packaged.is_file():
-            return Path(packaged)
-    except Exception:
-        pass
-
-    raise FileNotFoundError(
-        "Could not find endpoints.yaml. Checked:\n"
-        "1. ENDPOINTS_PATH env var\n"
-        "2. dashboard/config/endpoints.yaml\n"
-        "3. config/endpoints.yaml\n"
-        "4. packaged default api/config/endpoints.yaml"
-    )
 
 
 def create_app() -> FastAPI:
