@@ -25,6 +25,7 @@ def _timer_log(message: str, duration: float) -> None:
 class DashboardData:
     endpoint_name: str
     group_path: str
+    display_variable: str
     client: "LocalClient"
 
 
@@ -40,6 +41,14 @@ class LocalClient:
         self.endpoints_path = Path(endpoints_path).expanduser().resolve()
         self.base_dir = self.endpoints_path.parent.parent
         self._nodes: Dict[str, Any] = {}
+        self._map_data_cache: Dict[str, Any] = {}
+        self._timeseries_cache: Dict[str, Any] = {}
+
+    def clear_cache(self):
+        """Clear all cached data"""
+        self._map_data_cache.clear()
+        self._timeseries_cache.clear()
+        print("[cache] Cleared all caches")
 
     def get_endpoints(self) -> Dict[str, Any]:
         endpoints = load_endpoints(self.endpoints_path)
@@ -101,6 +110,33 @@ class LocalClient:
 
         return build(node)
 
+    def get_variables(self, endpoint_name: Optional[str], group_path: str) -> Dict[str, str]:
+        node = self._get_group(endpoint_name, group_path)
+        ds = node.dataset
+
+        # Exclude coordinate variables - only show actual data variables
+        coord_names = set()
+        for coord in ds.coords:
+            coord_names.add(coord)
+        for var_name in ds.coords:
+            coord_names.add(var_name)
+
+        variables = {}
+        for var_name in ds.data_vars:
+            # Skip coordinate-like variables
+            if var_name.lower() in ("latitude", "longitude", "lat", "lon", "x", "y"):
+                continue
+            
+            var = ds[var_name]
+            unit = ""
+            if hasattr(var, "units") and var.units:
+                unit = str(var.units)
+            elif hasattr(var, "attrs") and var.attrs.get("units"):
+                unit = str(var.attrs.get("units"))
+            variables[var_name] = unit
+
+        return variables
+
     def get_map_data(
         self,
         endpoint_name: Optional[str],
@@ -110,6 +146,15 @@ class LocalClient:
         depth_index: int = 0,
     ) -> Dict[str, Any]:
         start = time.perf_counter()
+        
+        # Check cache first
+        cache_key = f"{endpoint_name}:{group_path}:{variable}:{time_index}:{depth_index}"
+        if hasattr(self, '_map_data_cache') and cache_key in getattr(self, '_map_data_cache', {}):
+            cached = self._map_data_cache[cache_key]
+            print(f"[cache] get_map_data: cache hit for {variable}")
+            _timer_log("get_map_data (cached)", time.perf_counter() - start)
+            return cached
+            
         endpoint = self._endpoint_config(endpoint_name)
         fields = resolve_schema_fields(endpoint.schema, group_path)
 
@@ -211,6 +256,9 @@ class LocalClient:
             "time_index": selected_time_index,
             "depth_index": selected_depth_index,
         }
+        
+        # Cache the result
+        self._map_data_cache[cache_key] = result
         _timer_log("get_map_data", time.perf_counter() - start)
         return result
 
@@ -223,6 +271,15 @@ class LocalClient:
         variable: Optional[str] = None,
     ) -> Dict[str, Any]:
         start = time.perf_counter()
+        
+        # Check cache first - using location as part of key since timeseries is location-specific
+        cache_key = f"{endpoint_name}:{group_path}:{variable}:{lat:.4f}:{lon:.4f}"
+        if cache_key in self._timeseries_cache:
+            cached = self._timeseries_cache[cache_key]
+            print(f"[cache] get_timeseries_data: cache hit for {variable}")
+            _timer_log("get_timeseries_data (cached)", time.perf_counter() - start)
+            return cached
+            
         endpoint = self._endpoint_config(endpoint_name)
         fields = resolve_schema_fields(endpoint.schema, group_path)
 
@@ -297,6 +354,9 @@ class LocalClient:
             "variable": variable,
             "borehole_index": idx,
         }
+        
+        # Cache the result
+        self._timeseries_cache[cache_key] = result
         _timer_log("get_timeseries_data", time.perf_counter() - start)
         return result
 
@@ -319,6 +379,7 @@ def load_data(
     endpoint_name: str,
     endpoints_path: Optional[Path] = None,
     group_path: Optional[str] = None,
+    display_variable: Optional[str] = None,
     **kwargs,
 ) -> DashboardData:
     if source not in {"local", "direct", "zarr_fuse"}:
@@ -347,8 +408,13 @@ def load_data(
     if not resolved_group_path:
         raise ValueError("group_path is required (set defaults.group_path or pass group_path explicitly)")
 
+    resolved_display_variable = display_variable or endpoint.defaults.display_variable
+    if not resolved_display_variable:
+        raise ValueError("display_variable is required (set defaults.display_variable or pass display_variable explicitly)")
+
     return DashboardData(
         endpoint_name=endpoint_name,
         group_path=resolved_group_path,
+        display_variable=resolved_display_variable,
         client=client,
     )

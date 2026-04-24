@@ -33,7 +33,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     visualization_config = endpoint_config["visualization"]
     timeseries_config = visualization_config["timeseries"]
 
-    default_display_variable = defaults_config["display_variable"]
+    default_display_variable = data.display_variable
 
     metric_label = (
         schema_display.get("display_variable")

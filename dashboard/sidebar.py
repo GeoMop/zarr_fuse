@@ -130,6 +130,19 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         sizing_mode="stretch_width",
     )
 
+    variable_selector = pn.widgets.Select(
+        name="VARIABLE",
+        options=[],
+        size=5,
+        width=320,
+    )
+
+    variable_info = pn.pane.Markdown(
+        "Select a variable",
+        sizing_mode="stretch_width",
+        styles={"font-size": "11px", "color": "#94a3b8"},
+    )
+
     node_hint = pn.pane.Alert(
         "",
         alert_type="warning",
@@ -144,13 +157,15 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         status_section,
         reload_button,
         tree_view,
+        variable_selector,
+        variable_info,
         node_hint,
         pn.layout.VSpacer(),
         sizing_mode="stretch_width",
         styles={"padding": "10px"},
     )
 
-    return controller, store_selector, tree_view, node_hint, store_info
+    return controller, store_selector, tree_view, variable_selector, variable_info, node_hint, store_info
 
 
 def build_depth_controls():

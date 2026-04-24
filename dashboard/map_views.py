@@ -59,9 +59,9 @@ def build_map_view(data, tap_stream):
 
     overlay_layer = _load_overlay(endpoint_config)
 
-    default_display_variable = defaults_config["display_variable"]
+    default_display_variable = data.display_variable
     if not default_display_variable:
-        raise ValueError(f"No default display variable configured for endpoint '{data.endpoint_name}'")
+        raise ValueError(f"No display variable set for endpoint '{data.endpoint_name}'")
 
     fig = data.client.get_map_data(
         data.endpoint_name,
