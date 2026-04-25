@@ -204,3 +204,5 @@ app/databuk/dashboard/.vscode/*
 # Dashboard backend virtual environment
 app/databuk/dashboard/backend/venv/
 app/databuk/dashboard/backend/.env
+
+ingress_server/inputs

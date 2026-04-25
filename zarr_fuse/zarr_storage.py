@@ -34,9 +34,9 @@ tuple val coords:
 - source cols as quantities
 - Coordinates object holds both index and non-dim coordinates
   so we use them. We just form the index coodrinate by hash.
-- How to allow providint tuple coord values in structure. 
+- How to allow providint tuple coord values in structure.
   Ideal as dictionary for source cols, but then there is duplicity of their names
-  Rather have values as dict determining source columns, optionaly providing values 
+  Rather have values as dict determining source columns, optionaly providing values
 
 - pivot_nd - hash source cols
 - future read - hash source cols
@@ -116,7 +116,7 @@ def _s3_options(store_options):
         'endpoint_url': _get_option(store_options, 'S3_ENDPOINT_URL'),
         'listings_expiry_time': 1,
         'max_paths': 0,
-        'asynchronous': False,
+        'asynchronous': True,
         'config_kwargs': {
             #'s3': {
             #    'payload_signing_enabled': False,
@@ -173,7 +173,7 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
     - overwrite by schema ATTRS is provided
     - overwrite by evironment variables
     """
-    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS', 'WORKDIR', 'MODE'}
+    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS', 'WORKDIR', 'MODE', 'LOGGER'}
     secret_attrs = {'S3_ACCESS_KEY', 'S3_SECRET_KEY'}
     interpreted_attrs = interpreted_attrs.union(secret_attrs)
     options = {key:kwargs[key] for key in interpreted_attrs if key in kwargs}
@@ -189,6 +189,11 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
     e_key = lambda key: f"ZF_{key}"  # Environment variable key prefix
     env_options = {key:os.environ[e_key(key)] for key in interpreted_attrs if e_key(key) in os.environ}
     options.update(env_options)
+    logger_option = options.get('LOGGER', None)
+    if logger_option not in {'local', 'default', None}:
+        raise ZFOptionError(
+            "Invalid LOGGER option. Expected one of: 'local', 'default', None."
+        )
     return options
 
 def _get_schema_safe(schema):
@@ -277,7 +282,10 @@ def open_store(schema: zarr_schema.NodeSchema | Path | str, **kwargs):
         raise ZFOptionError(f"{str(e)}. Opening store for schema {schema}.")
 
     mode = options.get('MODE', 'a')
-    return Node("", store, new_schema = node_schema, mode=mode)
+    logger = None
+    if options.get('LOGGER') == 'local':
+        logger = RaisingLogger("local zarr_fuse logger")
+    return Node("", store, new_schema = node_schema, mode=mode, logger=logger)
 
 class Node:
     """
@@ -444,7 +452,8 @@ class Node:
 
     def __init__(self, name, store, parent=None,
                  new_schema:zarr_schema.NodeSchema=None,
-                 mode="a"):
+                 mode="a",
+                 logger=None):
         """
         Parameters:
           name (str): The name of the node. For the root node, use an empty string ("").
@@ -453,6 +462,7 @@ class Node:
         """
         self.name = name
         self.store = store
+        self._logger = logger
         if store.read_only:
             mode = 'r'
         else:
@@ -468,6 +478,8 @@ class Node:
 
     @cached_property
     def logger(self):
+        if self._logger is not None:
+            return self._logger
         if self.mode == 'r':
             return RaisingLogger(get_logger(store=None, path=self.group_path))
         else:
@@ -533,7 +545,13 @@ class Node:
                 new_child_schema = None
 
             # Here we do indirect recursion of _make_consistent.
-            return Node(key, self.store, parent=self, new_schema=new_child_schema)
+            return Node(
+                key,
+                self.store,
+                parent=self,
+                new_schema=new_child_schema,
+                logger=self._logger,
+            )
 
         # Process existing child Nodes
         childern = {
@@ -555,11 +573,10 @@ class Node:
         """
         try:
             old_schema = self.schema
-        except (KeyError,GroupNotFoundError):
-            cfg = zarr_schema.ContextCfg(dict(attrs={}, vars={}, coords={}), self._make_null_ctx())
-            old_schema = zarr_schema.DatasetSchema(cfg['attrs'], cfg['vars'], cfg['coords'])
+        except (KeyError,GroupNotFoundError) as e:
+            old_schema = None
 
-        if old_schema.is_empty():
+        if old_schema is None or old_schema.is_empty():
             # Initialize new dataset.
             empty_ds = Node.empty_ds(new_schema)
             self._init_empty_grup(empty_ds)
@@ -616,8 +633,9 @@ class Node:
         rel_path = self.group_path #+ self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
         ds = xr.open_zarr(self.store, group=rel_path, consolidated=False)
-        for coord in ds.coords:
-            assert  'composed' in ds.coords[coord].attrs
+        # TODO: Check why this is used and if it is necessary.
+        # for coord in ds.coords:
+        #     assert 'composed' in ds.coords[coord].attrs
         return ds
 
     @property
@@ -778,6 +796,8 @@ class Node:
             self.logger.error(dup_dict)
 
         return written_ds
+
+
     def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode
         rel_path = self.group_path  # + self.PATH_SEP + "dataset"
         rel_path = rel_path.strip(self.PATH_SEP)
@@ -795,26 +815,40 @@ class Node:
         return written_ds
 
     def write_ds(self, ds, **kwargs):
-        rel_path = self.group_path # + self.PATH_SEP + "dataset"
-        rel_path = rel_path.strip(self.PATH_SEP)
-        #path_store = zarr.open_group(self.store, mode=mode, path=rel_path)
-        #ds.to_zarr(path_store,  **kwargs)
-        ds.to_zarr(self.store, group = rel_path, consolidated=False, **kwargs)
+        ds.attrs = self.ensure_schema_attrs(ds.attrs)
 
-        # written_ds = xr.open_zarr(self.store, group=rel_path)
-        # assert '__structure__' in ds.attrs
-        # assert '__structure__' in written_ds.attrs
+        rel_path = self.group_path.strip(self.PATH_SEP)
+        ds.to_zarr(self.store, group=rel_path, consolidated=False, **kwargs)
+
+        grp = zarr.open_group(self.store, path=rel_path, mode="r")
+        if dict(grp.attrs) != dict(ds.attrs):
+            self.logger.warning(
+                f"After writing dataset to Zarr store, the stored attributes differ from the original dataset attributes."
+                f"\nStored attrs: {dict(grp.attrs)} Update attrs: {ds.attrs}\n"
+            )
+
         return ds
 
     """
      For the updating DF we define "overlap" slice:
-     For sorted coord:  current_coords > new_coords.min() 
+     For sorted coord:  current_coords > new_coords.min()
      For unsorted coords: current_coord_idx > index_of( argmin( current_coords _intersect_ new_coords))
      However new_coords could undergo e.g. projection to existing coords.
      How to unify the procedure?
     """
 
 
+    def ensure_schema_attrs(self, attrs: zarr_schema.Attrs) -> zarr_schema.Attrs:
+        """
+        Update
+        :param ds:
+        :return:
+        """
+        merge_attrs = dict(self.schema.ATTRS)
+        merge_attrs.update(attrs)
+        merge_attrs["__structure__"] = zarr_schema.serialize(self.schema)
+
+        return merge_attrs
 
     def merge_ds(self, ds_update: xr.Dataset) -> xr.Dataset:
         """
@@ -879,8 +913,11 @@ class Node:
 
         # --- Phase 1: Dive (split by dimension) ---
         # We create a dict to hold the extension subset for each dimension.
-        if '__empty__' in ds_existing.attrs:
-            del ds_existing.attrs['__empty__']
+        if ds_existing.attrs.get('__empty__', False):
+            ds_update.attrs.pop('__empty__', None)
+            return self.write_ds(ds_update, mode="a"), {}
+        if ds_existing.attrs.get('__empty__', False):
+            ds_update.attrs.pop('__empty__', None)
             return self.write_ds(ds_update, mode="a"), {}
 
         ds_update, split_indices = interpolate_ds(
@@ -940,7 +977,7 @@ for dim in dim_order:
     n, merged_new_coords = merge_coords(dim, new_ds.coords[dim])
     l_overlap = len(ds_zar.coords[dim]) - N
     split_dict[dim] = (n,     l_overlap, merged_new_coords)
- 
+
 dim = dim_order[0]
 ` pad ds_zarr by Nans over [0:N] in 'dim', adding len(new_coords) - l_overlap for each d > dim'
 N, L, coords = slpit_dir[dim]
@@ -1302,7 +1339,7 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     # coords_dict = Node._create_coords(schema.COORDS, coords_dict)
 
     df_multi_idx, coords_dict, var_data = coerce_df(schema, df, logger)
-    coord_sizes = [len(coord) for coord in coords_dict.values()]
+    coord_sizes = {c: len(v) for c, v in coords_dict.items()}
 
     # 4. form variables
     # Helper: for a given variable, build the pivoted array.
@@ -1311,7 +1348,7 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
         # Choose a dtype based on the column (floating or object)
         #dtype = column_vals.dtype if np.issubdtype(column_vals.dtype, np.floating) else object
         # Create an empty output array with fill_value.
-        result = np.full(coord_sizes, var_struc.na_value, dtype=column_vals.dtype)
+        result = np.full(list(coord_sizes.values()), var_struc.na_value, dtype=column_vals.dtype)
 
         mask_valid = var_struc.valid_mask(column_vals)
 
@@ -1321,6 +1358,14 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
         dims_to_eliminate = [d not in var_struc.coords for d in coords_dict.keys()]
         result_valid = np.ma.array(result, mask=~var_struc.valid_mask(result))
         np_var = eliminate_dims_if_equal(result_valid, dims_to_eliminate)
+
+        # possibly transpose axis according to variable coords order
+        b_keys = [k for k in coord_sizes.keys() if k in var_struc.coords] # coords axis order
+        a_keys = list(var_struc.coords)  # desired variable axis order
+        axis_of = {k: i for i, k in enumerate(b_keys)}
+        perm = [axis_of[k] for k in a_keys]
+        np_var = np_var.transpose(perm)
+
         data_var = Node._variable(var_struc, np_var, coords_dict)
         return data_var
 

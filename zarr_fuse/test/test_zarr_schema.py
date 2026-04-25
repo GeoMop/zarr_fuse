@@ -277,6 +277,19 @@ def test_schema_serialization(smart_tmp_path, struc_yaml):
     check_fn(node_schema)
 
 
+def test_dataset_schema_source_to_schema_name_map():
+    node_schema = schema.deserialize(inputs_dir / "schema_weather.yaml")
+    ds_schema = node_schema.ds
+
+    assert ds_schema.source_to_schema_name_map == {
+        "timestamp": "time of year",
+        "lat_lon": "lat_lon",
+        "temp": "temperature",
+        "longitude": "longitude",
+        "latitude": "latitude",
+    }
+
+
 def check_schema_weather(node_schema):
     ds_schema = node_schema.ds
     assert isinstance(ds_schema, schema.DatasetSchema), "Expected DatasetSchema instance"

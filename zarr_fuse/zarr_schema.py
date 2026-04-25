@@ -1,5 +1,6 @@
 import re
 from functools import cached_property
+from itertools import chain
 from typing import *
 
 import pandas
@@ -471,6 +472,16 @@ class DatasetSchema(AddressMixin):
                 and not self.COORDS
                 and not self.VARS)
 
+    @property
+    def source_to_schema_name_map(self):
+        """
+        Return a mapping of the source variable names to the schema variable names.
+        Provides map for coords as well.
+        :return:
+        """
+        return {var.df_col: var.name
+                for var in chain(self.COORDS.values(), self.VARS.values())
+                }
 
     def zarr_attrs(self):
         attrs = { k:convert_value(v) for k,v in self.ATTRS.items()}
