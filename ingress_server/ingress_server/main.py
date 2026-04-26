@@ -31,18 +31,15 @@ LOG = logging.getLogger(__name__)
 # =========================
 def load_runtime_config() -> AppConfig:
     config_path = os.getenv("CONFIG_PATH", "inputs/endpoints_config.yaml")
-    queue_dir = os.getenv("QUEUE_DIR_PATH", "./var/zarr_fuse")
 
-    LOG.info(
-        "Loading runtime configuration config_path=%s queue_dir=%s",
-        config_path,
-        queue_dir,
-    )
+    LOG.info("Loading runtime configuration config_path=%s", config_path)
 
-    return load_app_config(
-        config_path=config_path,
-        queue_dir=queue_dir,
-    )
+    app_config = load_app_config(config_path=config_path)
+
+    setup_logging(app_config.base.log_level)
+    LOG.info("Log level set to %s", app_config.base.log_level)
+
+    return app_config
 
 
 # =========================
@@ -52,7 +49,7 @@ def _start_worker_thread(app: FastAPI, app_config: AppConfig) -> Thread:
     LOG.info("Starting worker thread")
     thread = Thread(
         target=working_loop,
-        args=(app_config, float(os.getenv("WORKER_POLL_INTERVAL", 30))),
+        args=(app_config, float(app_config.base.worker_poll_interval)),
         name="worker",
         daemon=True,
     )
@@ -151,7 +148,9 @@ def create_app() -> FastAPI:
 # Entrypoint
 # =========================
 def main() -> None:
-    port = int(os.getenv("PORT", 8000))
+    config_path = os.getenv("CONFIG_PATH", "inputs/endpoints_config.yaml")
+    app_config = load_app_config(config_path=config_path)
+    port = app_config.base.port
 
     LOG.info("Starting ingress server host=0.0.0.0 port=%s", port)
     uvicorn.run(

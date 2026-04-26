@@ -236,6 +236,7 @@ def run_one_scheduled_run(
     if failures:
         try:
             send_failure_email(
+                smtp_config=app_config.smtp,
                 scrapper_name=scrapper.name,
                 cron=run_cfg.cron,
                 failures=failures,

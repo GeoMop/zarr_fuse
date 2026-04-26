@@ -9,9 +9,8 @@ LOG = logging.getLogger(__name__)
 def prepare_test_environment() -> AppConfig:
     script_dir = Path(__file__).parent
     config_path = script_dir / "inputs" / "endpoints_config.yaml"
-    queue_dir = script_dir / "workdir" / "queue"
 
-    return load_app_config(config_path, queue_dir)
+    return load_app_config(config_path)
 
 def test_worker_process_one_with_json_payload():
     app_config = prepare_test_environment()

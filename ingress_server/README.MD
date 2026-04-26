@@ -137,10 +137,28 @@ Main configuration file:
 ```text
 inputs/endpoints_config.yaml
 ```
-This file defines:
 
-- passive ingestion endpoints
-- active scraping jobs
+The `configuration` block at the top of the file controls runtime behaviour and
+SMTP notifications. All settings except secrets live here — not in `.env`.
+
+```yaml
+configuration:
+  base:
+    queue_dir_path: ./var/zarr_fuse   # local ingestion queue directory
+    log_level: INFO
+    port: 8000
+    worker_poll_interval: 30          # seconds between worker cycles
+
+  smtp:
+    notify_to: ["ops@example.com"]
+    host: smtp.gmail.com
+    port: 587
+    from_email: "zarr.fuse.support@gmail.com"
+    username: "zarr.fuse.support@gmail.com"
+    password: ""                      # leave empty — set SMTP_PASSWORD in .env
+```
+
+The rest of the file defines passive endpoints and active scrappers (see sections below).
 
 ---
 
@@ -251,7 +269,9 @@ active_scrappers:
 
 # Environment Variables
 
-The application uses environment variables for S3 configuration, authentication and runtime settings.
+Only secrets and optional path overrides belong in `.env`. All other settings
+(port, log level, SMTP host, recipients, etc.) are configured in
+`endpoints_config.yaml`.
 
 For local development a template file is provided:
 
@@ -268,48 +288,33 @@ cp .env-template .env
 Example `.env` configuration:
 
 ```env
-# BASE CONFIGURATION
-QUEUE_DIR_PATH=./var/zarr_fuse                  # Optional
-CONFIG_PATH=.../inputs/endpoints_config.yaml    # Optional
-BASIC_AUTH_USERS_JSON={"test":"test"}
-PORT=8000                                       # Optional
-LOG_LEVEL=INFO                                  # Optional
-WORKER_POLL_INTERVAL=30                         # Optional
-
-# ZARR_FUSE CONFIGURATION
+# S3 CONFIGURATION
 ZF_S3_ACCESS_KEY=key
 ZF_S3_SECRET_KEY=key
 ZF_S3_ENDPOINT_URL=https://s3.cl4.du.cesnet.cz
 ZF_STORE_URL=s3://test....
 
-# SMTP CONFIGURATION
-ACTIVE_SCRAPPER_NOTIFY_TO="prvni@example.com,druhy@example.com"
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_FROM=mojeadresa@gmail.com
-SMTP_USER=mojeadresa@gmail.com
-SMTP_PASSWORD=xxxx
+# AUTH
+BASIC_AUTH_USERS_JSON={"user":"password"}
+
+# SMTP — password only, all other SMTP settings are in endpoints_config.yaml
+SMTP_PASSWORD=your_gmail_app_password
+
+# Optional overrides
+#CONFIG_PATH=inputs/endpoints_config.yaml
 ```
 
 ### Variable Description
 
-| Variable                    | Description                                                      |
-| --------------------------- | ---------------------------------------------------------------- |
-| `ZF_S3_ACCESS_KEY`          | S3 access key                                                    |
-| `ZF_S3_SECRET_KEY`          | S3 secret key                                                    |
-| `ZF_S3_ENDPOINT_URL`        | S3 endpoint URL                                                  |
-| `ZF_STORE_URL`              | Zarr store location                                              |
-| `QUEUE_DIR`                 | Local ingestion queue directory                                  |
-| `BASIC_AUTH_USERS_JSON`     | Basic auth users in JSON format                                  |
-| `PORT`                      | HTTP server port                                                 |
-| `LOG_LEVEL`                 | Logging level                                                    |
-| `WORKER_POLL_INTERVAL`      | Worker poll interval in seconds                                  |
-| `ACTIVE_SCRAPPER_NOTIFY_TO` | Comma-separated list of emails to notify on scrapper failure     |
-| `SMTP_HOST`                 | SMTP server host (e.g., `smtp.gmail.com`)                        |
-| `SMTP_PORT`                 | SMTP server port (usually `587` for TLS)                         |
-| `SMTP_FROM`                 | Email address used as sender                                     |
-| `SMTP_USER`                 | SMTP username (usually same as sender email)                     |
-| `SMTP_PASSWORD`             | SMTP password (for Gmail use App Password, not account password) |
+| Variable                | Description                                                      |
+| ----------------------- | ---------------------------------------------------------------- |
+| `ZF_S3_ACCESS_KEY`      | S3 access key                                                    |
+| `ZF_S3_SECRET_KEY`      | S3 secret key                                                    |
+| `ZF_S3_ENDPOINT_URL`    | S3 endpoint URL                                                  |
+| `ZF_STORE_URL`          | Zarr store location                                              |
+| `BASIC_AUTH_USERS_JSON` | Basic auth users as a JSON object `{"user":"password"}`          |
+| `SMTP_PASSWORD`         | SMTP password (for Gmail use App Password, not account password) |
+| `CONFIG_PATH`           | Override path to `endpoints_config.yaml` (optional)             |
 
 
 ---
