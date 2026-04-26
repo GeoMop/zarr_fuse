@@ -173,7 +173,7 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
     - overwrite by schema ATTRS is provided
     - overwrite by evironment variables
     """
-    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS', 'WORKDIR', 'MODE'}
+    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS', 'WORKDIR', 'MODE', 'LOGGER'}
     secret_attrs = {'S3_ACCESS_KEY', 'S3_SECRET_KEY'}
     interpreted_attrs = interpreted_attrs.union(secret_attrs)
     options = {key:kwargs[key] for key in interpreted_attrs if key in kwargs}
@@ -189,6 +189,11 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
     e_key = lambda key: f"ZF_{key}"  # Environment variable key prefix
     env_options = {key:os.environ[e_key(key)] for key in interpreted_attrs if e_key(key) in os.environ}
     options.update(env_options)
+    logger_option = options.get('LOGGER', None)
+    if logger_option not in {'local', 'default', None}:
+        raise ZFOptionError(
+            "Invalid LOGGER option. Expected one of: 'local', 'default', None."
+        )
     return options
 
 def _get_schema_safe(schema):
@@ -277,7 +282,10 @@ def open_store(schema: zarr_schema.NodeSchema | Path | str, **kwargs):
         raise ZFOptionError(f"{str(e)}. Opening store for schema {schema}.")
 
     mode = options.get('MODE', 'a')
-    return Node("", store, new_schema = node_schema, mode=mode)
+    logger = None
+    if options.get('LOGGER') == 'local':
+        logger = RaisingLogger("local zarr_fuse logger")
+    return Node("", store, new_schema = node_schema, mode=mode, logger=logger)
 
 class Node:
     """
@@ -444,7 +452,8 @@ class Node:
 
     def __init__(self, name, store, parent=None,
                  new_schema:zarr_schema.NodeSchema=None,
-                 mode="a"):
+                 mode="a",
+                 logger=None):
         """
         Parameters:
           name (str): The name of the node. For the root node, use an empty string ("").
@@ -453,6 +462,7 @@ class Node:
         """
         self.name = name
         self.store = store
+        self._logger = logger
         if store.read_only:
             mode = 'r'
         else:
@@ -468,6 +478,8 @@ class Node:
 
     @cached_property
     def logger(self):
+        if self._logger is not None:
+            return self._logger
         if self.mode == 'r':
             return RaisingLogger(get_logger(store=None, path=self.group_path))
         else:
@@ -533,7 +545,13 @@ class Node:
                 new_child_schema = None
 
             # Here we do indirect recursion of _make_consistent.
-            return Node(key, self.store, parent=self, new_schema=new_child_schema)
+            return Node(
+                key,
+                self.store,
+                parent=self,
+                new_schema=new_child_schema,
+                logger=self._logger,
+            )
 
         # Process existing child Nodes
         childern = {
