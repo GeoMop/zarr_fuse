@@ -1,3 +1,17 @@
+configuration:
+  base:
+    queue_dir_path: ./workdir/queue
+    log_level: INFO
+    port: 8000
+    worker_poll_interval: 30
+  smtp:
+    notify_to: [ "stepan.mocik@gmail.com" ]
+    host: smtp.gmail.com
+    port: 587
+    from_email: "zarr.fuse.support@gmail.com"
+    username: "zarr.fuse.support@gmail.com"
+    password: "" # in .env file, not in plaintext
+
 active_scrappers:
   - name: testing-scrapper
     crons:

@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
-from ..io import process_payload
+from ..io import process_payload, send_failure_email
 from ..app_config import AppConfig
 from .context import ExecutionContext, ExecutionContextError
 from .iterate import expand_iterate
@@ -126,7 +126,13 @@ def _build_contexts_for_run(
     return contexts
 
 
-def run_one_scheduled_run(app_config: AppConfig, scrapper: ActiveScrapperConfig, run_cfg: RunConfig) -> None:
+def run_one_scheduled_run(
+    app_config: AppConfig,
+    scrapper: ActiveScrapperConfig,
+    run_cfg: RunConfig,
+) -> None:
+    failures: list[dict] = []
+
     try:
         contexts = _build_contexts_for_run(app_config, scrapper, run_cfg)
     except ExecutionContextError as exc:
@@ -136,14 +142,24 @@ def run_one_scheduled_run(app_config: AppConfig, scrapper: ActiveScrapperConfig,
             run_cfg.cron,
             exc,
         )
-        return
-    except Exception:
+        failures.append({
+            "type": "build_contexts",
+            "context": {},
+            "error": str(exc),
+        })
+        contexts = []
+    except Exception as exc:
         LOG.exception(
             "Scrapper %s unexpectedly failed to build contexts for cron=%s",
             scrapper.name,
             run_cfg.cron,
         )
-        return
+        failures.append({
+            "type": "build_contexts_unexpected",
+            "context": {},
+            "error": str(exc),
+        })
+        contexts = []
 
     LOG.info(
         "Scrapper %s running cron=%s: %d request(s)",
@@ -155,6 +171,8 @@ def run_one_scheduled_run(app_config: AppConfig, scrapper: ActiveScrapperConfig,
     headers_static = {h.header_name: h.header_value for h in scrapper.request.headers}
 
     for ctx in contexts:
+        ctx_dict = ctx.to_dict()
+
         try:
             url, headers, params = build_request(ctx, scrapper.request)
 
@@ -174,26 +192,57 @@ def run_one_scheduled_run(app_config: AppConfig, scrapper: ActiveScrapperConfig,
                 payload=resp.content,
                 content_type=_effective_content_type(resp.headers.get("Content-Type"), url),
                 username=f"scrapper-{scrapper.name}",
-                dataframe_row=ctx.to_dict(),
+                dataframe_row=ctx_dict,
             )
 
         except ExecutionContextError as exc:
             LOG.error(
                 "Scrapper %s context/render error for ctx=%s: %s",
                 scrapper.name,
-                ctx.to_dict(),
+                ctx_dict,
                 exc,
             )
+            failures.append({
+                "type": "context_render",
+                "context": ctx_dict,
+                "error": str(exc),
+            })
+
         except ValueError as exc:
             LOG.warning(
                 "Scrapper %s rejected payload for ctx=%s: %s",
                 scrapper.name,
-                ctx.to_dict(),
+                ctx_dict,
                 exc,
             )
-        except Exception:
+            failures.append({
+                "type": "payload_validation",
+                "context": ctx_dict,
+                "error": str(exc),
+            })
+
+        except Exception as exc:
             LOG.exception(
                 "Scrapper %s unexpected error for ctx=%s",
                 scrapper.name,
-                ctx.to_dict(),
+                ctx_dict,
+            )
+            failures.append({
+                "type": "unexpected",
+                "context": ctx_dict,
+                "error": str(exc),
+            })
+
+    if failures:
+        try:
+            send_failure_email(
+                smtp_config=app_config.smtp,
+                scrapper_name=scrapper.name,
+                cron=run_cfg.cron,
+                failures=failures,
+            )
+        except Exception:
+            LOG.exception(
+                "Scrapper %s failed to send failure notification email",
+                scrapper.name,
             )
