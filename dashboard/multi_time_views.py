@@ -72,7 +72,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             return 0.0, 0.0
         return float(lats[0]), float(lons[0])
 
-    def _update_depth_selector(depths, series, entity_index):
+    def _update_depth_selector(depths, series, entity_index, borehole_name=None):
         available = []
         for idx, values in enumerate(series):
             if np.any(np.isfinite(values)):
@@ -85,7 +85,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             for i in available
         }
         depth_selector.value = available
-        borehole_info.object = f"### {entity_label} {entity_index}"
+        display_name = borehole_name if borehole_name else entity_label
+        borehole_info.object = f"### {display_name}"
 
     def _fetch_timeseries(lat, lon):
         start = time.perf_counter()
@@ -112,12 +113,13 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         depths = np.array(fig.get("depths", []), dtype=float)
         series = [np.array(values, dtype=float) for values in fig.get("series", [])]
         entity_index = int(fig.get("borehole_index", 0))
+        borehole_name = fig.get("borehole_name")
 
         timeseries_state["times"] = times
         timeseries_state["depths"] = depths
         timeseries_state["series"] = series
         timeseries_state["entity_index"] = entity_index
-        _update_depth_selector(depths, series, entity_index)
+        _update_depth_selector(depths, series, entity_index, borehole_name)
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
 

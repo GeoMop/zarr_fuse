@@ -176,5 +176,5 @@ def build_depth_controls():
         inline=False,
         sizing_mode="stretch_width",
     )
-    borehole_info = pn.pane.Markdown("### Borehole 0", sizing_mode="stretch_width")
+    borehole_info = pn.pane.Markdown("### No borehole selected", sizing_mode="stretch_width")
     return depth_selector, borehole_info

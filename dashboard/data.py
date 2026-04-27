@@ -163,6 +163,7 @@ class LocalClient:
         lon_field = fields.lon
         time_field = fields.time
         depth_field = fields.vertical
+        entity_field = fields.entity
 
         if not variable:
             _timer_log("get_map_data failed", time.perf_counter() - start)
@@ -180,6 +181,7 @@ class LocalClient:
 
         lat = ds.get(lat_field)
         lon = ds.get(lon_field)
+        entity_var = ds.get(entity_field) if entity_field else None
         if lat is None or lon is None:
             _timer_log("get_map_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": f"{lat_field}/{lon_field} not found"}
@@ -207,11 +209,16 @@ class LocalClient:
             values_local = np.array(data_sel.values, dtype=float).ravel()
             values_local = np.where(np.isfinite(values_local), values_local, np.nan)
 
+            entities_local = None
+            if entity_var is not None:
+                entity_sel = _isel_if_has_dim(_isel_if_has_dim(entity_var, time_field, t_idx), depth_field, d_idx)
+                entities_local = np.array(entity_sel.values, dtype=str).ravel()
+
             if len(lats_local) != len(lons_local) or len(lats_local) != len(values_local):
                 return None
 
             valid_count = int(np.sum(np.isfinite(lats_local) & np.isfinite(lons_local) & np.isfinite(values_local)))
-            return lats_local, lons_local, values_local, valid_count
+            return lats_local, lons_local, values_local, valid_count, entities_local
 
         selected_time_index = time_index
         selected_depth_index = depth_index
@@ -224,7 +231,7 @@ class LocalClient:
                 "reason": "Coordinate/value lengths do not match for selected map slice",
             }
 
-        lats, lons, values, valid_count = sliced
+        lats, lons, values, valid_count, entities = sliced
 
         if valid_count == 0:
             time_size = int(data_var_full.sizes.get(time_field, 1)) if time_field and time_field in data_var_full.dims else 1
@@ -237,9 +244,9 @@ class LocalClient:
                     candidate = _slice_map_arrays(t_idx, d_idx)
                     if candidate is None:
                         continue
-                    cand_lats, cand_lons, cand_values, cand_valid = candidate
+                    cand_lats, cand_lons, cand_values, cand_valid, cand_entities = candidate
                     if cand_valid > 0:
-                        lats, lons, values = cand_lats, cand_lons, cand_values
+                        lats, lons, values, entities = cand_lats, cand_lons, cand_values, cand_entities
                         selected_time_index = t_idx
                         selected_depth_index = d_idx
                         break
@@ -252,6 +259,7 @@ class LocalClient:
             "lat": _to_json_floats(lats),
             "lon": _to_json_floats(lons),
             "values": _to_json_floats(values),
+            "entities": entities.tolist() if entities is not None else None,
             "variable": variable,
             "time_index": selected_time_index,
             "depth_index": selected_depth_index,
@@ -327,6 +335,11 @@ class LocalClient:
         dist = (lats - lat) ** 2 + (lons - lon) ** 2
         idx = int(np.nanargmin(dist))
 
+        entity_names = None
+        if entity_field and entity_field in ds:
+            entity_arr = ds[entity_field]
+            entity_names = np.array(entity_arr.values, dtype=str).ravel()
+
         data_var = ds[variable]
         if entity_field and entity_field in data_var.dims:
             data_var = data_var.isel({entity_field: idx})
@@ -353,6 +366,7 @@ class LocalClient:
             "series": series,
             "variable": variable,
             "borehole_index": idx,
+            "borehole_name": entity_names[idx] if entity_names is not None else None,
         }
         
         # Cache the result

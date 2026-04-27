@@ -56,6 +56,33 @@ def build_map_view(data, tap_stream):
     defaults_config = endpoint_config["defaults"]
     visualization_config = endpoint_config["visualization"]
     map_config = visualization_config["map"]
+    schema_config = endpoint_config["schema"]
+    schema_display = endpoint_config["schema_display"]
+
+    lat_field = "lat"
+    lon_field = "lon"
+    entity_field = schema_display.get("entity_name") or "entity"
+
+    if data.group_path:
+        schema_dict = endpoint_config["schema"]
+        group_fields = schema_dict.get("group_fields", {})
+        normalized = "/".join(part for part in (data.group_path or "").strip("/").split("/") if part)
+        path = normalized
+        fields = None
+        while True:
+            if path in group_fields:
+                fields = group_fields[path]
+                break
+            if not path:
+                break
+            path = path.rsplit("/", 1)[0] if "/" in path else ""
+        if fields is None:
+            fields = schema_dict.get("fields", {})
+        if fields:
+            if fields.get("lat"):
+                lat_field = fields.get("lat")
+            if fields.get("lon"):
+                lon_field = fields.get("lon")
 
     overlay_layer = _load_overlay(endpoint_config)
 
@@ -82,6 +109,7 @@ def build_map_view(data, tap_stream):
         lats = np.array(fig["lat"], dtype=float)
         lons = np.array(fig["lon"], dtype=float)
         values = np.array(fig["values"], dtype=float)
+        entities = fig.get("entities")
         map_title = map_config["title"]
         data_error_reason = None
 
@@ -90,6 +118,8 @@ def build_map_view(data, tap_stream):
         lats = lats[valid_mask]
         lons = lons[valid_mask]
         values = values[valid_mask]
+        if entities is not None:
+            entities = np.array(entities)[valid_mask]
 
     if len(lats) == 0:
         reason = fig.get("reason", "No valid map points available") if fig.get("status") == "error" else "No valid map points available"
@@ -103,9 +133,9 @@ def build_map_view(data, tap_stream):
             "variable": default_display_variable,
             "data_error_reason": reason,
         }
-        empty_df = pd.DataFrame({"lon": [], "lat": [], "value": []})
+        empty_df = pd.DataFrame({lon_field: [], lat_field: [], entity_field: [], "value": []})
         map_points = gv.Points(
-            empty_df, kdims=["lon", "lat"], vdims=["value"], crs=ccrs.PlateCarree()
+            empty_df, kdims=[lon_field, lat_field], vdims=[entity_field, "value"], crs=ccrs.PlateCarree()
         ).opts(
             color="value",
             cmap="viridis",
@@ -113,7 +143,8 @@ def build_map_view(data, tap_stream):
             alpha=map_config["alpha"],
             line_color="white",
             line_width=1.5,
-            tools=["hover", "tap"],
+            tools=["hover"],
+            hover_tooltips=[(entity_field, f"@{{{entity_field}}}"), (lat_field, f"@{{{lat_field}}}"), (lon_field, f"@{{{lon_field}}}")],
             colorbar=False,
             responsive=True,
             title=f"{map_config['title']} - {reason}",
@@ -140,9 +171,9 @@ def build_map_view(data, tap_stream):
         print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
         return result
 
-    map_df = pd.DataFrame({"lon": lons, "lat": lats, "value": values})
+    map_df = pd.DataFrame({lon_field: lons, lat_field: lats, entity_field: entities if entities is not None else [""] * len(lons), "value": values})
     map_points = gv.Points(
-        map_df, kdims=["lon", "lat"], vdims=["value"], crs=ccrs.PlateCarree()
+        map_df, kdims=[lon_field, lat_field], vdims=[entity_field, "value"], crs=ccrs.PlateCarree()
     ).opts(
         color="value",
         cmap="viridis",
@@ -151,6 +182,7 @@ def build_map_view(data, tap_stream):
         line_color="white",
         line_width=1.5,
         tools=["hover", "tap"],
+        hover_tooltips=[(entity_field, f"@{{{entity_field}}}"), (lat_field, f"@{{{lat_field}}}"), (lon_field, f"@{{{lon_field}}}")],
         colorbar=False,
         responsive=True,
         title=map_title,
