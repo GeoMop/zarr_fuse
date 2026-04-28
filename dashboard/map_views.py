@@ -32,7 +32,7 @@ def _zoom_to_span_meters(zoom: int) -> float:
 def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field):
     """
     Cluster borehole points based on current view extent.
-    Returns a DataFrame with lon, lat, merged_count, label, value columns.
+    Returns a DataFrame with lon, lat, merged_count, label columns.
     """
     if x_range is None or y_range is None or len(df) == 0:
         return pd.DataFrame({
@@ -40,7 +40,6 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field):
             lat_field: df[lat_field] if len(df) > 0 else [],
             "merged_count": [1] * len(df) if len(df) > 0 else [],
             "label": df[entity_field] if len(df) > 0 else [],
-            "value": df["value"] if len(df) > 0 else [],
         })
 
     # Calculate cluster distance (eps) as 0.5% of view width in degrees
@@ -55,7 +54,7 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field):
     )
     visible_df = df[mask].copy()
     if len(visible_df) == 0:
-        return pd.DataFrame({lon_field: [], lat_field: [], "merged_count": [], "label": [], "value": []})
+        return pd.DataFrame({lon_field: [], lat_field: [], "merged_count": [], "label": []})
 
     # Grid-based clustering: round coordinates to eps grid
     visible_df["grid_lon"] = (visible_df[lon_field] / eps).round() * eps
@@ -71,14 +70,11 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field):
         center_lat = group[lat_field].mean()
         # Use first entity label as representative
         label = group[entity_field].iloc[0] if entity_field in group.columns else ""
-        # Use mean value for the cluster
-        value = group["value"].mean() if "value" in group.columns else 0
         clustered_rows.append({
             lon_field: center_lon,
             lat_field: center_lat,
             "merged_count": merged_count,
             "label": label,
-            "value": value,
         })
 
     return pd.DataFrame(clustered_rows)
@@ -149,9 +145,9 @@ def build_map_view(data, tap_stream):
             # Always read the latest map DataFrame from the data object
             df = getattr(data_obj, 'current_map_df', pd.DataFrame())
             if len(df) == 0:
-                empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": [], "value": []})
+                empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": []})
                 return gv.Points(
-                    empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
+                    empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count"], crs=ccrs.PlateCarree()
                 ).opts(
                     color="navy", size=config["point_size"],
                     line_color="white", line_width=1.5,
@@ -159,9 +155,9 @@ def build_map_view(data, tap_stream):
                 )
             clustered = _cluster_points(x_range, y_range, df, lon_f, lat_f, ent_f)
             if len(clustered) == 0:
-                empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": [], "value": []})
+                empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": []})
                 return gv.Points(
-                    empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
+                    empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count"], crs=ccrs.PlateCarree()
                 ).opts(
                     color="navy", size=config["point_size"],
                     line_color="white", line_width=1.5,
@@ -169,7 +165,7 @@ def build_map_view(data, tap_stream):
                 )
             size_scale = config.get("cluster_size_scale", 3)
             return gv.Points(
-                clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
+                clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count"], crs=ccrs.PlateCarree()
             ).opts(
                 color="navy",
                 size=hv.dim("merged_count") * size_scale + config["point_size"],
@@ -179,7 +175,6 @@ def build_map_view(data, tap_stream):
                 hover_tooltips=[
                     ("Label", "@{label}"),
                     ("Merged Count", "@{merged_count}"),
-                    ("Value", "@{value}"),
                     (lat_f, f"@{{{lat_f}}}"),
                     (lon_f, f"@{{{lon_f}}}"),
                 ],
@@ -262,7 +257,7 @@ def build_map_view(data, tap_stream):
         print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
         return result
 
-    map_df = pd.DataFrame({lon_field: lons, lat_field: lats, entity_field: entities if entities is not None else [""] * len(lons), "value": values})
+    map_df = pd.DataFrame({lon_field: lons, lat_field: lats, entity_field: entities if entities is not None else [""] * len(lons)})
     data.current_map_df = map_df  # Store latest map_df on data object for refresh access
 
     points_callback = _make_points_callback(data, map_config, lon_field, lat_field, entity_field, map_title)
