@@ -29,6 +29,57 @@ def _zoom_to_span_meters(zoom: int) -> float:
     return world_width_m / (2 ** zoom)
 
 
+def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field):
+    """
+    Cluster borehole points based on current view extent.
+    Returns a DataFrame with lon, lat, merged_count, label columns.
+    """
+    if x_range is None or y_range is None or len(df) == 0:
+        return pd.DataFrame({
+            lon_field: df[lon_field] if len(df) > 0 else [],
+            lat_field: df[lat_field] if len(df) > 0 else [],
+            "merged_count": [1] * len(df) if len(df) > 0 else [],
+            "label": df[entity_field] if len(df) > 0 else [],
+        })
+
+    # Calculate cluster distance (eps) as 0.5% of view width in degrees
+    view_width = x_range[1] - x_range[0]
+    eps = view_width * 0.005  # 0.5% of view width
+
+    # Filter to points within or near current view (with buffer)
+    buffer = view_width * 0.1
+    mask = (
+        (df[lon_field] >= x_range[0] - buffer) & (df[lon_field] <= x_range[1] + buffer) &
+        (df[lat_field] >= y_range[0] - buffer) & (df[lat_field] <= y_range[1] + buffer)
+    )
+    visible_df = df[mask].copy()
+    if len(visible_df) == 0:
+        return pd.DataFrame({lon_field: [], lat_field: [], "merged_count": [], "label": []})
+
+    # Grid-based clustering: round coordinates to eps grid
+    visible_df["grid_lon"] = (visible_df[lon_field] / eps).round() * eps
+    visible_df["grid_lat"] = (visible_df[lat_field] / eps).round() * eps
+
+    # Group by grid cell
+    grouped = visible_df.groupby(["grid_lon", "grid_lat"])
+    clustered_rows = []
+    for (glon, glat), group in grouped:
+        merged_count = len(group)
+        # Use centroid of the group for the clustered point
+        center_lon = group[lon_field].mean()
+        center_lat = group[lat_field].mean()
+        # Use first entity label as representative
+        label = group[entity_field].iloc[0] if entity_field in group.columns else ""
+        clustered_rows.append({
+            lon_field: center_lon,
+            lat_field: center_lat,
+            "merged_count": merged_count,
+            "label": label,
+        })
+
+    return pd.DataFrame(clustered_rows)
+
+
 def _load_overlay(endpoint_config):
     if os.getenv("HV_OVERLAY_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
         logger.info("Overlay disabled via HV_OVERLAY_ENABLED.")
@@ -175,10 +226,15 @@ def build_map_view(data, tap_stream):
 
     map_df = pd.DataFrame({lon_field: lons, lat_field: lats, entity_field: entities if entities is not None else [""] * len(lons), "value": values})
 
-    # Step 1: DynamicMap with RangeXY stream to capture zoom/pan events
+    # Step 2: DynamicMap with RangeXY stream + clustering test
     def _make_points_callback(df, config, lon_f, lat_f, ent_f):
         def callback(x_range, y_range):
             print(f"[RangeXY] x_range={x_range}, y_range={y_range}")
+            # Test clustering function
+            clustered = _cluster_points(x_range, y_range, df, lon_f, lat_f, ent_f)
+            print(f"[Clustering] Original points: {len(df)}, Clustered points: {len(clustered)}, "
+                  f"Max merged count: {clustered['merged_count'].max() if len(clustered) > 0 else 0}")
+            # Still return original points for Step 2 verification
             if x_range is None or y_range is None:
                 return gv.Points(
                     pd.DataFrame({lon_f: [], lat_f: [], ent_f: [], "value": []}),
