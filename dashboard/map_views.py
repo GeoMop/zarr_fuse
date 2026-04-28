@@ -5,6 +5,8 @@ import time
 
 import cartopy.crs as ccrs
 import geoviews as gv
+import holoviews as hv
+from holoviews.streams import RangeXY
 import numpy as np
 import pandas as pd
 
@@ -172,23 +174,41 @@ def build_map_view(data, tap_stream):
         return result
 
     map_df = pd.DataFrame({lon_field: lons, lat_field: lats, entity_field: entities if entities is not None else [""] * len(lons), "value": values})
-    map_points = gv.Points(
-        map_df, kdims=[lon_field, lat_field], vdims=[entity_field, "value"], crs=ccrs.PlateCarree()
-    ).opts(
-        color="value",
-        cmap="viridis",
-        size=map_config["point_size"],
-        alpha=map_config["alpha"],
-        line_color="white",
-        line_width=1.5,
-        tools=["hover", "tap"],
-        hover_tooltips=[(entity_field, f"@{{{entity_field}}}"), (lat_field, f"@{{{lat_field}}}"), (lon_field, f"@{{{lon_field}}}")],
-        colorbar=False,
-        responsive=True,
-        title=map_title,
-    )
 
-    tap_stream.source = map_points
+    # Step 1: DynamicMap with RangeXY stream to capture zoom/pan events
+    def _make_points_callback(df, config, lon_f, lat_f, ent_f):
+        def callback(x_range, y_range):
+            print(f"[RangeXY] x_range={x_range}, y_range={y_range}")
+            if x_range is None or y_range is None:
+                return gv.Points(
+                    pd.DataFrame({lon_f: [], lat_f: [], ent_f: [], "value": []}),
+                    kdims=[lon_f, lat_f], vdims=[ent_f, "value"], crs=ccrs.PlateCarree()
+                ).opts(
+                    color="value", cmap="viridis", size=config["point_size"],
+                    alpha=config["alpha"], line_color="white", line_width=1.5,
+                    tools=["hover"], responsive=True, title=map_title,
+                )
+            return gv.Points(
+                df, kdims=[lon_f, lat_f], vdims=[ent_f, "value"], crs=ccrs.PlateCarree()
+            ).opts(
+                color="value",
+                cmap="viridis",
+                size=config["point_size"],
+                alpha=config["alpha"],
+                line_color="white",
+                line_width=1.5,
+                tools=["hover", "tap"],
+                hover_tooltips=[(ent_f, f"@{{{ent_f}}}"), (lat_f, f"@{{{lat_f}}}"), (lon_f, f"@{{{lon_f}}}")],
+                colorbar=False,
+                responsive=True,
+                title=map_title,
+            )
+        return callback
+
+    points_callback = _make_points_callback(map_df, map_config, lon_field, lat_field, entity_field)
+    map_points_dmap = hv.DynamicMap(points_callback, streams=[RangeXY()])
+
+    tap_stream.source = map_points_dmap
 
     center_lat = map_config["center_lat"]
     center_lon = map_config["center_lon"]
@@ -210,7 +230,7 @@ def build_map_view(data, tap_stream):
     }
 
     if overlay_layer is not None:
-        map_view = (base_map * overlay_layer * map_points).opts(
+        map_view = (base_map * overlay_layer * map_points_dmap).opts(
             xlim=xlim,
             ylim=ylim,
             framewise=True,
@@ -220,7 +240,7 @@ def build_map_view(data, tap_stream):
         print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
         return result
 
-    map_view = (base_map * map_points).opts(
+    map_view = (base_map * map_points_dmap).opts(
         xlim=xlim,
         ylim=ylim,
         framewise=True,
