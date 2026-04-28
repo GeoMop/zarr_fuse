@@ -153,8 +153,8 @@ def build_map_view(data, tap_stream):
                 return gv.Points(
                     empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
                 ).opts(
-                    color="value", cmap="viridis", size=config["point_size"],
-                    alpha=config["alpha"], line_color="white", line_width=1.5,
+                    color="navy", size=config["point_size"],
+                    line_color="white", line_width=1.5,
                     tools=["hover"], responsive=True, title=title,
                 )
             clustered = _cluster_points(x_range, y_range, df, lon_f, lat_f, ent_f)
@@ -163,18 +163,16 @@ def build_map_view(data, tap_stream):
                 return gv.Points(
                     empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
                 ).opts(
-                    color="value", cmap="viridis", size=config["point_size"],
-                    alpha=config["alpha"], line_color="white", line_width=1.5,
+                    color="navy", size=config["point_size"],
+                    line_color="white", line_width=1.5,
                     tools=["hover"], responsive=True, title=title,
                 )
             size_scale = config.get("cluster_size_scale", 3)
             return gv.Points(
                 clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
             ).opts(
-                color="value",
-                cmap="viridis",
+                color="navy",
                 size=hv.dim("merged_count") * size_scale + config["point_size"],
-                alpha=config["alpha"],
                 line_color="white",
                 line_width=1.5,
                 tools=["hover", "tap"],
@@ -185,7 +183,6 @@ def build_map_view(data, tap_stream):
                     (lat_f, f"@{{{lat_f}}}"),
                     (lon_f, f"@{{{lon_f}}}"),
                 ],
-                colorbar=True,
                 responsive=True,
                 title=title,
             )
