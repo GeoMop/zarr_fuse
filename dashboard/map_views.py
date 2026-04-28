@@ -143,6 +143,54 @@ def build_map_view(data, tap_stream):
 
     overlay_layer = _load_overlay(endpoint_config)
 
+    # Step 4: DynamicMap callback - defined early so it's available in all code paths
+    def _make_points_callback(data_obj, config, lon_f, lat_f, ent_f, title):
+        def callback(x_range, y_range):
+            # Always read the latest map DataFrame from the data object
+            df = getattr(data_obj, 'current_map_df', pd.DataFrame())
+            if len(df) == 0:
+                empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": [], "value": []})
+                return gv.Points(
+                    empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
+                ).opts(
+                    color="value", cmap="viridis", size=config["point_size"],
+                    alpha=config["alpha"], line_color="white", line_width=1.5,
+                    tools=["hover"], responsive=True, title=title,
+                )
+            clustered = _cluster_points(x_range, y_range, df, lon_f, lat_f, ent_f)
+            if len(clustered) == 0:
+                empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": [], "value": []})
+                return gv.Points(
+                    empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
+                ).opts(
+                    color="value", cmap="viridis", size=config["point_size"],
+                    alpha=config["alpha"], line_color="white", line_width=1.5,
+                    tools=["hover"], responsive=True, title=title,
+                )
+            size_scale = config.get("cluster_size_scale", 3)
+            return gv.Points(
+                clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
+            ).opts(
+                color="value",
+                cmap="viridis",
+                size=hv.dim("merged_count") * size_scale + config["point_size"],
+                alpha=config["alpha"],
+                line_color="white",
+                line_width=1.5,
+                tools=["hover", "tap"],
+                hover_tooltips=[
+                    ("Label", "@{label}"),
+                    ("Merged Count", "@{merged_count}"),
+                    ("Value", "@{value}"),
+                    (lat_f, f"@{{{lat_f}}}"),
+                    (lon_f, f"@{{{lon_f}}}"),
+                ],
+                colorbar=True,
+                responsive=True,
+                title=title,
+            )
+        return callback
+
     default_display_variable = data.display_variable
     if not default_display_variable:
         raise ValueError(f"No display variable set for endpoint '{data.endpoint_name}'")
@@ -219,54 +267,6 @@ def build_map_view(data, tap_stream):
 
     map_df = pd.DataFrame({lon_field: lons, lat_field: lats, entity_field: entities if entities is not None else [""] * len(lons), "value": values})
     data.current_map_df = map_df  # Store latest map_df on data object for refresh access
-
-    # Step 4: DynamicMap with RangeXY stream + clustered points + dynamic sizing, reads latest data from data.current_map_df
-    def _make_points_callback(data_obj, config, lon_f, lat_f, ent_f, title):
-        def callback(x_range, y_range):
-            # Always read the latest map DataFrame from the data object
-            df = getattr(data_obj, 'current_map_df', pd.DataFrame())
-            if len(df) == 0:
-                empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": [], "value": []})
-                return gv.Points(
-                    empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
-                ).opts(
-                    color="value", cmap="viridis", size=config["point_size"],
-                    alpha=config["alpha"], line_color="white", line_width=1.5,
-                    tools=["hover"], responsive=True, title=title,
-                )
-            clustered = _cluster_points(x_range, y_range, df, lon_f, lat_f, ent_f)
-            if len(clustered) == 0:
-                empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": [], "value": []})
-                return gv.Points(
-                    empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
-                ).opts(
-                    color="value", cmap="viridis", size=config["point_size"],
-                    alpha=config["alpha"], line_color="white", line_width=1.5,
-                    tools=["hover"], responsive=True, title=title,
-                )
-            size_scale = config.get("cluster_size_scale", 3)
-            return gv.Points(
-                clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
-            ).opts(
-                color="value",
-                cmap="viridis",
-                size=hv.dim("merged_count") * size_scale + config["point_size"],
-                alpha=config["alpha"],
-                line_color="white",
-                line_width=1.5,
-                tools=["hover", "tap"],
-                hover_tooltips=[
-                    ("Label", "@{label}"),
-                    ("Merged Count", "@{merged_count}"),
-                    ("Value", "@{value}"),
-                    (lat_f, f"@{{{lat_f}}}"),
-                    (lon_f, f"@{{{lon_f}}}"),
-                ],
-                colorbar=True,
-                responsive=True,
-                title=title,
-            )
-        return callback
 
     points_callback = _make_points_callback(data, map_config, lon_field, lat_field, entity_field, map_title)
     map_points_dmap = hv.DynamicMap(points_callback, streams=[RangeXY()])
