@@ -45,7 +45,7 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field):
 
     # Calculate cluster distance (eps) as 0.5% of view width in degrees
     view_width = x_range[1] - x_range[0]
-    eps = view_width * 0.005  # 0.5% of view width
+    eps = view_width * 0.05  # 0.5% of view width
 
     # Filter to points within or near current view (with buffer)
     buffer = view_width * 0.1
