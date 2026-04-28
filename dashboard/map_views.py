@@ -191,23 +191,12 @@ def build_map_view(data, tap_stream):
             "data_error_reason": reason,
         }
         empty_df = pd.DataFrame({lon_field: [], lat_field: [], entity_field: [], "value": []})
-        map_points = gv.Points(
-            empty_df, kdims=[lon_field, lat_field], vdims=[entity_field, "value"], crs=ccrs.PlateCarree()
-        ).opts(
-            color="value",
-            cmap="viridis",
-            size=map_config["point_size"],
-            alpha=map_config["alpha"],
-            line_color="white",
-            line_width=1.5,
-            tools=["hover"],
-            hover_tooltips=[(entity_field, f"@{{{entity_field}}}"), (lat_field, f"@{{{lat_field}}}"), (lon_field, f"@{{{lon_field}}}")],
-            colorbar=False,
-            responsive=True,
-            title=f"{map_config['title']} - {reason}",
-        )
+        data.current_map_df = empty_df  # Store empty df for refresh access
 
-        tap_stream.source = map_points
+        # Step 4: Use DynamicMap even for empty case
+        points_callback = _make_points_callback(data, map_config, lon_field, lat_field, entity_field, f"{map_config['title']} - {reason}")
+        map_points_dmap = hv.DynamicMap(points_callback, streams=[RangeXY()])
+        tap_stream.source = map_points_dmap
 
         center_lat = map_config["center_lat"]
         center_lon = map_config["center_lon"]
@@ -218,7 +207,7 @@ def build_map_view(data, tap_stream):
         xlim = (center_x - half_span, center_x + half_span)
         ylim = (center_y - half_span, center_y + half_span)
 
-        map_view = (base_map * map_points).opts(
+        map_view = (base_map * map_points_dmap).opts(
             xlim=xlim,
             ylim=ylim,
             framewise=True,
@@ -229,25 +218,32 @@ def build_map_view(data, tap_stream):
         return result
 
     map_df = pd.DataFrame({lon_field: lons, lat_field: lats, entity_field: entities if entities is not None else [""] * len(lons), "value": values})
+    data.current_map_df = map_df  # Store latest map_df on data object for refresh access
 
-    # Step 3: DynamicMap with RangeXY stream + clustered points + dynamic sizing
-    def _make_points_callback(df, config, lon_f, lat_f, ent_f):
+    # Step 4: DynamicMap with RangeXY stream + clustered points + dynamic sizing, reads latest data from data.current_map_df
+    def _make_points_callback(data_obj, config, lon_f, lat_f, ent_f, title):
         def callback(x_range, y_range):
-            clustered = _cluster_points(x_range, y_range, df, lon_f, lat_f, ent_f)
-            if x_range is None or y_range is None or len(clustered) == 0:
-                empty_df = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": [], "value": []})
+            # Always read the latest map DataFrame from the data object
+            df = getattr(data_obj, 'current_map_df', pd.DataFrame())
+            if len(df) == 0:
+                empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": [], "value": []})
                 return gv.Points(
-                    empty_df, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
+                    empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
                 ).opts(
-                    color="value",
-                    cmap="viridis",
-                    size=config["point_size"],
-                    alpha=config["alpha"],
-                    line_color="white",
-                    line_width=1.5,
-                    tools=["hover"], responsive=True, title=map_title,
+                    color="value", cmap="viridis", size=config["point_size"],
+                    alpha=config["alpha"], line_color="white", line_width=1.5,
+                    tools=["hover"], responsive=True, title=title,
                 )
-            # Dynamic size: base size + scale factor * merged_count
+            clustered = _cluster_points(x_range, y_range, df, lon_f, lat_f, ent_f)
+            if len(clustered) == 0:
+                empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": [], "value": []})
+                return gv.Points(
+                    empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
+                ).opts(
+                    color="value", cmap="viridis", size=config["point_size"],
+                    alpha=config["alpha"], line_color="white", line_width=1.5,
+                    tools=["hover"], responsive=True, title=title,
+                )
             size_scale = config.get("cluster_size_scale", 3)
             return gv.Points(
                 clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count", "value"], crs=ccrs.PlateCarree()
@@ -268,11 +264,11 @@ def build_map_view(data, tap_stream):
                 ],
                 colorbar=True,
                 responsive=True,
-                title=map_title,
+                title=title,
             )
         return callback
 
-    points_callback = _make_points_callback(map_df, map_config, lon_field, lat_field, entity_field)
+    points_callback = _make_points_callback(data, map_config, lon_field, lat_field, entity_field, map_title)
     map_points_dmap = hv.DynamicMap(points_callback, streams=[RangeXY()])
 
     tap_stream.source = map_points_dmap
