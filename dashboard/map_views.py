@@ -29,7 +29,7 @@ def _zoom_to_span_meters(zoom: int) -> float:
     return world_width_m / (2 ** zoom)
 
 
-def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field):
+def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, eps_factor=0.05, buffer_factor=0.1):
     """
     Cluster borehole points based on current view extent.
     Returns a DataFrame with lon, lat, merged_count, label columns.
@@ -42,12 +42,12 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field):
             "label": df[entity_field] if len(df) > 0 else [],
         })
 
-    # Calculate cluster distance (eps) as 0.5% of view width in degrees
+    # Calculate cluster distance (eps) as eps_factor of view width in degrees
     view_width = x_range[1] - x_range[0]
-    eps = view_width * 0.05  # 0.5% of view width
+    eps = view_width * eps_factor
 
     # Filter to points within or near current view (with buffer)
-    buffer = view_width * 0.1
+    buffer = view_width * buffer_factor
     mask = (
         (df[lon_field] >= x_range[0] - buffer) & (df[lon_field] <= x_range[1] + buffer) &
         (df[lat_field] >= y_range[0] - buffer) & (df[lat_field] <= y_range[1] + buffer)
@@ -141,6 +141,15 @@ def build_map_view(data, tap_stream):
 
     # Step 4: DynamicMap callback - defined early so it's available in all code paths
     def _make_points_callback(data_obj, config, lon_f, lat_f, ent_f, title):
+        # Read clustering config
+        cluster_enabled = config.get("cluster_enabled", True)
+        # Ensure proper boolean (handle both YAML bool and potential string)
+        if isinstance(cluster_enabled, str):
+            cluster_enabled = cluster_enabled.lower() in ("true", "1", "yes")
+        eps_factor = config.get("cluster_eps_factor",0.05)
+        buffer_factor = config.get("cluster_buffer_factor", 0.1)
+        cluster_size_scale = config.get("cluster_size_scale", 3.0)
+
         def callback(x_range, y_range):
             # Always read the latest map DataFrame from the data object
             df = getattr(data_obj, 'current_map_df', pd.DataFrame())
@@ -153,7 +162,11 @@ def build_map_view(data, tap_stream):
                     line_color="white", line_width=1.5,
                     tools=["hover"], responsive=True, title=title,
                 )
-            clustered = _cluster_points(x_range, y_range, df, lon_f, lat_f, ent_f)
+            if cluster_enabled:
+                clustered = _cluster_points(x_range, y_range, df, lon_f, lat_f, ent_f, eps_factor, buffer_factor)
+            else:
+                # No clustering - pass through all points
+                clustered = df.assign(merged_count=1, label=df[ent_f] if ent_f in df.columns else "")
             if len(clustered) == 0:
                 empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": []})
                 return gv.Points(
@@ -163,12 +176,11 @@ def build_map_view(data, tap_stream):
                     line_color="white", line_width=1.5,
                     tools=["hover"], responsive=True, title=title,
                 )
-            size_scale = config.get("cluster_size_scale", 3)
             return gv.Points(
                 clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count"], crs=ccrs.PlateCarree()
             ).opts(
                 color="navy",
-                size=hv.dim("merged_count") * size_scale + config["point_size"],
+                size=hv.dim("merged_count") * cluster_size_scale + config["point_size"],
                 line_color="white",
                 line_width=1.5,
                 tools=["hover", "tap"],

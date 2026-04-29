@@ -52,6 +52,10 @@ class MapConfig:
     title: Optional[str] = None
     point_size: Optional[int] = None
     alpha: Optional[float] = None
+    cluster_enabled: bool = True
+    cluster_eps_factor: float = 0.05
+    cluster_buffer_factor: float = 0.1
+    cluster_size_scale: float = 3.0
 
 
 @dataclass
@@ -373,6 +377,10 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
                 title=map_data["title"],
                 point_size=map_data["point_size"],
                 alpha=map_data["alpha"],
+                cluster_enabled=map_data.get("cluster_enabled", True),
+                cluster_eps_factor=map_data.get("cluster_eps_factor", 0.05),
+                cluster_buffer_factor=map_data.get("cluster_buffer_factor", 0.1),
+                cluster_size_scale=map_data.get("cluster_size_scale", 3.0),
             ),
             timeseries=TimeSeriesConfig(
                 middle_window_days=timeseries_data["middle_window_days"],
