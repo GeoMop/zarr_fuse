@@ -36,8 +36,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     default_display_variable = data.display_variable
 
     metric_label = (
-        schema_display.get("display_variable")
-        or default_display_variable
+        default_display_variable
+        or schema_display.get("display_variable")
         or "value"
     )
     display_unit = schema_display.get("display_unit")
