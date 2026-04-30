@@ -55,6 +55,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         "depths": np.array([]),
         "series": [],
         "entity_index": 0,
+        "entity_display_name": None,
     }
 
     def format_depth(depth_value: float):
@@ -87,6 +88,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         depth_selector.value = available
         display_name = borehole_name if borehole_name else entity_label
         borehole_info.object = f"### {display_name}"
+        timeseries_state["entity_display_name"] = display_name
 
     def _fetch_timeseries(lat, lon):
         start = time.perf_counter()
@@ -239,9 +241,10 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         else:
             force_key = "force_mid" if view == "mid" else "force_right"
             hooks = [make_xrange_hook(xlim, force_key)]
+        entity_display = timeseries_state.get("entity_display_name") or f"{entity_label.lower()} {timeseries_state['entity_index']}"
         return overlay.opts(
             responsive=True,
-            title=f"{metric_label} over Time ({entity_label.lower()} {timeseries_state['entity_index']})",
+            title=f"{metric_label} over Time ({entity_display})",
             tools=["hover", "xwheel_zoom", "xpan", "tap", "reset"],
             active_tools=["xwheel_zoom", "xpan"],
             xlim=xlim,
