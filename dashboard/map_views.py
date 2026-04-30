@@ -191,6 +191,9 @@ def build_map_view(data, tap_stream):
                     (lon_f, f"@{{{lon_f}}}"),
                 ],
                 nonselection_alpha=1.0,
+                selection_color="#ff0000",
+                selection_line_color="white",
+                selection_line_width=3,
                 responsive=True,
                 title=title,
             )
