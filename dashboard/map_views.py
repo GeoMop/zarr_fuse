@@ -190,6 +190,7 @@ def build_map_view(data, tap_stream):
                     (lat_f, f"@{{{lat_f}}}"),
                     (lon_f, f"@{{{lon_f}}}"),
                 ],
+                nonselection_alpha=1.0,
                 responsive=True,
                 title=title,
             )
