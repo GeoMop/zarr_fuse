@@ -56,6 +56,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         "series": [],
         "entity_index": 0,
         "entity_display_name": None,
+        "selected_lat": None,
+        "selected_lon": None,
     }
 
     def format_depth(depth_value: float):
@@ -87,7 +89,10 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         }
         depth_selector.value = available
         display_name = borehole_name if borehole_name else entity_label
-        borehole_info.object = f"### {display_name}"
+        lat = timeseries_state.get("selected_lat")
+        lon = timeseries_state.get("selected_lon")
+        lat_lon_text = f" ({lat:.4f}, {lon:.4f})" if lat is not None and lon is not None else ""
+        borehole_info.object = f"### {display_name}{lat_lon_text}"
         timeseries_state["entity_display_name"] = display_name
 
     def _fetch_timeseries(lat, lon):
@@ -105,6 +110,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             timeseries_state["depths"] = np.array([])
             timeseries_state["series"] = []
             timeseries_state["entity_index"] = 0
+            timeseries_state["selected_lat"] = lat
+            timeseries_state["selected_lon"] = lon
             depth_selector.options = {}
             depth_selector.value = []
             borehole_info.object = f"### No data ({reason})"
@@ -121,6 +128,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         timeseries_state["depths"] = depths
         timeseries_state["series"] = series
         timeseries_state["entity_index"] = entity_index
+        timeseries_state["selected_lat"] = lat
+        timeseries_state["selected_lon"] = lon
         _update_depth_selector(depths, series, entity_index, borehole_name)
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
