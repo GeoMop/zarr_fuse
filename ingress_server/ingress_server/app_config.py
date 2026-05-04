@@ -64,9 +64,9 @@ class AppConfig:
 
 def _parse_base_config(raw: dict) -> BaseConfig:
     return BaseConfig(
-        queue_dir_path=raw.get("queue_dir_path", BaseConfig.queue_dir_path),
+        queue_dir_path=os.getenv("QUEUE_DIR_PATH", raw.get("queue_dir_path", BaseConfig.queue_dir_path)),
         log_level=raw.get("log_level", BaseConfig.log_level),
-        port=int(raw.get("port", BaseConfig.port)),
+        port=int(os.getenv("PORT", raw.get("port", BaseConfig.port))),
         worker_poll_interval=int(raw.get("worker_poll_interval", BaseConfig.worker_poll_interval)),
     )
 
@@ -76,7 +76,7 @@ def _parse_smtp_config(raw: dict) -> SmtpConfig:
     if isinstance(notify_to, str):
         notify_to = [x.strip() for x in notify_to.split(",") if x.strip()]
 
-    password = (os.getenv("SMTP_PASSWORD") or raw.get("password", "")).strip()
+    password = os.getenv("SMTP_PASSWORD").strip()
 
     return SmtpConfig(
         notify_to=list(notify_to),

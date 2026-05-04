@@ -55,16 +55,6 @@ deployment:
     # -- Active scrapper failure notification configuration
     # @default -- ~
     smtp:
-      # -- Comma-separated list of email addresses to notify when an active scrapper fails (e.g., "user1@example.com,user2@example.com")
-      notifyTo: ""
-      # -- SMTP host for sending notifications
-      host: smtp.gmail.com
-      # -- SMTP port for sending notifications
-      port: 587
-      # -- SMTP email address to send notifications from
-      from: ""
-      # -- SMTP username for authentication
-      user: ""
       # -- SMTP password for authentication
       password: ""
 
