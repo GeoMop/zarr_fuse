@@ -1,0 +1,71 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          16.22867858,
+          49.45756777
+        ]
+      },
+      "properties": {
+        "mapX": 16.22867858,
+        "mapY": 49.45756777,
+        "sourceX": 5957.760056818182,
+        "sourceY": -11806.911477272726,
+        "enable": true,
+        "dX": 506.6327983282272,
+        "dY": -163.71012037999208,
+        "residual": 532.426329041607
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          16.2199611,
+          49.46372511
+        ]
+      },
+      "properties": {
+        "mapX": 16.2199611,
+        "mapY": 49.46372511,
+        "sourceX": 3500.131647727272,
+        "sourceY": -8412.691704545454,
+        "enable": true,
+        "dX": 250.71327623783282,
+        "dY": 232.1960888562844,
+        "residual": 341.7194325203988
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          16.22200427,
+          49.4810047
+        ]
+      },
+      "properties": {
+        "mapX": 16.22200427,
+        "mapY": 49.4810047,
+        "sourceX": 5144.182102272725,
+        "sourceY": -299.08624999999876,
+        "enable": true,
+        "dX": -757.3460746226474,
+        "dY": -68.48596850348659,
+        "residual": 760.4363251635164
+      }
+    }
+  ],
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "GEOGCRS[\"WGS 84\",ENSEMBLE[\"World Geodetic System 1984 ensemble\",MEMBER[\"World Geodetic System 1984 (Transit)\"],MEMBER[\"World Geodetic System 1984 (G730)\"],MEMBER[\"World Geodetic System 1984 (G873)\"],MEMBER[\"World Geodetic System 1984 (G1150)\"],MEMBER[\"World Geodetic System 1984 (G1674)\"],MEMBER[\"World Geodetic System 1984 (G1762)\"],MEMBER[\"World Geodetic System 1984 (G2139)\"],ELLIPSOID[\"WGS 84\",6378137,298.257223563,LENGTHUNIT[\"metre\",1]],ENSEMBLEACCURACY[2.0]],PRIMEM[\"Greenwich\",0,ANGLEUNIT[\"degree\",0.0174532925199433]],CS[ellipsoidal,2],AXIS[\"geodetic latitude (Lat)\",north,ORDER[1],ANGLEUNIT[\"degree\",0.0174532925199433]],AXIS[\"geodetic longitude (Lon)\",east,ORDER[2],ANGLEUNIT[\"degree\",0.0174532925199433]],USAGE[SCOPE[\"Horizontal component of 3D system.\"],AREA[\"World.\"],BBOX[-90,-180,90,180]],ID[\"EPSG\",4326]]"
+    }
+  }
+}

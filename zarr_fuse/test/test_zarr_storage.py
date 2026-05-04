@@ -112,6 +112,127 @@ def test_open_store(smart_tmp_path, options):
     assert "__structure__" in ds.attrs
 
 
+@pytest.mark.parametrize("logger_option", ['default', None])
+def test_open_store_default_logger_behavior(monkeypatch, logger_option):
+    schema = zf.schema.deserialize(inputs_dir / "schema_open_store_tst.yaml")
+    captured = {}
+    sentinel_store = object()
+
+    monkeypatch.setattr(zf.zarr_storage, "_zarr_store_open", lambda options: sentinel_store)
+
+    def capture_node(name, store, **kwargs):
+        captured.update(name=name, store=store, kwargs=kwargs)
+        return captured
+
+    monkeypatch.setattr(zf.zarr_storage, "Node", capture_node)
+
+    node = zf.zarr_storage.open_store(
+        schema,
+        STORE_URL="default_logger.zarr",
+        LOGGER=logger_option,
+    )
+
+    assert node["kwargs"]["logger"] is None
+
+
+def test_open_store_local_logger(monkeypatch):
+    schema = zf.schema.deserialize(inputs_dir / "schema_open_store_tst.yaml")
+    captured = {}
+    sentinel_store = object()
+
+    monkeypatch.setattr(zf.zarr_storage, "_zarr_store_open", lambda options: sentinel_store)
+
+    def capture_node(name, store, **kwargs):
+        captured.update(name=name, store=store, kwargs=kwargs)
+        return captured
+
+    monkeypatch.setattr(zf.zarr_storage, "Node", capture_node)
+
+    node = zf.zarr_storage.open_store(
+        schema,
+        STORE_URL="local_logger.zarr",
+        LOGGER='local',
+    )
+
+    assert isinstance(node["kwargs"]["logger"], zf.zarr_storage.RaisingLogger)
+
+
+def test_node_logger_override(monkeypatch):
+    class FakeStore:
+        read_only = True
+
+    logger = logging.getLogger("test_node_logger_override")
+    monkeypatch.setattr(zf.zarr_storage.Node, "_make_consistent", lambda self, new_schema: {})
+
+    node = zf.zarr_storage.Node("", FakeStore(), logger=logger)
+
+    assert node.logger is logger
+
+
+def test_zarr_fuse_options_rejects_unknown_logger():
+    with pytest.raises(zf.zarr_storage.ZFOptionError):
+        zf.zarr_storage._zarr_fuse_options(None, LOGGER='unknown')
+
+
+def test_update_from_ds_writes_schema_compatible_dataset():
+    schema = zf.schema.deserialize(inputs_dir / "schema_open_store_tst.yaml")
+
+    class DummyNode:
+        _validate_ds_against_schema = zf.Node._validate_ds_against_schema
+        update_from_ds = zf.Node.update_from_ds
+
+        def __init__(self, ds_schema):
+            self._schema = ds_schema
+            self.group_path = ""
+            self.logger = logging.getLogger("test_update_from_ds")
+            self.merged = None
+
+        @property
+        def schema(self):
+            return self._schema
+
+        def merge_ds(self, ds_update):
+            self.merged = ds_update
+            return ds_update, {}
+
+    node = DummyNode(schema.ds)
+
+    ds = xr.Dataset(
+        data_vars={
+            "temperature": (("time",), np.array([280.0, 281.0])),
+        },
+        coords={
+            "time": np.array([1000, 1001]),
+        },
+    )
+
+    written_ds = node.update_from_ds(ds)
+
+    assert node.merged is ds
+    npt.assert_array_equal(written_ds.coords["time"].values, np.array([1000, 1001]))
+    npt.assert_array_equal(written_ds["temperature"].values, np.array([280.0, 281.0]))
+
+    ds_bad_dims = xr.Dataset(
+        data_vars={
+            "temperature": (("sample",), np.array([280.0, 281.0])),
+        },
+        coords={
+            "time": ("sample", np.array([1000, 1001])),
+        },
+    )
+    with pytest.raises(ValueError, match=r"Coordinate 'time'.*must be 1D with dimension 'time'"):
+        node.update_from_ds(ds_bad_dims)
+
+    ds_bad_coord_values = xr.Dataset(
+        data_vars={
+            "temperature": (("time",), np.array([280.0, 281.0])),
+        },
+        coords={
+            "time": np.array([1000.0, np.nan]),
+        },
+    )
+    with pytest.raises(ValueError, match=r"Coordinate 'time'.*contains NaN/NaT values"):
+        node.update_from_ds(ds_bad_coord_values)
 
 
 def sync_remove_store(storage_options, path):

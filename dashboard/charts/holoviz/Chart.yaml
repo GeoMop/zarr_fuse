@@ -1,0 +1,9 @@
+apiVersion: v2
+name: holoviz-dashboard
+description: HoloViz dashboard deployment (Panel + FastAPI)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/geomop/zarr_fuse
+sources:
+  - https://github.com/geomop/zarr_fuse

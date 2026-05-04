@@ -1,0 +1,89 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zarr_fuse.dashboard"
+version = "0.1.0"
+description = "Reusable HoloViz dashboard for Zarr Fuse endpoints configured via YAML and environment variables."
+readme = "README.md"
+authors = [
+  { name = "Mehmet Fatih Akbas", email = "fatihakbas733@gmail.com" },
+  { name = "Jan Brezina", email = "jan.brezina@tul.cz" }
+]
+license = { text = "BSD-3-Clause" }
+keywords = ["dashboard", "holoviz", "panel", "zarr", "fastapi"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: BSD License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12"
+]
+requires-python = ">=3.11"
+dependencies = [
+  "panel>=1.4,<2.0",
+  "holoviews>=1.19,<2.0",
+  "geoviews>=1.12,<2.0",
+  "bokeh>=3.4,<4.0",
+  "boto3==1.42.74",
+  "pandas>=2.1,<3.0",
+  "numpy>=1.24,<3.0",
+  "zarr>=3.0,<4.0",
+  "pyyaml>=6.0,<7.0",
+  "requests>=2.31,<3.0",
+  "fastapi>=0.110,<1.0",
+  "uvicorn>=0.27,<1.0",
+  "pillow>=10.0,<11.0",
+  "python-dotenv>=1.0,<2.0",
+  "cartopy>=0.22,<0.24",
+  "pyproj>=3.6,<4.0",
+  "shapely>=2.0,<3.0",
+  "pyshp>=2.3,<3.0",
+  "rtree>=1.0,<2.0",
+  "zarr_fuse>=0.2.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6"
+]
+
+[project.urls]
+Homepage = "https://github.com/geomop/zarr_fuse"
+Repository = "https://github.com/geomop/zarr_fuse"
+Contact = "https://github.com/GeoMop/zarr_fuse/issues"
+
+[project.scripts]
+zf-dashboard = "dashboard.serve_dashboard:main"
+
+[tool.setuptools]
+packages = [
+  "dashboard",
+  "dashboard.api",
+  "dashboard.schemas"
+]
+
+[tool.setuptools.package-dir]
+dashboard = "."
+
+[tool.setuptools.package-data]
+dashboard = [
+  "config/*.yaml",
+  "config/*.yml",
+  "config/**/*.yaml",
+  "config/**/*.yml",
+  "config/**/*.json",
+  "config/**/*.geojson",
+  "config/**/*.png",
+  "config/**/*.jpg",
+  "config/**/*.jpeg",
+  "schemas/*.yaml",
+  "schemas/*.yml"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
