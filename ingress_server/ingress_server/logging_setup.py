@@ -1,5 +1,4 @@
 import logging
-import os
 import sys
 import time
 
@@ -23,9 +22,7 @@ class ColorFormatter(logging.Formatter):
         return super().format(record)
 
 
-def setup_logging():
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-
+def setup_logging(log_level: str = "INFO") -> None:
     fmt = "%(asctime)sZ %(levelname)s %(name)s %(message)s"
     datefmt = "%Y-%m-%dT%H:%M:%S"
 
@@ -33,6 +30,6 @@ def setup_logging():
     handler.setFormatter(ColorFormatter(fmt=fmt, datefmt=datefmt))
 
     root = logging.getLogger()
-    root.setLevel(log_level)
+    root.setLevel(log_level.upper())
     root.handlers.clear()
     root.addHandler(handler)
