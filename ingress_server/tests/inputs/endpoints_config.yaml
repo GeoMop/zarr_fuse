@@ -10,7 +10,6 @@ configuration:
     port: 587
     from_email: "zarr.fuse.support@gmail.com"
     username: "zarr.fuse.support@gmail.com"
-    password: "" # in .env file, not in plaintext
 
 active_scrappers:
   - name: testing-scrapper
