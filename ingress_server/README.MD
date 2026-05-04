@@ -155,7 +155,6 @@ configuration:
     port: 587
     from_email: "zarr.fuse.support@gmail.com"
     username: "zarr.fuse.support@gmail.com"
-    password: ""                      # leave empty — set SMTP_PASSWORD in .env
 ```
 
 The rest of the file defines passive endpoints and active scrappers (see sections below).
@@ -314,7 +313,7 @@ SMTP_PASSWORD=your_gmail_app_password
 | `ZF_STORE_URL`          | Zarr store location                                              |
 | `BASIC_AUTH_USERS_JSON` | Basic auth users as a JSON object `{"user":"password"}`          |
 | `SMTP_PASSWORD`         | SMTP password (for Gmail use App Password, not account password) |
-| `CONFIG_PATH`           | Override path to `endpoints_config.yaml` (optional)             |
+| `CONFIG_PATH`           | Override path to `endpoints_config.yaml` (optional)              |
 
 
 ---
