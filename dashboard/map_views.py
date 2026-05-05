@@ -210,6 +210,7 @@ def build_map_view(data, tap_stream):
         time_index=0,
         depth_index=0,
     )
+    total_points = 0  # Initialize for logging
     if fig.get("status") == "error":
         reason = fig.get("reason", "No map data available")
         logger.warning("Map data unavailable for group '%s': %s", data.group_path, reason)
@@ -218,25 +219,46 @@ def build_map_view(data, tap_stream):
         values = np.array([], dtype=float)
         map_title = f"{map_config['title']} - {reason}"
         data_error_reason = reason
+        print(f"[map] Total points: 0 (error: {reason})")
     else:
-        lats = np.array(fig["lat"], dtype=float)
-        lons = np.array(fig["lon"], dtype=float)
-        values = np.array(fig["values"], dtype=float)
+        # Print raw values BEFORE numpy conversion to see what's really in the data
+        raw_lats = fig["lat"]
+        raw_lons = fig["lon"]
+        raw_values = fig["values"]
+        print(f"[map] Raw data sample - lat[0]: {repr(raw_lats[0])}, lon[0]: {repr(raw_lons[0])}, value[0]: {repr(raw_values[0])}")
+        
+        lats = np.array(raw_lats, dtype=float)
+        lons = np.array(raw_lons, dtype=float)
+        values = np.array(raw_values, dtype=float)
         entities = fig.get("entities")
         map_title = map_config["title"]
         data_error_reason = None
+        total_points = len(lats)
+        print(f"[map] Total points loaded: {total_points}")
+        print(f"[map] All points (including invalid coordinates):")
+        for i in range(total_points):
+            lat_valid = "OK" if np.isfinite(lats[i]) else "INVALID"
+            lon_valid = "OK" if np.isfinite(lons[i]) else "INVALID"
+            val_valid = "OK" if np.isfinite(values[i]) else "INVALID/NaN"
+            entity = entities[i] if entities is not None and i < len(entities) else "N/A"
+            # Show raw values from original data and converted numpy values
+            print(f"  [{i}] raw_lat={repr(raw_lats[i])}, raw_lon={repr(raw_lons[i])}, lat={repr(lats[i])}, lon={repr(lons[i])} ({lat_valid}, {lon_valid}) raw_value={repr(raw_values[i])}, value={repr(values[i])} ({val_valid}) entity={entity}")
 
-    valid_mask = np.isfinite(lats) & np.isfinite(lons) & np.isfinite(values)
+    valid_mask = np.isfinite(lats) & np.isfinite(lons)
     if not np.all(valid_mask):
         lats = lats[valid_mask]
         lons = lons[valid_mask]
         values = values[valid_mask]
         if entities is not None:
             entities = np.array(entities)[valid_mask]
+        print(f"[map] Points after lat/lon filter: {len(lats)} (removed {total_points - len(lats)})")
+    else:
+        print(f"[map] All {len(lats)} points have valid lat/lon - displaying all")
 
     if len(lats) == 0:
         reason = fig.get("reason", "No valid map points available") if fig.get("status") == "error" else "No valid map points available"
         logger.warning("Map data unavailable for group '%s': %s", data.group_path, reason)
+        print(f"[map] Final points to display: 0")
         map_state = {
             "lats": lats,
             "lons": lons,
@@ -280,6 +302,25 @@ def build_map_view(data, tap_stream):
     map_points_dmap = hv.DynamicMap(points_callback, streams=[RangeXY()])
 
     tap_stream.source = map_points_dmap
+
+    print(f"[map] Final points to display: {len(lats)}")
+
+    # Selection marker that highlights the tapped point
+    def _selection_marker(x, y):
+        if x is None or y is None:
+            return hv.Points([])
+        mx, my = _lonlat_to_web_mercator(x, y)
+        return hv.Points([(mx, my)]).opts(
+            color="#ff0000",
+            size=20,
+            marker="circle",
+            line_color="white",
+            line_width=3,
+            fill_alpha=0.5,
+            tools=[],
+        )
+
+    selection_marker_dmap = hv.DynamicMap(_selection_marker, streams=[tap_stream])
 
     center_lat = map_config["center_lat"]
     center_lon = map_config["center_lon"]
