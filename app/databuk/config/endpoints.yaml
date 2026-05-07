@@ -19,7 +19,13 @@ bukov_endpoint:
 
   defaults:
     display_variable: "rock_temp"
-    group_path: "/"
+    group_path: "bukov"
+
+  cluster_defaults: &cluster_defaults
+    cluster_enabled: true
+    cluster_eps_factor: 0.05
+    cluster_buffer_factor: 0.1
+    cluster_size_scale: 3.0
 
   visualization:
     map:
@@ -29,10 +35,7 @@ bukov_endpoint:
       title: "Geographic Data View"
       point_size: 10
       alpha: 0.8
-      cluster_enabled: true
-      cluster_eps_factor: 0.05
-      cluster_buffer_factor: 0.1
-      cluster_size_scale: 3.0
+      <<: *cluster_defaults
     timeseries:
       middle_window_days: 30
       right_window_hours: 24

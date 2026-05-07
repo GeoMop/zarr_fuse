@@ -415,7 +415,7 @@ def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
     with config_path.open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
+        config = yaml.full_load(file)
 
     if not isinstance(config, dict):
         raise ValueError(f"Invalid endpoint configuration format in {config_path}")
