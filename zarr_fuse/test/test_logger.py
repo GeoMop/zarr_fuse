@@ -11,8 +11,9 @@ from zarr.core.buffer.core import default_buffer_prototype
 
 import asyncio
 
-from zarr_fuse.logger import StoreLogHandler  # adjust to your import path
+from zarr_fuse.logger import StoreLogHandler, get_logger
 from zarr_fuse.zarr_storage import _zarr_store_open
+import zarr_fuse as zf
 
 script_dir = Path(__file__).parent
 inputs_dir = script_dir / "inputs"
@@ -83,3 +84,46 @@ def test_store_log_handler(tmp_path, store_options):
         assert timestamp_re.match(line)
         # ends with "LEVEL message"
         assert line.endswith(f"{lvl} [{node_path}] {msg}")
+
+
+def test_make_child_logger(tmp_path):
+    """
+    Open schema_tree.yaml with a local store, verify:
+    1. _make_consistent builds the expected child tree.
+    2. All child nodes share the root's logger instance (no extra loggers/threads).
+    3. node.logger.info() writes to the store (StoreLogHandler works end-to-end).
+    4. Calling get_logger again (simulating a re-open) does not accumulate handlers
+       — old ones are properly closed before a new handler is attached.
+    """
+    schema = zf.schema.deserialize(inputs_dir / "schema_tree.yaml")
+    store_path = tmp_path / "make_child_test.zarr"
+    node = zf.open_store(schema, STORE_URL=str(store_path))
+
+    # --- 1. child tree structure from _make_consistent ---
+    assert "child_1" in node.children
+    assert "child_2" in node.children
+    assert "child_3" in node.children["child_1"].children
+
+    # --- 2. children share the root logger (make_child passes self.logger, not self._logger) ---
+    root_logger = node.logger
+    assert node.children["child_1"].logger is root_logger
+    assert node.children["child_2"].logger is root_logger
+    assert node.children["child_1"].children["child_3"].logger is root_logger
+
+    # --- 3. logger.info() reaches the store ---
+    root_logger.info("hello from root")
+
+    handler = next(h for h in root_logger.handlers if isinstance(h, StoreLogHandler))
+    handler.wait_for_last_message()
+
+    zarr_root_store = zarr.open_group(node.store).store
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    buf = asyncio.run(zarr_root_store.get(f"logs/{today}.log", default_buffer_prototype()))
+    text = buf.as_array_like().tobytes().decode("utf-8")
+    assert "hello from root" in text
+
+    # --- 4. get_logger does not accumulate handlers when called again ---
+    same_logger = get_logger(zarr_root_store, node.group_path)
+    assert len(same_logger.handlers) == 1, (
+        f"Expected exactly 1 handler after re-calling get_logger, got {len(same_logger.handlers)}"
+    )
