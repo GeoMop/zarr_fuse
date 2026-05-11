@@ -7,7 +7,7 @@
   "schema_path": "schemas/testing.yaml",
   "target_node": "testing",
   "extract_fn": "normalize",
-  "fn_module": "inputs.extract.hlavo_extract",
+  "fn_module": "extract.hlavo_extract",
   "dataframe_row": {
     "idx": "26",
     "tmp_id": "6",

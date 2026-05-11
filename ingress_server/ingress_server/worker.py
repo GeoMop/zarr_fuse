@@ -106,6 +106,7 @@ def _process_one(app_config: AppConfig, data_path: Path) -> None:
     obj = read_df_from_bytes(
         payload=payload,
         metadata=metadata,
+        config_dir=app_config.config_dir,
     )
 
     try:
@@ -140,39 +141,47 @@ def _save_to_queue(src: Path, dst: Path) -> None:
         shutil.move(str(meta), str(dst / meta.name))
 
 
+def _process_available_files(app_config: AppConfig) -> bool:
+    progressed = False
+
+    for data_path in list(_iter_accepted_files(app_config)):
+
+        # Check for stop signal at the beginning of each loop iteration to allow graceful shutdown.
+        if app_config.stop_event.is_set():
+            break
+
+        success_dir, failed_dir = _target_dirs_for(app_config, data_path)
+
+        try:
+            LOG.info("Processing data %s", data_path)
+            _process_one(app_config, data_path)
+            _save_to_queue(data_path, success_dir)
+            LOG.info("Processing succeeded for %s", data_path)
+
+        except ValueError as exc:
+            LOG.warning("Processing rejected for %s: %s", data_path, exc)
+            try:
+                _save_to_queue(data_path, failed_dir)
+            except Exception:
+                LOG.exception("Failed to move %s to failed queue", data_path)
+
+        except Exception:
+            LOG.exception("Processing failed for %s", data_path)
+            try:
+                _save_to_queue(data_path, failed_dir)
+            except Exception:
+                LOG.exception("Failed to move %s to failed queue", data_path)
+
+        progressed = True
+
+    return progressed
+
+
 def working_loop(app_config: AppConfig, poll_sleep: float = 30.0) -> None:
     LOG.info("Worker loop started")
 
     while not app_config.stop_event.is_set():
-        progressed = False
-
-        for data_path in list(_iter_accepted_files(app_config)):
-            if app_config.stop_event.is_set():
-                break
-
-            success_dir, failed_dir = _target_dirs_for(app_config, data_path)
-
-            try:
-                LOG.info("Processing data %s", data_path)
-                _process_one(app_config, data_path)
-                _save_to_queue(data_path, success_dir)
-                LOG.info("Processing succeeded for %s", data_path)
-
-            except ValueError as exc:
-                LOG.warning("Processing rejected for %s: %s", data_path, exc)
-                try:
-                    _save_to_queue(data_path, failed_dir)
-                except Exception:
-                    LOG.exception("Failed to move %s to failed queue", data_path)
-
-            except Exception:
-                LOG.exception("Processing failed for %s", data_path)
-                try:
-                    _save_to_queue(data_path, failed_dir)
-                except Exception:
-                    LOG.exception("Failed to move %s to failed queue", data_path)
-
-            progressed = True
+        progressed = _process_available_files(app_config)
 
         if not progressed:
             app_config.stop_event.wait(timeout=poll_sleep)
