@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 import zarr_fuse as zf
 
 from dashboard.config import (
@@ -193,16 +194,25 @@ class LocalClient:
                 return array.isel({dim_name: index})
             return array
 
-        def _candidate_indices(size: int, preferred: int) -> list[int]:
-            if size <= 1:
-                return [0]
-            preferred_idx = preferred if 0 <= preferred < size else 0
-            return [preferred_idx] + [i for i in range(size) if i != preferred_idx]
-
         def _slice_map_arrays(t_idx: int, d_idx: int):
             lat_sel = _isel_if_has_dim(_isel_if_has_dim(lat, time_field, t_idx), depth_field, d_idx)
             lon_sel = _isel_if_has_dim(_isel_if_has_dim(lon, time_field, t_idx), depth_field, d_idx)
             data_sel = _isel_if_has_dim(_isel_if_has_dim(data_var_full, time_field, t_idx), depth_field, d_idx)
+
+            aligned_arrays = [lat_sel, lon_sel, data_sel]
+            if entity_var is not None:
+                entity_sel = _isel_if_has_dim(_isel_if_has_dim(entity_var, time_field, t_idx), depth_field, d_idx)
+                aligned_arrays.append(entity_sel)
+            else:
+                entity_sel = None
+
+            # Align by coordinate labels so site/date dependent coordinates map to matching values.
+            aligned = xr.align(*aligned_arrays, join="inner", copy=False)
+            lat_sel = aligned[0]
+            lon_sel = aligned[1]
+            data_sel = aligned[2]
+            if entity_sel is not None:
+                entity_sel = aligned[3]
 
             lats_local = np.array(lat_sel.values, dtype=float).ravel()
             lons_local = np.array(lon_sel.values, dtype=float).ravel()
@@ -210,14 +220,22 @@ class LocalClient:
             values_local = np.where(np.isfinite(values_local), values_local, np.nan)
 
             entities_local = None
-            if entity_var is not None:
-                entity_sel = _isel_if_has_dim(_isel_if_has_dim(entity_var, time_field, t_idx), depth_field, d_idx)
+            if entity_sel is not None:
                 entities_local = np.array(entity_sel.values, dtype=str).ravel()
 
             if len(lats_local) != len(lons_local) or len(lats_local) != len(values_local):
                 return None
 
-            valid_count = int(np.sum(np.isfinite(lats_local) & np.isfinite(lons_local) & np.isfinite(values_local)))
+            valid_mask = np.isfinite(lats_local) & np.isfinite(lons_local)
+            valid_count = int(np.sum(valid_mask))
+
+            if valid_count > 0 and valid_count < len(valid_mask):
+                lats_local = lats_local[valid_mask]
+                lons_local = lons_local[valid_mask]
+                values_local = values_local[valid_mask]
+                if entities_local is not None:
+                    entities_local = entities_local[valid_mask]
+
             return lats_local, lons_local, values_local, valid_count, entities_local
 
         selected_time_index = time_index
@@ -234,25 +252,11 @@ class LocalClient:
         lats, lons, values, valid_count, entities = sliced
 
         if valid_count == 0:
-            time_size = int(data_var_full.sizes.get(time_field, 1)) if time_field and time_field in data_var_full.dims else 1
-            depth_size = int(data_var_full.sizes.get(depth_field, 1)) if depth_field and depth_field in data_var_full.dims else 1
-
-            for t_idx in _candidate_indices(time_size, selected_time_index):
-                for d_idx in _candidate_indices(depth_size, selected_depth_index):
-                    if t_idx == selected_time_index and d_idx == selected_depth_index:
-                        continue
-                    candidate = _slice_map_arrays(t_idx, d_idx)
-                    if candidate is None:
-                        continue
-                    cand_lats, cand_lons, cand_values, cand_valid, cand_entities = candidate
-                    if cand_valid > 0:
-                        lats, lons, values, entities = cand_lats, cand_lons, cand_values, cand_entities
-                        selected_time_index = t_idx
-                        selected_depth_index = d_idx
-                        break
-                else:
-                    continue
-                break
+            _timer_log("get_map_data failed", time.perf_counter() - start)
+            return {
+                "status": "error",
+                "reason": "No valid lat/lon points for selected map slice",
+            }
 
         result = {
             "status": "success",
