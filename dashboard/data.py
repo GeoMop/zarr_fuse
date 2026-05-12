@@ -195,48 +195,157 @@ class LocalClient:
             return array
 
         def _slice_map_arrays(t_idx: int, d_idx: int):
-            lat_sel = _isel_if_has_dim(_isel_if_has_dim(lat, time_field, t_idx), depth_field, d_idx)
-            lon_sel = _isel_if_has_dim(_isel_if_has_dim(lon, time_field, t_idx), depth_field, d_idx)
+            def _coords_for_map(coord_var, time_idx: int):
+                if coord_var is None:
+                    return None, None, 0
+
+                dims = tuple(coord_var.dims)
+                raw = np.array(coord_var.values)
+
+                # If entity_field present we expect per-entity coords
+                if entity_field and entity_field in dims:
+                    time_ax = dims.index(time_field) if (time_field and time_field in dims) else None
+                    ent_ax = dims.index(entity_field)
+
+                    if time_ax is None:
+                        coords = np.array(coord_var.values)
+                        coords_1d = coords.reshape(-1)
+                        return coords_1d, coords.dtype, coords_1d.size
+
+                    arr = np.array(coord_var.values)
+                    if arr.ndim == 1:
+                        coords_1d = arr.ravel()
+                        return coords_1d, arr.dtype, coords_1d.size
+
+                    if time_ax != 0 or ent_ax != 1:
+                        arr = np.moveaxis(arr, (time_ax, ent_ax), (0, 1))
+
+                    T, E = arr.shape[0], arr.shape[1]
+
+                    try:
+                        valid_mask = np.isfinite(arr.astype(float))
+                    except Exception:
+                        valid_mask = ~pd.isna(arr)
+
+                    t_idx_clamped = max(0, min(int(time_idx), T - 1))
+                    slice_vals = arr[t_idx_clamped, :]
+
+                    filled = np.array(slice_vals, dtype=float)
+                    nan_mask = ~valid_mask[t_idx_clamped, :]
+                    if nan_mask.any():
+                        for j in np.flatnonzero(nan_mask):
+                            found = False
+                            for offset in range(1, max(T - t_idx_clamped, t_idx_clamped) + 1):
+                                for cand in (t_idx_clamped - offset, t_idx_clamped + offset):
+                                    if 0 <= cand < T and valid_mask[cand, j]:
+                                        try:
+                                            filled[j] = float(arr[cand, j])
+                                            found = True
+                                        except Exception:
+                                            filled[j] = np.nan
+                                        break
+                                if found:
+                                    break
+                            if not found:
+                                filled[j] = np.nan
+
+                    return filled.ravel(), arr.dtype, E
+
+                flat = raw.ravel()
+                return flat, raw.dtype, flat.size
+
+            # selected data slice for logging and value extraction
             data_sel = _isel_if_has_dim(_isel_if_has_dim(data_var_full, time_field, t_idx), depth_field, d_idx)
 
-            aligned_arrays = [lat_sel, lon_sel, data_sel]
+            # build 1D coords per entity (or flattened fallback)
+            lat_1d, lat_dtype, lat_count = _coords_for_map(lat, t_idx)
+            lon_1d, lon_dtype, lon_count = _coords_for_map(lon, t_idx)
             if entity_var is not None:
-                entity_sel = _isel_if_has_dim(_isel_if_has_dim(entity_var, time_field, t_idx), depth_field, d_idx)
-                aligned_arrays.append(entity_sel)
+                ent_1d_raw, ent_dtype, ent_count = _coords_for_map(entity_var, t_idx)
             else:
-                entity_sel = None
+                ent_1d_raw, ent_dtype, ent_count = (None, None, 0)
 
-            # Align by coordinate labels so site/date dependent coordinates map to matching values.
-            aligned = xr.align(*aligned_arrays, join="inner", copy=False)
-            lat_sel = aligned[0]
-            lon_sel = aligned[1]
-            data_sel = aligned[2]
-            if entity_sel is not None:
-                entity_sel = aligned[3]
+            # Logging dims and shapes
+            print(f"[map][debug] variable='{variable}' original_dims={data_var_full.dims} original_shape={data_var_full.shape}")
+            print(f"[map][debug] selected_slice_dims={data_sel.dims} selected_slice_shape={data_sel.shape}")
+            print(f"[map][debug] lat_dims={getattr(lat, 'dims', None)} lat_shape={getattr(lat, 'shape', None)}")
+            print(f"[map][debug] lon_dims={getattr(lon, 'dims', None)} lon_shape={getattr(lon, 'shape', None)}")
 
-            lats_local = np.array(lat_sel.values, dtype=float).ravel()
-            lons_local = np.array(lon_sel.values, dtype=float).ravel()
-            values_local = np.array(data_sel.values, dtype=float).ravel()
-            values_local = np.where(np.isfinite(values_local), values_local, np.nan)
+            values_arr = np.array(data_sel.values)
 
-            entities_local = None
-            if entity_sel is not None:
-                entities_local = np.array(entity_sel.values, dtype=str).ravel()
+            # If data_sel has an entity dimension, try to reduce to one value per entity
+            if entity_field and entity_field in data_sel.dims:
+                dims = tuple(data_sel.dims)
+                ent_ax = dims.index(entity_field)
+                if ent_ax != values_arr.ndim - 1:
+                    values_arr = np.moveaxis(values_arr, ent_ax, -1)
+                if values_arr.ndim > 1:
+                    values_1d = values_arr.reshape(-1, values_arr.shape[-1])
+                    vals = np.full(values_1d.shape[1], np.nan)
+                    for j in range(values_1d.shape[1]):
+                        col = values_1d[:, j]
+                        try:
+                            finite_idx = np.flatnonzero(np.isfinite(col))
+                            if finite_idx.size:
+                                vals[j] = float(col[finite_idx[0]])
+                            else:
+                                vals[j] = np.nan
+                        except Exception:
+                            valid = (~pd.isna(col)) & (col != None)
+                            idx = np.flatnonzero(valid)
+                            vals[j] = col[idx[0]] if idx.size else None
+                    values_1d_final = vals
+                else:
+                    values_1d_final = values_arr.astype(float).ravel()
+            else:
+                try:
+                    values_1d_final = np.array(values_arr, dtype=float).ravel()
+                except Exception:
+                    values_1d_final = np.array(values_arr).ravel()
 
-            if len(lats_local) != len(lons_local) or len(lats_local) != len(values_local):
-                return None
+            entity_count = ent_count or lat_count or lon_count or values_1d_final.size
 
-            valid_mask = np.isfinite(lats_local) & np.isfinite(lons_local)
-            valid_count = int(np.sum(valid_mask))
+            def _ensure_len(arr, count):
+                if arr is None:
+                    return np.full(count, np.nan)
+                a = np.array(arr).ravel()
+                if a.size == count:
+                    return a
+                if a.size < count:
+                    out = np.full(count, np.nan)
+                    out[: a.size] = a
+                    return out
+                return a[:count]
 
-            if valid_count > 0 and valid_count < len(valid_mask):
-                lats_local = lats_local[valid_mask]
-                lons_local = lons_local[valid_mask]
-                values_local = values_local[valid_mask]
-                if entities_local is not None:
-                    entities_local = entities_local[valid_mask]
+            lats_local = _ensure_len(lat_1d, entity_count)
+            lons_local = _ensure_len(lon_1d, entity_count)
+            values_local = _ensure_len(values_1d_final, entity_count)
 
-            return lats_local, lons_local, values_local, valid_count, entities_local
+            coord_valid_mask = np.isfinite(lats_local) & np.isfinite(lons_local)
+            try:
+                value_valid_mask = np.isfinite(values_local)
+            except Exception:
+                value_valid_mask = ~pd.isna(values_local)
+
+            total = int(entity_count)
+            missing_coord_count = int(np.sum(~coord_valid_mask))
+            missing_value_count = int(np.sum(~value_valid_mask))
+            plotable = int(np.sum(coord_valid_mask & value_valid_mask))
+
+            print(
+                f"[map] Location counts - total: {total}, missing coords: {missing_coord_count}, missing values: {missing_value_count}, plotable: {plotable}"
+            )
+
+            if plotable > 0:
+                keep_mask = coord_valid_mask & value_valid_mask
+                lats_local = lats_local[keep_mask]
+                lons_local = lons_local[keep_mask]
+                values_local = values_local[keep_mask]
+                entities_local = ent_1d_raw[keep_mask] if ent_1d_raw is not None else None
+            else:
+                entities_local = ent_1d_raw
+
+            return lats_local, lons_local, values_local, plotable, entities_local
 
         selected_time_index = time_index
         selected_depth_index = depth_index
