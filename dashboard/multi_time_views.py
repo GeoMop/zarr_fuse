@@ -331,12 +331,22 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
                         # do not select a different nearby marker — show no-data state.
                         try:
                             if isinstance(marker_meta, dict) and not bool(marker_meta.get("has_value", True)):
+                                # Clear timeseries state so plots render empty for this selected site
+                                timeseries_state["times"] = pd.to_datetime([])
+                                timeseries_state["depths"] = np.array([])
+                                timeseries_state["series"] = []
+                                timeseries_state["entity_index"] = int(nearest_idx)
                                 timeseries_state["selected_marker_has_value"] = False
                                 timeseries_state["selected_lat"] = float(y)
                                 timeseries_state["selected_lon"] = float(x)
+                                timeseries_state["entity_display_name"] = marker_meta.get("site_id") if isinstance(marker_meta, dict) else None
                                 depth_selector.options = {}
                                 depth_selector.value = []
                                 borehole_info.object = f"### No data available for this site at the selected time and depth."
+                                try:
+                                    borehole_stream.event(borehole_index=int(nearest_idx))
+                                except Exception:
+                                    pass
                                 return None
                         except Exception:
                             # Fall back to normal selection if marker_meta is malformed
