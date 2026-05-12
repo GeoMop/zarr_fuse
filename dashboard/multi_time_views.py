@@ -322,7 +322,28 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
                 dist = (lats - float(y)) ** 2 + (lons - float(x)) ** 2
                 nearest_idx = int(np.nanargmin(dist))
                 if 0 <= nearest_idx < len(all_meta):
-                    marker_meta = all_meta[nearest_idx]
+                    min_dist = float(dist[nearest_idx])
+                    # Selection threshold (degrees). Tweak this for your map zoom level.
+                    threshold_deg = 0.0002
+                    if min_dist <= threshold_deg ** 2:
+                        marker_meta = all_meta[nearest_idx]
+                        # If the map-slice value for the selected marker is missing,
+                        # do not select a different nearby marker — show no-data state.
+                        try:
+                            if isinstance(marker_meta, dict) and not bool(marker_meta.get("has_value", True)):
+                                timeseries_state["selected_marker_has_value"] = False
+                                timeseries_state["selected_lat"] = float(y)
+                                timeseries_state["selected_lon"] = float(x)
+                                depth_selector.options = {}
+                                depth_selector.value = []
+                                borehole_info.object = f"### No data available for this site at the selected time and depth."
+                                return None
+                        except Exception:
+                            # Fall back to normal selection if marker_meta is malformed
+                            pass
+                    else:
+                        # Click wasn't close enough to any marker — don't select.
+                        return None
         entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=marker_meta)
         if entity_index is not None:
             borehole_stream.event(borehole_index=entity_index)
