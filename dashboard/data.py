@@ -414,7 +414,9 @@ class LocalClient:
         start = time.perf_counter()
         
         # Check cache first - using location as part of key since timeseries is location-specific
-        cache_key = f"{endpoint_name}:{group_path}:{variable}:{lat:.4f}:{lon:.4f}"
+        # Use higher precision here so nearby boreholes do not collapse
+        # to the same cache entry when coordinates differ only slightly.
+        cache_key = f"{endpoint_name}:{group_path}:{variable}:{lat:.8f}:{lon:.8f}"
         if cache_key in self._timeseries_cache:
             cached = self._timeseries_cache[cache_key]
             print(f"[cache] get_timeseries_data: cache hit for {variable}")
