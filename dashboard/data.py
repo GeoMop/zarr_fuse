@@ -328,24 +328,42 @@ class LocalClient:
                 value_valid_mask = ~pd.isna(values_local)
 
             total = int(entity_count)
+            valid_coord_count = int(np.sum(coord_valid_mask))
+            finite_value_count = int(np.sum(value_valid_mask & coord_valid_mask))
             missing_coord_count = int(np.sum(~coord_valid_mask))
-            missing_value_count = int(np.sum(~value_valid_mask))
-            plotable = int(np.sum(coord_valid_mask & value_valid_mask))
+            missing_value_count = int(np.sum(coord_valid_mask & ~value_valid_mask))
+            displayed_markers = valid_coord_count
 
             print(
-                f"[map] Location counts - total: {total}, missing coords: {missing_coord_count}, missing values: {missing_value_count}, plotable: {plotable}"
+                f"[map] Location counts - total entities: {total}, valid coordinate markers: {valid_coord_count}, finite selected values: {finite_value_count}, missing selected values: {missing_value_count}, displayed markers: {displayed_markers}"
             )
 
-            if plotable > 0:
-                keep_mask = coord_valid_mask & value_valid_mask
+            if valid_coord_count > 0:
+                keep_mask = coord_valid_mask
                 lats_local = lats_local[keep_mask]
                 lons_local = lons_local[keep_mask]
                 values_local = values_local[keep_mask]
                 entities_local = ent_1d_raw[keep_mask] if ent_1d_raw is not None else None
+                value_valid_mask = value_valid_mask[keep_mask]
             else:
                 entities_local = ent_1d_raw
+                value_valid_mask = np.array([], dtype=bool)
 
-            return lats_local, lons_local, values_local, plotable, entities_local
+            marker_meta = []
+            for idx in range(len(lats_local)):
+                entity_value = entities_local[idx] if entities_local is not None and idx < len(entities_local) else None
+                value_value = values_local[idx] if idx < len(values_local) else np.nan
+                has_value = bool(np.isfinite(value_value)) if np.isscalar(value_value) else False
+                marker_meta.append(
+                    {
+                        "entity_index": int(idx),
+                        "site_id": None if entity_value is None else str(entity_value),
+                        "value": None if not has_value else float(value_value),
+                        "has_value": has_value,
+                    }
+                )
+
+            return lats_local, lons_local, values_local, valid_coord_count, entities_local, marker_meta, value_valid_mask
 
         selected_time_index = time_index
         selected_depth_index = depth_index
@@ -358,7 +376,7 @@ class LocalClient:
                 "reason": "Coordinate/value lengths do not match for selected map slice",
             }
 
-        lats, lons, values, valid_count, entities = sliced
+        lats, lons, values, valid_count, entities, marker_meta, value_valid_mask = sliced
 
         if valid_count == 0:
             _timer_log("get_map_data failed", time.perf_counter() - start)
@@ -373,6 +391,8 @@ class LocalClient:
             "lon": _to_json_floats(lons),
             "values": _to_json_floats(values),
             "entities": entities.tolist() if entities is not None else None,
+            "marker_meta": marker_meta,
+            "has_value": value_valid_mask.tolist() if hasattr(value_valid_mask, "tolist") else [],
             "variable": variable,
             "time_index": selected_time_index,
             "depth_index": selected_depth_index,

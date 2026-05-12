@@ -58,6 +58,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         "entity_display_name": None,
         "selected_lat": None,
         "selected_lon": None,
+        "selected_marker_has_value": True,
     }
 
     def format_depth(depth_value: float):
@@ -92,11 +93,18 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         lat = timeseries_state.get("selected_lat")
         lon = timeseries_state.get("selected_lon")
         lat_lon_text = f" ({lat:.4f}, {lon:.4f})" if lat is not None and lon is not None else ""
-        borehole_info.object = f"### {display_name}{lat_lon_text}"
+        if timeseries_state.get("selected_marker_has_value", True):
+            borehole_info.object = f"### {display_name}{lat_lon_text}"
+        else:
+            borehole_info.object = (
+                f"### {display_name}{lat_lon_text}\n"
+                "No data available for this site at the selected time and depth."
+            )
         timeseries_state["entity_display_name"] = display_name
 
-    def _fetch_timeseries(lat, lon):
+    def _fetch_timeseries(lat, lon, marker_meta=None):
         start = time.perf_counter()
+        timeseries_state["selected_marker_has_value"] = bool(marker_meta.get("has_value", True)) if isinstance(marker_meta, dict) else True
         fig = data.client.get_timeseries_data(
             data.endpoint_name,
             group_path=data.group_path,
@@ -301,9 +309,21 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     )
 
     def on_map_tap(x, y):
+        marker_meta = None
         if x is None or y is None:
             y, x = _default_coords()
-        entity_index = _fetch_timeseries(lat=float(y), lon=float(x))
+        else:
+            lats_raw = map_state.get("lats")
+            lons_raw = map_state.get("lons")
+            all_meta = map_state.get("marker_meta") or []
+            if lats_raw is not None and lons_raw is not None and len(all_meta):
+                lats = np.array(lats_raw, dtype=float)
+                lons = np.array(lons_raw, dtype=float)
+                dist = (lats - float(y)) ** 2 + (lons - float(x)) ** 2
+                nearest_idx = int(np.nanargmin(dist))
+                if 0 <= nearest_idx < len(all_meta):
+                    marker_meta = all_meta[nearest_idx]
+        entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=marker_meta)
         if entity_index is not None:
             borehole_stream.event(borehole_index=entity_index)
 

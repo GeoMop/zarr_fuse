@@ -217,6 +217,8 @@ def build_map_view(data, tap_stream):
         lats = np.array([], dtype=float)
         lons = np.array([], dtype=float)
         values = np.array([], dtype=float)
+        marker_meta = []
+        entities = None
         map_title = f"{map_config['title']} - {reason}"
         data_error_reason = reason
         print(f"[map] Total points: 0 (error: {reason})")
@@ -225,6 +227,7 @@ def build_map_view(data, tap_stream):
         raw_lats = fig["lat"]
         raw_lons = fig["lon"]
         raw_values = fig["values"]
+        marker_meta = fig.get("marker_meta") or []
         print(f"[map] Raw data sample - lat[0]: {repr(raw_lats[0])}, lon[0]: {repr(raw_lons[0])}, value[0]: {repr(raw_values[0])}")
         
         lats = np.array(raw_lats, dtype=float)
@@ -234,15 +237,23 @@ def build_map_view(data, tap_stream):
         map_title = map_config["title"]
         data_error_reason = None
         total_points = len(lats)
-        print(f"[map] Total points loaded: {total_points}")
-        print(f"[map] All points (including invalid coordinates):")
+        finite_selected_values = int(np.isfinite(values).sum())
+        missing_selected_values = int(np.sum(~np.isfinite(values)))
+        displayed_markers = int(np.sum(np.isfinite(lats) & np.isfinite(lons)))
+        print(f"[map] Total entities: {total_points}")
+        print(f"[map] Valid coordinate markers: {displayed_markers}")
+        print(f"[map] Finite selected values: {finite_selected_values}")
+        print(f"[map] Missing selected values: {missing_selected_values}")
+        print(f"[map] Displayed markers: {displayed_markers}")
+        print(f"[map] All points (including NaN values, invalid coordinates excluded later):")
         for i in range(total_points):
             lat_valid = "OK" if np.isfinite(lats[i]) else "INVALID"
             lon_valid = "OK" if np.isfinite(lons[i]) else "INVALID"
             val_valid = "OK" if np.isfinite(values[i]) else "INVALID/NaN"
             entity = entities[i] if entities is not None and i < len(entities) else "N/A"
+            marker_info = marker_meta[i] if i < len(marker_meta) else {}
             # Show raw values from original data and converted numpy values
-            print(f"  [{i}] raw_lat={repr(raw_lats[i])}, raw_lon={repr(raw_lons[i])}, lat={repr(lats[i])}, lon={repr(lons[i])} ({lat_valid}, {lon_valid}) raw_value={repr(raw_values[i])}, value={repr(values[i])} ({val_valid}) entity={entity}")
+            print(f"  [{i}] raw_lat={repr(raw_lats[i])}, raw_lon={repr(raw_lons[i])}, lat={repr(lats[i])}, lon={repr(lons[i])} ({lat_valid}, {lon_valid}) raw_value={repr(raw_values[i])}, value={repr(values[i])} ({val_valid}) entity={entity} marker_meta={marker_info}")
 
     valid_mask = np.isfinite(lats) & np.isfinite(lons)
     if not np.all(valid_mask):
@@ -251,6 +262,8 @@ def build_map_view(data, tap_stream):
         values = values[valid_mask]
         if entities is not None:
             entities = np.array(entities)[valid_mask]
+        if marker_meta:
+            marker_meta = [marker_meta[i] for i, keep in enumerate(valid_mask) if keep]
         print(f"[map] Points after lat/lon filter: {len(lats)} (removed {total_points - len(lats)})")
     else:
         print(f"[map] All {len(lats)} points have valid lat/lon - displaying all")
@@ -262,6 +275,7 @@ def build_map_view(data, tap_stream):
         map_state = {
             "lats": lats,
             "lons": lons,
+            "marker_meta": marker_meta,
             "center_lat": map_config["center_lat"],
             "center_lon": map_config["center_lon"],
             "zoom": int(map_config["zoom"]),
@@ -295,7 +309,18 @@ def build_map_view(data, tap_stream):
         print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
         return result
 
-    map_df = pd.DataFrame({lon_field: lons, lat_field: lats, entity_field: entities if entities is not None else [""] * len(lons)})
+    map_df = pd.DataFrame({
+        lon_field: lons,
+        lat_field: lats,
+        entity_field: entities if entities is not None else [""] * len(lons),
+        "value": values,
+        "has_value": np.isfinite(values),
+    })
+    if marker_meta:
+        map_df["site_id"] = [m.get("site_id") for m in marker_meta]
+        map_df["entity_index"] = [m.get("entity_index") for m in marker_meta]
+        map_df["marker_has_value"] = [m.get("has_value") for m in marker_meta]
+        map_df["marker_value"] = [m.get("value") for m in marker_meta]
     data.current_map_df = map_df  # Store latest map_df on data object for refresh access
 
     points_callback = _make_points_callback(data, map_config, lon_field, lat_field, entity_field, map_title)
@@ -334,6 +359,7 @@ def build_map_view(data, tap_stream):
     map_state = {
         "lats": lats,
         "lons": lons,
+        "marker_meta": marker_meta,
         "center_lat": center_lat,
         "center_lon": center_lon,
         "zoom": zoom,
