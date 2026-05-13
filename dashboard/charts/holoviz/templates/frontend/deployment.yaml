@@ -36,10 +36,8 @@ spec:
               containerPort: {{ .Values.frontend.service.internalPort.number | int }}
           envFrom:
             - secretRef:
-                name: {{ .Values.backend.name }}-secrets
+                name: {{ .Values.frontend.name }}-secrets
           env:
-            - name: HV_API_URL
-              value: "http://{{ .Values.backend.name }}:{{ .Values.backend.service.internalPort.number }}"
             - name: HV_DASHBOARD_ENDPOINT
               value: {{ .Values.frontend.endpointName | quote }}
             - name: BOKEH_ALLOW_WS_ORIGIN
