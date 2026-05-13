@@ -120,6 +120,7 @@ def resolve_endpoints_path() -> Path:
     2. Search upward from current working directory for:
        - dashboard/config/endpoints.yaml
        - config/endpoints.yaml
+       - app/databuk/config/endpoints.yaml
     """
     env_path = os.getenv("ENDPOINTS_PATH")
     if env_path:
@@ -133,6 +134,7 @@ def resolve_endpoints_path() -> Path:
         for candidate in (
             base / "dashboard" / "config" / "endpoints.yaml",
             base / "config" / "endpoints.yaml",
+            base / "app" / "databuk" / "config" / "endpoints.yaml",
         ):
             if candidate.exists():
                 return candidate
@@ -141,7 +143,8 @@ def resolve_endpoints_path() -> Path:
         "Could not find endpoints.yaml. Checked:\n"
         "1. ENDPOINTS_PATH env var\n"
         "2. dashboard/config/endpoints.yaml\n"
-        "3. config/endpoints.yaml"
+        "3. config/endpoints.yaml\n"
+        "4. app/databuk/config/endpoints.yaml"
     )
 
 
