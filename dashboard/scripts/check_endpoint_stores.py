@@ -1,3 +1,27 @@
+"""
+Check endpoint store reachability and dataset health.
+
+This script is a developer utility to validate the endpoints declared in
+`endpoints.yaml` and to exercise the underlying data stores referenced by
+those endpoints (for example S3-backed Zarr stores). It helps answer questions
+like:
+
+- Are the configured endpoints reachable?
+- Which group paths exist for an endpoint?
+- Do datasets expose the expected variables and coordinates?
+- Are numeric values present (finite) in sample slices of the variables?
+
+Usage examples:
+
+    python dashboard/test/check_endpoint_stores.py --endpoints <path/to/endpoints.yaml>
+    python dashboard/test/check_endpoint_stores.py --check-values-endpoint my_ep --check-values-group /my/group
+    python dashboard/test/check_endpoint_stores.py --check-values-all
+
+The script can optionally print credential status (S3 env vars), list groups,
+and perform lightweight value inspections for dataset variables. It is intended
+for manual checks during development and CI troubleshooting, not as a unit test.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -8,7 +32,7 @@ from typing import Any
 
 import numpy as np
 
-# Allow running this file directly via "python dashboard/test/check_endpoint_stores.py".
+# Allow running this file directly via "python dashboard/scripts/check_endpoint_stores.py".
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
