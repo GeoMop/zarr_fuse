@@ -137,24 +137,23 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         borehole_name = fig.get("borehole_name")
         
         # Check if returned entity matches expected entity (to detect fallback to nearest neighbor)
-        if expected_site_id is not None and borehole_name is not None:
-            if str(borehole_name).strip() != str(expected_site_id).strip():
-                print(f"[fetch_ts] Entity mismatch: expected {expected_site_id}, got {borehole_name}")
-                print(f"[fetch_ts] This means get_timeseries_data fell back to nearest neighbor (unwanted)")
-                print(f"[fetch_ts] Clearing state to show 'No data...' message for clicked point")
-                timeseries_state["times"] = pd.to_datetime([])
-                timeseries_state["depths"] = np.array([])
-                timeseries_state["series"] = []
-                timeseries_state["entity_index"] = 0
-                timeseries_state["selected_lat"] = lat
-                timeseries_state["selected_lon"] = lon
-                timeseries_state["selected_marker_has_value"] = False
-                timeseries_state["entity_display_name"] = expected_site_id
-                depth_selector.options = {}
-                depth_selector.value = []
-                borehole_info.object = f"### {expected_site_id}\nNo data available for this site at the selected time and depth."
-                print(f"[timing] timeseries fetch (no data, fallback detected): {time.perf_counter() - start:.3f}s")
-                return None
+        if expected_site_id is not None and borehole_name is not None and str(borehole_name).strip() != str(expected_site_id).strip():
+            print(f"[fetch_ts] Entity mismatch: expected {expected_site_id}, got {borehole_name}")
+            print(f"[fetch_ts] This means get_timeseries_data fell back to nearest neighbor (unwanted)")
+            print(f"[fetch_ts] Clearing state to show 'No data...' message for clicked point")
+            timeseries_state["times"] = pd.to_datetime([])
+            timeseries_state["depths"] = np.array([])
+            timeseries_state["series"] = []
+            timeseries_state["entity_index"] = 0
+            timeseries_state["selected_lat"] = lat
+            timeseries_state["selected_lon"] = lon
+            timeseries_state["selected_marker_has_value"] = False
+            timeseries_state["entity_display_name"] = expected_site_id
+            depth_selector.options = {}
+            depth_selector.value = []
+            borehole_info.object = f"### {expected_site_id}\nNo data available for this site at the selected time and depth."
+            print(f"[timing] timeseries fetch (no data, fallback detected): {time.perf_counter() - start:.3f}s")
+            return None
 
         # Only update state if we got data for the correct entity
         timeseries_state["times"] = times
@@ -346,39 +345,46 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     )
 
     def on_map_tap(x, y):
-        marker_meta = None
         if x is None or y is None:
             y, x = _default_coords()
             print(f"[tap] Initial load: using default coords y={y:.4f}, x={x:.4f}")
             print(f"[tap] marker_meta will be None (not computed for initial load)")
-        else:
-            print(f"[tap] Click detected: x={x}, y={y}")
-            lats_raw = map_state.get("lats")
-            lons_raw = map_state.get("lons")
-            all_meta = map_state.get("marker_meta") or []
-            print(f"[tap] Computing nearest marker from {len(all_meta)} available markers")
-            if lats_raw is not None and lons_raw is not None and len(all_meta):
-                lats = np.array(lats_raw, dtype=float)
-                lons = np.array(lons_raw, dtype=float)
-                dist = (lats - float(y)) ** 2 + (lons - float(x)) ** 2
-                nearest_idx = int(np.nanargmin(dist))
-                print(f"[tap] nearest_idx={nearest_idx}, distance={dist[nearest_idx]:.2e}")
-                if 0 <= nearest_idx < len(all_meta):
-                    min_dist = float(dist[nearest_idx])
-                    # Selection threshold (degrees). Tweak this for your map zoom level.
-                    threshold_deg = 0.0002
-                    marker_meta = all_meta[nearest_idx]
-                    print(f"[tap] Selected marker_meta={marker_meta}")
-                    if min_dist <= threshold_deg ** 2:
-                        # Always fetch timeseries - even if map-slice has no value.
-                        # _fetch_timeseries will check actual series content and update UI accordingly.
-                        print(f"[tap] Will fetch timeseries regardless of map-slice has_value")
-                    else:
-                        print(f"[tap] Outside threshold ({min_dist:.2e} > {threshold_deg**2:.2e}): not selecting")
-                        # Click wasn't close enough to any marker — don't select.
-                        return None
-            else:
-                print(f"[tap] No markers available or missing lats/lons")
+            print(f"[tap] Calling _fetch_timeseries with marker_meta=None")
+            entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=None)
+            if entity_index is not None:
+                borehole_stream.event(borehole_index=entity_index)
+            return None
+
+        print(f"[tap] Click detected: x={x}, y={y}")
+        lats_raw = map_state.get("lats")
+        lons_raw = map_state.get("lons")
+        all_meta = map_state.get("marker_meta") or []
+        print(f"[tap] Computing nearest marker from {len(all_meta)} available markers")
+        if lats_raw is None or lons_raw is None or not len(all_meta):
+            print(f"[tap] No markers available or missing lats/lons")
+            return None
+
+        lats = np.array(lats_raw, dtype=float)
+        lons = np.array(lons_raw, dtype=float)
+        dist = (lats - float(y)) ** 2 + (lons - float(x)) ** 2
+        nearest_idx = int(np.nanargmin(dist))
+        print(f"[tap] nearest_idx={nearest_idx}, distance={dist[nearest_idx]:.2e}")
+        if not (0 <= nearest_idx < len(all_meta)):
+            return None
+
+        min_dist = float(dist[nearest_idx])
+        # Selection threshold (degrees). Tweak this for your map zoom level.
+        threshold_deg = 0.0002
+        if min_dist > threshold_deg ** 2:
+            print(f"[tap] Outside threshold ({min_dist:.2e} > {threshold_deg**2:.2e}): not selecting")
+            # Click wasn't close enough to any marker — don't select.
+            return None
+
+        marker_meta = all_meta[nearest_idx]
+        print(f"[tap] Selected marker_meta={marker_meta}")
+        # Always fetch timeseries - even if map-slice has no value.
+        # _fetch_timeseries will check actual series content and update UI accordingly.
+        print(f"[tap] Will fetch timeseries regardless of map-slice has_value")
         print(f"[tap] Calling _fetch_timeseries with marker_meta={marker_meta}")
         entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=marker_meta)
         if entity_index is not None:
