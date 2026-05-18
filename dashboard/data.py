@@ -410,13 +410,14 @@ class LocalClient:
         lat: float,
         lon: float,
         variable: Optional[str] = None,
+        entity_index: Optional[int] = None,
     ) -> Dict[str, Any]:
         start = time.perf_counter()
         
         # Check cache first - using location as part of key since timeseries is location-specific
         # Use higher precision here so nearby boreholes do not collapse
         # to the same cache entry when coordinates differ only slightly.
-        cache_key = f"{endpoint_name}:{group_path}:{variable}:{lat:.8f}:{lon:.8f}"
+        cache_key = f"{endpoint_name}:{group_path}:{variable}:{lat:.8f}:{lon:.8f}:{entity_index}"
         if cache_key in self._timeseries_cache:
             cached = self._timeseries_cache[cache_key]
             print(f"[cache] get_timeseries_data: cache hit for {variable}")
@@ -467,8 +468,24 @@ class LocalClient:
 
         lats = np.array(lat_var.values, dtype=float).ravel()
         lons = np.array(lon_var.values, dtype=float).ravel()
-        dist = (lats - lat) ** 2 + (lons - lon) ** 2
-        idx = int(np.nanargmin(dist))
+        available_min = 0
+        available_max = max(len(lats) - 1, 0)
+        print(f"[fetch_ts][backend] Available entity index range: {available_min}..{available_max}")
+        idx: int
+        if entity_index is not None:
+            idx = int(entity_index)
+            print(f"[fetch_ts][backend] Using provided entity_index={idx}")
+        else:
+            dist = (lats - lat) ** 2 + (lons - lon) ** 2
+            idx = int(np.nanargmin(dist))
+            print(f"[fetch_ts][backend] Resolved nearest entity_index={idx}")
+
+        if idx < available_min or idx > available_max:
+            _timer_log("get_timeseries_data failed", time.perf_counter() - start)
+            return {
+                "status": "error",
+                "reason": f"entity_index {idx} is out of range for available entities {available_min}..{available_max}",
+            }
 
         entity_names = None
         if entity_field and entity_field in ds:

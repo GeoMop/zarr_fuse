@@ -105,16 +105,18 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     def _fetch_timeseries(lat, lon, marker_meta=None):
         start = time.perf_counter()
         print(f"[fetch_ts] Called with lat={lat:.4f}, lon={lon:.4f}, marker_meta={marker_meta}")
-        expected_site_id = None
-        if isinstance(marker_meta, dict):
-            expected_site_id = marker_meta.get("site_id")
-            print(f"[fetch_ts] Expected site_id: {expected_site_id}")
+        marker_entity_index = marker_meta.get("entity_index") if isinstance(marker_meta, dict) else None
+        marker_site_id = marker_meta.get("site_id") if isinstance(marker_meta, dict) else None
+        selected_entity_index = marker_entity_index
+        if marker_entity_index is not None:
+            print(f"[fetch_ts] Selected marker index={marker_entity_index}, site_id={marker_site_id}")
         fig = data.client.get_timeseries_data(
             data.endpoint_name,
             group_path=data.group_path,
             lat=lat,
             lon=lon,
             variable=default_display_variable,
+            entity_index=selected_entity_index,
         )
         if fig.get("status") == "error":
             reason = fig.get("reason", "Failed to load timeseries")
@@ -135,25 +137,6 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         series = [np.array(values, dtype=float) for values in fig.get("series", [])]
         entity_index = int(fig.get("borehole_index", 0))
         borehole_name = fig.get("borehole_name")
-        
-        # Check if returned entity matches expected entity (to detect fallback to nearest neighbor)
-        if expected_site_id is not None and borehole_name is not None and str(borehole_name).strip() != str(expected_site_id).strip():
-            print(f"[fetch_ts] Entity mismatch: expected {expected_site_id}, got {borehole_name}")
-            print(f"[fetch_ts] This means get_timeseries_data fell back to nearest neighbor (unwanted)")
-            print(f"[fetch_ts] Clearing state to show 'No data...' message for clicked point")
-            timeseries_state["times"] = pd.to_datetime([])
-            timeseries_state["depths"] = np.array([])
-            timeseries_state["series"] = []
-            timeseries_state["entity_index"] = 0
-            timeseries_state["selected_lat"] = lat
-            timeseries_state["selected_lon"] = lon
-            timeseries_state["selected_marker_has_value"] = False
-            timeseries_state["entity_display_name"] = expected_site_id
-            depth_selector.options = {}
-            depth_selector.value = []
-            borehole_info.object = f"### {expected_site_id}\nNo data available for this site at the selected time and depth."
-            print(f"[timing] timeseries fetch (no data, fallback detected): {time.perf_counter() - start:.3f}s")
-            return None
 
         # Only update state if we got data for the correct entity
         timeseries_state["times"] = times
