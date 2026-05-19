@@ -35,7 +35,8 @@ bukov_endpoint:
       title: "Geographic Data View"
       point_size: 10
       alpha: 0.8
-      <<: *cluster_defaults
+      cluster:
+        <<: *cluster_defaults
     timeseries:
       middle_window_days: 30
       right_window_hours: 24
