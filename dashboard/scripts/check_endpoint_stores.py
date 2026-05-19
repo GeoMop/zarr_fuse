@@ -13,9 +13,9 @@ like:
 
 Usage examples:
 
-    python dashboard/test/check_endpoint_stores.py --endpoints <path/to/endpoints.yaml>
-    python dashboard/test/check_endpoint_stores.py --check-values-endpoint my_ep --check-values-group /my/group
-    python dashboard/test/check_endpoint_stores.py --check-values-all
+    python dashboard/scripts/check_endpoint_stores.py --endpoints <path/to/endpoints.yaml>
+    python dashboard/scripts/check_endpoint_stores.py --check-values-endpoint my_ep --check-values-group /my/group
+    python dashboard/scripts/check_endpoint_stores.py --check-values-all
 
 The script can optionally print credential status (S3 env vars), list groups,
 and perform lightweight value inspections for dataset variables. It is intended
