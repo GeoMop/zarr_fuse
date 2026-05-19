@@ -77,7 +77,7 @@ my_data:
   
   # Start defaults when dashboard loads
   defaults:
-    metric: "temperature"                   # Which variable to show first
+    display_variable: "temperature"         # Which variable to show first
     group_path: "/"                         # Start from root
   
   # Label customization
@@ -97,6 +97,12 @@ my_data:
       cmap: "viridis"                       # Color scheme
       point_size: 10
       alpha: 0.8
+      cluster:
+        # Cluster options can be placed under 'cluster' or as top-level map keys
+        cluster_enabled: true
+        cluster_eps_factor: 0.05
+        cluster_buffer_factor: 0.1
+        cluster_size_scale: 3.0
     
     timeseries:
       middle_window_days: 30

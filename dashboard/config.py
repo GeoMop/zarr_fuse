@@ -351,6 +351,12 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
         defaults_data.get("group_path"),
     )
 
+    # Support both flattened cluster keys and nested `cluster` mapping in endpoints.yaml
+    cluster_section = map_data.get("cluster") if isinstance(map_data.get("cluster"), dict) else {}
+
+    def _cluster_get(key, default):
+        return cluster_section.get(key, map_data.get(key, default))
+
     return EndpointConfig(
         name=endpoint_name,
         reload_interval=endpoint_data["reload_interval"],
@@ -372,7 +378,7 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
             display_variable=defaults_data["display_variable"],
             group_path=defaults_data["group_path"],
         ),
-        visualization=VisualizationConfig(
+            visualization=VisualizationConfig(
             map=MapConfig(
                 center_lat=map_data["center_lat"],
                 center_lon=map_data["center_lon"],
@@ -380,10 +386,10 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
                 title=map_data["title"],
                 point_size=map_data["point_size"],
                 alpha=map_data["alpha"],
-                cluster_enabled=map_data.get("cluster_enabled", True),
-                cluster_eps_factor=map_data.get("cluster_eps_factor", 0.05),
-                cluster_buffer_factor=map_data.get("cluster_buffer_factor", 0.1),
-                cluster_size_scale=map_data.get("cluster_size_scale", 3.0),
+                cluster_enabled=_cluster_get("cluster_enabled", True),
+                cluster_eps_factor=_cluster_get("cluster_eps_factor", 0.05),
+                cluster_buffer_factor=_cluster_get("cluster_buffer_factor", 0.1),
+                cluster_size_scale=_cluster_get("cluster_size_scale", 3.0),
             ),
             timeseries=TimeSeriesConfig(
                 middle_window_days=timeseries_data["middle_window_days"],
