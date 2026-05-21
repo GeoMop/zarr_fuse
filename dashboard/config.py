@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
+from dotenv import load_dotenv
 
 
 @dataclass
@@ -146,6 +147,42 @@ def resolve_endpoints_path() -> Path:
         "3. config/endpoints.yaml\n"
         "4. app/databuk/config/endpoints.yaml"
     )
+
+
+def _resolve_env_file_path(config_path: Path, env_file: str) -> Path:
+    path = Path(env_file).expanduser()
+    if path.is_absolute():
+        return path
+
+    base_dir = config_path.parent.parent
+    return (base_dir / path).resolve()
+
+
+def load_environment_from_config(config_path: Path) -> Path | None:
+    if not config_path.exists():
+        return None
+
+    with config_path.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    if not isinstance(config, dict):
+        return None
+
+    env_file = config.get("env_file")
+    if not isinstance(env_file, str) or not env_file.strip():
+        dashboard_meta = config.get("_dashboard")
+        if isinstance(dashboard_meta, dict):
+            env_file = dashboard_meta.get("env_file")
+
+    if not isinstance(env_file, str) or not env_file.strip():
+        return None
+
+    env_path = _resolve_env_file_path(config_path, env_file.strip())
+    if not env_path.exists():
+        raise FileNotFoundError(f"Configured env_file does not exist: {env_path}")
+
+    load_dotenv(env_path, override=False)
+    return env_path
 
 
 def _normalize_group_path(group_path: Optional[str]) -> str:
@@ -430,9 +467,12 @@ def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
         raise ValueError(f"Invalid endpoint configuration format in {config_path}")
 
     base_dir = config_path.parent.parent
+
+    load_environment_from_config(config_path)
+
     endpoints: Dict[str, EndpointConfig] = {}
     for endpoint_name, endpoint_data in config.items():
-        if isinstance(endpoint_name, str) and endpoint_name.startswith("_"):
+        if endpoint_name == "env_file" or (isinstance(endpoint_name, str) and endpoint_name.startswith("_")):
             continue
 
         if not isinstance(endpoint_data, dict):

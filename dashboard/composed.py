@@ -3,7 +3,6 @@ import time
 import holoviews as hv
 import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
-from dotenv import load_dotenv
 from holoviews import streams
 
 from dashboard.config import get_default_endpoint_name, get_endpoint_config, load_endpoints, resolve_endpoints_path
@@ -11,9 +10,6 @@ from dashboard.data import load_data
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
 from dashboard.sidebar import _flatten_nodes, build_depth_controls, build_sidebar
-
-# Load environment variables from .env file if present
-load_dotenv()
 
 JS_FILES = {
     "jquery": "https://code.jquery.com/jquery-1.11.1.min.js",
