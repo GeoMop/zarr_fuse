@@ -20,13 +20,12 @@ bukov_endpoint:
     schema_path: "config/bukov_schema.yaml"
 
   variable_map:
-    Bukov:
-      fields:
-        lat: "latitude"
-        lon: "longitude"
-        time: "date_time"
-        vertical: "depth"
-        entity: "borehole"
+    bukov:
+      lat: "latitude"
+      lon: "longitude"
+      time: "date_time"
+      vertical: "depth"
+      entity: "borehole"
 
   defaults:
     display_variable: "rock_temp"
