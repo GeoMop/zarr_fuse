@@ -336,9 +336,9 @@ var config = {
             {
                 type: 'component',
                 componentName: 'view',
-                componentState: {
+                    componentState: {
                     model: '{{ embed(roots.controller) }}',
-                    title: 'Controls',
+                    title: 'Dataset',
                     width: 350,
                     css_classes:['scrollable']
                 },
@@ -353,18 +353,18 @@ var config = {
                             {
                                 type: 'component',
                                 componentName: 'view',
-                                componentState: {
+                                    componentState: {
                                     model: '{{ embed(roots.top_left) }}',
-                                    title: 'Top Left'
+                                    title: 'Map view'
                                 },
                                 isClosable: false,
                             },
                             {
                                 type: 'component',
                                 componentName: 'view',
-                                componentState: {
+                                    componentState: {
                                     model: '{{ embed(roots.top_right) }}',
-                                    title: 'Top Right'
+                                    title: 'Plot Selection'
                                 },
                                 isClosable: false,
                             }
@@ -378,7 +378,7 @@ var config = {
                                 componentName: 'view',
                                 componentState: {
                                     model: '{{ embed(roots.bottom_left) }}',
-                                    title: 'Bottom Left'
+                                    title: 'Time dependent, Year scale'
                                 },
                                 isClosable: false,
                             },
@@ -387,7 +387,7 @@ var config = {
                                 componentName: 'view',
                                 componentState: {
                                     model: '{{ embed(roots.bottom_mid) }}',
-                                    title: 'Bottom Mid'
+                                    title: 'Time dependent, Month scale'
                                 },
                                 isClosable: false,
                             },
@@ -396,7 +396,7 @@ var config = {
                                 componentName: 'view',
                                 componentState: {
                                     model: '{{ embed(roots.bottom_right) }}',
-                                    title: 'Bottom Right'
+                                    title: 'Time dependent, Day scale'
                                 },
                                 isClosable: false,
                             }
