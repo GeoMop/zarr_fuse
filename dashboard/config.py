@@ -179,7 +179,8 @@ def load_environment_from_config(config_path: Path) -> Path | None:
 
     env_path = _resolve_env_file_path(config_path, env_file.strip())
     if not env_path.exists():
-        raise FileNotFoundError(f"Configured env_file does not exist: {env_path}")
+        print(f"Configured env_file does not exist: {env_path}; continuing with existing environment variables")
+        return None
 
     load_dotenv(env_path, override=False)
     return env_path
