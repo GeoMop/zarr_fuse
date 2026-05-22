@@ -92,4 +92,4 @@ jobs:
           --install --atomic --timeout 10m --namespace zarr-fuse-dashboard-development \
           --set frontend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
           --set frontend.s3.secrets.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
-          --set frontend.s3.secrets.secretKey="${{ secrets.S3_SECRET_KEY }}"
+          --set frontend.s3.secrets.secretKey="${{ secrets.S3_SECRET_KEY }}" \
