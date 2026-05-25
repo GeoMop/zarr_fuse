@@ -12,7 +12,7 @@ from pathlib import Path
 from . import __version__
 from . import units
 from . import logger as zf_logger
-from . dtype_converter import to_typed_array, DType, make_na
+from . dtype_converter import to_typed_array, _coerce_with_na, DType, make_na
 from .schema_ctx import SchemaCtx, ContextCfg, default_logger, AddressMixin, NoDefault
 
 """
@@ -312,6 +312,20 @@ class Variable(AddressMixin):
     def _opt_arg(arg, default):
         return default if arg is None else arg
 
+    def _to_typed_array(self, values, dtype: Optional[np.dtype]) -> np.ndarray:
+        """
+        Convert values to dtype. On failure:
+        - if self.na_value is set: fills bad elements with na_value and warns.
+        - if self.na_value is None: raises ValueError.
+        """
+        arr = np.asarray(values)
+        try:
+            return to_typed_array(arr, dtype, self._address)
+        except (ValueError, TypeError):
+            if self.na_value is None:
+                raise ValueError(f"Variable '{self.name}' has values not-convertible to type {dtype}.")
+            return _coerce_with_na(arr, dtype, self.na_value, self._address)
+
     def convert_values(self, values, from_unit=None, dtype = None, to_unit=None, range = None):
         """
         Convert from source units to the variable's unit, check type
@@ -338,11 +352,8 @@ class Variable(AddressMixin):
             # DateTime specialization
             quantity = units._create_dt_quantity(values, from_unit, log=self._address)
         else:
-            try:
-                if dtype is not None:
-                    values = to_typed_array(values, dtype, self._address)
-            except ValueError:
-                raise ValueError(f"Variable '{self.name}' has values not-convertible to the type: {dtype}.")
+            if dtype is not None:
+                values = self._to_typed_array(values, dtype)
 
             # Pint specialization when a unit string is provided
             assert isinstance(from_unit, (units.Unit, units.NoneUnit))

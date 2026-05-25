@@ -4,6 +4,7 @@ from typing import *
 
 import attrs
 import numpy as np
+import pandas as pd
 from zarr_fuse.schema_ctx import ContextCfg, SchemaCtx
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,52 @@ class TrimmedArrayWarning(Warning):
         if size > 10:
             return f"Trimmed values detected: [{self.preview}, ... (size= {size} more)]"
         return f"Trimmed values detected: [{self.preview}]"
+
+
+@attrs.define
+class ConversionFailedWarning(Warning):
+    failed_values: np.ndarray
+
+    @property
+    def preview(self) -> str:
+        return ", ".join(repr(v) for v in self.failed_values[:10])
+
+    def __str__(self):
+        size = len(self.failed_values)
+        if size > 10:
+            return f"Conversion failed for values: [{self.preview}, ... ({size} total)]"
+        return f"Conversion failed for values: [{self.preview}]"
+
+
+def _coerce_with_na(arr: np.ndarray, target_dtype: np.dtype, na_value, ctx: 'SchemaCtx') -> np.ndarray:
+    """
+    Element-wise coercion of arr to target_dtype; unconvertible elements are filled
+    with na_value. Emits ConversionFailedWarning via ctx for all failed elements.
+    Uses pd.to_numeric for string→numeric paths (fast, covers NaN/None strings).
+    """
+    flat = arr.ravel()
+    out_flat = np.full(flat.shape, na_value, dtype=target_dtype)
+    fail_mask = np.ones(flat.shape, dtype=bool)
+
+    _real_numeric = np.issubdtype(target_dtype, np.integer) or np.issubdtype(target_dtype, np.floating)
+    if _is_str(arr) and _real_numeric:
+        numeric = pd.to_numeric(pd.Series(flat.astype(str)), errors='coerce').to_numpy()
+        valid = ~np.isnan(numeric.astype(float, copy=False))
+        out_flat[valid] = numeric[valid]
+        fail_mask = ~valid
+    else:
+        for i, v in enumerate(flat):
+            try:
+                out_flat[i] = v
+                fail_mask[i] = False
+            except (ValueError, TypeError):
+                pass
+
+    if np.any(fail_mask):
+        ctx.warning(ConversionFailedWarning(flat[fail_mask]))
+
+    return out_flat.reshape(arr.shape)
+
 
 def _is_str(a) -> bool:
     return a.dtype.kind in ("S", "U", "O")
