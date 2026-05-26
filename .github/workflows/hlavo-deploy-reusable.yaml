@@ -70,7 +70,7 @@ jobs:
           token: ${{ secrets.zarr_repo_token }}
 
       - name: Containerize
-        uses: ./.github/actions/containerize
+        uses: GeoMop/zarr_fuse/.github/actions/containerize@feature/hlavo-integration
         with:
           repository: ${{ inputs.frontend_image }}
           tag: ${{ inputs.version_tag }}
