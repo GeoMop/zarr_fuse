@@ -115,20 +115,6 @@ jobs:
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
           working-directory: main-repo
 
-      - name: Tag and push :latest
-        if: ${{ inputs.push_container }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          IMAGE="${{ inputs.frontend_image }}"
-          TAG="${{ needs.get-version-tag.outputs.version-tag }}"
-          FULL="docker.io/${IMAGE}:${TAG}"
-          LATEST="docker.io/${IMAGE}:latest"
-          echo "Tagging ${FULL} -> ${LATEST}"
-          buildah tag "${FULL}" "${LATEST}" || true
-          echo "Pushing ${LATEST}"
-          buildah push "${LATEST}" docker://${IMAGE}:latest
-
   lint-helm-chart:
     name: Lint HoloViz Helm chart
     runs-on: ubuntu-latest
@@ -235,7 +221,7 @@ jobs:
           helm upgrade hlavo-dashboard-ui main-repo/dashboard/charts/holoviz \
             --install --atomic --timeout 10m --namespace "${{ inputs.namespace }}" \
             --set frontend.image.name="${{ inputs.frontend_image }}" \
-            --set frontend.image.tag="latest" \
+            --set frontend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
             --set frontend.s3.secrets.accessKey="${{ secrets.s3_access_key }}" \
             --set frontend.s3.secrets.secretKey="${{ secrets.s3_secret_key }}" \
             --set frontend.extraEnv[0].name="ENDPOINTS_PATH" \
