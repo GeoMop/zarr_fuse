@@ -1,4 +1,4 @@
-name: ${{ inputs.workflow_name }}
+name: Dashboard reusable deploy
 
 on:
   workflow_call:
