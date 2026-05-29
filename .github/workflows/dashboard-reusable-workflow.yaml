@@ -15,7 +15,7 @@ on:
         description: 'Whether to deploy the Helm chart'
         required: false
         type: boolean
-        default: true
+        default: false
       push-container:
         description: 'Whether to push the frontend image'
         required: false
@@ -56,7 +56,6 @@ on:
         description: 'Kubernetes namespace to deploy into'
         required: false
         type: string
-        default: 'dashboard-ui'
       tag:
         description: 'Image tag / version to deploy'
         required: false
@@ -66,7 +65,6 @@ on:
         description: 'Helm release name'
         required: false
         type: string
-        default: 'dashboard'
       configmap_name:
         description: 'ConfigMap name for endpoints and schemas'
         required: false
