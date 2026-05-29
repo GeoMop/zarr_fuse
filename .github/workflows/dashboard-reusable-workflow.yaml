@@ -214,7 +214,4 @@ deploy:
           --set frontend.extraVolumes[0].name="hlavo-config" \
           --set frontend.extraVolumes[0].configMap.name="${{ inputs.configmap_name }}" \
           --set frontend.extraVolumeMounts[0].name="hlavo-config" \
-          --set frontend.extraVolumeMounts[0].mountPath="/opt/hlavo/dashboard/config/endpoints.yaml" \
-          --set frontend.extraVolumeMounts[0].subPath="endpoints.yaml" \
-          --set frontend.extraVolumeMounts[1].name="hlavo-config" \
-          --set frontend.extraVolumeMounts[1].mountPath="/opt/hlavo/dashboard/schemas"
+          --set frontend.extraVolumeMounts[0].mountPath="/opt/hlavo/dashboard/config"
