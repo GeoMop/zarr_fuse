@@ -1,4 +1,4 @@
-name: HLAVO reusable deploy
+name: ${{ inputs.workflow_name }}
 
 on:
   workflow_call:
@@ -7,18 +7,16 @@ on:
         description: 'zarr_fuse repository (owner/repo)'
         required: false
         type: string
-        default: 'GeoMop/zarr_fuse'
-      zarr_ref:
+      zarr-fuse-ref:
         description: 'ref for zarr_fuse (branch or commit)'
         required: false
         type: string
-        default: 'feature/hlavo-integration'
       deploy:
         description: 'Whether to deploy the Helm chart'
         required: false
         type: boolean
         default: true
-      push_container:
+      push-container:
         description: 'Whether to push the frontend image'
         required: false
         type: boolean
@@ -31,7 +29,7 @@ on:
         description: 'Git ref in source repo (branch or commit)'
         required: true
         type: string
-      endpoints_path:
+      configuration-dir-path:
         description: 'Path to config directory containing endpoints.yaml and schemas/'
         required: true
         type: string
@@ -39,16 +37,41 @@ on:
         description: 'Frontend image name'
         required: true
         type: string
+      workflow_name:
+        description: 'Reusable workflow display name'
+        required: false
+        type: string
+        default: 'Dashboard reusable deploy'
+      containerize_job_name:
+        description: 'Display name for the containerize job'
+        required: false
+        type: string
+        default: 'Containerize frontend'
+      deploy_job_name:
+        description: 'Display name for the deploy job'
+        required: false
+        type: string
+        default: 'Deploy dashboard'
       namespace:
         description: 'Kubernetes namespace to deploy into'
         required: false
         type: string
-        default: 'hlavo-dashboard-ui'
-      version_tag:
+        default: 'dashboard-ui'
+      tag:
         description: 'Image tag / version to deploy'
         required: false
         type: string
         default: 'generate'
+      release-name:
+        description: 'Helm release name'
+        required: false
+        type: string
+        default: 'dashboard'
+      configmap_name:
+        description: 'ConfigMap name for endpoints and schemas'
+        required: false
+        type: string
+        default: 'dashboard-config'
     secrets:
       kubeconfig:
         required: true
@@ -74,21 +97,21 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.zarr_repo }}
-          ref: ${{ inputs.zarr_ref }}
+          ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
           token: ${{ secrets.zarr_repo_token }}
 
       - name: Get version tag
         id: get_version_tag
         run: |
-          if [[ ${{ inputs.version_tag }} == "generate" ]]; then
+          if [[ ${{ inputs.tag }} == "generate" ]]; then
             echo "version-tag=ci-$(git -C main-repo rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
           else
-            echo "version-tag=${{ inputs.version_tag }}" >> $GITHUB_OUTPUT
+            echo "version-tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
           fi
 
   containerize-frontend:
-    name: Containerize HLAVO frontend
+    name: ${{ inputs.containerize_job_name }}
     runs-on: ubuntu-latest
     container:
       image: quay.io/buildah/stable:v1.35.4
@@ -100,7 +123,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.zarr_repo }}
-          ref: ${{ inputs.zarr_ref }}
+          ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
           token: ${{ secrets.zarr_repo_token }}
 
@@ -110,7 +133,7 @@ jobs:
           repository: ${{ inputs.frontend_image }}
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           containerfile-path: dashboard/oci/frontend.Containerfile
-          push: ${{ inputs.push_container }}
+          push: ${{ inputs['push-container'] }}
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
           working-directory: main-repo
@@ -127,7 +150,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.zarr_repo }}
-          ref: ${{ inputs.zarr_ref }}
+          ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
           token: ${{ secrets.zarr_repo_token }}
 
@@ -137,7 +160,7 @@ jobs:
           working-directory: main-repo/dashboard/charts/holoviz
 
   deploy:
-    name: Deploy HLAVO (reusable)
+    name: ${{ inputs.deploy_job_name }}
     runs-on: ubuntu-latest
     if: ${{ inputs.deploy }}
     needs:
@@ -151,7 +174,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.zarr_repo }}
-          ref: ${{ inputs.zarr_ref }}
+          ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
           token: ${{ secrets.zarr_repo_token }}
 
@@ -191,20 +214,20 @@ jobs:
       - name: Validate source files
         run: |
           echo "Checking config directory in source repo: ${{ inputs.source_repo }}@${{ inputs.source_ref }}"
-          ls -l "source-repo/${{ inputs.endpoints_path }}/endpoints.yaml" || (echo "MISSING endpoints.yaml" && exit 1)
-          ls -l "source-repo/${{ inputs.endpoints_path }}/schemas" || (echo "MISSING schemas dir" && exit 1)
+          ls -l "source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml" || (echo "MISSING endpoints.yaml" && exit 1)
+          ls -l "source-repo/${{ inputs['configuration-dir-path'] }}/schemas" || (echo "MISSING schemas dir" && exit 1)
 
       - name: Create ConfigMap from source files
         run: |
           set -o pipefail
-          echo "Creating ConfigMap hlavo-dashboard-config in namespace '${{ inputs.namespace }}' from:"
-          echo " - endpoints: source-repo/${{ inputs.endpoints_path }}/endpoints.yaml"
-          echo " - schemas dir: source-repo/${{ inputs.endpoints_path }}/schemas"
+          echo "Creating ConfigMap ${{ inputs.configmap_name }} in namespace '${{ inputs.namespace }}' from:"
+          echo " - endpoints: source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml"
+          echo " - schemas dir: source-repo/${{ inputs['configuration-dir-path'] }}/schemas"
 
-          if kubectl create configmap hlavo-dashboard-config \
+            if kubectl create configmap "${{ inputs.configmap_name }}" \
               --namespace "${{ inputs.namespace }}" \
-              --from-file=endpoints.yaml=source-repo/${{ inputs.endpoints_path }}/endpoints.yaml \
-              --from-file=source-repo/${{ inputs.endpoints_path }}/schemas \
+              --from-file=endpoints.yaml=source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml \
+              --from-file=source-repo/${{ inputs['configuration-dir-path'] }}/schemas \
               --dry-run=client -o yaml | kubectl apply -f -; then
             echo "ConfigMap applied successfully."
           else
@@ -218,7 +241,7 @@ jobs:
 
       - name: Deploy Helm chart from main-repo
         run: |
-          helm upgrade hlavo-dashboard-ui main-repo/dashboard/charts/holoviz \
+          helm upgrade "${{ inputs['release-name'] }}" main-repo/dashboard/charts/holoviz \
             --install --atomic --timeout 10m --namespace "${{ inputs.namespace }}" \
             --set frontend.image.name="${{ inputs.frontend_image }}" \
             --set frontend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
@@ -227,7 +250,7 @@ jobs:
             --set frontend.extraEnv[0].name="ENDPOINTS_PATH" \
             --set frontend.extraEnv[0].value="/opt/hlavo/dashboard/config/endpoints.yaml" \
             --set frontend.extraVolumes[0].name="hlavo-config" \
-            --set frontend.extraVolumes[0].configMap.name="hlavo-dashboard-config" \
+            --set frontend.extraVolumes[0].configMap.name="${{ inputs.configmap_name }}" \
             --set frontend.extraVolumeMounts[0].name="hlavo-config" \
             --set frontend.extraVolumeMounts[0].mountPath="/opt/hlavo/dashboard/config/endpoints.yaml" \
             --set frontend.extraVolumeMounts[0].subPath="endpoints.yaml" \
