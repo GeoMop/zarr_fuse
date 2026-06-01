@@ -191,43 +191,33 @@ jobs:
         run: |
           set -euo pipefail
           NS="${{ inputs.namespace }}"
-          echo "Checking namespace '$NS'..."
           if kubectl get namespace "$NS" >/dev/null 2>&1; then
-            echo "Namespace '$NS' already exists."
+            :
+          elif kubectl auth can-i create namespace >/dev/null 2>&1; then
+            kubectl create namespace "$NS" >/dev/null
           else
-            echo "Namespace '$NS' does not exist. Checking permission to create namespaces..."
-            if kubectl auth can-i create namespace >/dev/null 2>&1; then
-              echo "Permission granted: creating namespace '$NS'..."
-              kubectl create namespace "$NS"
-            else
-              echo "Permission denied: this kubeconfig user cannot create namespaces."
-              echo "Please create the namespace '$NS' manually or provide a kubeconfig with namespace-create rights."
-              exit 1
-            fi
+            echo "Namespace '$NS' does not exist and this kubeconfig user cannot create namespaces."
+            echo "Create the namespace manually or provide a kubeconfig with namespace-create rights."
+            exit 1
           fi
 
       - name: Set context to namespace
-        run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
+        run: kubectl config set-context --current --namespace="${{ inputs.namespace }}" >/dev/null
 
       - name: Validate source files
         run: |
-          echo "Checking config directory in source repo: ${{ inputs.source_repo }}@${{ inputs.source_ref }}"
-          ls -l "source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml" || (echo "MISSING endpoints.yaml" && exit 1)
-          ls -l "source-repo/${{ inputs['configuration-dir-path'] }}/schemas" || (echo "MISSING schemas dir" && exit 1)
+          test -f "source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml" || { echo "MISSING endpoints.yaml"; exit 1; }
+          test -d "source-repo/${{ inputs['configuration-dir-path'] }}/schemas" || { echo "MISSING schemas dir"; exit 1; }
 
       - name: Create ConfigMap from source files
         run: |
           set -o pipefail
-          echo "Creating ConfigMap ${{ inputs.configmap_name }} in namespace '${{ inputs.namespace }}' from:"
-          echo " - endpoints: source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml"
-          echo " - schemas dir: source-repo/${{ inputs['configuration-dir-path'] }}/schemas"
-
-            if kubectl create configmap "${{ inputs.configmap_name }}" \
-              --namespace "${{ inputs.namespace }}" \
-              --from-file=endpoints.yaml=source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml \
-              --from-file=source-repo/${{ inputs['configuration-dir-path'] }}/schemas \
-              --dry-run=client -o yaml | kubectl apply -f -; then
-            echo "ConfigMap applied successfully."
+          if kubectl create configmap "${{ inputs.configmap_name }}" \
+            --namespace "${{ inputs.namespace }}" \
+            --from-file=endpoints.yaml=source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml \
+            --from-file=source-repo/${{ inputs['configuration-dir-path'] }}/schemas \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null; then
+            :
           else
             echo "Failed to create ConfigMap. Checking permissions and namespace..."
             kubectl auth can-i create configmaps --namespace="${{ inputs.namespace }}" || true
