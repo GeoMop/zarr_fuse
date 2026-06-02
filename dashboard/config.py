@@ -154,7 +154,7 @@ def _resolve_env_file_path(config_path: Path, env_file: str) -> Path:
     if path.is_absolute():
         return path
 
-    base_dir = config_path.parent.parent
+    base_dir = config_path.parent
     return (base_dir / path).resolve()
 
 
@@ -467,7 +467,7 @@ def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
     if not isinstance(config, dict):
         raise ValueError(f"Invalid endpoint configuration format in {config_path}")
 
-    base_dir = config_path.parent.parent
+    base_dir = config_path.parent
 
     load_environment_from_config(config_path)
 
