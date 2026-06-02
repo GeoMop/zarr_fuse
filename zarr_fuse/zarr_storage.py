@@ -550,7 +550,7 @@ class Node:
                 self.store,
                 parent=self,
                 new_schema=new_child_schema,
-                logger=self._logger,
+                logger=self.logger,
             )
 
         # Process existing child Nodes
