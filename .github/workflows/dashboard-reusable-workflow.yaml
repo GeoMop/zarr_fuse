@@ -224,8 +224,8 @@ jobs:
           set -o pipefail
           if kubectl create configmap "${{ inputs.configmap_name }}" \
             --namespace "${{ inputs.namespace }}" \
-            --from-file=config/endpoints.yaml=source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml \
-            --from-file=schemas/=source-repo/${{ inputs['configuration-dir-path'] }}/schemas \
+            --from-file=endpoints.yaml=source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml \
+            --from-file=source-repo/${{ inputs['configuration-dir-path'] }}/schemas \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null; then
             :
           else
@@ -250,4 +250,7 @@ jobs:
             --set frontend.extraVolumes[0].name="${{ inputs.config_volume_name }}" \
             --set frontend.extraVolumes[0].configMap.name="${{ inputs.configmap_name }}" \
             --set frontend.extraVolumeMounts[0].name="${{ inputs.config_volume_name }}" \
-            --set frontend.extraVolumeMounts[0].mountPath="${{ inputs.config_mount_path }}"
+            --set frontend.extraVolumeMounts[0].mountPath="${{ inputs.config_mount_path }}/config/endpoints.yaml" \
+            --set frontend.extraVolumeMounts[0].subPath="endpoints.yaml" \
+            --set frontend.extraVolumeMounts[1].name="${{ inputs.config_volume_name }}" \
+            --set frontend.extraVolumeMounts[1].mountPath="${{ inputs.config_mount_path }}/schemas"
