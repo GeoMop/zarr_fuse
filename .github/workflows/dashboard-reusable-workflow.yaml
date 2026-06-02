@@ -22,7 +22,7 @@ on:
         type: boolean
         default: true
       source_repo:
-        description: 'Repository containing endpoints and schemas (owner/repo)'
+        description: 'Repository containing endpoints config (owner/repo)'
         required: true
         type: string
       source_ref:
@@ -30,7 +30,7 @@ on:
         required: true
         type: string
       configuration-dir-path:
-        description: 'Path to config directory containing endpoints.yaml and schemas/'
+        description: 'Path to config directory containing endpoints.yaml'
         required: true
         type: string
       frontend_image:
@@ -66,7 +66,7 @@ on:
         required: false
         type: string
       configmap_name:
-        description: 'ConfigMap name for endpoints and schemas'
+        description: 'ConfigMap name for endpoints config'
         required: false
         type: string
         default: 'dashboard-config'
@@ -76,7 +76,7 @@ on:
         type: string
         default: 'ui-config'
       config_mount_path:
-        description: 'Base mount path inside the container for config and schemas'
+        description: 'Base mount path inside the container for config'
         required: false
         type: string
         default: '/opt/ui'
@@ -217,7 +217,6 @@ jobs:
       - name: Validate source files
         run: |
           test -f "source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml" || { echo "MISSING endpoints.yaml"; exit 1; }
-          test -d "source-repo/${{ inputs['configuration-dir-path'] }}/schemas" || { echo "MISSING schemas dir"; exit 1; }
 
       - name: Create ConfigMap from source files
         run: |
@@ -225,7 +224,6 @@ jobs:
           if kubectl create configmap "${{ inputs.configmap_name }}" \
             --namespace "${{ inputs.namespace }}" \
             --from-file=endpoints.yaml=source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml \
-            --from-file=source-repo/${{ inputs['configuration-dir-path'] }}/schemas \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null; then
             :
           else
