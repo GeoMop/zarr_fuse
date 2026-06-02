@@ -40,7 +40,7 @@ class EndpointHandle:
 class LocalClient:
     def __init__(self, endpoints_path: Path):
         self.endpoints_path = Path(endpoints_path).expanduser().resolve()
-        self.base_dir = self.endpoints_path.parent
+        self.base_dir = self.endpoints_path.parent.parent
         self._nodes: Dict[str, Any] = {}
         self._map_data_cache: Dict[str, Any] = {}
         self._timeseries_cache: Dict[str, Any] = {}
