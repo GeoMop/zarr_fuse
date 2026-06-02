@@ -70,6 +70,16 @@ on:
         required: false
         type: string
         default: 'dashboard-config'
+      config_volume_name:
+        description: 'Kubernetes volume name for the ConfigMap mount'
+        required: false
+        type: string
+        default: 'ui-config'
+      config_mount_path:
+        description: 'Base mount path inside the container for config and schemas'
+        required: false
+        type: string
+        default: '/opt/ui'
     secrets:
       kubeconfig:
         required: true
@@ -236,8 +246,8 @@ jobs:
             --set frontend.s3.secrets.accessKey="${{ secrets.s3_access_key }}" \
             --set frontend.s3.secrets.secretKey="${{ secrets.s3_secret_key }}" \
             --set frontend.extraEnv[0].name="ENDPOINTS_PATH" \
-            --set frontend.extraEnv[0].value="/opt/hlavo/config/endpoints.yaml" \
-            --set frontend.extraVolumes[0].name="hlavo-config" \
+            --set frontend.extraEnv[0].value="${{ inputs.config_mount_path }}/config/endpoints.yaml" \
+            --set frontend.extraVolumes[0].name="${{ inputs.config_volume_name }}" \
             --set frontend.extraVolumes[0].configMap.name="${{ inputs.configmap_name }}" \
-            --set frontend.extraVolumeMounts[0].name="hlavo-config" \
-            --set frontend.extraVolumeMounts[0].mountPath="/opt/hlavo"
+            --set frontend.extraVolumeMounts[0].name="${{ inputs.config_volume_name }}" \
+            --set frontend.extraVolumeMounts[0].mountPath="${{ inputs.config_mount_path }}"
