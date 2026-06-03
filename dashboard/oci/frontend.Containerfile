@@ -12,8 +12,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 
-WORKDIR /ui
-COPY . /ui
+WORKDIR /app
+COPY . /app
 
 WORKDIR /ui/dashboard
 RUN pip install --no-cache-dir .. \

@@ -70,16 +70,6 @@ on:
         required: false
         type: string
         default: 'dashboard-config'
-      config_volume_name:
-        description: 'Kubernetes volume name for the ConfigMap mount'
-        required: false
-        type: string
-        default: 'ui-config'
-      config_mount_path:
-        description: 'Base mount path inside the container for config and schemas'
-        required: false
-        type: string
-        default: '/opt/ui'
     secrets:
       kubeconfig:
         required: true
@@ -201,76 +191,43 @@ jobs:
         run: |
           set -euo pipefail
           NS="${{ inputs.namespace }}"
+          echo "Checking namespace '$NS'..."
           if kubectl get namespace "$NS" >/dev/null 2>&1; then
-            :
-          elif kubectl auth can-i create namespace >/dev/null 2>&1; then
-            kubectl create namespace "$NS" >/dev/null
+            echo "Namespace '$NS' already exists."
           else
-            echo "Namespace '$NS' does not exist and this kubeconfig user cannot create namespaces."
-            echo "Create the namespace manually or provide a kubeconfig with namespace-create rights."
-            exit 1
+            echo "Namespace '$NS' does not exist. Checking permission to create namespaces..."
+            if kubectl auth can-i create namespace >/dev/null 2>&1; then
+              echo "Permission granted: creating namespace '$NS'..."
+              kubectl create namespace "$NS"
+            else
+              echo "Permission denied: this kubeconfig user cannot create namespaces."
+              echo "Please create the namespace '$NS' manually or provide a kubeconfig with namespace-create rights."
+              exit 1
+            fi
           fi
 
       - name: Set context to namespace
-        run: kubectl config set-context --current --namespace="${{ inputs.namespace }}" >/dev/null
+        run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
 
       - name: Validate source files
         run: |
-          set -euo pipefail
-          CFG="source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml"
-          SCHEMA_DIR="source-repo/${{ inputs['configuration-dir-path'] }}/schemas"
-
-          test -f "$CFG" || { echo "MISSING endpoints.yaml"; exit 1; }
-          test -d "$SCHEMA_DIR" || { echo "MISSING schemas dir"; exit 1; }
-
-          echo "=== Validating schema_path entries in endpoints.yaml ==="
-          python3 << PYEOF
-import yaml, sys
-cfg = "$CFG"
-with open(cfg) as f:
-    config = yaml.safe_load(f)
-for name, data in config.items():
-    if name.startswith('_') or not isinstance(data, dict):
-        continue
-    sp = (data.get('source') or {}).get('schema_path', '')
-    print(f"{name}: {sp}")
-    if not sp.startswith('schemas/'):
-        print(f"  WARNING: schema_path \"{sp}\" does not start with \"schemas/\"", file=sys.stderr)
-PYEOF
-          echo "=== Checking schema files exist ==="
-          python3 << PYEOF
-import yaml, sys, os
-cfg = "$CFG"
-schema_dir = "$SCHEMA_DIR"
-with open(cfg) as f:
-    config = yaml.safe_load(f)
-ok = True
-for name, data in config.items():
-    if name.startswith('_') or not isinstance(data, dict):
-        continue
-    sp = (data.get('source') or {}).get('schema_path', '')
-    if not sp:
-        continue
-    fname = sp.split('/')[-1]
-    fpath = os.path.join(schema_dir, fname)
-    if os.path.isfile(fpath):
-        print(f"  {sp} -> OK")
-    else:
-        print(f"  {sp} -> MISSING (expected at {fpath})", file=sys.stderr)
-        ok = False
-if not ok:
-    sys.exit(1)
-PYEOF
+          echo "Checking config directory in source repo: ${{ inputs.source_repo }}@${{ inputs.source_ref }}"
+          ls -l "source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml" || (echo "MISSING endpoints.yaml" && exit 1)
+          ls -l "source-repo/${{ inputs['configuration-dir-path'] }}/schemas" || (echo "MISSING schemas dir" && exit 1)
 
       - name: Create ConfigMap from source files
         run: |
           set -o pipefail
-          if kubectl create configmap "${{ inputs.configmap_name }}" \
-            --namespace "${{ inputs.namespace }}" \
-            --from-file=endpoints.yaml=source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml \
-            --from-file=source-repo/${{ inputs['configuration-dir-path'] }}/schemas \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null; then
-            :
+          echo "Creating ConfigMap ${{ inputs.configmap_name }} in namespace '${{ inputs.namespace }}' from:"
+          echo " - endpoints: source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml"
+          echo " - schemas dir: source-repo/${{ inputs['configuration-dir-path'] }}/schemas"
+
+            if kubectl create configmap "${{ inputs.configmap_name }}" \
+              --namespace "${{ inputs.namespace }}" \
+              --from-file=endpoints.yaml=source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml \
+              --from-file=source-repo/${{ inputs['configuration-dir-path'] }}/schemas \
+              --dry-run=client -o yaml | kubectl apply -f -; then
+            echo "ConfigMap applied successfully."
           else
             echo "Failed to create ConfigMap. Checking permissions and namespace..."
             kubectl auth can-i create configmaps --namespace="${{ inputs.namespace }}" || true
@@ -289,11 +246,11 @@ PYEOF
             --set frontend.s3.secrets.accessKey="${{ secrets.s3_access_key }}" \
             --set frontend.s3.secrets.secretKey="${{ secrets.s3_secret_key }}" \
             --set frontend.extraEnv[0].name="ENDPOINTS_PATH" \
-            --set frontend.extraEnv[0].value="${{ inputs.config_mount_path }}/config/endpoints.yaml" \
-            --set frontend.extraVolumes[0].name="${{ inputs.config_volume_name }}" \
+            --set frontend.extraEnv[0].value="/opt/hlavo/dashboard/config/endpoints.yaml" \
+            --set frontend.extraVolumes[0].name="hlavo-config" \
             --set frontend.extraVolumes[0].configMap.name="${{ inputs.configmap_name }}" \
-            --set frontend.extraVolumeMounts[0].name="${{ inputs.config_volume_name }}" \
-            --set frontend.extraVolumeMounts[0].mountPath="${{ inputs.config_mount_path }}/config/endpoints.yaml" \
+            --set frontend.extraVolumeMounts[0].name="hlavo-config" \
+            --set frontend.extraVolumeMounts[0].mountPath="/opt/hlavo/dashboard/config/endpoints.yaml" \
             --set frontend.extraVolumeMounts[0].subPath="endpoints.yaml" \
-            --set frontend.extraVolumeMounts[1].name="${{ inputs.config_volume_name }}" \
-            --set frontend.extraVolumeMounts[1].mountPath="${{ inputs.config_mount_path }}/schemas"
+            --set frontend.extraVolumeMounts[1].name="hlavo-config" \
+            --set frontend.extraVolumeMounts[1].mountPath="/opt/hlavo/dashboard/schemas"

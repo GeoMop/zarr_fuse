@@ -32,7 +32,7 @@ def main() -> None:
     ]
     
     pn.serve(
-        {"/": build_dashboard, "/ui": build_dashboard},
+        {"/": build_dashboard, "/app": build_dashboard},
         address=bind_address,
         port=bind_port,
         show=False,
