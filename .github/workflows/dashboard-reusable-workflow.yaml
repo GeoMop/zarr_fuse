@@ -216,8 +216,39 @@ jobs:
 
       - name: Validate source files
         run: |
-          test -f "source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml" || { echo "MISSING endpoints.yaml"; exit 1; }
-          test -d "source-repo/${{ inputs['configuration-dir-path'] }}/schemas" || { echo "MISSING schemas dir"; exit 1; }
+          set -euo pipefail
+          CFG="source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml"
+          SCHEMA_DIR="source-repo/${{ inputs['configuration-dir-path'] }}/schemas"
+
+          test -f "$CFG" || { echo "MISSING endpoints.yaml"; exit 1; }
+          test -d "$SCHEMA_DIR" || { echo "MISSING schemas dir"; exit 1; }
+
+          echo "=== Validating schema_path entries in endpoints.yaml ==="
+          schema_paths=$(python3 -c "
+import yaml, sys
+with open('$CFG') as f:
+    config = yaml.safe_load(f)
+for name, data in config.items():
+    if name.startswith('_') or not isinstance(data, dict):
+        continue
+    sp = (data.get('source') or {}).get('schema_path', '')
+    print(f'{name}: {sp}')
+    if not sp.startswith('schemas/'):
+        print(f'  WARNING: schema_path \"{sp}\" does not start with \"schemas/\"', file=sys.stderr)
+")
+          echo "$schema_paths"
+          echo "=== Checking schema files exist ==="
+          while IFS=: read -r ep sp; do
+            sp="${sp# }"
+            [ -z "$sp" ] && continue
+            fpath="$SCHEMA_DIR/${sp#schemas/}"
+            if [ -f "$fpath" ]; then
+              echo "  $sp -> OK"
+            else
+              echo "  $sp -> MISSING (expected at $fpath)"
+              exit 1
+            fi
+          done <<< "$schema_paths"
 
       - name: Create ConfigMap from source files
         run: |

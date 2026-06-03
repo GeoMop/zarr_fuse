@@ -126,6 +126,7 @@ def resolve_endpoints_path() -> Path:
     env_path = os.getenv("ENDPOINTS_PATH")
     if env_path:
         path = Path(env_path).expanduser().resolve()
+        print(f"[config] resolve_endpoints_path: from ENV ENDPOINTS_PATH={env_path} -> {path}")
         if not path.exists():
             raise FileNotFoundError(f"ENDPOINTS_PATH does not exist: {path}")
         return path
@@ -281,6 +282,7 @@ def _read_schema_display(
     vertical_field: Optional[str],
     group_path: Optional[str],
 ) -> SchemaDisplayConfig:
+    print(f"[config] _read_schema_display: opening schema_path={schema_path} exists={schema_path.exists()}")
     with schema_path.open("r", encoding="utf-8") as file:
         schema = yaml.safe_load(file)
 
@@ -375,6 +377,8 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
     if not schema_file_path.is_absolute():
         schema_file_path = base_dir / schema_file_path
 
+    print(f"[config] endpoint={endpoint_name} schema_path(raw)={schema_file} base_dir={base_dir} resolved={schema_file_path}")
+
     schema_for_display = SchemaConfig(
         file=schema_file,
         fields=root_fields or SchemaFieldsConfig(),
@@ -468,6 +472,7 @@ def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
         raise ValueError(f"Invalid endpoint configuration format in {config_path}")
 
     base_dir = config_path.parent.parent
+    print(f"[config] load_endpoints: config_path={config_path} config_path.parent={config_path.parent} base_dir={base_dir}")
 
     load_environment_from_config(config_path)
 
