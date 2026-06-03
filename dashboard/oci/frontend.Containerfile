@@ -15,7 +15,7 @@ ENV PIP_NO_CACHE_DIR=1
 WORKDIR /app
 COPY . /app
 
-WORKDIR /ui/dashboard
+WORKDIR /app/dashboard
 RUN pip install --no-cache-dir .. \
  && pip install --no-cache-dir .
 
