@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
+from dotenv import load_dotenv
 
 
 @dataclass
@@ -27,6 +28,7 @@ class SchemaFieldsConfig:
 class SchemaConfig:
     file: str
     fields: SchemaFieldsConfig = field(default_factory=SchemaFieldsConfig)
+    group_fields: Dict[str, SchemaFieldsConfig] = field(default_factory=dict)
 
 
 @dataclass
@@ -51,6 +53,10 @@ class MapConfig:
     title: Optional[str] = None
     point_size: Optional[int] = None
     alpha: Optional[float] = None
+    cluster_enabled: bool = True
+    cluster_eps_factor: float = 0.05
+    cluster_buffer_factor: float = 0.1
+    cluster_size_scale: float = 3.0
 
 
 @dataclass
@@ -104,6 +110,148 @@ class EndpointConfig:
     tile_build: TileBuildConfig = field(default_factory=TileBuildConfig)
 
 
+FIELD_NAMES = {"lat", "lon", "time", "vertical", "entity"}
+REQUIRED_FIELD_NAMES = {"lat", "lon", "time", "entity"}
+
+
+def resolve_endpoints_path() -> Path:
+    """
+    Resolution order:
+    1. ENDPOINTS_PATH env var
+    2. Search upward from current working directory for:
+       - dashboard/config/endpoints.yaml
+       - config/endpoints.yaml
+       - app/databuk/config/endpoints.yaml
+    """
+    env_path = os.getenv("ENDPOINTS_PATH")
+    if env_path:
+        path = Path(env_path).expanduser().resolve()
+        print(f"[config] resolve_endpoints_path: from ENV ENDPOINTS_PATH={env_path} -> {path}")
+        if not path.exists():
+            raise FileNotFoundError(f"ENDPOINTS_PATH does not exist: {path}")
+        return path
+
+    cwd = Path.cwd().resolve()
+    for base in [cwd, *cwd.parents]:
+        for candidate in (
+            base / "dashboard" / "config" / "endpoints.yaml",
+            base / "config" / "endpoints.yaml",
+            base / "app" / "databuk" / "config" / "endpoints.yaml",
+        ):
+            if candidate.exists():
+                return candidate
+
+    raise FileNotFoundError(
+        "Could not find endpoints.yaml. Checked:\n"
+        "1. ENDPOINTS_PATH env var\n"
+        "2. dashboard/config/endpoints.yaml\n"
+        "3. config/endpoints.yaml\n"
+        "4. app/databuk/config/endpoints.yaml"
+    )
+
+
+def _resolve_env_file_path(config_path: Path, env_file: str) -> Path:
+    path = Path(env_file).expanduser()
+    if path.is_absolute():
+        return path
+
+    base_dir = config_path.parent.parent
+    return (base_dir / path).resolve()
+
+
+def load_environment_from_config(config_path: Path) -> Path | None:
+    if not config_path.exists():
+        return None
+
+    with config_path.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    if not isinstance(config, dict):
+        return None
+
+    env_file = config.get("env_file")
+    if not isinstance(env_file, str) or not env_file.strip():
+        dashboard_meta = config.get("_dashboard")
+        if isinstance(dashboard_meta, dict):
+            env_file = dashboard_meta.get("env_file")
+
+    if not isinstance(env_file, str) or not env_file.strip():
+        return None
+
+    env_path = _resolve_env_file_path(config_path, env_file.strip())
+    if not env_path.exists():
+        print(f"Configured env_file does not exist: {env_path}; continuing with existing environment variables")
+        return None
+
+    load_dotenv(env_path, override=False)
+    return env_path
+
+
+def _normalize_group_path(group_path: Optional[str]) -> str:
+    if not group_path or group_path == "/":
+        return ""
+    return "/".join(part for part in str(group_path).strip("/").split("/") if part)
+
+
+def _build_schema_fields(fields_data: Dict[str, Any], context: str) -> SchemaFieldsConfig:
+    if not isinstance(fields_data, dict):
+        raise ValueError(f"{context} must be a mapping/object")
+
+    missing = [name for name in REQUIRED_FIELD_NAMES if name not in fields_data]
+    if missing:
+        raise ValueError(f"{context} is missing required keys: {', '.join(sorted(missing))}")
+
+    return SchemaFieldsConfig(
+        lat=fields_data.get("lat"),
+        lon=fields_data.get("lon"),
+        time=fields_data.get("time"),
+        vertical=fields_data.get("vertical"),
+        entity=fields_data.get("entity"),
+    )
+
+
+def _collect_group_fields(variable_map: Dict[str, Any], endpoint_name: str) -> Dict[str, SchemaFieldsConfig]:
+    group_fields: Dict[str, SchemaFieldsConfig] = {}
+
+    def walk(node: Any, path_parts: list[str]) -> None:
+        if not isinstance(node, dict):
+            return
+
+        if FIELD_NAMES.intersection(node.keys()):
+            group_path = "/".join(path_parts)
+            if not group_path:
+                raise ValueError(
+                    f"Endpoint '{endpoint_name}' uses grouped variable_map, but a field mapping was found at the root."
+                )
+            group_fields[group_path] = _build_schema_fields(
+                node,
+                f"Endpoint '{endpoint_name}' variable_map.{group_path}",
+            )
+            return
+
+        for key, value in node.items():
+            if key == "fields":
+                continue
+            walk(value, path_parts + [key])
+
+    walk(variable_map, [])
+    return group_fields
+
+
+def resolve_schema_fields(schema: SchemaConfig, group_path: Optional[str]) -> SchemaFieldsConfig:
+    normalized = _normalize_group_path(group_path)
+    path = normalized
+
+    while True:
+        if path in schema.group_fields:
+            return schema.group_fields[path]
+        if not path:
+            break
+        path = path.rsplit("/", 1)[0] if "/" in path else ""
+
+    return schema.fields
+
+
 def _process_environment_variables(data: Any) -> Any:
     if isinstance(data, dict):
         return {key: _process_environment_variables(value) for key, value in data.items()}
@@ -127,38 +275,96 @@ def _process_environment_variables(data: Any) -> Any:
     return data
 
 
-def _read_schema_display(schema_path: Path, display_variable: Optional[str]) -> SchemaDisplayConfig:
+def _read_schema_display(
+    schema_path: Path,
+    display_variable: Optional[str],
+    entity_field: Optional[str],
+    vertical_field: Optional[str],
+    group_path: Optional[str],
+) -> SchemaDisplayConfig:
+    print(f"[config] _read_schema_display: opening schema_path={schema_path} exists={schema_path.exists()}")
     with schema_path.open("r", encoding="utf-8") as file:
         schema = yaml.safe_load(file)
 
-    group_name = next(key for key in schema.keys() if key != "ATTRS")
+    def _find_data_node(node: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(node, dict):
+            return None
+        if "VARS" in node and "COORDS" in node:
+            return node
+        for key, value in node.items():
+            if key == "ATTRS":
+                continue
+            found = _find_data_node(value)
+            if found is not None:
+                return found
+        return None
 
-    group_data = schema[group_name]
-    vars_data = group_data["VARS"]
-    coords_data = group_data["COORDS"]
+    group_data: Optional[Dict[str, Any]] = None
+    path_parts = [p for p in (group_path or "").strip("/").split("/") if p]
+    if path_parts:
+        current: Any = schema
+        for part in path_parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                current = None
+                break
+        group_data = _find_data_node(current)
 
-    variable_data = vars_data[display_variable]
-    entity_data = coords_data["borehole"]
-    vertical_data = coords_data["depth"]
+    if group_data is None:
+        group_data = _find_data_node(schema)
+
+    if group_data is None:
+        return SchemaDisplayConfig(
+            display_variable=display_variable,
+            display_unit=None,
+            entity_name=entity_field,
+            vertical_name=vertical_field,
+        )
+
+    vars_data = group_data.get("VARS", {})
+    coords_data = group_data.get("COORDS", {})
+
+    variable_data = vars_data.get(display_variable or "", {})
+
+    entity_name = entity_field
+    if entity_field and entity_field in coords_data and isinstance(coords_data[entity_field], dict):
+        entity_name = coords_data[entity_field].get("df_col", entity_field)
+
+    vertical_name = vertical_field
+    if vertical_field and vertical_field in coords_data and isinstance(coords_data[vertical_field], dict):
+        vertical_name = coords_data[vertical_field].get("df_col", vertical_field)
 
     return SchemaDisplayConfig(
         display_variable=display_variable,
-        display_unit=variable_data["unit"],
-        entity_name=entity_data["df_col"],
-        vertical_name=vertical_data["df_col"],
+        display_unit=variable_data.get("unit"),
+        entity_name=entity_name,
+        vertical_name=vertical_name,
     )
 
 
 def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], base_dir: Path) -> EndpointConfig:
     source_data = endpoint_data["source"]
     schema_data = endpoint_data["variable_map"]
-    schema_fields_data = schema_data["fields"]
     defaults_data = endpoint_data["defaults"]
     visualization_data = endpoint_data["visualization"]
     map_data = visualization_data["map"]
     timeseries_data = visualization_data["timeseries"]
     overlay_data = visualization_data["overlay"]
-    tile_build_data = endpoint_data["tile_build"]
+    tile_build_data = endpoint_data.get("tile_build", {"enabled": False})
+
+    if not isinstance(schema_data, dict):
+        raise ValueError(f"Endpoint '{endpoint_name}' variable_map must be a mapping/object")
+
+    root_fields = None
+    if isinstance(schema_data.get("fields"), dict):
+        root_fields = _build_schema_fields(schema_data["fields"], f"Endpoint '{endpoint_name}' variable_map.fields")
+
+    group_fields = _collect_group_fields(schema_data, endpoint_name)
+    if root_fields is None and not group_fields:
+        raise ValueError(
+            f"Endpoint '{endpoint_name}' must define either variable_map.fields or nested group mappings."
+        )
 
     required_source_fields = ["type", "store_type", "uri"]
     for field_name in required_source_fields:
@@ -171,7 +377,27 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
     if not schema_file_path.is_absolute():
         schema_file_path = base_dir / schema_file_path
 
-    schema_display = _read_schema_display(schema_file_path, defaults_data.get("display_variable"))
+    print(f"[config] endpoint={endpoint_name} schema_path(raw)={schema_file} base_dir={base_dir} resolved={schema_file_path}")
+
+    schema_for_display = SchemaConfig(
+        file=schema_file,
+        fields=root_fields or SchemaFieldsConfig(),
+        group_fields=group_fields,
+    )
+    selected_fields = resolve_schema_fields(schema_for_display, defaults_data.get("group_path"))
+    schema_display = _read_schema_display(
+        schema_file_path,
+        defaults_data.get("display_variable"),
+        selected_fields.entity,
+        selected_fields.vertical,
+        defaults_data.get("group_path"),
+    )
+
+    # Support both flattened cluster keys and nested `cluster` mapping in endpoints.yaml
+    cluster_section = map_data.get("cluster") if isinstance(map_data.get("cluster"), dict) else {}
+
+    def _cluster_get(key, default):
+        return cluster_section.get(key, map_data.get(key, default))
 
     return EndpointConfig(
         name=endpoint_name,
@@ -186,20 +412,15 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
         ),
         schema=SchemaConfig(
             file=schema_file,
-            fields=SchemaFieldsConfig(
-                lat=schema_fields_data["lat"],
-                lon=schema_fields_data["lon"],
-                time=schema_fields_data["time"],
-                vertical=schema_fields_data["vertical"],
-                entity=schema_fields_data["entity"],
-            ),
+            fields=root_fields or SchemaFieldsConfig(),
+            group_fields=group_fields,
         ),
         schema_display=schema_display,
         defaults=DefaultsConfig(
             display_variable=defaults_data["display_variable"],
             group_path=defaults_data["group_path"],
         ),
-        visualization=VisualizationConfig(
+            visualization=VisualizationConfig(
             map=MapConfig(
                 center_lat=map_data["center_lat"],
                 center_lon=map_data["center_lon"],
@@ -207,6 +428,10 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
                 title=map_data["title"],
                 point_size=map_data["point_size"],
                 alpha=map_data["alpha"],
+                cluster_enabled=_cluster_get("cluster_enabled", True),
+                cluster_eps_factor=_cluster_get("cluster_eps_factor", 0.05),
+                cluster_buffer_factor=_cluster_get("cluster_buffer_factor", 0.1),
+                cluster_size_scale=_cluster_get("cluster_size_scale", 3.0),
             ),
             timeseries=TimeSeriesConfig(
                 middle_window_days=timeseries_data["middle_window_days"],
@@ -214,24 +439,24 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
             ),
             overlay=OverlayConfig(
                 enabled=overlay_data["enabled"],
-                tile_url=overlay_data["tile_url"],
+                tile_url=overlay_data.get("tile_url"),
             ),
         ),
         tile_build=TileBuildConfig(
             enabled=tile_build_data["enabled"],
-            source_image=tile_build_data["source_image"],
-            georef_file=tile_build_data["georef_file"],
-            vrt_file=tile_build_data["vrt_file"],
-            warped_tif=tile_build_data["warped_tif"],
-            rgba_vrt=tile_build_data["rgba_vrt"],
-            tiles_dir=tile_build_data["tiles_dir"],
-            tile_scheme=tile_build_data["tile_scheme"],
-            min_zoom=tile_build_data["min_zoom"],
-            max_zoom=tile_build_data["max_zoom"],
-            target_srs=tile_build_data["target_srs"],
-            gcp_srs=tile_build_data["gcp_srs"],
-            resampling=tile_build_data["resampling"],
-            add_alpha=tile_build_data["add_alpha"],
+            source_image=tile_build_data.get("source_image"),
+            georef_file=tile_build_data.get("georef_file"),
+            vrt_file=tile_build_data.get("vrt_file"),
+            warped_tif=tile_build_data.get("warped_tif"),
+            rgba_vrt=tile_build_data.get("rgba_vrt"),
+            tiles_dir=tile_build_data.get("tiles_dir"),
+            tile_scheme=tile_build_data.get("tile_scheme"),
+            min_zoom=tile_build_data.get("min_zoom"),
+            max_zoom=tile_build_data.get("max_zoom"),
+            target_srs=tile_build_data.get("target_srs"),
+            gcp_srs=tile_build_data.get("gcp_srs"),
+            resampling=tile_build_data.get("resampling"),
+            add_alpha=tile_build_data.get("add_alpha"),
         ),
     )
 
@@ -241,14 +466,21 @@ def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
     with config_path.open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
+        config = yaml.full_load(file)
 
     if not isinstance(config, dict):
         raise ValueError(f"Invalid endpoint configuration format in {config_path}")
 
     base_dir = config_path.parent.parent
+    print(f"[config] load_endpoints: config_path={config_path} config_path.parent={config_path.parent} base_dir={base_dir}")
+
+    load_environment_from_config(config_path)
+
     endpoints: Dict[str, EndpointConfig] = {}
     for endpoint_name, endpoint_data in config.items():
+        if endpoint_name == "env_file" or (isinstance(endpoint_name, str) and endpoint_name.startswith("_")):
+            continue
+
         if not isinstance(endpoint_data, dict):
             raise ValueError(f"Endpoint '{endpoint_name}' must be a mapping/object")
 
@@ -256,6 +488,31 @@ def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
         endpoints[endpoint_name] = _build_endpoint_config(endpoint_name, processed_data, base_dir)
 
     return endpoints
+
+
+def get_default_endpoint_name(config_path: Path) -> Optional[str]:
+    if not config_path.exists():
+        return None
+
+    with config_path.open("r", encoding="utf-8") as file:
+        config = yaml.safe_load(file)
+
+    if not isinstance(config, dict):
+        return None
+
+    meta = config.get("_dashboard")
+    if not isinstance(meta, dict):
+        return None
+
+    default_endpoint = meta.get("default_endpoint")
+    if not isinstance(default_endpoint, str):
+        return None
+
+    endpoint_config = config.get(default_endpoint)
+    if isinstance(endpoint_config, dict):
+        return default_endpoint
+
+    return None
 
 
 def get_endpoint_config(config_path: Path, endpoint_name: Optional[str] = None) -> EndpointConfig:

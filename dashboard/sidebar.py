@@ -2,17 +2,32 @@ import panel as pn
 import pandas as pd
 
 
-def _flatten_nodes(structure, depth: int = 0, items=None):
+def _flatten_nodes(structure, depth: int = 0, items=None, prefixes=None, is_last: bool = True):
     if items is None:
         items = []
+    if prefixes is None:
+        prefixes = []
 
     name = structure.get("name") or "root"
     path = structure.get("path") or "/"
-    label = f"{'  ' * depth}{name}"
-    items.append((label, path))
+    children = structure.get("children", []) or []
 
-    for child in structure.get("children", []) or []:
-        _flatten_nodes(child, depth + 1, items)
+    # Skip rendering synthetic root if it only contains real child groups.
+    render_current = not (path == "/" and children)
+    if render_current:
+        branch = "".join(prefixes)
+        connector = "└─ " if is_last else "├─ "
+        label = f"{branch}{connector if branch else ''}{name}"
+        items.append((label, path))
+
+    next_depth = depth + 1 if render_current else depth
+    next_prefixes = list(prefixes)
+    if render_current:
+        next_prefixes.append("   " if is_last else "│  ")
+
+    for index, child in enumerate(children):
+        child_is_last = index == len(children) - 1
+        _flatten_nodes(child, next_depth, items, next_prefixes, child_is_last)
 
     return items
 
@@ -40,7 +55,7 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         value=endpoint_name,
         options=endpoint_options,
         width=320,
-        disabled=True,
+        disabled=False,
         stylesheets=["""
     select {
         background-color: #1e293b !important;
@@ -115,6 +130,19 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         sizing_mode="stretch_width",
     )
 
+    variable_selector = pn.widgets.Select(
+        name="VARIABLE",
+        options=[],
+        size=5,
+        width=320,
+    )
+
+    variable_info = pn.pane.Markdown(
+        "Select a variable",
+        sizing_mode="stretch_width",
+        styles={"font-size": "11px", "color": "#94a3b8"},
+    )
+
     node_hint = pn.pane.Alert(
         "",
         alert_type="warning",
@@ -129,13 +157,15 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         status_section,
         reload_button,
         tree_view,
+        variable_selector,
+        variable_info,
         node_hint,
         pn.layout.VSpacer(),
         sizing_mode="stretch_width",
         styles={"padding": "10px"},
     )
 
-    return controller, tree_view, node_hint
+    return controller, store_selector, tree_view, variable_selector, variable_info, node_hint, store_info
 
 
 def build_depth_controls():
@@ -146,5 +176,5 @@ def build_depth_controls():
         inline=False,
         sizing_mode="stretch_width",
     )
-    borehole_info = pn.pane.Markdown("### Borehole 0", sizing_mode="stretch_width")
+    borehole_info = pn.pane.Markdown("### No borehole selected", sizing_mode="stretch_width")
     return depth_selector, borehole_info

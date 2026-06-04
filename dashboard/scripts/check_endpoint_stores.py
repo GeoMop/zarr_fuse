@@ -1,0 +1,293 @@
+"""
+Check endpoint store reachability and dataset health.
+
+This script is a developer utility to validate the endpoints declared in
+`endpoints.yaml` and to exercise the underlying data stores referenced by
+those endpoints (for example S3-backed Zarr stores). It helps answer questions
+like:
+
+- Are the configured endpoints reachable?
+- Which group paths exist for an endpoint?
+- Do datasets expose the expected variables and coordinates?
+- Are numeric values present (finite) in sample slices of the variables?
+
+Usage examples:
+
+    python dashboard/scripts/check_endpoint_stores.py --endpoints <path/to/endpoints.yaml>
+    python dashboard/scripts/check_endpoint_stores.py --check-values-endpoint my_ep --check-values-group /my/group
+    python dashboard/scripts/check_endpoint_stores.py --check-values-all
+
+The script can optionally print credential status (S3 env vars), list groups,
+and perform lightweight value inspections for dataset variables. It is intended
+for manual checks during development and CI troubleshooting, not as a unit test.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import sys
+from typing import Any
+
+import numpy as np
+
+# Allow running this file directly via "python dashboard/scripts/check_endpoint_stores.py".
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from dotenv import load_dotenv
+
+from dashboard.config import load_endpoints
+from dashboard.data import LocalClient
+
+
+def list_group_paths(structure: dict, prefix: str = "") -> list[str]:
+    paths: list[str] = []
+    path = structure.get("path") or "/"
+    name = structure.get("name") or "root"
+    paths.append(f"{prefix}{name} ({path})")
+    for child in structure.get("children", []) or []:
+        paths.extend(list_group_paths(child, prefix + "  "))
+    return paths
+
+
+def collect_group_paths(structure: dict) -> list[str]:
+    paths: list[str] = []
+
+    def walk(node: dict) -> None:
+        path = node.get("path") or "/"
+        paths.append(path)
+        for child in node.get("children", []) or []:
+            walk(child)
+
+    walk(structure)
+    return paths
+
+
+def _mask_secret(value: str | None) -> str:
+    if not value:
+        return "<missing>"
+    if len(value) <= 6:
+        return "***"
+    return f"{value[:3]}***{value[-3:]}"
+
+
+def print_credential_status() -> None:
+    zf_key = os.getenv("ZF_S3_ACCESS_KEY")
+    zf_secret = os.getenv("ZF_S3_SECRET_KEY")
+    zf_endpoint = os.getenv("ZF_S3_ENDPOINT_URL")
+    key = os.getenv("S3_ACCESS_KEY")
+    secret = os.getenv("S3_SECRET_KEY")
+    endpoint = os.getenv("S3_ENDPOINT_URL")
+
+    print("\n" + "=" * 72)
+    print("Credential status")
+    print(f"ZF_S3_ACCESS_KEY: {('set' if zf_key else 'missing')} ({_mask_secret(zf_key)})")
+    print(f"ZF_S3_SECRET_KEY: {('set' if zf_secret else 'missing')} ({_mask_secret(zf_secret)})")
+    print(f"ZF_S3_ENDPOINT_URL: {zf_endpoint or '<missing>'}")
+    print(f"S3_ACCESS_KEY: {('set' if key else 'missing')} ({_mask_secret(key)})")
+    print(f"S3_SECRET_KEY: {('set' if secret else 'missing')} ({_mask_secret(secret)})")
+    print(f"S3_ENDPOINT_URL: {endpoint or '<missing>'}")
+
+
+def _format_sample(values: np.ndarray, limit: int = 6) -> str:
+    flat = values.ravel()
+    clipped = flat[:limit]
+    rendered = ", ".join(repr(v) for v in clipped)
+    suffix = " ..." if flat.size > limit else ""
+    return f"[{rendered}{suffix}]"
+
+
+def inspect_group_values(client: LocalClient, endpoint_name: str, group_path: str) -> None:
+    node = client._get_group(endpoint_name, group_path)
+    ds = node.dataset
+
+    print("\n" + "=" * 72)
+    print(f"Value check: endpoint='{endpoint_name}', group='{group_path}'")
+    print(f"Dataset variables: {len(ds.data_vars)}")
+    print(f"Dataset coords: {len(ds.coords)}")
+
+    if len(ds.data_vars) == 0:
+        print("No data variables in this node.")
+        return
+
+    print("Variables:")
+    for var_name, data_array in ds.data_vars.items():
+        dims = tuple(data_array.dims)
+        shape = tuple(data_array.shape)
+
+        indexers: dict[str, Any] = {
+            dim: slice(0, min(int(size), 3)) for dim, size in data_array.sizes.items()
+        }
+
+        try:
+            sample = np.array(data_array.isel(indexers).values)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  - {var_name}: dims={dims}, shape={shape}, sample_error={type(exc).__name__}: {exc}")
+            continue
+
+        sample_size = int(sample.size)
+        dtype = str(sample.dtype)
+
+        if sample_size == 0:
+            print(f"  - {var_name}: dims={dims}, shape={shape}, dtype={dtype}, sample=empty")
+            continue
+
+        if np.issubdtype(sample.dtype, np.number):
+            finite_mask = np.isfinite(sample)
+            finite_count = int(finite_mask.sum())
+            print(
+                f"  - {var_name}: dims={dims}, shape={shape}, dtype={dtype}, "
+                f"sample_finite={finite_count}/{sample_size}, sample={_format_sample(sample)}"
+            )
+        else:
+            non_null_count = int(np.sum(sample != None))  # noqa: E711
+            print(
+                f"  - {var_name}: dims={dims}, shape={shape}, dtype={dtype}, "
+                f"sample_non_null={non_null_count}/{sample_size}, sample={_format_sample(sample)}"
+            )
+
+
+def inspect_group_summary(client: LocalClient, endpoint_name: str, group_path: str) -> str:
+    try:
+        node = client._get_group(endpoint_name, group_path)
+        ds = node.dataset
+    except Exception as exc:  # noqa: BLE001
+        return f"{group_path}: error={type(exc).__name__}: {exc}"
+
+    data_var_count = len(ds.data_vars)
+    coord_count = len(ds.coords)
+    if data_var_count == 0:
+        return f"{group_path}: vars=0, coords={coord_count}"
+
+    finite_total = 0
+    sample_total = 0
+    for _, data_array in ds.data_vars.items():
+        indexers: dict[str, Any] = {
+            dim: slice(0, min(int(size), 3)) for dim, size in data_array.sizes.items()
+        }
+        try:
+            sample = np.array(data_array.isel(indexers).values)
+        except Exception:  # noqa: BLE001
+            continue
+
+        if sample.size == 0:
+            continue
+
+        if np.issubdtype(sample.dtype, np.number):
+            finite_total += int(np.isfinite(sample).sum())
+            sample_total += int(sample.size)
+        else:
+            finite_total += int(np.sum(sample != None))  # noqa: E711
+            sample_total += int(sample.size)
+
+    return (
+        f"{group_path}: vars={data_var_count}, coords={coord_count}, "
+        f"sample_non_null={finite_total}/{sample_total if sample_total else 0}"
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Check endpoint store reachability and print group structure."
+    )
+    parser.add_argument(
+        "--endpoints",
+        default="app/databuk/config/endpoints.yaml",
+        help="Path to endpoints.yaml",
+    )
+    parser.add_argument(
+        "--env-file",
+        default="dashboard/scripts/.env",
+        help="Path to .env file with S3 credentials",
+    )
+    parser.add_argument(
+        "--check-values-endpoint",
+        default=None,
+        help="Endpoint name for value check.",
+    )
+    parser.add_argument(
+        "--check-values-group",
+        default=None,
+        help="Group path for value check.",
+    )
+    parser.add_argument(
+        "--check-values-all",
+        action="store_true",
+        help="Run value checks for every reachable endpoint/group automatically.",
+    )
+    parser.add_argument(
+        "--full-report",
+        action="store_true",
+        help="Print credentials, endpoint reachability, groups, and per-group dataset summary.",
+    )
+    args = parser.parse_args()
+
+    load_dotenv(args.env_file)
+    if args.full_report:
+        print_credential_status()
+
+    endpoints_path = Path(args.endpoints)
+    endpoints = load_endpoints(endpoints_path)
+    client = LocalClient(endpoints_path)
+
+    print(f"Using endpoints file: {endpoints_path}")
+    print(f"Found endpoints: {', '.join(endpoints.keys())}")
+
+    for endpoint_name, endpoint_cfg in endpoints.items():
+        print("\n" + "-" * 72)
+        print(f"Endpoint: {endpoint_name}")
+        print(f"URI: {endpoint_cfg.source.uri}")
+        try:
+            structure = client.get_structure(endpoint_name)
+            print("Reachable: yes")
+            print("Groups:")
+            for line in list_group_paths(structure):
+                print(f"  {line}")
+
+            if args.full_report:
+                print("Group dataset summary:")
+                for group_path in collect_group_paths(structure):
+                    print(f"  - {inspect_group_summary(client, endpoint_name, group_path)}")
+        except Exception as exc:  # noqa: BLE001
+            print("Reachable: no")
+            print(f"Error: {type(exc).__name__}: {exc}")
+
+    if args.check_values_all:
+        for endpoint_name in endpoints.keys():
+            try:
+                structure = client.get_structure(endpoint_name)
+            except Exception as exc:  # noqa: BLE001
+                print(f"\nSkipping value checks for endpoint '{endpoint_name}': {type(exc).__name__}: {exc}")
+                continue
+
+            for group_path in collect_group_paths(structure):
+                inspect_group_values(
+                    client,
+                    endpoint_name=endpoint_name,
+                    group_path=group_path,
+                )
+    elif args.check_values_endpoint and args.check_values_group:
+        inspect_group_values(
+            client,
+            endpoint_name=args.check_values_endpoint,
+            group_path=args.check_values_group,
+        )
+    elif args.check_values_endpoint or args.check_values_group:
+        print(
+            "\nValue check skipped: provide both --check-values-endpoint and --check-values-group, "
+            "or use --check-values-all."
+        )
+
+    return 0
+
+
+if __name__ == "__main__":
+    code = main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # s3fs/aiobotocore can emit shutdown traceback on interpreter teardown in this environment.
+    # Fast exit keeps script output clean after a successful check.
+    os._exit(code)

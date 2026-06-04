@@ -1,3 +1,13 @@
+_dashboard:
+  default_endpoint: "bukov_endpoint"
+  env_file: "../../dashboard/scripts/.env"
+
+_cluster_defaults: &cluster_defaults
+  cluster_enabled: true
+  cluster_eps_factor: 0.05
+  cluster_buffer_factor: 0.1
+  cluster_size_scale: 3.0
+
 bukov_endpoint:
   description: "Bukov production endpoint"
   version: "1.0.0"
@@ -7,10 +17,10 @@ bukov_endpoint:
     type: "s3"
     store_type: "zarr"
     uri: "s3://bukov/store_latlon_2024.zarr"
-    schema_path: "schemas/bukov_schema.yaml"
+    schema_path: "config/bukov_schema.yaml"
 
   variable_map:
-    fields:
+    bukov:
       lat: "latitude"
       lon: "longitude"
       time: "date_time"
@@ -19,7 +29,7 @@ bukov_endpoint:
 
   defaults:
     display_variable: "rock_temp"
-    group_path: "/"
+    group_path: "bukov"
 
   visualization:
     map:
@@ -29,15 +39,18 @@ bukov_endpoint:
       title: "Geographic Data View"
       point_size: 10
       alpha: 0.8
+      cluster:
+        <<: *cluster_defaults
+
     timeseries:
       middle_window_days: 30
       right_window_hours: 24
+
     overlay:
       enabled: true
       tile_url: "/tiles/{Z}/{X}/{Y}.png"
       cache_dir: "."
 
-# Should be tested and fully integrated to the dashboard, but this is the general structure for the tile building configuration. The actual implementation of tile building and serving would require additional code to generate tiles from the source image and serve them via a web server or similar mechanism.
   tile_build:
     enabled: true
     source_image: "config/bukov_endpoint/overlay.png"

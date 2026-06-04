@@ -1,22 +1,15 @@
-import os
 import time
-from pathlib import Path
 
 import holoviews as hv
 import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
 from holoviews import streams
-from dotenv import load_dotenv
 
-# Load environment variables from .env file if present
-load_dotenv()
-
+from dashboard.config import get_default_endpoint_name, get_endpoint_config, load_endpoints, resolve_endpoints_path
 from dashboard.data import load_data
-from dashboard.config import load_endpoints
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
-from dashboard.sidebar import build_depth_controls, build_sidebar
-
+from dashboard.sidebar import _flatten_nodes, build_depth_controls, build_sidebar
 
 JS_FILES = {
     "jquery": "https://code.jquery.com/jquery-1.11.1.min.js",
@@ -40,30 +33,32 @@ hv.renderer("bokeh").theme = "dark_minimal"
 
 def build_dashboard():
     start_total = time.perf_counter()
-    endpoint_name = os.getenv("HV_DASHBOARD_ENDPOINT")
 
-    if not endpoint_name:
-        endpoints_path = Path(
-            os.getenv(
-                "ENDPOINTS_PATH",
-                str(Path(__file__).resolve().parent / "config" / "endpoints.yaml"),
-            )
-        )
-        endpoints = load_endpoints(endpoints_path)
-        if not endpoints:
-            raise ValueError(f"No endpoints configured in {endpoints_path}")
-        endpoint_name = next(iter(endpoints.keys()))
+    endpoints_path = resolve_endpoints_path()
+    print(f"Using endpoints config: {endpoints_path}")
+
+    configured_default = get_default_endpoint_name(endpoints_path)
+    endpoints = load_endpoints(endpoints_path)
+    if not endpoints:
+        raise ValueError(f"No endpoints configured in {endpoints_path}")
+
+    endpoint_name = configured_default or next(iter(endpoints.keys()))
+
+    endpoint_config = get_endpoint_config(endpoints_path, endpoint_name)
+    default_display_variable = endpoint_config.defaults.display_variable
 
     data = load_data(
         "local",
         endpoint_name=endpoint_name,
+        endpoints_path=endpoints_path,
+        display_variable=default_display_variable,
     )
 
     endpoints = data.client.get_endpoints()
     endpoint = endpoints.get(endpoint_name) or data.client.get_endpoint(endpoint_name)
     structure = data.client.get_structure(endpoint_name)
 
-    controller, node_select, node_hint = build_sidebar(
+    controller, store_selector, node_select, variable_selector, variable_info, node_hint, store_info = build_sidebar(
         endpoint_name, endpoint, structure, endpoints=endpoints
     )
     depth_selector, borehole_info = build_depth_controls()
@@ -75,6 +70,96 @@ def build_dashboard():
     map_handlers = {"on_map_tap": lambda *_: None}
 
     map_view, map_state = build_map_view(data, tap_stream)
+
+    def _populate_variable_selector(endpoint_name: str, group_path: str):
+        try:
+            print(f"[variables] Loading for endpoint={endpoint_name}, group={group_path}")
+            t0 = time.perf_counter()
+            variables = data.client.get_variables(endpoint_name, group_path)
+            print(f"[timing] get_variables: {time.perf_counter() - t0:.3f}s")
+            print(f"[variables] Found: {len(variables)} variables")
+            
+            if variables:
+                var_options = [f"{name} ({unit})" if unit else name for name, unit in variables.items()]
+                variable_selector.options = var_options
+                
+                # Log each variable
+                for name, unit in variables.items():
+                    print(f"[variables]   - {name}: unit={unit}")
+                
+                current_var = data.client.get_endpoint(endpoint_name).get("defaults", {}).get("display_variable")
+                if current_var:
+                    # Find matching label
+                    for i, label in enumerate(var_options):
+                        if label.startswith(current_var):
+                            variable_selector.value = label
+                            print(f"[variables] Selected default: {current_var}")
+                            break
+                    else:
+                        variable_selector.value = var_options[0]
+                        print(f"[variables] Using first: {var_options[0]}")
+                else:
+                    variable_selector.value = var_options[0]
+                    
+                # Update info text
+                variable_info.object = f"**{len(variables)} variables available**\nClick to select"
+                print(f"[variables] Loaded {len(variables)} variables successfully")
+            else:
+                variable_selector.options = []
+                variable_info.object = "⚠️ No variables found"
+                print(f"[variables] No variables in group {group_path}")
+        except Exception as e:
+            variable_selector.options = []
+            variable_info.object = f"❌ Error: {str(e)[:50]}"
+            print(f"[variables] ERROR: {e}")
+
+    _populate_variable_selector(endpoint_name, data.group_path)
+
+    def _refresh_sidebar_for_endpoint(selected_endpoint: str):
+        nonlocal endpoints, endpoint, structure
+        print(f"[timing] _refresh_sidebar: start for {selected_endpoint}")
+
+        endpoints = data.client.get_endpoints()
+        print(f"[timing] _refresh_sidebar: get_endpoints done")
+        endpoint = endpoints.get(selected_endpoint) or data.client.get_endpoint(selected_endpoint)
+        structure = data.client.get_structure(selected_endpoint)
+        print(f"[timing] _refresh_sidebar: get_structure done")
+
+        node_items = _flatten_nodes(structure)
+        node_options = {label: path for label, path in node_items}
+        node_select.options = node_options
+        node_select.value = node_items[0][1] if node_items else "/"
+
+        store_info.object = (
+            "<div style='background: #1e293b; padding: 12px; border-radius: 8px; margin: 8px 0;"
+            " border-left: 3px solid #3b82f6;'>"
+            "<div style='font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 600;'>"
+            "STORE URI</div>"
+            f"<div style='font-size: 12px; color: #e2e8f0; font-family: monospace;'>{endpoint['source']['uri']}</div>"
+            "</div>"
+        )
+        print(f"[timing] _refresh_sidebar: about to populate variables")
+
+        _populate_variable_selector(selected_endpoint, data.group_path)
+        print(f"[timing] _refresh_sidebar: done")
+
+    def _switch_endpoint(selected_endpoint: str):
+        nonlocal data, endpoint_name
+
+        endpoint_name = selected_endpoint
+        endpoint_obj = data.client.get_endpoint(selected_endpoint)
+        data.endpoint_name = selected_endpoint
+        data.group_path = "/"
+        data.display_variable = endpoint_obj.get("defaults", {}).get("display_variable") or ""
+        
+        # Clear cache for new endpoint
+        data.client.clear_cache()
+        
+        print(f"[timing] _switch_endpoint: starting refresh for {selected_endpoint}")
+        _refresh_sidebar_for_endpoint(selected_endpoint)
+        print(f"[timing] _switch_endpoint: calling refresh_views")
+        refresh_views()
+        print(f"[timing] _switch_endpoint: done")
 
     def update_data_warnings(state):
         reason = (state or {}).get("data_error_reason")
@@ -118,6 +203,7 @@ def build_dashboard():
     )
     top_right = pn.Column(
         loading_indicator,
+        variable_info,
         borehole_info,
         depth_selector,
         sizing_mode="stretch_both",
@@ -127,8 +213,11 @@ def build_dashboard():
     bottom_right = pn.pane.HoloViews(line_right, sizing_mode="stretch_both")
 
     def refresh_views():
+        print(f"[timing] refresh_views: start building map_view")
         new_map_view, new_map_state = build_map_view(data, tap_stream)
+        print(f"[timing] refresh_views: map_view done, building timeseries")
         update_data_warnings(new_map_state)
+
         new_line_left, new_line_mid, new_line_right, new_on_map_tap = build_timeseries_views(
             data,
             depth_selector,
@@ -136,11 +225,30 @@ def build_dashboard():
             borehole_stream,
             new_map_state,
         )
+        print(f"[timing] refresh_views: timeseries done, updating panes")
+
         map_handlers["on_map_tap"] = new_on_map_tap
         top_left.object = new_map_view
         bottom_left.object = new_line_left
         bottom_mid.object = new_line_mid
         bottom_right.object = new_line_right
+        print(f"[timing] refresh_views: done")
+
+    def on_store_change(event):
+        if event.new and event.new != endpoint_name:
+            loading_indicator.visible = True
+
+            def _run_switch():
+                try:
+                    _switch_endpoint(event.new)
+                finally:
+                    loading_indicator.visible = False
+
+            doc = pn.state.curdoc
+            if doc is not None:
+                doc.add_next_tick_callback(_run_switch)
+            else:
+                _run_switch()
 
     def on_node_change(event):
         if event.new:
@@ -149,6 +257,7 @@ def build_dashboard():
 
             def _run_refresh():
                 try:
+                    _populate_variable_selector(data.endpoint_name, data.group_path)
                     refresh_views()
                 finally:
                     loading_indicator.visible = False
@@ -159,14 +268,43 @@ def build_dashboard():
             else:
                 _run_refresh()
 
+    def on_variable_change(event):
+        selected_label = event.new
+        if selected_label:
+            # Extract variable name from label (strip unit part like " (degC)")
+            var_name = selected_label.split(" (")[0] if " (" in selected_label else selected_label
+            
+            if var_name != data.display_variable:
+                print(f"[variables] Changing from {data.display_variable} to {var_name}")
+                data.display_variable = var_name
+                variable_info.object = f"**Loading {var_name}...**"
+                loading_indicator.visible = True
+
+                def _run_refresh():
+                    try:
+                        refresh_views()
+                        variable_info.object = f"**Viewing: {var_name}**"
+                    except Exception as e:
+                        variable_info.object = f"❌ Error: {str(e)[:50]}"
+                        print(f"[variables] Error viewing {var_name}: {e}")
+                    finally:
+                        loading_indicator.visible = False
+
+                doc = pn.state.curdoc
+                if doc is not None:
+                    doc.add_next_tick_callback(_run_refresh)
+                else:
+                    _run_refresh()
+
     node_select.param.watch(on_node_change, ["value"])
+    store_selector.param.watch(on_store_change, ["value"])
+    variable_selector.param.watch(on_variable_change, ["value"])
 
     template = """
 {%% extends base %%}
 {%% block contents %%}
 {%% set context = '%s' %%}
 
-<!-- Notebook-specific container -->
 {%% if context == 'notebook' %%}
     {%% set slicer_id = get_id() %%}
     <div id='{{slicer_id}}'></div>
@@ -179,7 +317,6 @@ def build_dashboard():
 </style>
 
 <script>
-// GoldenLayout configuration
 var config = {
     settings: {
         hasHeaders: true,
@@ -196,47 +333,43 @@ var config = {
     content: [{
         type: 'row',
         content:[
-            // Left sidebar: Controls
             {
                 type: 'component',
                 componentName: 'view',
-                componentState: {
+                    componentState: {
                     model: '{{ embed(roots.controller) }}',
-                    title: 'Controls',
+                    title: 'Dataset',
                     width: 350,
                     css_classes:['scrollable']
                 },
                 isClosable: false,
             },
-            // Right section: 2x2 grid
             {
                 type: 'column',
                 content: [
-                    // Top row: Map + Depths
                     {
                         type: 'row',
                         content:[
                             {
                                 type: 'component',
                                 componentName: 'view',
-                                componentState: {
+                                    componentState: {
                                     model: '{{ embed(roots.top_left) }}',
-                                    title: 'Top Left'
+                                    title: 'Map view'
                                 },
                                 isClosable: false,
                             },
                             {
                                 type: 'component',
                                 componentName: 'view',
-                                componentState: {
+                                    componentState: {
                                     model: '{{ embed(roots.top_right) }}',
-                                    title: 'Top Right'
+                                    title: 'Plot Selection'
                                 },
                                 isClosable: false,
                             }
                         ]
                     },
-                    // Bottom row: Three synchronized views
                     {
                         type: 'row',
                         content:[
@@ -245,7 +378,7 @@ var config = {
                                 componentName: 'view',
                                 componentState: {
                                     model: '{{ embed(roots.bottom_left) }}',
-                                    title: 'Bottom Left'
+                                    title: 'Time dependent, Year scale'
                                 },
                                 isClosable: false,
                             },
@@ -254,7 +387,7 @@ var config = {
                                 componentName: 'view',
                                 componentState: {
                                     model: '{{ embed(roots.bottom_mid) }}',
-                                    title: 'Bottom Mid'
+                                    title: 'Time dependent, Month scale'
                                 },
                                 isClosable: false,
                             },
@@ -263,7 +396,7 @@ var config = {
                                 componentName: 'view',
                                 componentState: {
                                     model: '{{ embed(roots.bottom_right) }}',
-                                    title: 'Bottom Right'
+                                    title: 'Time dependent, Day scale'
                                 },
                                 isClosable: false,
                             }
@@ -275,32 +408,26 @@ var config = {
     }]
 };
 
-// Initialize GoldenLayout
 {%% if context == 'notebook' %%}
-    var myLayout = new GoldenLayout( config, '#' + '{{slicer_id}}' );
+    var myLayout = new GoldenLayout(config, '#' + '{{slicer_id}}');
     $('#' + '{{slicer_id}}').css({width: '100%%', height: '800px', margin: '0px'})
 {%% else %%}
-    var myLayout = new GoldenLayout( config );
+    var myLayout = new GoldenLayout(config);
 {%% endif %%}
 
-// Register component handler
-myLayout.registerComponent('view', function( container, componentState ){
-    const {width, css_classes} = componentState
+myLayout.registerComponent('view', function(container, componentState) {
+    const {width, css_classes} = componentState;
 
-    // Set initial width if specified
     if (width)
-      container.on('open', () => container.setSize(width, container.height))
+        container.on('open', () => container.setSize(width, container.height));
 
-    // Apply CSS classes
     if (css_classes)
-      css_classes.map((item) => container.getElement().addClass(item))
+        css_classes.map((item) => container.getElement().addClass(item));
 
-    // Set title and inject Panel model
-    container.setTitle(componentState.title)
+    container.setTitle(componentState.title);
     container.getElement().html(componentState.model);
 
-    // Trigger resize event for responsive plots
-    container.on('resize', () => window.dispatchEvent(new Event('resize')))
+    container.on('resize', () => window.dispatchEvent(new Event('resize')));
 });
 
 myLayout.init();

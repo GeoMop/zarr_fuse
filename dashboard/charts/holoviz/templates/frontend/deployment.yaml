@@ -24,6 +24,9 @@ spec:
       volumes:
         - name: app-home
           emptyDir: {}
+        {{- with .Values.frontend.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       containers:
         - name: {{ .Values.frontend.name }}
           image: "{{ .Values.registry.host }}/{{ .Values.frontend.image.name }}:{{ .Values.frontend.image.tag }}"
@@ -33,10 +36,8 @@ spec:
               containerPort: {{ .Values.frontend.service.internalPort.number | int }}
           envFrom:
             - secretRef:
-                name: {{ .Values.backend.name }}-secrets
+                name: {{ .Values.frontend.name }}-secrets
           env:
-            - name: HV_API_URL
-              value: "http://{{ .Values.backend.name }}:{{ .Values.backend.service.internalPort.number }}"
             - name: HV_DASHBOARD_ENDPOINT
               value: {{ .Values.frontend.endpointName | quote }}
             - name: BOKEH_ALLOW_WS_ORIGIN
@@ -47,9 +48,15 @@ spec:
               value: /home
             - name: MPLCONFIGDIR
               value: /home/app/.config/matplotlib
+            {{- with .Values.frontend.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           volumeMounts:
             - name: app-home
               mountPath: /home/app
+            {{- with .Values.frontend.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           resources:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           securityContext:

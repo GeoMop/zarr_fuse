@@ -6,23 +6,47 @@ import time
 from holoviews import streams
 
 
+def _resolve_fields_for_group(schema_config, group_path):
+    fields = schema_config.get("fields", {})
+    group_fields = schema_config.get("group_fields", {})
+    normalized = "/".join(part for part in (group_path or "").strip("/").split("/") if part)
+
+    path = normalized
+    while True:
+        if path in group_fields:
+            return group_fields[path]
+        if not path:
+            break
+        path = path.rsplit("/", 1)[0] if "/" in path else ""
+
+    return fields
+
+
 def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream, map_state):
     start_total = time.perf_counter()
     endpoint_config = data.client.get_endpoint(data.endpoint_name)
     defaults_config = endpoint_config["defaults"]
     schema_display = endpoint_config["schema_display"]
     schema_config = endpoint_config["schema"]
-    fields_config = schema_config["fields"]
-    time_dim = fields_config["time"]
+    fields_config = _resolve_fields_for_group(schema_config, data.group_path)
+    time_dim = fields_config.get("time") or "time"
     visualization_config = endpoint_config["visualization"]
     timeseries_config = visualization_config["timeseries"]
 
-    default_display_variable = defaults_config["display_variable"]
+    default_display_variable = data.display_variable
 
-    metric_label = schema_display["display_variable"]
-    display_unit = schema_display["display_unit"]
-    y_axis_label = f"{metric_label} ({display_unit})".strip() if display_unit else metric_label
-    entity_label = schema_display["entity_name"]
+    metric_label = (
+        default_display_variable
+        or schema_display.get("display_variable")
+        or "value"
+    )
+    display_unit = schema_display.get("display_unit")
+    y_axis_label = f"{metric_label} ({display_unit})" if display_unit else metric_label
+    entity_label = (
+        schema_display.get("entity_name")
+        or fields_config.get("entity")
+        or "entity"
+    )
     middle_window_days = timeseries_config["middle_window_days"]
     right_window_hours = timeseries_config["right_window_hours"]
 
@@ -31,6 +55,10 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         "depths": np.array([]),
         "series": [],
         "entity_index": 0,
+        "entity_display_name": None,
+        "selected_lat": None,
+        "selected_lon": None,
+        "selected_marker_has_value": True,
     }
 
     def format_depth(depth_value: float):
@@ -48,7 +76,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             return 0.0, 0.0
         return float(lats[0]), float(lons[0])
 
-    def _update_depth_selector(depths, series, entity_index):
+    def _update_depth_selector(depths, series, entity_index, borehole_name=None):
         available = []
         for idx, values in enumerate(series):
             if np.any(np.isfinite(values)):
@@ -61,16 +89,34 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             for i in available
         }
         depth_selector.value = available
-        borehole_info.object = f"### {entity_label} {entity_index}"
+        display_name = borehole_name if borehole_name else entity_label
+        lat = timeseries_state.get("selected_lat")
+        lon = timeseries_state.get("selected_lon")
+        lat_lon_text = f" ({lat:.4f}, {lon:.4f})" if lat is not None and lon is not None else ""
+        if timeseries_state.get("selected_marker_has_value", True):
+            borehole_info.object = f"### {display_name}{lat_lon_text}"
+        else:
+            borehole_info.object = (
+                f"### {display_name}{lat_lon_text}\n"
+                "No data available for this site at the selected time and depth."
+            )
+        timeseries_state["entity_display_name"] = display_name
 
-    def _fetch_timeseries(lat, lon):
+    def _fetch_timeseries(lat, lon, marker_meta=None):
         start = time.perf_counter()
+        print(f"[fetch_ts] Called with lat={lat:.4f}, lon={lon:.4f}, marker_meta={marker_meta}")
+        marker_entity_index = marker_meta.get("entity_index") if isinstance(marker_meta, dict) else None
+        marker_site_id = marker_meta.get("site_id") if isinstance(marker_meta, dict) else None
+        selected_entity_index = marker_entity_index
+        if marker_entity_index is not None:
+            print(f"[fetch_ts] Selected marker index={marker_entity_index}, site_id={marker_site_id}")
         fig = data.client.get_timeseries_data(
             data.endpoint_name,
             group_path=data.group_path,
             lat=lat,
             lon=lon,
             variable=default_display_variable,
+            entity_index=selected_entity_index,
         )
         if fig.get("status") == "error":
             reason = fig.get("reason", "Failed to load timeseries")
@@ -78,6 +124,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             timeseries_state["depths"] = np.array([])
             timeseries_state["series"] = []
             timeseries_state["entity_index"] = 0
+            timeseries_state["selected_lat"] = lat
+            timeseries_state["selected_lon"] = lon
             depth_selector.options = {}
             depth_selector.value = []
             borehole_info.object = f"### No data ({reason})"
@@ -88,12 +136,28 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         depths = np.array(fig.get("depths", []), dtype=float)
         series = [np.array(values, dtype=float) for values in fig.get("series", [])]
         entity_index = int(fig.get("borehole_index", 0))
+        borehole_name = fig.get("borehole_name")
 
+        # Only update state if we got data for the correct entity
         timeseries_state["times"] = times
         timeseries_state["depths"] = depths
         timeseries_state["series"] = series
         timeseries_state["entity_index"] = entity_index
-        _update_depth_selector(depths, series, entity_index)
+        timeseries_state["selected_lat"] = lat
+        timeseries_state["selected_lon"] = lon
+        # Determine has_value based on fetched series content (not map-slice)
+        has_series_data = False
+        try:
+            if series:
+                has_series_data = any(np.any(np.isfinite(s)) for s in series)
+        except Exception:
+            has_series_data = False
+        timeseries_state["selected_marker_has_value"] = bool(has_series_data)
+        if not has_series_data:
+            print(f"[fetch_ts] Fetched site {borehole_name}: no finite data in series")
+        else:
+            print(f"[fetch_ts] Fetched site {borehole_name}: has finite data")
+        _update_depth_selector(depths, series, entity_index, borehole_name)
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
 
@@ -213,9 +277,10 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         else:
             force_key = "force_mid" if view == "mid" else "force_right"
             hooks = [make_xrange_hook(xlim, force_key)]
+        entity_display = timeseries_state.get("entity_display_name") or f"{entity_label.lower()} {timeseries_state['entity_index']}"
         return overlay.opts(
             responsive=True,
-            title=f"{metric_label} over Time ({entity_label.lower()} {timeseries_state['entity_index']})",
+            title=f"{metric_label} over Time ({entity_display})",
             tools=["hover", "xwheel_zoom", "xpan", "tap", "reset"],
             active_tools=["xwheel_zoom", "xpan"],
             xlim=xlim,
@@ -265,7 +330,46 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     def on_map_tap(x, y):
         if x is None or y is None:
             y, x = _default_coords()
-        entity_index = _fetch_timeseries(lat=float(y), lon=float(x))
+            print(f"[tap] Initial load: using default coords y={y:.4f}, x={x:.4f}")
+            print(f"[tap] marker_meta will be None (not computed for initial load)")
+            print(f"[tap] Calling _fetch_timeseries with marker_meta=None")
+            entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=None)
+            if entity_index is not None:
+                borehole_stream.event(borehole_index=entity_index)
+            return None
+
+        print(f"[tap] Click detected: x={x}, y={y}")
+        lats_raw = map_state.get("lats")
+        lons_raw = map_state.get("lons")
+        all_meta = map_state.get("marker_meta") or []
+        print(f"[tap] Computing nearest marker from {len(all_meta)} available markers")
+        if lats_raw is None or lons_raw is None or not len(all_meta):
+            print(f"[tap] No markers available or missing lats/lons")
+            return None
+
+        lats = np.array(lats_raw, dtype=float)
+        lons = np.array(lons_raw, dtype=float)
+        dist = (lats - float(y)) ** 2 + (lons - float(x)) ** 2
+        nearest_idx = int(np.nanargmin(dist))
+        print(f"[tap] nearest_idx={nearest_idx}, distance={dist[nearest_idx]:.2e}")
+        if not (0 <= nearest_idx < len(all_meta)):
+            return None
+
+        min_dist = float(dist[nearest_idx])
+        # Selection threshold (degrees). Tweak this for your map zoom level.
+        threshold_deg = 0.0002
+        if min_dist > threshold_deg ** 2:
+            print(f"[tap] Outside threshold ({min_dist:.2e} > {threshold_deg**2:.2e}): not selecting")
+            # Click wasn't close enough to any marker — don't select.
+            return None
+
+        marker_meta = all_meta[nearest_idx]
+        print(f"[tap] Selected marker_meta={marker_meta}")
+        # Always fetch timeseries - even if map-slice has no value.
+        # _fetch_timeseries will check actual series content and update UI accordingly.
+        print(f"[tap] Will fetch timeseries regardless of map-slice has_value")
+        print(f"[tap] Calling _fetch_timeseries with marker_meta={marker_meta}")
+        entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=marker_meta)
         if entity_index is not None:
             borehole_stream.event(borehole_index=entity_index)
 

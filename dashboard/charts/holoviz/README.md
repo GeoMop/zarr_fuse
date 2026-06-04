@@ -1,13 +1,13 @@
 # HoloViz Dashboard Helm Deployment
 
-This chart deploys the HoloViz dashboard backend and frontend to Kubernetes using Helm.
+This chart deploys the HoloViz dashboard frontend to Kubernetes using Helm.
 
 ## Prerequisites
 
 - Helm 3.x
 - kubectl configured for your cluster
 - Access to the target namespace
-- S3 credentials for the backend
+- S3 credentials for the frontend
 
 ## Chart Location
 
@@ -26,19 +26,17 @@ kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -
 # deploy
 helm upgrade "$RELEASE" dashboard/charts/holoviz \
   --install --atomic --timeout 10m --namespace "$NAMESPACE" \
-  --set backend.image.tag=<IMAGE_TAG> \
   --set frontend.image.tag=<IMAGE_TAG> \
-  --set backend.s3.secrets.accessKey=<S3_ACCESS_KEY> \
-  --set backend.s3.secrets.secretKey=<S3_SECRET_KEY>
+  --set frontend.s3.secrets.accessKey=<S3_ACCESS_KEY> \
+  --set frontend.s3.secrets.secretKey=<S3_SECRET_KEY>
 ```
 
 ## Values
 
 Key values in values.yaml:
 
-- backend.image.name, backend.image.tag
 - frontend.image.name, frontend.image.tag
-- backend.resources / frontend.resources
+- frontend.resources
 - ingress.className and ingress.annotations
 
 To override values without editing the chart:
@@ -46,8 +44,6 @@ To override values without editing the chart:
 ```bash
 helm upgrade "$RELEASE" dashboard/charts/holoviz \
   --install --atomic --timeout 10m --namespace "$NAMESPACE" \
-  --set backend.resources.requests.memory=256Mi \
-  --set backend.resources.limits.memory=512Mi \
   --set frontend.resources.requests.memory=256Mi \
   --set frontend.resources.limits.memory=512Mi
 ```

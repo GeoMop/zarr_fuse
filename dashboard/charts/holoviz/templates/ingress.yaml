@@ -14,27 +14,6 @@ spec:
     - host: zarr-fuse-{{ .Release.Name }}.dyn.cloud.e-infra.cz
       http:
         paths:
-          - path: /api
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ .Values.backend.name }}
-                port:
-                  number: {{ .Values.backend.service.externalPort.number | int }}
-          - path: /config
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ .Values.backend.name }}
-                port:
-                  number: {{ .Values.backend.service.externalPort.number | int }}
-          - path: /s3
-            pathType: Prefix
-            backend:
-              service:
-                name: {{ .Values.backend.name }}
-                port:
-                  number: {{ .Values.backend.service.externalPort.number | int }}
           - path: /
             pathType: Prefix
             backend:
