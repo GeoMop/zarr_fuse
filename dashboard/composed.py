@@ -61,6 +61,7 @@ def build_dashboard():
     controller, store_selector, node_select, variable_selector, variable_info, node_hint, store_info = build_sidebar(
         endpoint_name, endpoint, structure, endpoints=endpoints
     )
+    data.group_path = node_select.value
     depth_selector, borehole_info = build_depth_controls()
 
     tap_stream = streams.Tap(x=None, y=None)
