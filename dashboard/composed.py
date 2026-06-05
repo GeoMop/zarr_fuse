@@ -100,7 +100,10 @@ def build_dashboard():
                         variable_selector.value = var_options[0]
                         print(f"[variables] Using first: {var_options[0]}")
                 else:
-                    variable_selector.value = var_options[0]
+                    # No default — add placeholder to prevent auto-selection
+                    placeholder = "-- Select variable --"
+                    variable_selector.options = [placeholder] + var_options
+                    variable_selector.value = placeholder
                     
                 # Update info text
                 variable_info.object = f"**{len(variables)} variables available**\nClick to select"
@@ -114,7 +117,41 @@ def build_dashboard():
             variable_info.object = f"❌ Error: {str(e)[:50]}"
             print(f"[variables] ERROR: {e}")
 
+    _initialized = False
+
+    def on_variable_change(event):
+        selected_label = event.new
+        if selected_label and selected_label != "-- Select variable --":
+            if not _initialized:
+                variable_selector.value = "-- Select variable --"
+                return
+            var_name = selected_label.split(" (")[0] if " (" in selected_label else selected_label
+            if var_name != data.display_variable:
+                print(f"[variables] Changing from {data.display_variable} to {var_name}")
+                data.display_variable = var_name
+                variable_info.object = f"**Loading {var_name}...**"
+                loading_indicator.visible = True
+
+                def _run_refresh():
+                    try:
+                        refresh_views()
+                        variable_info.object = f"**Viewing: {var_name}**"
+                    except Exception as e:
+                        variable_info.object = f"❌ Error: {str(e)[:50]}"
+                        print(f"[variables] Error viewing {var_name}: {e}")
+                    finally:
+                        loading_indicator.visible = False
+
+                doc = pn.state.curdoc
+                if doc is not None:
+                    doc.add_next_tick_callback(_run_refresh)
+                else:
+                    _run_refresh()
+
+    variable_selector.param.watch(on_variable_change, ["value"])
+
     _populate_variable_selector(endpoint_name, data.group_path)
+    _initialized = True
 
     def _refresh_sidebar_for_endpoint(selected_endpoint: str):
         nonlocal endpoints, endpoint, structure
@@ -193,7 +230,6 @@ def build_dashboard():
         map_handlers["on_map_tap"](tap_stream.x, tap_stream.y)
 
     tap_stream.param.watch(on_tap_event, ["x", "y"])
-    map_handlers["on_map_tap"](tap_stream.x, tap_stream.y)
 
     top_left = pn.pane.HoloViews(map_view, sizing_mode="stretch_both")
     loading_indicator = pn.Row(
@@ -269,37 +305,8 @@ def build_dashboard():
             else:
                 _run_refresh()
 
-    def on_variable_change(event):
-        selected_label = event.new
-        if selected_label:
-            # Extract variable name from label (strip unit part like " (degC)")
-            var_name = selected_label.split(" (")[0] if " (" in selected_label else selected_label
-            
-            if var_name != data.display_variable:
-                print(f"[variables] Changing from {data.display_variable} to {var_name}")
-                data.display_variable = var_name
-                variable_info.object = f"**Loading {var_name}...**"
-                loading_indicator.visible = True
-
-                def _run_refresh():
-                    try:
-                        refresh_views()
-                        variable_info.object = f"**Viewing: {var_name}**"
-                    except Exception as e:
-                        variable_info.object = f"❌ Error: {str(e)[:50]}"
-                        print(f"[variables] Error viewing {var_name}: {e}")
-                    finally:
-                        loading_indicator.visible = False
-
-                doc = pn.state.curdoc
-                if doc is not None:
-                    doc.add_next_tick_callback(_run_refresh)
-                else:
-                    _run_refresh()
-
     node_select.param.watch(on_node_change, ["value"])
     store_selector.param.watch(on_store_change, ["value"])
-    variable_selector.param.watch(on_variable_change, ["value"])
 
     template = """
 {%% extends base %%}

@@ -373,6 +373,5 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         if entity_index is not None:
             borehole_stream.event(borehole_index=entity_index)
 
-    on_map_tap(None, None)
     print(f"[timing] build_timeseries_views: {time.perf_counter() - start_total:.3f}s")
     return line_left, line_mid, line_right, on_map_tap
