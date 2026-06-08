@@ -143,6 +143,12 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         styles={"font-size": "11px", "color": "#94a3b8"},
     )
 
+    variable_metadata = pn.pane.HTML(
+        "",
+        visible=False,
+        sizing_mode="stretch_width",
+    )
+
     node_hint = pn.pane.Alert(
         "",
         alert_type="warning",
@@ -159,13 +165,14 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         tree_view,
         variable_selector,
         variable_info,
+        variable_metadata,
         node_hint,
         pn.layout.VSpacer(),
         sizing_mode="stretch_width",
         styles={"padding": "10px"},
     )
 
-    return controller, store_selector, tree_view, variable_selector, variable_info, node_hint, store_info
+    return controller, store_selector, tree_view, variable_selector, variable_info, variable_metadata, node_hint, store_info
 
 
 def build_depth_controls():

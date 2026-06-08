@@ -343,6 +343,63 @@ def _read_schema_display(
     )
 
 
+def read_variable_metadata(
+    schema_path: Path,
+    variable_name: str,
+    group_path: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    with schema_path.open("r", encoding="utf-8") as file:
+        schema = yaml.safe_load(file)
+
+    def _find_data_node(node: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(node, dict):
+            return None
+        if "VARS" in node and "COORDS" in node:
+            return node
+        for key, value in node.items():
+            if key == "ATTRS":
+                continue
+            found = _find_data_node(value)
+            if found is not None:
+                return found
+        return None
+
+    group_data: Optional[Dict[str, Any]] = None
+    path_parts = [p for p in (group_path or "").strip("/").split("/") if p]
+    if path_parts:
+        current: Any = schema
+        for part in path_parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                current = None
+                break
+        group_data = _find_data_node(current)
+
+    if group_data is None:
+        group_data = _find_data_node(schema)
+
+    if group_data is None:
+        return None
+
+    vars_data = group_data.get("VARS", {})
+    variable_data = vars_data.get(variable_name)
+    if not variable_data:
+        return None
+
+    coords = variable_data.get("coords", [])
+    if isinstance(coords, str):
+        coords = [coords]
+
+    return {
+        "name": variable_name,
+        "description": variable_data.get("description", ""),
+        "unit": variable_data.get("unit", ""),
+        "coords": coords,
+        "df_col": variable_data.get("df_col", ""),
+    }
+
+
 def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], base_dir: Path) -> EndpointConfig:
     source_data = endpoint_data["source"]
     schema_data = endpoint_data["variable_map"]

@@ -13,6 +13,7 @@ import zarr_fuse as zf
 from dashboard.config import (
     get_endpoint_config,
     load_endpoints,
+    read_variable_metadata,
     resolve_endpoints_path,
     resolve_schema_fields,
 )
@@ -137,6 +138,23 @@ class LocalClient:
             variables[var_name] = unit
 
         return variables
+
+    def get_variable_metadata(
+        self,
+        endpoint_name: Optional[str],
+        group_path: str,
+        variable_name: str,
+    ) -> Optional[Dict[str, Any]]:
+        endpoint = self._endpoint_config(endpoint_name)
+        schema_path = Path(endpoint.schema.file)
+        if not schema_path.is_absolute():
+            schema_path = self.base_dir / schema_path
+
+        return read_variable_metadata(
+            schema_path,
+            variable_name=variable_name,
+            group_path=group_path,
+        )
 
     def get_map_data(
         self,

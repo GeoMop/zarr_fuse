@@ -55,7 +55,7 @@ def build_dashboard():
     endpoint = endpoints.get(endpoint_name) or data.client.get_endpoint(endpoint_name)
     structure = data.client.get_structure(endpoint_name)
 
-    controller, store_selector, node_select, variable_selector, variable_info, node_hint, store_info = build_sidebar(
+    controller, store_selector, node_select, variable_selector, variable_info, variable_metadata, node_hint, store_info = build_sidebar(
         endpoint_name, endpoint, structure, endpoints=endpoints
     )
     data.group_path = node_select.value
@@ -88,6 +88,7 @@ def build_dashboard():
                 variable_selector.options = [placeholder] + var_options
                 variable_selector.value = placeholder
                 data.display_variable = ""
+                variable_metadata.visible = False
 
                 # Update info text
                 variable_info.object = f"**{len(variables)} variables available**\nClick to select"
@@ -95,10 +96,12 @@ def build_dashboard():
             else:
                 variable_selector.options = []
                 variable_info.object = "⚠️ No variables found"
+                variable_metadata.visible = False
                 print(f"[variables] No variables in group {group_path}")
         except Exception as e:
             variable_selector.options = []
             variable_info.object = f"❌ Error: {str(e)[:50]}"
+            variable_metadata.visible = False
             print(f"[variables] ERROR: {e}")
 
     _initialized = False
@@ -116,10 +119,33 @@ def build_dashboard():
                 variable_info.object = f"**Loading {var_name}...**"
                 loading_indicator.visible = True
 
+                def _update_metadata():
+                    meta = data.client.get_variable_metadata(
+                        data.endpoint_name, data.group_path, var_name
+                    )
+                    if meta:
+                        coords_text = ", ".join(meta.get("coords", []))
+                        unit_text = f" ({meta['unit']})" if meta.get("unit") else ""
+                        variable_metadata.object = (
+                            "<div style='background: #1e293b; padding: 12px; border-radius: 8px; "
+                            "margin: 8px 0; border-left: 3px solid #10b981;'>"
+                            "<div style='font-size: 11px; color: #94a3b8; margin-bottom: 6px; "
+                            "font-weight: 600;'>📋 VARIABLE METADATA</div>"
+                            f"<div style='font-size: 13px; color: #e2e8f0; font-weight: 600; "
+                            f"margin-bottom: 6px;'>{meta['name']}{unit_text}</div>"
+                            f"<div style='font-size: 11px; color: #cbd5e1; line-height: 1.6;'>"
+                            f"<b>Description:</b> {meta.get('description', '—')}<br>"
+                            f"<b>Unit:</b> {meta.get('unit', '—')}<br>"
+                            f"<b>Coordinates:</b> {coords_text or '—'}"
+                            "</div></div>"
+                        )
+                        variable_metadata.visible = True
+
                 def _run_refresh():
                     try:
                         refresh_views()
                         variable_info.object = f"**Viewing: {var_name}**"
+                        _update_metadata()
                     except Exception as e:
                         variable_info.object = f"❌ Error: {str(e)[:50]}"
                         print(f"[variables] Error viewing {var_name}: {e}")
