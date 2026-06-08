@@ -9,7 +9,7 @@ from dashboard.config import get_default_endpoint_name, get_endpoint_config, loa
 from dashboard.data import load_data
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
-from dashboard.plot_selection import build_plot_selection, build_plot_selection_panel
+from dashboard.plot_selection import build_plot_selection_panel
 from dashboard.sidebar import _flatten_nodes, build_sidebar
 
 JS_FILES = {
@@ -60,9 +60,8 @@ def build_dashboard():
         endpoint_name, endpoint, structure, endpoints=endpoints
     )
     data.group_path = node_select.value
-    depth_selector, borehole_info = build_plot_selection()
 
-    # ── New table-style plot selection (side-by-side) ──────────────
+    # ── Table-style plot selection ──────────────────────────────────
     endpoint_cfg = data.client.get_endpoint(endpoint_name)
     schema_display_tbl = endpoint_cfg.get("schema_display", {})
     schema_cfg_tbl = endpoint_cfg.get("schema", {})
@@ -80,8 +79,6 @@ def build_dashboard():
     # ────────────────────────────────────────────────────────────────
 
     tap_stream = streams.Tap(x=None, y=None)
-    borehole_stream = streams.Stream.define("Borehole", borehole_index=0)()
-    borehole_stream.event(borehole_index=0)
 
     map_handlers = {"on_map_tap": lambda *_: None}
 
@@ -248,9 +245,6 @@ def build_dashboard():
 
     line_left, line_mid, line_right, on_map_tap = build_timeseries_views(
         data,
-        depth_selector,
-        borehole_info,
-        borehole_stream,
         map_state,
         selection_state=selection_state,
     )
@@ -271,8 +265,6 @@ def build_dashboard():
     top_right = pn.Column(
         loading_indicator,
         variable_info,
-        borehole_info,
-        depth_selector,
         panel_table,
         sizing_mode="stretch_both",
     )
@@ -288,9 +280,6 @@ def build_dashboard():
 
         new_line_left, new_line_mid, new_line_right, new_on_map_tap = build_timeseries_views(
             data,
-            depth_selector,
-            borehole_info,
-            borehole_stream,
             new_map_state,
             selection_state=selection_state,
         )

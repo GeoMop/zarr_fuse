@@ -22,7 +22,7 @@ def _resolve_fields_for_group(schema_config, group_path):
     return fields
 
 
-def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream, map_state, selection_state=None):
+def build_timeseries_views(data, map_state, selection_state):
     start_total = time.perf_counter()
     endpoint_config = data.client.get_endpoint(data.endpoint_name)
     defaults_config = endpoint_config["defaults"]
@@ -50,22 +50,6 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     middle_window_days = timeseries_config["middle_window_days"]
     right_window_hours = timeseries_config["right_window_hours"]
 
-    timeseries_state = {
-        "times": pd.to_datetime([]),
-        "depths": np.array([]),
-        "series": [],
-        "entity_index": 0,
-        "entity_display_name": None,
-        "selected_lat": None,
-        "selected_lon": None,
-        "selected_marker_has_value": True,
-    }
-
-    def format_depth(depth_value: float):
-        if np.isnan(depth_value):
-            return "NaN"
-        return f"{depth_value:.2f}"
-
     def _default_coords():
         lats = map_state.get("lats")
         lons = map_state.get("lons")
@@ -76,46 +60,11 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             return 0.0, 0.0
         return float(lats[0]), float(lons[0])
 
-    def _update_depth_selector(depths, series, entity_index, borehole_name=None):
-        available = []
-        for idx, values in enumerate(series):
-            if np.any(np.isfinite(values)):
-                available.append(idx)
-        if not available:
-            available = list(range(len(series)))
-
-        depth_selector.options = {
-            f"{format_depth(depths[i])}" if i < len(depths) else str(i): i
-            for i in available
-        }
-        depth_selector.value = available
-        display_name = borehole_name if borehole_name else entity_label
-        lat = timeseries_state.get("selected_lat")
-        lon = timeseries_state.get("selected_lon")
-        lat_lon_text = f" ({lat:.4f}, {lon:.4f})" if lat is not None and lon is not None else ""
-        if timeseries_state.get("selected_marker_has_value", True):
-            borehole_info.object = f"### {display_name}{lat_lon_text}"
-        else:
-            borehole_info.object = (
-                f"### {display_name}{lat_lon_text}\n"
-                "No data available for this site at the selected time and depth."
-            )
-        timeseries_state["entity_display_name"] = display_name
-
     def _fetch_timeseries(lat, lon, marker_meta=None):
         start = time.perf_counter()
         print(f"[fetch_ts] Called with lat={lat:.4f}, lon={lon:.4f}, marker_meta={marker_meta}")
         if not default_display_variable:
             print(f"[fetch_ts] No variable selected — skipping fetch")
-            timeseries_state["times"] = pd.to_datetime([])
-            timeseries_state["depths"] = np.array([])
-            timeseries_state["series"] = []
-            timeseries_state["entity_index"] = 0
-            timeseries_state["selected_lat"] = lat
-            timeseries_state["selected_lon"] = lon
-            depth_selector.options = {}
-            depth_selector.value = []
-            borehole_info.object = "### Select a variable first"
             return None
         marker_entity_index = marker_meta.get("entity_index") if isinstance(marker_meta, dict) else None
         marker_site_id = marker_meta.get("site_id") if isinstance(marker_meta, dict) else None
@@ -132,15 +81,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         )
         if fig.get("status") == "error":
             reason = fig.get("reason", "Failed to load timeseries")
-            timeseries_state["times"] = pd.to_datetime([])
-            timeseries_state["depths"] = np.array([])
-            timeseries_state["series"] = []
-            timeseries_state["entity_index"] = 0
-            timeseries_state["selected_lat"] = lat
-            timeseries_state["selected_lon"] = lon
-            depth_selector.options = {}
-            depth_selector.value = []
-            borehole_info.object = f"### No data ({reason})"
+            print(f"[fetch_ts] Error: {reason}")
             print(f"[timing] timeseries fetch failed: {time.perf_counter() - start:.3f}s")
             return None
 
@@ -150,36 +91,15 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         entity_index = int(fig.get("borehole_index", 0))
         borehole_name = fig.get("borehole_name")
 
-        # Only update state if we got data for the correct entity
-        timeseries_state["times"] = times
-        timeseries_state["depths"] = depths
-        timeseries_state["series"] = series
-        timeseries_state["entity_index"] = entity_index
-        timeseries_state["selected_lat"] = lat
-        timeseries_state["selected_lon"] = lon
-        # Determine has_value based on fetched series content (not map-slice)
-        has_series_data = False
-        try:
-            if series:
-                has_series_data = any(np.any(np.isfinite(s)) for s in series)
-        except Exception:
-            has_series_data = False
-        timeseries_state["selected_marker_has_value"] = bool(has_series_data)
-        if not has_series_data:
-            print(f"[fetch_ts] Fetched site {borehole_name}: no finite data in series")
-        else:
-            print(f"[fetch_ts] Fetched site {borehole_name}: has finite data")
-        _update_depth_selector(depths, series, entity_index, borehole_name)
-        if selection_state is not None:
-            site_id = borehole_name if borehole_name else f"{entity_label}_{entity_index}"
-            selection_state.add_site(
-                entity_index=entity_index,
-                site_id=site_id,
-                depths=depths,
-                series=series,
-                times=times,
-            )
-            print(f"[plot_selection] Site added via side-by-side: {site_id}")
+        site_id = borehole_name if borehole_name else f"{entity_label}_{entity_index}"
+        selection_state.add_site(
+            entity_index=entity_index,
+            site_id=site_id,
+            depths=depths,
+            series=series,
+            times=times,
+        )
+        print(f"[plot_selection] Site added: {site_id}")
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
 

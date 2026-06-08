@@ -18,7 +18,7 @@ from holoviews import streams
 from dashboard.data import load_data
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
-from dashboard.plot_selection import build_plot_selection
+from dashboard.plot_selection import build_plot_selection_panel, SelectionState
 from dashboard.sidebar import build_sidebar
 
 # ============================================================================
@@ -65,11 +65,23 @@ STRUCTURE = data.client.get_structure(ENDPOINT_NAME)
 controller, node_select, node_hint = build_sidebar(
     ENDPOINT_NAME, ENDPOINT, STRUCTURE, endpoints=ENDPOINTS
 )
-depth_selector, borehole_info = build_plot_selection()
+
+selection_state = SelectionState()
+endpoint_cfg = ENDPOINTS.get(ENDPOINT_NAME) or data.client.get_endpoint(ENDPOINT_NAME)
+schema_display = endpoint_cfg.get("schema_display", {})
+schema_cfg = endpoint_cfg.get("schema", {})
+fields_cfg = schema_cfg.get("fields", {})
+from dashboard.multi_time_views import _resolve_fields_for_group
+resolved_fields = _resolve_fields_for_group(schema_cfg, data.group_path)
+entity_label_dd = (schema_display.get("entity_name")
+                   or resolved_fields.get("entity") or "Site")
+vertical_label_dd = (schema_display.get("vertical_name")
+                     or resolved_fields.get("vertical") or "Depth")
+panel_table, _state = build_plot_selection_panel(
+    entity_label=entity_label_dd, vertical_label=vertical_label_dd,
+)
 
 tap_stream = streams.Tap(x=None, y=None)
-borehole_stream = streams.Stream.define("Borehole", borehole_index=0)()
-borehole_stream.event(borehole_index=0)
 
 map_handlers = {"on_map_tap": lambda *_: None}
 
@@ -97,10 +109,8 @@ update_data_warnings(map_state)
 
 line_left, line_mid, line_right, on_map_tap = build_timeseries_views(
     data,
-    depth_selector,
-    borehole_info,
-    borehole_stream,
     map_state,
+    selection_state=selection_state,
 )
 map_handlers["on_map_tap"] = on_map_tap
 
@@ -125,8 +135,7 @@ loading_indicator = pn.Row(
 )
 top_right = pn.Column(
     loading_indicator,
-    borehole_info,
-    depth_selector,
+    panel_table,
     sizing_mode="stretch_both",
 )
 bottom_left = pn.pane.HoloViews(line_left, sizing_mode="stretch_both")
@@ -139,10 +148,8 @@ def refresh_views():
     update_data_warnings(new_map_state)
     new_line_left, new_line_mid, new_line_right, new_on_map_tap = build_timeseries_views(
         data,
-        depth_selector,
-        borehole_info,
-        borehole_stream,
         new_map_state,
+        selection_state=selection_state,
     )
     map_handlers["on_map_tap"] = new_on_map_tap
     top_left.object = new_map_view
