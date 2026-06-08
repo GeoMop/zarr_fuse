@@ -256,9 +256,33 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
                 center_state[force_flag_key] = False
         return _hook
 
+    def _make_yrange_hook(ylim):
+        def _hook(plot, element):
+            plot.state.y_range.start = ylim[0]
+            plot.state.y_range.end = ylim[1]
+        return _hook
+
     left_tap.param.watch(update_center_from_tap, ["x"])
     mid_tap.param.watch(update_center_from_tap, ["x"])
     right_tap.param.watch(update_center_from_tap, ["x"])
+
+    def _compute_ylim(times, series, selected_depths, xlim):
+        if len(times) == 0 or not series:
+            return None
+        mask = (times >= xlim[0]) & (times <= xlim[1])
+        visible = np.where(mask)[0]
+        if len(visible) == 0:
+            return None
+        values = []
+        for idx in selected_depths:
+            if idx < len(series):
+                vals = series[idx][visible]
+                values.extend(vals[np.isfinite(vals)])
+        if not values:
+            return None
+        ymin, ymax = float(np.min(values)), float(np.max(values))
+        padding = (ymax - ymin) * 0.1 or 1.0
+        return (ymin - padding, ymax + padding)
 
     def create_timeseries_view(value=None, center=None, view="left", **_):
         selected_depths = value or []
@@ -286,11 +310,16 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         overlay = build_timeseries_overlay(selected_depths)
         overlay = overlay.redim.range(**{time_dim: xlim})
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
+
+        ylim = _compute_ylim(times, timeseries_state["series"], selected_depths, xlim)
+
         if view == "left":
             hooks = [make_xrange_hook(xlim, "force_left")]
         else:
             force_key = "force_mid" if view == "mid" else "force_right"
             hooks = [make_xrange_hook(xlim, force_key)]
+        if ylim:
+            hooks.append(_make_yrange_hook(ylim))
         entity_display = timeseries_state.get("entity_display_name") or f"{entity_label.lower()} {timeseries_state['entity_index']}"
         return overlay.opts(
             responsive=True,
