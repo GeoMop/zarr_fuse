@@ -9,7 +9,8 @@ from dashboard.config import get_default_endpoint_name, get_endpoint_config, loa
 from dashboard.data import load_data
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
-from dashboard.sidebar import _flatten_nodes, build_depth_controls, build_sidebar
+from dashboard.plot_selection import build_plot_selection
+from dashboard.sidebar import _flatten_nodes, build_sidebar
 
 JS_FILES = {
     "jquery": "https://code.jquery.com/jquery-1.11.1.min.js",
@@ -59,7 +60,7 @@ def build_dashboard():
         endpoint_name, endpoint, structure, endpoints=endpoints
     )
     data.group_path = node_select.value
-    depth_selector, borehole_info = build_depth_controls()
+    depth_selector, borehole_info = build_plot_selection()
 
     tap_stream = streams.Tap(x=None, y=None)
     borehole_stream = streams.Stream.define("Borehole", borehole_index=0)()

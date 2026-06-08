@@ -175,13 +175,4 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
     return controller, store_selector, tree_view, variable_selector, variable_info, variable_metadata, node_hint, store_info
 
 
-def build_depth_controls():
-    depth_selector = pn.widgets.CheckBoxGroup(
-        name="Depths (m)",
-        options=[],
-        value=[],
-        inline=False,
-        sizing_mode="stretch_width",
-    )
-    borehole_info = pn.pane.Markdown("### No borehole selected", sizing_mode="stretch_width")
-    return depth_selector, borehole_info
+

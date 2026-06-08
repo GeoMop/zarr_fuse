@@ -18,7 +18,8 @@ from holoviews import streams
 from dashboard.data import load_data
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
-from dashboard.sidebar import build_depth_controls, build_sidebar
+from dashboard.plot_selection import build_plot_selection
+from dashboard.sidebar import build_sidebar
 
 # ============================================================================
 # CONFIGURATION
@@ -64,7 +65,7 @@ STRUCTURE = data.client.get_structure(ENDPOINT_NAME)
 controller, node_select, node_hint = build_sidebar(
     ENDPOINT_NAME, ENDPOINT, STRUCTURE, endpoints=ENDPOINTS
 )
-depth_selector, borehole_info = build_depth_controls()
+depth_selector, borehole_info = build_plot_selection()
 
 tap_stream = streams.Tap(x=None, y=None)
 borehole_stream = streams.Stream.define("Borehole", borehole_index=0)()
