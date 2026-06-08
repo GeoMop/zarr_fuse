@@ -105,6 +105,18 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     def _fetch_timeseries(lat, lon, marker_meta=None):
         start = time.perf_counter()
         print(f"[fetch_ts] Called with lat={lat:.4f}, lon={lon:.4f}, marker_meta={marker_meta}")
+        if not default_display_variable:
+            print(f"[fetch_ts] No variable selected — skipping fetch")
+            timeseries_state["times"] = pd.to_datetime([])
+            timeseries_state["depths"] = np.array([])
+            timeseries_state["series"] = []
+            timeseries_state["entity_index"] = 0
+            timeseries_state["selected_lat"] = lat
+            timeseries_state["selected_lon"] = lon
+            depth_selector.options = {}
+            depth_selector.value = []
+            borehole_info.object = "### Select a variable first"
+            return None
         marker_entity_index = marker_meta.get("entity_index") if isinstance(marker_meta, dict) else None
         marker_site_id = marker_meta.get("site_id") if isinstance(marker_meta, dict) else None
         selected_entity_index = marker_entity_index
