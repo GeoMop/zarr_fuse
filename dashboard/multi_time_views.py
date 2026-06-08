@@ -5,6 +5,15 @@ import time
 
 from holoviews import streams
 
+COLORS = [
+    "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
+    "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990",
+    "#dcbeff", "#9a6324", "#800000", "#aaffc3", "#808000",
+    "#ffd8b1", "#000075", "#a9a9a9", "#e6beff", "#1a1a1a",
+]
+
+LINE_DASHES = ["solid", "dashed", "dotted", "dashdot", "longdash", "dashdotdot"]
+
 
 def _resolve_fields_for_group(schema_config, group_path):
     fields = schema_config.get("fields", {})
@@ -121,6 +130,14 @@ def build_timeseries_views(data, map_state, selection_state):
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
 
+        # ── style mapping ─────────────────────────────────────────────
+        # Color by depth: pick a distinct color for each unique depth
+        all_depths = selection_state.all_depths
+        depth_colors = {d: COLORS[i % len(COLORS)] for i, d in enumerate(all_depths)}
+        # Line dash by site entity_index
+        entity_indices = sorted({s["entity_index"] for s in selection_state.sites})
+        entity_dashes = {ei: LINE_DASHES[i % len(LINE_DASHES)] for i, ei in enumerate(entity_indices)}
+
         curves = []
         for entity_idx, depth_idx in selected_combos:
             site = site_lookup.get(entity_idx)
@@ -133,7 +150,11 @@ def build_timeseries_views(data, map_state, selection_state):
                 time_dim: times,
                 y_axis_label: site["series"][depth_idx],
             })
-            curves.append(hv.Curve(curve_df, time_dim, y_axis_label, label=label))
+            curve = hv.Curve(curve_df, time_dim, y_axis_label, label=label).opts(
+                color=depth_colors.get(float(depth_val), "#000000"),
+                line_dash=entity_dashes.get(entity_idx, "solid"),
+            )
+            curves.append(curve)
 
         if not curves:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})

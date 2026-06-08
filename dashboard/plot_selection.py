@@ -153,63 +153,103 @@ def _format_depth(depth_value: float) -> str:
 def build_table(state: SelectionState) -> pn.Column:
     """Build the site × depth checkbox matrix from *state*.
 
-    Returns a ``pn.Column`` of rows.  Each row is a ``pn.Row`` with:
-      - site name label
-      - one checkbox per depth level (or ``—`` placeholder)
-      - remove button
+    Orientation is controlled by ``state.orientation``:
+
+    ``"site_rows"`` (default)
+      Rows = sites, columns = depths.  Each row has a site label, one checkbox
+      per depth, and a remove button.
+
+    ``"depth_rows"``
+      Rows = depths, columns = sites.  Each row has a depth label and one
+      checkbox per site.  No remove buttons in this orientation.
     """
     rows: list[pn.Row] = []
 
-    # ── header row ────────────────────────────────────────────────
-    header_cells: list = [
-        pn.pane.Markdown("**Site**", width=LBL_WIDTH),
-        *[
-            pn.pane.Markdown(f"**{_format_depth(d)}**", width=CELL_WIDTH)
-            for d in state.all_depths
-        ],
-        pn.pane.Markdown("", width=BTN_WIDTH),
-    ]
-    rows.append(pn.Row(*header_cells, sizing_mode="stretch_width"))
-
-    # ── data rows ─────────────────────────────────────────────────
-    for site in state.sites:
-        site_id = site["site_id"]
-        site_depths = set(float(d) for d in np.asarray(site["depths"]).ravel())
-
-        cells: list = [
-            pn.pane.Markdown(f"**{site_id}**", width=LBL_WIDTH),
+    if state.orientation == "depth_rows":
+        # ── header ─────────────────────────────────────────────────
+        header_cells: list = [
+            pn.pane.Markdown("**Depth**", width=LBL_WIDTH),
+            *[
+                pn.pane.Markdown(f"**{s['site_id']}**", width=CELL_WIDTH)
+                for s in state.sites
+            ],
         ]
+        rows.append(pn.Row(*header_cells, sizing_mode="stretch_width"))
 
+        # ── data rows (one per depth) ──────────────────────────────
         for depth_val in state.all_depths:
-            if depth_val in site_depths:
-                cb = pn.widgets.Checkbox(
-                    value=state._selected.get((site_id, depth_val), False),
-                    width=CELL_WIDTH,
-                )
+            cells: list = [
+                pn.pane.Markdown(f"**{_format_depth(depth_val)}**", width=LBL_WIDTH),
+            ]
+            for site in state.sites:
+                site_id = site["site_id"]
+                site_depths = set(float(d) for d in np.asarray(site["depths"]).ravel())
+                if depth_val in site_depths:
+                    cb = pn.widgets.Checkbox(
+                        value=state._selected.get((site_id, depth_val), False),
+                        width=CELL_WIDTH,
+                    )
 
-                def _on_cb(event, _site_id=site_id, _depth=depth_val):
-                    state.set_selected(_site_id, _depth, event.new)
+                    def _on_cb(event, _site_id=site_id, _depth=depth_val):
+                        state.set_selected(_site_id, _depth, event.new)
 
-                cb.param.watch(_on_cb, "value")
-                cells.append(cb)
-            else:
-                cells.append(pn.pane.Markdown("—", width=CELL_WIDTH))
+                    cb.param.watch(_on_cb, "value")
+                    cells.append(cb)
+                else:
+                    cells.append(pn.pane.Markdown("—", width=CELL_WIDTH))
 
-        remove_btn = pn.widgets.Button(
-            name="✕",
-            width=BTN_WIDTH,
-            height=30,
-            button_type="danger",
-            stylesheets=[".bk-btn-danger { padding: 0px !important; font-size: 12px; }"],
-        )
+            rows.append(pn.Row(*cells, sizing_mode="stretch_width"))
 
-        def _on_remove(event, _idx=site["entity_index"]):
-            state.remove_site(_idx)
+    else:
+        # ── "site_rows" (default) ──────────────────────────────────
+        header_cells: list = [
+            pn.pane.Markdown("**Site**", width=LBL_WIDTH),
+            *[
+                pn.pane.Markdown(f"**{_format_depth(d)}**", width=CELL_WIDTH)
+                for d in state.all_depths
+            ],
+            pn.pane.Markdown("", width=BTN_WIDTH),
+        ]
+        rows.append(pn.Row(*header_cells, sizing_mode="stretch_width"))
 
-        remove_btn.on_click(_on_remove)
-        cells.append(remove_btn)
+        for site in state.sites:
+            site_id = site["site_id"]
+            site_depths = set(float(d) for d in np.asarray(site["depths"]).ravel())
 
-        rows.append(pn.Row(*cells, sizing_mode="stretch_width"))
+            cells: list = [
+                pn.pane.Markdown(f"**{site_id}**", width=LBL_WIDTH),
+            ]
+
+            for depth_val in state.all_depths:
+                if depth_val in site_depths:
+                    cb = pn.widgets.Checkbox(
+                        value=state._selected.get((site_id, depth_val), False),
+                        width=CELL_WIDTH,
+                    )
+
+                    def _on_cb(event, _site_id=site_id, _depth=depth_val):
+                        state.set_selected(_site_id, _depth, event.new)
+
+                    cb.param.watch(_on_cb, "value")
+                    cells.append(cb)
+                else:
+                    cells.append(pn.pane.Markdown("—", width=CELL_WIDTH))
+
+            remove_btn = pn.widgets.Button(
+                name="✕",
+                width=BTN_WIDTH,
+                height=30,
+                button_type="danger",
+                stylesheets=[".bk-btn-danger { padding: 0px !important; font-size: 12px; }"],
+            )
+
+            def _on_remove(event, _idx=site["entity_index"]):
+                state.remove_site(_idx)
+
+            remove_btn.on_click(_on_remove)
+            cells.append(remove_btn)
+
+            rows.append(pn.Row(*cells, sizing_mode="stretch_width"))
 
     return pn.Column(*rows, sizing_mode="stretch_width")
 
