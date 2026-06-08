@@ -179,7 +179,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             curves.append(hv.Curve(curve_df, time_dim, y_axis_label, label=label))
 
         if not curves:
-            curves = [hv.Curve([])]
+            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
+            curves = [hv.Curve(empty_df, time_dim, y_axis_label)]
         return hv.Overlay(curves)
 
     def clamp_range(center, span):
@@ -254,7 +255,8 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
 
         times = timeseries_state["times"]
         if len(times) == 0:
-            return hv.Overlay([hv.Curve([])])
+            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
+            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
 
         if center_state["center"] is None:
             full_span = times.max() - times.min()
