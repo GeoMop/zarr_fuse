@@ -574,9 +574,7 @@ def load_data(
     if not resolved_group_path:
         raise ValueError("group_path is required (set defaults.group_path or pass group_path explicitly)")
 
-    resolved_display_variable = display_variable or endpoint.defaults.display_variable
-    if not resolved_display_variable:
-        raise ValueError("display_variable is required (set defaults.display_variable or pass display_variable explicitly)")
+    resolved_display_variable = display_variable or endpoint.defaults.display_variable or ""
 
     return DashboardData(
         endpoint_name=endpoint_name,

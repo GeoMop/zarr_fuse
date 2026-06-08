@@ -201,15 +201,15 @@ def build_map_view(data, tap_stream):
 
     default_display_variable = data.display_variable
     if not default_display_variable:
-        raise ValueError(f"No display variable set for endpoint '{data.endpoint_name}'")
-
-    fig = data.client.get_map_data(
-        data.endpoint_name,
-        group_path=data.group_path,
-        variable=default_display_variable,
-        time_index=0,
-        depth_index=0,
-    )
+        fig = {"status": "error", "reason": "No variable selected"}
+    else:
+        fig = data.client.get_map_data(
+            data.endpoint_name,
+            group_path=data.group_path,
+            variable=default_display_variable,
+            time_index=0,
+            depth_index=0,
+        )
     total_points = 0  # Initialize for logging
     if fig.get("status") == "error":
         reason = fig.get("reason", "No map data available")

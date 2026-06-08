@@ -44,14 +44,11 @@ def build_dashboard():
 
     endpoint_name = configured_default or next(iter(endpoints.keys()))
 
-    endpoint_config = get_endpoint_config(endpoints_path, endpoint_name)
-    default_display_variable = endpoint_config.defaults.display_variable
-
     data = load_data(
         "local",
         endpoint_name=endpoint_name,
         endpoints_path=endpoints_path,
-        display_variable=default_display_variable,
+        display_variable="",
     )
 
     endpoints = data.client.get_endpoints()
@@ -82,29 +79,16 @@ def build_dashboard():
             
             if variables:
                 var_options = [f"{name} ({unit})" if unit else name for name, unit in variables.items()]
-                variable_selector.options = var_options
-                
+
                 # Log each variable
                 for name, unit in variables.items():
                     print(f"[variables]   - {name}: unit={unit}")
                 
-                current_var = data.client.get_endpoint(endpoint_name).get("defaults", {}).get("display_variable")
-                if current_var:
-                    # Find matching label
-                    for i, label in enumerate(var_options):
-                        if label.startswith(current_var):
-                            variable_selector.value = label
-                            print(f"[variables] Selected default: {current_var}")
-                            break
-                    else:
-                        variable_selector.value = var_options[0]
-                        print(f"[variables] Using first: {var_options[0]}")
-                else:
-                    # No default — add placeholder to prevent auto-selection
-                    placeholder = "-- Select variable --"
-                    variable_selector.options = [placeholder] + var_options
-                    variable_selector.value = placeholder
-                    
+                placeholder = "-- Select variable --"
+                variable_selector.options = [placeholder] + var_options
+                variable_selector.value = placeholder
+                data.display_variable = ""
+
                 # Update info text
                 variable_info.object = f"**{len(variables)} variables available**\nClick to select"
                 print(f"[variables] Loaded {len(variables)} variables successfully")
@@ -188,7 +172,7 @@ def build_dashboard():
         endpoint_obj = data.client.get_endpoint(selected_endpoint)
         data.endpoint_name = selected_endpoint
         data.group_path = "/"
-        data.display_variable = endpoint_obj.get("defaults", {}).get("display_variable") or ""
+        data.display_variable = ""
         
         # Clear cache for new endpoint
         data.client.clear_cache()
