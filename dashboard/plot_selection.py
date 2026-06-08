@@ -205,6 +205,86 @@ def build_table(state: SelectionState) -> pn.Column:
     return pn.Column(*rows, sizing_mode="stretch_width")
 
 
+def build_plot_selection_panel(
+    entity_label="Site",
+    vertical_label="Depth",
+    state=None,
+) -> tuple[pn.Column, SelectionState]:
+    """Build the Plot Selection panel with row/column dropdowns + table.
+
+    Parameters
+    ----------
+    entity_label : str
+        Display name for the entity/site dimension (e.g. ``"Borehole"``).
+    vertical_label : str
+        Display name for the vertical/depth dimension (e.g. ``"Depth"``).
+    state : SelectionState, optional
+        Reuse an existing state instance (e.g. when switching endpoints).
+        If omitted a fresh state is created.
+
+    Returns
+    -------
+    panel : pn.Column
+        The assembled widget.
+    state : SelectionState
+        The backing state object — wire callbacks to this.
+    """
+    if state is None:
+        state = SelectionState(entity_field=entity_label, vertical_field=vertical_label)
+
+    row_select = pn.widgets.Select(
+        name="Rows",
+        options={entity_label: "entity", vertical_label: "vertical"},
+        value="entity",
+        width=200,
+    )
+    col_select = pn.widgets.Select(
+        name="Columns",
+        options={vertical_label: "vertical", entity_label: "entity"},
+        value="vertical",
+        width=200,
+    )
+
+    _orientation_lock = False
+
+    def _sync_orientation(event=None):
+        nonlocal _orientation_lock
+        if _orientation_lock:
+            return
+        _orientation_lock = True
+        try:
+            if row_select.value == col_select.value:
+                other = "vertical" if row_select.value == "entity" else "entity"
+                col_select.value = other
+            orient = "site_rows" if row_select.value == "entity" else "depth_rows"
+            state.orientation = orient
+            new_table = build_table(state)
+            table_area.objects = list(new_table.objects)
+        finally:
+            _orientation_lock = False
+
+    row_select.param.watch(_sync_orientation, "value")
+    col_select.param.watch(_sync_orientation, "value")
+
+    def _on_layout_change(event):
+        new_table = build_table(state)
+        table_area.objects = list(new_table.objects)
+
+    state.param.watch(_on_layout_change, "layout_version")
+
+    controls = pn.Row(row_select, col_select, sizing_mode="stretch_width")
+    table_area = build_table(state)
+
+    panel = pn.Column(
+        pn.pane.Markdown("**Plot Selection**", margin=(0, 0, 5, 0)),
+        controls,
+        table_area,
+        sizing_mode="stretch_width",
+    )
+
+    return panel, state
+
+
 def build_plot_selection():
     """Temporary relocation: just wraps the existing depth controls."""
     depth_selector = pn.widgets.CheckBoxGroup(
