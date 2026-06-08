@@ -322,7 +322,13 @@ def build_plot_selection_panel(
     state.param.watch(_on_layout_change, "layout_version")
 
     controls = pn.Row(row_select, col_select, sizing_mode="stretch_width")
-    table_area = build_table(state)
+    table_area = pn.Column(
+        *build_table(state).objects,
+        scroll=True,
+        max_height=400,
+        styles={"overflow": "auto"},
+        sizing_mode="stretch_width",
+    )
 
     panel = pn.Column(
         pn.pane.Markdown("**Plot Selection**", margin=(0, 0, 5, 0)),
