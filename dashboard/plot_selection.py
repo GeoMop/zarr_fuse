@@ -132,6 +132,79 @@ class SelectionState(param.Parameterized):
         return sorted(result)
 
 
+LBL_WIDTH = 120
+CELL_WIDTH = 70
+BTN_WIDTH = 40
+
+
+def _format_depth(depth_value: float) -> str:
+    return f"{depth_value:.2f}"
+
+
+def build_table(state: SelectionState) -> pn.Column:
+    """Build the site × depth checkbox matrix from *state*.
+
+    Returns a ``pn.Column`` of rows.  Each row is a ``pn.Row`` with:
+      - site name label
+      - one checkbox per depth level (or ``—`` placeholder)
+      - remove button
+    """
+    rows: list[pn.Row] = []
+
+    # ── header row ────────────────────────────────────────────────
+    header_cells: list = [
+        pn.pane.Markdown("**Site**", width=LBL_WIDTH),
+        *[
+            pn.pane.Markdown(f"**{_format_depth(d)}**", width=CELL_WIDTH)
+            for d in state.all_depths
+        ],
+        pn.pane.Markdown("", width=BTN_WIDTH),
+    ]
+    rows.append(pn.Row(*header_cells, sizing_mode="stretch_width"))
+
+    # ── data rows ─────────────────────────────────────────────────
+    for site in state.sites:
+        site_id = site["site_id"]
+        site_depths = set(float(d) for d in np.asarray(site["depths"]).ravel())
+
+        cells: list = [
+            pn.pane.Markdown(f"**{site_id}**", width=LBL_WIDTH),
+        ]
+
+        for depth_val in state.all_depths:
+            if depth_val in site_depths:
+                cb = pn.widgets.Checkbox(
+                    value=state._selected.get((site_id, depth_val), False),
+                    width=CELL_WIDTH,
+                )
+
+                def _on_cb(event, _site_id=site_id, _depth=depth_val):
+                    state.set_selected(_site_id, _depth, event.new)
+
+                cb.param.watch(_on_cb, "value")
+                cells.append(cb)
+            else:
+                cells.append(pn.pane.Markdown("—", width=CELL_WIDTH))
+
+        remove_btn = pn.widgets.Button(
+            name="✕",
+            width=BTN_WIDTH,
+            height=30,
+            button_type="danger",
+            stylesheets=[".bk-btn-danger { padding: 0px !important; font-size: 12px; }"],
+        )
+
+        def _on_remove(event, _idx=site["entity_index"]):
+            state.remove_site(_idx)
+
+        remove_btn.on_click(_on_remove)
+        cells.append(remove_btn)
+
+        rows.append(pn.Row(*cells, sizing_mode="stretch_width"))
+
+    return pn.Column(*rows, sizing_mode="stretch_width")
+
+
 def build_plot_selection():
     """Temporary relocation: just wraps the existing depth controls."""
     depth_selector = pn.widgets.CheckBoxGroup(
