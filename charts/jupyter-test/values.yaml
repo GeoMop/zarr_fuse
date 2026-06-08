@@ -1,0 +1,18 @@
+image:
+  registry: docker.io
+  repository: mocstepan/voila-app
+  tag: latest
+app:
+  externalPort: 80
+  internalPort: 8080
+securityContext:
+  pod:
+    runAsUser: 1000
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  container:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
