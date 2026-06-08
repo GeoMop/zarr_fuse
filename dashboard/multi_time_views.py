@@ -183,20 +183,35 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
 
-    def build_timeseries_overlay(selected_depths):
-        curves = []
-        times = timeseries_state["times"]
-        depths = timeseries_state["depths"]
-        series = timeseries_state["series"]
+    def build_timeseries_overlay():
+        if selection_state is None:
+            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
+            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
+        selected_combos = selection_state.get_selected_combinations()
+        if not selected_combos or not selection_state.sites:
+            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
+            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
 
-        for depth_idx in selected_depths:
-            if depth_idx >= len(series):
+        site_lookup = {s["entity_index"]: s for s in selection_state.sites}
+        times = next(
+            (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
+            None,
+        )
+        if times is None or len(times) == 0:
+            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
+            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
+
+        curves = []
+        for entity_idx, depth_idx in selected_combos:
+            site = site_lookup.get(entity_idx)
+            if site is None or depth_idx >= len(site["series"]):
                 continue
-            depth_val = depths[depth_idx] if depth_idx < len(depths) else depth_idx
-            label = f"{format_depth(depth_val)}"
+            depths_arr = np.asarray(site["depths"]).ravel()
+            depth_val = depths_arr[depth_idx] if depth_idx < len(depths_arr) else depth_idx
+            label = f"{site['site_id']} @ {depth_val:.2f}"
             curve_df = pd.DataFrame({
                 time_dim: times,
-                y_axis_label: series[depth_idx],
+                y_axis_label: site["series"][depth_idx],
             })
             curves.append(hv.Curve(curve_df, time_dim, y_axis_label, label=label))
 
@@ -206,7 +221,12 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         return hv.Overlay(curves)
 
     def clamp_range(center, span):
-        times = timeseries_state["times"]
+        if selection_state is None:
+            return (pd.Timestamp("1970-01-01"), pd.Timestamp("1970-01-02"))
+        times = next(
+            (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
+            pd.to_datetime([]),
+        )
         if len(times) == 0:
             return (pd.Timestamp("1970-01-01"), pd.Timestamp("1970-01-02"))
         min_t = times.min()
@@ -276,31 +296,38 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
     mid_tap.param.watch(update_center_from_tap, ["x"])
     right_tap.param.watch(update_center_from_tap, ["x"])
 
-    def _compute_ylim(times, series, selected_depths, xlim):
-        if len(times) == 0 or not series:
+    def _compute_ylim(times, selected_combos, xlim):
+        if selection_state is None or len(times) == 0 or not selected_combos:
             return None
         mask = (times >= xlim[0]) & (times <= xlim[1])
         visible = np.where(mask)[0]
         if len(visible) == 0:
             return None
         values = []
-        for idx in selected_depths:
-            if idx < len(series):
-                vals = series[idx][visible]
-                values.extend(vals[np.isfinite(vals)])
+        site_lookup = {s["entity_index"]: s for s in selection_state.sites}
+        for entity_idx, depth_idx in selected_combos:
+            site = site_lookup.get(entity_idx)
+            if site is None or depth_idx >= len(site["series"]):
+                continue
+            vals = site["series"][depth_idx][visible]
+            values.extend(vals[np.isfinite(vals)])
         if not values:
             return None
         ymin, ymax = float(np.min(values)), float(np.max(values))
         padding = (ymax - ymin) * 0.1 or 1.0
         return (ymin - padding, ymax + padding)
 
-    def create_timeseries_view(value=None, center=None, view="left", **_):
-        selected_depths = value or []
-        if not selected_depths:
-            selected_depths = list(range(len(timeseries_state["series"])))
+    def create_timeseries_view(center=None, view="left", **_):
+        if selection_state is None:
+            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
+            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
 
-        times = timeseries_state["times"]
-        if len(times) == 0:
+        selected_combos = selection_state.get_selected_combinations()
+        times = next(
+            (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
+            None,
+        )
+        if times is None or len(times) == 0:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
 
@@ -317,11 +344,11 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         else:
             xlim = clamp_range(center_time, right_span)
 
-        overlay = build_timeseries_overlay(selected_depths)
+        overlay = build_timeseries_overlay()
         overlay = overlay.redim.range(**{time_dim: xlim})
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
 
-        ylim = _compute_ylim(times, timeseries_state["series"], selected_depths, xlim)
+        ylim = _compute_ylim(times, selected_combos, xlim)
 
         if view == "left":
             hooks = [make_xrange_hook(xlim, "force_left")]
@@ -330,51 +357,49 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             hooks = [make_xrange_hook(xlim, force_key)]
         if ylim:
             hooks.append(_make_yrange_hook(ylim))
-        entity_display = timeseries_state.get("entity_display_name") or f"{entity_label.lower()} {timeseries_state['entity_index']}"
+        n_sites = len(selection_state.sites)
+        site_label = "1 site" if n_sites == 1 else f"{n_sites} sites"
         return overlay.opts(
             responsive=True,
-            title=f"{metric_label} over Time ({entity_display})",
+            title=f"{metric_label} over Time ({site_label})",
             tools=["hover", "xwheel_zoom", "xpan", "tap", "reset"],
             active_tools=["xwheel_zoom", "xpan"],
             xlim=xlim,
             axiswise=True,
             shared_axes=False,
-            show_legend=False,
+            show_legend=True,
             hooks=hooks,
             framewise=True,
         )
 
     line_left = hv.DynamicMap(
-        lambda value=None, center=None, **kwargs: create_timeseries_view(
-            value=value, center=center, view="left"
+        lambda center=None, **kwargs: create_timeseries_view(
+            center=center, view="left"
         ),
         streams=[
-            borehole_stream,
-            streams.Params(depth_selector, parameters=["value"]),
+            streams.Params(selection_state, parameters=["version"]),
             left_tap,
             center_stream,
         ],
     )
 
     line_mid = hv.DynamicMap(
-        lambda value=None, center=None, **kwargs: create_timeseries_view(
-            value=value, center=center, view="mid"
+        lambda center=None, **kwargs: create_timeseries_view(
+            center=center, view="mid"
         ),
         streams=[
-            borehole_stream,
-            streams.Params(depth_selector, parameters=["value"]),
+            streams.Params(selection_state, parameters=["version"]),
             mid_tap,
             center_stream,
         ],
     )
 
     line_right = hv.DynamicMap(
-        lambda value=None, center=None, **kwargs: create_timeseries_view(
-            value=value, center=center, view="right"
+        lambda center=None, **kwargs: create_timeseries_view(
+            center=center, view="right"
         ),
         streams=[
-            borehole_stream,
-            streams.Params(depth_selector, parameters=["value"]),
+            streams.Params(selection_state, parameters=["version"]),
             right_tap,
             center_stream,
         ],
@@ -387,9 +412,7 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
             print(f"[tap] marker_meta will be None (not computed for initial load)")
             print(f"[tap] Calling _fetch_timeseries with marker_meta=None")
             entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=None)
-            if entity_index is not None:
-                borehole_stream.event(borehole_index=entity_index)
-            return None
+            return entity_index
 
         print(f"[tap] Click detected: x={x}, y={y}")
         lats_raw = map_state.get("lats")
@@ -413,18 +436,13 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         threshold_deg = 0.0002
         if min_dist > threshold_deg ** 2:
             print(f"[tap] Outside threshold ({min_dist:.2e} > {threshold_deg**2:.2e}): not selecting")
-            # Click wasn't close enough to any marker — don't select.
             return None
 
         marker_meta = all_meta[nearest_idx]
         print(f"[tap] Selected marker_meta={marker_meta}")
-        # Always fetch timeseries - even if map-slice has no value.
-        # _fetch_timeseries will check actual series content and update UI accordingly.
-        print(f"[tap] Will fetch timeseries regardless of map-slice has_value")
         print(f"[tap] Calling _fetch_timeseries with marker_meta={marker_meta}")
         entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=marker_meta)
-        if entity_index is not None:
-            borehole_stream.event(borehole_index=entity_index)
+        return entity_index
 
     print(f"[timing] build_timeseries_views: {time.perf_counter() - start_total:.3f}s")
     return line_left, line_mid, line_right, on_map_tap

@@ -62,6 +62,7 @@ class SelectionState(param.Parameterized):
             self._selected.setdefault(key, True)
 
         self.layout_version += 1
+        self.version += 1
         print(f"[SelectionState] Added site {site_id} (idx={entity_index}), "
               f"depths={depths_arr.tolist()}")
 
