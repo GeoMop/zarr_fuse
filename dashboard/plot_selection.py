@@ -203,12 +203,12 @@ def build_table(state: SelectionState) -> pn.Column:
     else:
         # ── "site_rows" (default) ──────────────────────────────────
         header_cells: list = [
+            pn.pane.Markdown("", width=BTN_WIDTH),
             pn.pane.Markdown("**Site**", width=LBL_WIDTH),
             *[
                 pn.pane.Markdown(f"**{_format_depth(d)}**", width=CELL_WIDTH)
                 for d in state.all_depths
             ],
-            pn.pane.Markdown("", width=BTN_WIDTH),
         ]
         rows.append(pn.Row(*header_cells, sizing_mode="stretch_width"))
 
@@ -216,7 +216,21 @@ def build_table(state: SelectionState) -> pn.Column:
             site_id = site["site_id"]
             site_depths = set(float(d) for d in np.asarray(site["depths"]).ravel())
 
+            remove_btn = pn.widgets.Button(
+                name="✕",
+                width=BTN_WIDTH,
+                height=30,
+                button_type="danger",
+                stylesheets=[".bk-btn-danger { padding: 0px !important; font-size: 12px; }"],
+            )
+
+            def _on_remove(event, _idx=site["entity_index"]):
+                state.remove_site(_idx)
+
+            remove_btn.on_click(_on_remove)
+
             cells: list = [
+                remove_btn,
                 pn.pane.Markdown(f"**{site_id}**", width=LBL_WIDTH),
             ]
 
@@ -234,20 +248,6 @@ def build_table(state: SelectionState) -> pn.Column:
                     cells.append(cb)
                 else:
                     cells.append(pn.pane.Markdown("—", width=CELL_WIDTH))
-
-            remove_btn = pn.widgets.Button(
-                name="✕",
-                width=BTN_WIDTH,
-                height=30,
-                button_type="danger",
-                stylesheets=[".bk-btn-danger { padding: 0px !important; font-size: 12px; }"],
-            )
-
-            def _on_remove(event, _idx=site["entity_index"]):
-                state.remove_site(_idx)
-
-            remove_btn.on_click(_on_remove)
-            cells.append(remove_btn)
 
             rows.append(pn.Row(*cells, sizing_mode="stretch_width"))
 
