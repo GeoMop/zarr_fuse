@@ -229,3 +229,96 @@ def test_to_typed_array():
     assert not np.array_equal(src, out.astype(src.dtype), equal_nan=False)
     assert ctx.count_level("WARNING") >= 1
     assert ctx.has_warning_instance(ta.TrimmedArrayWarning)
+
+
+# --- to_typed_array raises on unconvertible input ----------------------------
+def test_to_typed_array_raises_on_bad_string():
+    ctx = DummyCtx()
+    with pytest.raises(ValueError):
+        ta.to_typed_array(np.array(["hello", "1.0"]), np.float64, ctx)
+
+
+# --- _coerce_with_na (ConversionFailedWarning) --------------------------------
+def test_coerce_with_na_str_to_float():
+    ctx = DummyCtx()
+    src = np.array(["1.5", "bad", "3.0", "nope"])
+    out = ta._coerce_with_na(src, np.float64, np.nan, ctx)
+
+    assert out.dtype == np.float64
+    assert out[0] == pytest.approx(1.5)
+    assert np.isnan(out[1])
+    assert out[2] == pytest.approx(3.0)
+    assert np.isnan(out[3])
+    assert ctx.has_warning_instance(ta.ConversionFailedWarning)
+
+
+def test_coerce_with_na_str_to_int():
+    ctx = DummyCtx()
+    na = np.iinfo(np.int32).max
+    src = np.array(["10", "bad", "42"])
+    out = ta._coerce_with_na(src, np.int32, na, ctx)
+
+    assert out.dtype == np.int32
+    assert out[0] == 10
+    assert out[1] == na
+    assert out[2] == 42
+    assert ctx.has_warning_instance(ta.ConversionFailedWarning)
+
+
+def test_coerce_with_na_all_valid_no_warning():
+    ctx = DummyCtx()
+    src = np.array(["1.0", "2.0", "3.0"])
+    out = ta._coerce_with_na(src, np.float64, np.nan, ctx)
+
+    assert out.dtype == np.float64
+    assert out.tolist() == pytest.approx([1.0, 2.0, 3.0])
+    assert not ctx.has_warning_instance(ta.ConversionFailedWarning)
+
+
+def test_coerce_with_na_failed_values_in_warning():
+    ctx = DummyCtx()
+    ta._coerce_with_na(np.array(["ok_nope", "1.0"]), np.float64, np.nan, ctx)
+
+    warn_obj = next(obj for lvl, obj in ctx.records
+                    if lvl == "WARNING" and isinstance(obj, ta.ConversionFailedWarning))
+    assert "ok_nope" in list(warn_obj.failed_values)
+
+
+def test_coerce_with_na_str_to_complex():
+    ctx = DummyCtx()
+    na = np.nan + 1j * np.nan
+    src = np.array(["1+2j", "bad", "3+0j"])
+    out = ta._coerce_with_na(src, np.complex128, na, ctx)
+
+    assert out.dtype == np.complex128
+    assert out[0] == (1 + 2j)
+    assert np.isnan(out[1].real) and np.isnan(out[1].imag)
+    assert out[2] == (3 + 0j)
+    assert ctx.has_warning_instance(ta.ConversionFailedWarning)
+    warn_obj = next(obj for _, obj in ctx.records if isinstance(obj, ta.ConversionFailedWarning))
+    assert list(warn_obj.failed_values) == ["bad"]
+
+
+def test_coerce_with_na_str_to_datetime():
+    ctx = DummyCtx()
+    na = np.datetime64("NaT")
+    src = np.array(["2021-01-01", "bad", "2022-06-15"])
+    out = ta._coerce_with_na(src, np.dtype("datetime64[D]"), na, ctx)
+
+    assert out.dtype == np.dtype("datetime64[D]")
+    assert out[0] == np.datetime64("2021-01-01", "D")
+    assert np.isnat(out[1])
+    assert out[2] == np.datetime64("2022-06-15", "D")
+    assert ctx.has_warning_instance(ta.ConversionFailedWarning)
+
+
+def test_coerce_with_na_2d_shape_preserved():
+    ctx = DummyCtx()
+    src = np.array([["1.0", "bad"], ["3.0", "nope"]])
+    out = ta._coerce_with_na(src, np.float64, np.nan, ctx)
+
+    assert out.shape == (2, 2)
+    assert out[0, 0] == pytest.approx(1.0)
+    assert np.isnan(out[0, 1])
+    assert out[1, 0] == pytest.approx(3.0)
+    assert np.isnan(out[1, 1])
