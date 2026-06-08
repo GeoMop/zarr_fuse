@@ -254,6 +254,67 @@ def build_table(state: SelectionState) -> pn.Column:
     return pn.Column(*rows, sizing_mode="stretch_width")
 
 
+COLORS = [
+    "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
+    "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990",
+    "#dcbeff", "#9a6324", "#800000", "#aaffc3", "#808000",
+    "#ffd8b1", "#000075", "#a9a9a9", "#e6beff", "#1a1a1a",
+]
+
+LINE_DASHES = ["solid", "dashed", "dotted", "dashdot", "longdash", "dashdotdot"]
+
+_DASH_CSS = {
+    "solid": "solid",
+    "dashed": "dashed",
+    "dotted": "dotted",
+    "dashdot": "dashed",
+    "longdash": "dashed",
+    "dashdotdot": "dashdot",
+}
+
+
+def _build_legend_html(state):
+    """Compact HTML legend: depth→color, site→dash."""
+    combos = state.get_selected_combinations()
+    if not combos or not state.sites:
+        return "<i>No curves selected</i>"
+
+    all_depths = state.all_depths
+    depth_colors = {d: COLORS[i % len(COLORS)] for i, d in enumerate(all_depths)}
+    entity_indices = sorted({s["entity_index"] for s in state.sites})
+    entity_dashes = {ei: LINE_DASHES[i % len(LINE_DASHES)] for i, ei in enumerate(entity_indices)}
+
+    parts = ['<div style="font-size: 11px; line-height: 1.6;">']
+
+    # Depth color row
+    parts.append('<div style="display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 2px;">')
+    parts.append("<b>Color — Depth:</b>")
+    for d in all_depths:
+        color = depth_colors.get(float(d), "#888")
+        swatch = (
+            f'<span style="display:inline-block;width:10px;height:10px;'
+            f'background:{color};border-radius:2px;vertical-align:middle;"></span>'
+        )
+        parts.append(f"<span>{swatch} {_format_depth(d)}</span>")
+    parts.append("</div>")
+
+    # Site dash row
+    parts.append('<div style="display: flex; flex-wrap: wrap; gap: 4px 10px;">')
+    parts.append("<b>Dash — Site:</b>")
+    for site in state.sites:
+        dash_key = entity_dashes.get(site["entity_index"], "solid")
+        css_dash = _DASH_CSS.get(dash_key, "solid")
+        line = (
+            f'<span style="border-bottom:2px {css_dash};width:16px;'
+            f'display:inline-block;vertical-align:middle;"></span>'
+        )
+        parts.append(f"<span>{line} {site['site_id']}</span>")
+    parts.append("</div>")
+
+    parts.append("</div>")
+    return "".join(parts)
+
+
 def build_plot_selection_panel(
     entity_label="Site",
     vertical_label="Depth",
@@ -330,10 +391,24 @@ def build_plot_selection_panel(
         sizing_mode="stretch_width",
     )
 
+    legend_pane = pn.pane.HTML("", sizing_mode="stretch_width", margin=(2, 0, 0, 0))
+    legend_accordion = pn.Accordion(
+        ("Legend", legend_pane),
+        active=[],
+        sizing_mode="stretch_width",
+    )
+
+    def _update_legend(event):
+        legend_pane.object = _build_legend_html(state)
+
+    state.param.watch(_update_legend, "version")
+    _update_legend(None)
+
     panel = pn.Column(
         pn.pane.Markdown("**Plot Selection**", margin=(0, 0, 5, 0)),
         controls,
         table_area,
+        legend_accordion,
         sizing_mode="stretch_width",
     )
 

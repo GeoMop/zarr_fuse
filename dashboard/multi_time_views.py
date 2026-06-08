@@ -308,7 +308,7 @@ def build_timeseries_views(data, map_state, selection_state):
             xlim=xlim,
             axiswise=True,
             shared_axes=False,
-            show_legend=True,
+            show_legend=False,
             hooks=hooks,
             framewise=True,
         )
