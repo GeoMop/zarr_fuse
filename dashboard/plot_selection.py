@@ -92,6 +92,14 @@ class SelectionState(param.Parameterized):
         self._selected[(str(site_id), float(depth_value))] = bool(value)
         self.version += 1
 
+    def clear(self):
+        """Remove all sites and reset selection."""
+        self._sites.clear()
+        self._selected.clear()
+        self.layout_version += 1
+        self.version += 1
+        print("[SelectionState] Cleared all sites")
+
     def select_all(self):
         """Check every (site, depth) cell."""
         changed = False

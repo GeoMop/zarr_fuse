@@ -22,7 +22,7 @@ def _resolve_fields_for_group(schema_config, group_path):
     return fields
 
 
-def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream, map_state):
+def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream, map_state, selection_state=None):
     start_total = time.perf_counter()
     endpoint_config = data.client.get_endpoint(data.endpoint_name)
     defaults_config = endpoint_config["defaults"]
@@ -170,6 +170,16 @@ def build_timeseries_views(data, depth_selector, borehole_info, borehole_stream,
         else:
             print(f"[fetch_ts] Fetched site {borehole_name}: has finite data")
         _update_depth_selector(depths, series, entity_index, borehole_name)
+        if selection_state is not None:
+            site_id = borehole_name if borehole_name else f"{entity_label}_{entity_index}"
+            selection_state.add_site(
+                entity_index=entity_index,
+                site_id=site_id,
+                depths=depths,
+                series=series,
+                times=times,
+            )
+            print(f"[plot_selection] Site added via side-by-side: {site_id}")
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
 

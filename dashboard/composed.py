@@ -9,7 +9,7 @@ from dashboard.config import get_default_endpoint_name, get_endpoint_config, loa
 from dashboard.data import load_data
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
-from dashboard.plot_selection import build_plot_selection
+from dashboard.plot_selection import build_plot_selection, build_plot_selection_panel
 from dashboard.sidebar import _flatten_nodes, build_sidebar
 
 JS_FILES = {
@@ -61,6 +61,23 @@ def build_dashboard():
     )
     data.group_path = node_select.value
     depth_selector, borehole_info = build_plot_selection()
+
+    # ── New table-style plot selection (side-by-side) ──────────────
+    endpoint_cfg = data.client.get_endpoint(endpoint_name)
+    schema_display_tbl = endpoint_cfg.get("schema_display", {})
+    schema_cfg_tbl = endpoint_cfg.get("schema", {})
+    fields_cfg_tbl = schema_cfg_tbl.get("fields", {})
+    # Same group resolution as build_timeseries_views
+    from dashboard.multi_time_views import _resolve_fields_for_group
+    resolved_fields = _resolve_fields_for_group(schema_cfg_tbl, data.group_path)
+    entity_label_tbl = (schema_display_tbl.get("entity_name")
+                        or resolved_fields.get("entity") or "Site")
+    vertical_label_tbl = (schema_display_tbl.get("vertical_name")
+                          or resolved_fields.get("vertical") or "Depth")
+    panel_table, selection_state = build_plot_selection_panel(
+        entity_label=entity_label_tbl, vertical_label=vertical_label_tbl,
+    )
+    # ────────────────────────────────────────────────────────────────
 
     tap_stream = streams.Tap(x=None, y=None)
     borehole_stream = streams.Stream.define("Borehole", borehole_index=0)()
@@ -204,6 +221,7 @@ def build_dashboard():
         # Clear cache for new endpoint
         data.client.clear_cache()
         
+        selection_state.clear()
         print(f"[timing] _switch_endpoint: starting refresh for {selected_endpoint}")
         _refresh_sidebar_for_endpoint(selected_endpoint)
         print(f"[timing] _switch_endpoint: calling refresh_views")
@@ -234,6 +252,7 @@ def build_dashboard():
         borehole_info,
         borehole_stream,
         map_state,
+        selection_state=selection_state,
     )
     map_handlers["on_map_tap"] = on_map_tap
 
@@ -254,6 +273,7 @@ def build_dashboard():
         variable_info,
         borehole_info,
         depth_selector,
+        panel_table,
         sizing_mode="stretch_both",
     )
     bottom_left = pn.pane.HoloViews(line_left, sizing_mode="stretch_both")
@@ -272,6 +292,7 @@ def build_dashboard():
             borehole_info,
             borehole_stream,
             new_map_state,
+            selection_state=selection_state,
         )
         print(f"[timing] refresh_views: timeseries done, updating panes")
 
@@ -301,6 +322,7 @@ def build_dashboard():
     def on_node_change(event):
         if event.new:
             data.group_path = event.new
+            selection_state.clear()
             loading_indicator.visible = True
 
             def _run_refresh():
