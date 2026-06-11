@@ -1,11 +1,16 @@
 """
-HoloViz Dashboard Prototype
+HoloViz Dashboard Prototype (DEPRECATED)
 
 A Panel-based dashboard demonstrating:
 - GoldenLayout for resizable panes
 - Linked interactive visualizations (map + time-series)
 - Multi-layer geographic maps with GeoViews
 - Dashboard-style control panel
+
+⚠️  DEPRECATION WARNING
+This module is deprecated.  ``composed.py`` is the active entry
+point (served by ``serve_dashboard.py``).  This file is preserved
+for reference only and may be removed in a future release.
 """
 
 import os
@@ -71,8 +76,8 @@ endpoint_cfg = ENDPOINTS.get(ENDPOINT_NAME) or data.client.get_endpoint(ENDPOINT
 schema_display = endpoint_cfg.get("schema_display", {})
 schema_cfg = endpoint_cfg.get("schema", {})
 fields_cfg = schema_cfg.get("fields", {})
-from dashboard.multi_time_views import _resolve_fields_for_group
-resolved_fields = _resolve_fields_for_group(schema_cfg, data.group_path)
+from dashboard.config import _resolve_fields_for_group_raw
+resolved_fields = _resolve_fields_for_group_raw(schema_cfg, data.group_path)
 entity_label_dd = (schema_display.get("entity_name")
                    or resolved_fields.get("entity") or "Site")
 vertical_label_dd = (schema_display.get("vertical_name")

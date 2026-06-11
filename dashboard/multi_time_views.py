@@ -5,30 +5,8 @@ import time
 
 from holoviews import streams
 
-COLORS = [
-    "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
-    "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990",
-    "#dcbeff", "#9a6324", "#800000", "#aaffc3", "#808000",
-    "#ffd8b1", "#000075", "#a9a9a9", "#e6beff", "#1a1a1a",
-]
-
-LINE_DASHES = ["solid", "dashed", "dotted", "dashdot", "longdash", "dashdotdot"]
-
-
-def _resolve_fields_for_group(schema_config, group_path):
-    fields = schema_config.get("fields", {})
-    group_fields = schema_config.get("group_fields", {})
-    normalized = "/".join(part for part in (group_path or "").strip("/").split("/") if part)
-
-    path = normalized
-    while True:
-        if path in group_fields:
-            return group_fields[path]
-        if not path:
-            break
-        path = path.rsplit("/", 1)[0] if "/" in path else ""
-
-    return fields
+from dashboard.config import _resolve_fields_for_group_raw
+from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_DASH
 
 
 def build_timeseries_views(data, map_state, selection_state):
@@ -37,7 +15,7 @@ def build_timeseries_views(data, map_state, selection_state):
     defaults_config = endpoint_config["defaults"]
     schema_display = endpoint_config["schema_display"]
     schema_config = endpoint_config["schema"]
-    fields_config = _resolve_fields_for_group(schema_config, data.group_path)
+    fields_config = _resolve_fields_for_group_raw(schema_config, data.group_path)
     time_dim = fields_config.get("time") or "time"
     visualization_config = endpoint_config["visualization"]
     timeseries_config = visualization_config["timeseries"]
@@ -134,31 +112,42 @@ def build_timeseries_views(data, map_state, selection_state):
         # Color by depth: pick a distinct color for each unique depth
         all_depths = selection_state.all_depths
         depth_colors = {d: COLORS[i % len(COLORS)] for i, d in enumerate(all_depths)}
-        # Line dash by site entity_index
+        # Line dash by site entity_index — assign shape, then convert to dash
         entity_indices = sorted({s["entity_index"] for s in selection_state.sites})
-        entity_dashes = {ei: LINE_DASHES[i % len(LINE_DASHES)] for i, ei in enumerate(entity_indices)}
+        entity_shapes = {ei: MARKER_SHAPES[i % len(MARKER_SHAPES)] for i, ei in enumerate(entity_indices)}
+        entity_dashes = {ei: SHAPE_TO_DASH.get(shape, "solid") for ei, shape in entity_shapes.items()}
 
         curves = []
         for entity_idx, depth_idx in selected_combos:
             site = site_lookup.get(entity_idx)
             if site is None or depth_idx >= len(site["series"]):
+                print(f"[timeseries] SKIP combo entity={entity_idx} depth_idx={depth_idx}: site=None or series too short")
                 continue
             depths_arr = np.asarray(site["depths"]).ravel()
             depth_val = depths_arr[depth_idx] if depth_idx < len(depths_arr) else depth_idx
             label = f"{site['site_id']} @ {depth_val:.2f}"
+            series_vals = site["series"][depth_idx]
+            n_valid = int(np.isfinite(series_vals).sum())
+            print(f"[timeseries] curve entity={entity_idx} depth_idx={depth_idx} label={label} "
+                  f"n_times={len(times)} n_vals={len(series_vals)} n_finite={n_valid}")
             curve_df = pd.DataFrame({
                 time_dim: times,
-                y_axis_label: site["series"][depth_idx],
+                y_axis_label: series_vals,
             })
+            dash = entity_dashes.get(entity_idx, "solid")
+            print(f"[timeseries] style color={depth_colors.get(float(depth_val), '#000000')} dash={dash}")
             curve = hv.Curve(curve_df, time_dim, y_axis_label, label=label).opts(
                 color=depth_colors.get(float(depth_val), "#000000"),
-                line_dash=entity_dashes.get(entity_idx, "solid"),
+                line_dash=dash,
             )
             curves.append(curve)
 
         if not curves:
+            print("[timeseries] No curves generated — returning empty overlay")
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             curves = [hv.Curve(empty_df, time_dim, y_axis_label)]
+        else:
+            print(f"[timeseries] Returning overlay with {len(curves)} curves")
         return hv.Overlay(curves)
 
     def clamp_range(center, span):

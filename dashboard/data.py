@@ -340,6 +340,7 @@ class LocalClient:
             values_local = _ensure_len(values_1d_final, entity_count)
 
             coord_valid_mask = np.isfinite(lats_local) & np.isfinite(lons_local)
+            entity_indices = np.arange(entity_count)
             try:
                 value_valid_mask = np.isfinite(values_local)
             except Exception:
@@ -362,6 +363,7 @@ class LocalClient:
                 lons_local = lons_local[keep_mask]
                 values_local = values_local[keep_mask]
                 entities_local = ent_1d_raw[keep_mask] if ent_1d_raw is not None else None
+                entity_indices = entity_indices[keep_mask]
                 value_valid_mask = value_valid_mask[keep_mask]
             else:
                 entities_local = ent_1d_raw
@@ -374,7 +376,7 @@ class LocalClient:
                 has_value = bool(np.isfinite(value_value)) if np.isscalar(value_value) else False
                 marker_meta.append(
                     {
-                        "entity_index": int(idx),
+                        "entity_index": int(entity_indices[idx]),
                         "site_id": None if entity_value is None else str(entity_value),
                         "value": None if not has_value else float(value_value),
                         "has_value": has_value,

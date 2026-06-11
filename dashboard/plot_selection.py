@@ -1,5 +1,7 @@
 """Plot selection panel — table-based site/depth selector."""
 
+from __future__ import annotations
+
 import numpy as np
 import panel as pn
 import param
@@ -11,21 +13,25 @@ class SelectionState(param.Parameterized):
     Drives both the visible table (via *layout_version*) and the timeseries
     plots (via *version*).  The two version counters let callers distinguish
     between "rebuild the widget tree" and "just redraw plots".
+
+    The canonical selection store is ``_checked: set[(site_id, depth)]``,
+    always keyed by site_id and depth_value regardless of the current
+    table row/column orientation.
     """
 
     version = param.Integer(default=0)
     layout_version = param.Integer(default=0)
-    orientation = param.ObjectSelector(
-        default="site_rows",
-        objects=["site_rows", "depth_rows"],
-    )
+    row_dim = param.String(default="entity")
+    col_dim = param.String(default="vertical")
 
     def __init__(self, entity_field="entity", vertical_field="vertical", **params):
         super().__init__(**params)
         self.entity_field = entity_field
         self.vertical_field = vertical_field
         self._sites: list[dict] = []
-        self._selected: dict[tuple[str, float], bool] = {}
+        self._checked: set[tuple[str, float]] = set()
+        self._row_shapes: dict[str, str] = {}
+        self._col_colors: dict[str, str] = {}
 
     # ── read-only view of internal data ──────────────────────────────
 
@@ -33,6 +39,75 @@ class SelectionState(param.Parameterized):
     def sites(self) -> list[dict]:
         """Snapshot of currently registered sites."""
         return list(self._sites)
+
+    # ── row / column key helpers ─────────────────────────────────────
+
+    @property
+    def row_keys(self) -> list:
+        """Labels for current table rows, determined by *row_dim*."""
+        if self.row_dim == "entity":
+            return [s["site_id"] for s in self._sites]
+        return self.all_depths
+
+    @property
+    def col_keys(self) -> list:
+        """Labels for current table columns, determined by *col_dim*."""
+        if self.col_dim == "vertical":
+            return self.all_depths
+        return [s["site_id"] for s in self._sites]
+
+    def _resolve_canonical(self, row_key, col_key) -> tuple[str, float]:
+        """Convert *(row_key, col_key)* to canonical *(site_id, depth)*.
+
+        Works correctly in both orientations so the caller can always
+        store / query ``_checked`` with the same key type.
+        """
+        if self.row_dim == "entity":
+            return str(row_key), float(col_key)
+        return str(col_key), float(row_key)
+
+    def _site_has_depth(self, site_id: str, depth_value: float) -> bool:
+        """Return ``True`` if *depth_value* exists for the given site."""
+        for site in self._sites:
+            if site["site_id"] == site_id:
+                return float(depth_value) in set(
+                    float(d) for d in np.asarray(site["depths"]).ravel()
+                )
+        return False
+
+    def is_valid(self, row_key, col_key) -> bool:
+        """Return ``True`` if *(row_key, col_key)* is a valid combination."""
+        site_id, depth_value = self._resolve_canonical(row_key, col_key)
+        return self._site_has_depth(site_id, depth_value)
+
+    def is_checked(self, row_key, col_key) -> bool | None:
+        """Return checked state for *(row_key, col_key)*.
+
+        Returns ``None`` for invalid combinations.
+        """
+        if not self.is_valid(row_key, col_key):
+            return None
+        site_id, depth_value = self._resolve_canonical(row_key, col_key)
+        return (str(site_id), float(depth_value)) in self._checked
+
+    def set_checked(self, row_key, col_key, value: bool):
+        """Mark *(row_key, col_key)* as checked or unchecked.
+
+        Only affects valid combinations; invalid combos are silently
+        ignored.  Bumps *version* on change.
+        """
+        if not self.is_valid(row_key, col_key):
+            return
+        site_id, depth_value = self._resolve_canonical(row_key, col_key)
+        key = (str(site_id), float(depth_value))
+        before = key in self._checked
+        if value and not before:
+            self._checked.add(key)
+        elif not value and before:
+            self._checked.discard(key)
+        else:
+            return  # no change
+        self.version += 1
 
     # ── mutations ────────────────────────────────────────────────────
 
@@ -58,8 +133,11 @@ class SelectionState(param.Parameterized):
         })
 
         for d in depths_arr:
-            key = (str(site_id), float(d))
-            self._selected.setdefault(key, True)
+            dv = float(d)
+            if not np.isfinite(dv):
+                continue  # skip NaN/Inf — NaN != NaN breaks set lookup
+            key = (str(site_id), dv)
+            self._checked.add(key)
 
         self.layout_version += 1
         self.version += 1
@@ -80,9 +158,9 @@ class SelectionState(param.Parameterized):
         site_id = site["site_id"]
         self._sites.remove(site)
 
-        for k in list(self._selected):
+        for k in list(self._checked):
             if k[0] == site_id:
-                del self._selected[k]
+                self._checked.discard(k)
 
         self.layout_version += 1
         self.version += 1
@@ -90,13 +168,17 @@ class SelectionState(param.Parameterized):
 
     def set_selected(self, site_id, depth_value, value):
         """Check/uncheck a single (site, depth) cell.  Triggers plot re-render."""
-        self._selected[(str(site_id), float(depth_value))] = bool(value)
+        key = (str(site_id), float(depth_value))
+        if value:
+            self._checked.add(key)
+        else:
+            self._checked.discard(key)
         self.version += 1
 
     def clear(self):
         """Remove all sites and reset selection."""
         self._sites.clear()
-        self._selected.clear()
+        self._checked.clear()
         self.layout_version += 1
         self.version += 1
         print("[SelectionState] Cleared all sites")
@@ -106,18 +188,18 @@ class SelectionState(param.Parameterized):
         changed = False
         for site in self._sites:
             for d in site["depths"]:
-                k = (site["site_id"], float(d))
-                if not self._selected.get(k, False):
-                    self._selected[k] = True
+                k = (str(site["site_id"]), float(d))
+                if k not in self._checked:
+                    self._checked.add(k)
                     changed = True
         if changed:
             self.version += 1
 
     def deselect_all(self):
         """Uncheck every (site, depth) cell."""
-        for k in self._selected:
-            self._selected[k] = False
-        self.version += 1
+        if self._checked:
+            self._checked.clear()
+            self.version += 1
 
     # ── queries ──────────────────────────────────────────────────────
 
@@ -127,7 +209,7 @@ class SelectionState(param.Parameterized):
         for site in self._sites:
             depths_arr = np.asarray(site["depths"]).ravel()
             for depth_idx, depth_val in enumerate(depths_arr):
-                if self._selected.get((site["site_id"], float(depth_val)), False):
+                if (str(site["site_id"]), float(depth_val)) in self._checked:
                     combos.append((site["entity_index"], int(depth_idx)))
         return combos
 
@@ -151,22 +233,23 @@ def _format_depth(depth_value: float) -> str:
 
 
 def build_table(state: SelectionState) -> pn.Column:
-    """Build the site × depth checkbox matrix from *state*.
+    """Build the site × depth checkbox matrix from *state* (legacy).
 
-    Orientation is controlled by ``state.orientation``:
+    Orientation is controlled by ``state.row_dim`` / ``state.col_dim``:
 
-    ``"site_rows"`` (default)
+    ``row_dim="entity"``
       Rows = sites, columns = depths.  Each row has a site label, one checkbox
       per depth, and a remove button.
 
-    ``"depth_rows"``
+    ``row_dim="vertical"``
       Rows = depths, columns = sites.  Each row has a depth label and one
       checkbox per site.  No remove buttons in this orientation.
     """
     rows: list[pn.Row] = []
 
-    if state.orientation == "depth_rows":
-        # ── header ─────────────────────────────────────────────────
+    is_depth_rows = state.row_dim == "vertical"
+
+    if is_depth_rows:
         header_cells: list = [
             pn.pane.Markdown("**Depth**", width=LBL_WIDTH),
             *[
@@ -176,7 +259,6 @@ def build_table(state: SelectionState) -> pn.Column:
         ]
         rows.append(pn.Row(*header_cells, sizing_mode="stretch_width"))
 
-        # ── data rows (one per depth) ──────────────────────────────
         for depth_val in state.all_depths:
             cells: list = [
                 pn.pane.Markdown(f"**{_format_depth(depth_val)}**", width=LBL_WIDTH),
@@ -186,7 +268,7 @@ def build_table(state: SelectionState) -> pn.Column:
                 site_depths = set(float(d) for d in np.asarray(site["depths"]).ravel())
                 if depth_val in site_depths:
                     cb = pn.widgets.Checkbox(
-                        value=state._selected.get((site_id, depth_val), False),
+                        value=(str(site_id), float(depth_val)) in state._checked,
                         width=CELL_WIDTH,
                     )
 
@@ -199,9 +281,7 @@ def build_table(state: SelectionState) -> pn.Column:
                     cells.append(pn.pane.Markdown("—", width=CELL_WIDTH))
 
             rows.append(pn.Row(*cells, sizing_mode="stretch_width"))
-
     else:
-        # ── "site_rows" (default) ──────────────────────────────────
         header_cells: list = [
             pn.pane.Markdown("", width=BTN_WIDTH),
             pn.pane.Markdown("**Site**", width=LBL_WIDTH),
@@ -237,7 +317,7 @@ def build_table(state: SelectionState) -> pn.Column:
             for depth_val in state.all_depths:
                 if depth_val in site_depths:
                     cb = pn.widgets.Checkbox(
-                        value=state._selected.get((site_id, depth_val), False),
+                        value=(str(site_id), float(depth_val)) in state._checked,
                         width=CELL_WIDTH,
                     )
 
@@ -254,83 +334,223 @@ def build_table(state: SelectionState) -> pn.Column:
     return pn.Column(*rows, sizing_mode="stretch_width")
 
 
-COLORS = [
-    "#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
-    "#42d4f4", "#f032e6", "#bfef45", "#fabed4", "#469990",
-    "#dcbeff", "#9a6324", "#800000", "#aaffc3", "#808000",
-    "#ffd8b1", "#000075", "#a9a9a9", "#e6beff", "#1a1a1a",
-]
+from dashboard.plot_styles import COLORS, MARKER_SHAPES
 
-LINE_DASHES = ["solid", "dashed", "dotted", "dashdot", "longdash", "dashdotdot"]
+import pandas as pd
 
-_DASH_CSS = {
-    "solid": "solid",
-    "dashed": "dashed",
-    "dotted": "dotted",
-    "dashdot": "dashed",
-    "longdash": "dashed",
-    "dashdotdot": "dashdot",
-}
+
+def resolve_available_dimensions(
+    endpoint_config: dict | None = None,
+    group_path: str | None = None,
+    schema_display: dict | None = None,
+) -> dict[str, str]:
+    """Return ``{display_label: dim_key}`` for eligible coordinate dimensions.
+
+    Excludes ``lat``, ``lon``, ``time``, ``x``, ``y``, ``z`` which are
+    unsuitable as table axes.
+
+    Parameters
+    ----------
+    endpoint_config : dict, optional
+        Raw endpoint config dict (from ``data.client.get_endpoint()``).
+    group_path : str, optional
+        Current group path for field resolution.
+    schema_display : dict, optional
+        ``schema_display`` dict for human-readable names.
+
+    Returns
+    -------
+    dict
+        ``{display_label: dimension_key}``  e.g. ``{"Site": "entity", "Depth": "vertical"}``
+    """
+    from dashboard.config import _resolve_fields_for_group_raw
+
+    EXCLUDED = {"lat", "lon", "time", "x", "y", "z"}
+
+    if endpoint_config is None:
+        return {"Site": "entity", "Depth": "vertical"}
+
+    schema_config = endpoint_config.get("schema", {})
+    resolved = _resolve_fields_for_group_raw(schema_config, group_path or "/")
+
+    display = schema_display or {}
+    dims: dict[str, str] = {}
+    for key, field_name in resolved.items():
+        if key in EXCLUDED:
+            continue
+        label = field_name or key
+        if key == "entity" and display.get("entity_name"):
+            label = display["entity_name"]
+        elif key == "vertical" and display.get("vertical_name"):
+            label = display["vertical_name"]
+        dims[label] = key
+
+    if not dims:
+        dims = {"Site": "entity", "Depth": "vertical"}
+
+    return dims
+
+
+def build_assignment_matrix(
+    selection_state: SelectionState,
+    row_dim: str | None = None,
+    col_dim: str | None = None,
+) -> tuple[pd.DataFrame, dict, dict, dict, dict[str, str], dict[str, str]]:
+    """Build a Tabulator-ready assignment matrix from *selection_state*.
+
+    Returns
+    -------
+    df : pd.DataFrame
+        Table data with row labels, marker shapes, and boolean assignment
+        columns.  Hidden ``__valid_<col>`` columns track cell validity.
+    editors : dict
+        Per-column Tabulator editor config.
+    formatters : dict
+        Per-column Tabulator formatter config.
+    editables : dict
+        Per-column boolean editability flag.
+    row_shapes : dict
+        ``{row_key: marker_shape_name}``
+    col_colors : dict
+        ``{col_key: hex_color}``
+    """
+    if row_dim is None:
+        row_dim = selection_state.row_dim
+    if col_dim is None:
+        col_dim = selection_state.col_dim
+
+    # Temporarily switch state orientation so is_valid / is_checked
+    # use the requested dimensions, then restore originals.
+    _orig_row = selection_state.row_dim
+    _orig_col = selection_state.col_dim
+    selection_state.row_dim = row_dim
+    selection_state.col_dim = col_dim
+
+    row_keys = list(selection_state.row_keys)
+    col_keys = list(selection_state.col_keys)
+
+    row_shapes: dict[str, str] = {
+        str(rk): MARKER_SHAPES[i % len(MARKER_SHAPES)]
+        for i, rk in enumerate(row_keys)
+    }
+    col_colors: dict[str, str] = {
+        str(ck): COLORS[i % len(COLORS)]
+        for i, ck in enumerate(col_keys)
+    }
+
+    selection_state._row_shapes = row_shapes
+    selection_state._col_colors = col_colors
+
+    rows: list[dict] = []
+    for i, row_key in enumerate(row_keys):
+        row: dict = {
+            "_index": i,
+            "_row_label": str(row_key),
+            "_marker": row_shapes.get(str(row_key), "circle"),
+        }
+        for col_key in col_keys:
+            col_s = str(col_key)
+            valid = selection_state.is_valid(row_key, col_key)
+            if valid:
+                checked = selection_state.is_checked(row_key, col_key)
+                row[col_s] = bool(checked)
+                row[f"__valid_{col_s}"] = True
+            else:
+                row[col_s] = None
+                row[f"__valid_{col_s}"] = False
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    if "_index" in df.columns:
+        df = df.drop(columns=["_index"])
+
+    selection_cols = [str(ck) for ck in col_keys]
+
+    editors: dict = {
+        "_row_label": None,
+        "_marker": None,
+        **{
+            col: {"type": "tickCross", "tristate": True, "indeterminateValue": None}
+            for col in selection_cols
+        },
+    }
+
+    formatters: dict = {
+        "_row_label": {"type": "text"},
+        "_marker": {"type": "text"},
+        **{col: {"type": "tickCross"} for col in selection_cols},
+    }
+
+    editables: dict = {
+        "_row_label": False,
+        "_marker": False,
+        **{col: True for col in selection_cols},
+    }
+
+    # Restore original orientation
+    selection_state.row_dim = _orig_row
+    selection_state.col_dim = _orig_col
+
+    return df, editors, formatters, editables, row_shapes, col_colors
 
 
 def _build_legend_html(state):
-    """Compact HTML legend: depth→color, site→dash."""
+    """Compact HTML legend showing row shapes and column colors."""
     combos = state.get_selected_combinations()
     if not combos or not state.sites:
         return "<i>No curves selected</i>"
 
-    all_depths = state.all_depths
-    depth_colors = {d: COLORS[i % len(COLORS)] for i, d in enumerate(all_depths)}
-    entity_indices = sorted({s["entity_index"] for s in state.sites})
-    entity_dashes = {ei: LINE_DASHES[i % len(LINE_DASHES)] for i, ei in enumerate(entity_indices)}
+    row_shapes = getattr(state, "_row_shapes", {})
+    col_colors = getattr(state, "_col_colors", {})
 
     parts = ['<div style="font-size: 11px; line-height: 1.6;">']
 
-    # Depth color row
-    parts.append('<div style="display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 2px;">')
-    parts.append("<b>Color — Depth:</b>")
-    for d in all_depths:
-        color = depth_colors.get(float(d), "#888")
-        swatch = (
-            f'<span style="display:inline-block;width:10px;height:10px;'
-            f'background:{color};border-radius:2px;vertical-align:middle;"></span>'
-        )
-        parts.append(f"<span>{swatch} {_format_depth(d)}</span>")
-    parts.append("</div>")
+    keys = list(col_colors.keys())
+    if keys:
+        parts.append('<div style="display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 2px;">')
+        if state.col_dim == "vertical":
+            parts.append("<b>Color — Depth:</b>")
+        else:
+            parts.append("<b>Color — Site:</b>")
+        for k in keys:
+            color = col_colors.get(k, "#888")
+            swatch = (
+                f'<span style="display:inline-block;width:10px;height:10px;'
+                f'background:{color};border-radius:2px;vertical-align:middle;"></span>'
+            )
+            parts.append(f"<span>{swatch} {k}</span>")
+        parts.append("</div>")
 
-    # Site dash row
-    parts.append('<div style="display: flex; flex-wrap: wrap; gap: 4px 10px;">')
-    parts.append("<b>Dash — Site:</b>")
-    for site in state.sites:
-        dash_key = entity_dashes.get(site["entity_index"], "solid")
-        css_dash = _DASH_CSS.get(dash_key, "solid")
-        line = (
-            f'<span style="border-bottom:2px {css_dash};width:16px;'
-            f'display:inline-block;vertical-align:middle;"></span>'
-        )
-        parts.append(f"<span>{line} {site['site_id']}</span>")
-    parts.append("</div>")
+    row_keys = list(row_shapes.keys())
+    if row_keys:
+        parts.append('<div style="display: flex; flex-wrap: wrap; gap: 4px 10px;">')
+        if state.row_dim == "entity":
+            parts.append("<b>Shape — Site:</b>")
+        else:
+            parts.append("<b>Shape — Depth:</b>")
+        for k in row_keys:
+            shape = row_shapes.get(k, "circle")
+            parts.append(f"<span><i>{shape}</i> {k}</span>")
+        parts.append("</div>")
 
     parts.append("</div>")
     return "".join(parts)
 
 
 def build_plot_selection_panel(
-    entity_label="Site",
-    vertical_label="Depth",
-    state=None,
+    state: SelectionState | None = None,
+    available_dims: dict[str, str] | None = None,
 ) -> tuple[pn.Column, SelectionState]:
-    """Build the Plot Selection panel with row/column dropdowns + table.
+    """Build the Tabulator-based Plot Selection panel.
 
     Parameters
     ----------
-    entity_label : str
-        Display name for the entity/site dimension (e.g. ``"Borehole"``).
-    vertical_label : str
-        Display name for the vertical/depth dimension (e.g. ``"Depth"``).
     state : SelectionState, optional
         Reuse an existing state instance (e.g. when switching endpoints).
         If omitted a fresh state is created.
+    available_dims : dict, optional
+        ``{display_label: dim_key}`` from ``resolve_available_dimensions()``.
+        Defaults to ``{"Site": "entity", "Depth": "vertical"}``.
 
     Returns
     -------
@@ -340,22 +560,63 @@ def build_plot_selection_panel(
         The backing state object — wire callbacks to this.
     """
     if state is None:
-        state = SelectionState(entity_field=entity_label, vertical_field=vertical_label)
+        state = SelectionState()
+    if available_dims is None:
+        available_dims = {"Site": "entity", "Depth": "vertical"}
+
+    row_options = available_dims
+    col_options = dict(available_dims)
 
     row_select = pn.widgets.Select(
         name="Rows",
-        options={entity_label: "entity", vertical_label: "vertical"},
-        value="entity",
+        options=row_options,
+        value=state.row_dim,
         width=200,
     )
     col_select = pn.widgets.Select(
         name="Columns",
-        options={vertical_label: "vertical", entity_label: "entity"},
-        value="vertical",
+        options=col_options,
+        value=state.col_dim,
         width=200,
     )
 
+    df, editors, formatters, editables, _rshapes, _ccolors = build_assignment_matrix(
+        state, state.row_dim, state.col_dim
+    )
+
+    hidden = [c for c in df.columns if c.startswith("__valid_")]
+    table = pn.widgets.Tabulator(
+        df,
+        editors=editors,
+        formatters=formatters,
+        hidden_columns=hidden,
+        frozen_columns=["_row_label", "_marker"],
+        selectable=False,
+        show_index=False,
+        max_height=400,
+        sizing_mode="stretch_width",
+        layout="fit_data_table",
+        theme="midnight",
+        sortable=False,
+    )
+
     _orientation_lock = False
+    _updating_table = False
+
+    def _rebuild_table():
+        nonlocal _updating_table
+        _updating_table = True
+        try:
+            new_df, new_editors, new_formatters, _, _, _ = build_assignment_matrix(
+                state, state.row_dim, state.col_dim
+            )
+            new_hidden = [c for c in new_df.columns if c.startswith("__valid_")]
+            table.value = new_df
+            table.editors = new_editors
+            table.formatters = new_formatters
+            table.hidden_columns = new_hidden
+        finally:
+            _updating_table = False
 
     def _sync_orientation(event=None):
         nonlocal _orientation_lock
@@ -364,32 +625,44 @@ def build_plot_selection_panel(
         _orientation_lock = True
         try:
             if row_select.value == col_select.value:
-                other = "vertical" if row_select.value == "entity" else "entity"
-                col_select.value = other
-            orient = "site_rows" if row_select.value == "entity" else "depth_rows"
-            state.orientation = orient
-            new_table = build_table(state)
-            table_area.objects = list(new_table.objects)
+                other = next(
+                    (k for k, v in available_dims.items() if v != row_select.value),
+                    None,
+                )
+                if other is not None:
+                    col_select.value = available_dims[other]
+            state.row_dim = row_select.value
+            state.col_dim = col_select.value
+            _rebuild_table()
         finally:
             _orientation_lock = False
 
     row_select.param.watch(_sync_orientation, "value")
     col_select.param.watch(_sync_orientation, "value")
 
+    def _on_table_edit(event):
+        """Handle user edits to the Tabulator."""
+        nonlocal _updating_table
+        if _updating_table:
+            return
+        col = event.column
+        row_idx = event.row
+        new_value = event.value
+
+        if col in ("_row_label", "_marker"):
+            return
+
+        row_key = table.value.iloc[row_idx]["_row_label"]
+        state.set_checked(row_key, col, bool(new_value))
+
+    table.on_edit(_on_table_edit)
+
     def _on_layout_change(event):
-        new_table = build_table(state)
-        table_area.objects = list(new_table.objects)
+        _rebuild_table()
 
     state.param.watch(_on_layout_change, "layout_version")
 
     controls = pn.Row(row_select, col_select, sizing_mode="stretch_width")
-    table_area = pn.Column(
-        *build_table(state).objects,
-        scroll=True,
-        max_height=400,
-        styles={"overflow": "auto"},
-        sizing_mode="stretch_width",
-    )
 
     legend_pane = pn.pane.HTML("", sizing_mode="stretch_width", margin=(2, 0, 0, 0))
     legend_accordion = pn.Accordion(
@@ -407,7 +680,7 @@ def build_plot_selection_panel(
     panel = pn.Column(
         pn.pane.Markdown("**Plot Selection**", margin=(0, 0, 5, 0)),
         controls,
-        table_area,
+        table,
         legend_accordion,
         sizing_mode="stretch_width",
     )

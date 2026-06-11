@@ -9,7 +9,7 @@ from dashboard.config import get_default_endpoint_name, get_endpoint_config, loa
 from dashboard.data import load_data
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
-from dashboard.plot_selection import build_plot_selection_panel
+from dashboard.plot_selection import build_plot_selection_panel, resolve_available_dimensions
 from dashboard.sidebar import _flatten_nodes, build_sidebar
 
 JS_FILES = {
@@ -64,17 +64,16 @@ def build_dashboard():
     # ── Table-style plot selection ──────────────────────────────────
     endpoint_cfg = data.client.get_endpoint(endpoint_name)
     schema_display_tbl = endpoint_cfg.get("schema_display", {})
-    schema_cfg_tbl = endpoint_cfg.get("schema", {})
-    fields_cfg_tbl = schema_cfg_tbl.get("fields", {})
-    # Same group resolution as build_timeseries_views
-    from dashboard.multi_time_views import _resolve_fields_for_group
-    resolved_fields = _resolve_fields_for_group(schema_cfg_tbl, data.group_path)
-    entity_label_tbl = (schema_display_tbl.get("entity_name")
-                        or resolved_fields.get("entity") or "Site")
-    vertical_label_tbl = (schema_display_tbl.get("vertical_name")
-                          or resolved_fields.get("vertical") or "Depth")
+
+    selection_state = None  # created by build_plot_selection_panel
+    available_dims = resolve_available_dimensions(
+        endpoint_config=endpoint_cfg,
+        group_path=data.group_path,
+        schema_display=schema_display_tbl,
+    )
     panel_table, selection_state = build_plot_selection_panel(
-        entity_label=entity_label_tbl, vertical_label=vertical_label_tbl,
+        state=selection_state,
+        available_dims=available_dims,
     )
     # ────────────────────────────────────────────────────────────────
 

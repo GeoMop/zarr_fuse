@@ -238,6 +238,27 @@ def _collect_group_fields(variable_map: Dict[str, Any], endpoint_name: str) -> D
     return group_fields
 
 
+def _resolve_fields_for_group_raw(schema_config: dict, group_path: str | None) -> dict:
+    """Resolve the effective fields dict for a group path by walking upward.
+
+    This is the raw-dict version (used at runtime with untyped endpoint config).
+    The typed counterpart is :func:`resolve_schema_fields`.
+    """
+    fields = schema_config.get("fields", {})
+    group_fields = schema_config.get("group_fields", {})
+    normalized = "/".join(part for part in (group_path or "").strip("/").split("/") if part)
+
+    path = normalized
+    while True:
+        if path in group_fields:
+            return group_fields[path]
+        if not path:
+            break
+        path = path.rsplit("/", 1)[0] if "/" in path else ""
+
+    return fields
+
+
 def resolve_schema_fields(schema: SchemaConfig, group_path: Optional[str]) -> SchemaFieldsConfig:
     normalized = _normalize_group_path(group_path)
     path = normalized
