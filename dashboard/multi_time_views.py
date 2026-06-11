@@ -181,9 +181,18 @@ def build_timeseries_views(data, map_state, selection_state):
     center_state = {
         "center": None,
         "force_left": True,
-        "force_mid": False,
-        "force_right": False,
+        "force_mid": True,
+        "force_right": True,
     }
+    # Pre-compute a default center from existing sites (e.g., after variable switch)
+    if selection_state.sites:
+        _first_times = next(
+            (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
+            None,
+        )
+        if _first_times is not None and len(_first_times) > 0:
+            _span = _first_times.max() - _first_times.min()
+            center_state["center"] = _first_times.min() + (_span / 2)
     center_stream = streams.Stream.define("Center", center=None)()
 
     left_tap = streams.Tap()
@@ -273,10 +282,11 @@ def build_timeseries_views(data, map_state, selection_state):
             xlim = clamp_range(center_time, mid_span)
         else:
             xlim = clamp_range(center_time, right_span)
+            print(f"[right] center_time={center_time}, xlim={xlim}, n_times={len(times)}, times_min={times.min()}, times_max={times.max()}")
 
         overlay = build_timeseries_overlay()
-        overlay = overlay.redim.range(**{time_dim: xlim})
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
+        overlay = overlay.redim.range(**{time_dim: xlim})
 
         ylim = _compute_ylim(times, selected_combos, xlim)
 
@@ -289,18 +299,17 @@ def build_timeseries_views(data, map_state, selection_state):
             hooks.append(_make_yrange_hook(ylim))
         n_sites = len(selection_state.sites)
         site_label = "1 site" if n_sites == 1 else f"{n_sites} sites"
-        return overlay.opts(
+        opts = dict(
             responsive=True,
             title=f"{metric_label} over Time ({site_label})",
             tools=["hover", "xwheel_zoom", "xpan", "tap", "reset"],
             active_tools=["xwheel_zoom", "xpan"],
-            xlim=xlim,
             axiswise=True,
             shared_axes=False,
             show_legend=False,
             hooks=hooks,
-            framewise=True,
         )
+        return overlay.opts(**opts)
 
     line_left = hv.DynamicMap(
         lambda center=None, **kwargs: create_timeseries_view(
