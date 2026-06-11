@@ -483,7 +483,7 @@ def build_assignment_matrix(
     formatters: dict = {
         "_row_label": {"type": "text"},
         "_marker": {"type": "text"},
-        "_actions": {"type": "button", "label": "✕", "buttonType": "danger"},
+        "_actions": {"type": "button", "label": "✕ Remove", "buttonType": "danger"},
         **{col: {"type": "tickCross"} for col in selection_cols},
     }
 
@@ -595,8 +595,15 @@ def build_plot_selection_panel(
     hidden = [c for c in df.columns if c.startswith("__valid_") or c == "_marker" or c == "entity_index"]
     if state.row_dim != "entity":
         hidden.append("_actions")
+
+    _row_label_title = next(
+        (k for k, v in available_dims.items() if v == state.row_dim),
+        state.row_dim,
+    )
+    titles = {"_row_label": _row_label_title, "_actions": "Remove"}
     table = pn.widgets.Tabulator(
         df,
+        titles=titles,
         editors=editors,
         formatters=formatters,
         hidden_columns=hidden,
@@ -625,6 +632,11 @@ def build_plot_selection_panel(
                 new_hidden.append("_actions")
             else:
                 new_hidden = [c for c in new_hidden if c != "_actions"]
+            _row_label_title = next(
+                (k for k, v in available_dims.items() if v == state.row_dim),
+                state.row_dim,
+            )
+            table.titles = {"_row_label": _row_label_title, "_actions": "Remove"}
             table.value = new_df
             table.editors = new_editors
             table.formatters = new_formatters

@@ -91,7 +91,7 @@ class TestFormatters:
         assert formatters["_row_label"]["type"] == "text"
         assert formatters["_marker"]["type"] == "text"
         assert formatters["_actions"]["type"] == "button"
-        assert formatters["_actions"]["label"] == "✕"
+        assert formatters["_actions"]["label"] == "✕ Remove"
         assert formatters["_actions"]["buttonType"] == "danger"
 
     def test_boolean_formatters_tickcross(self):
