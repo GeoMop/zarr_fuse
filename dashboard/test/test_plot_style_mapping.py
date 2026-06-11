@@ -88,31 +88,31 @@ class TestLegendHTML:
         html = _build_legend_html(state)
         assert "No curves selected" in html and "<i>" in html
 
-    def test_legend_shows_dynamic_shapes_colors(self):
+    def test_legend_shows_dynamic_dashes_colors(self):
         state = _n_sites(2, 5.0)
         build_assignment_matrix(state, "entity", "vertical")
         html = _build_legend_html(state)
-        assert "circle" in html or "square" in html
+        assert "solid" in html or "dashed" in html
         assert "#e6194b" in html or "#3cb44b" in html
         assert "Color" in html
-        assert "Shape" in html
+        assert "Dash" in html
 
     def test_legend_headers_reflect_orientation(self):
         """When rows = entity and cols = vertical, legend labels should
-        say 'Shape — Site' and 'Color — Depth'."""
+        say 'Dash — Site' and 'Color — Depth'."""
         state = _n_sites(2, 5.0)
         build_assignment_matrix(state, "entity", "vertical")
         html = _build_legend_html(state)
-        assert "Shape — Site:" in html
+        assert "Dash — Site:" in html
         assert "Color — Depth:" in html
 
     def test_legend_swapped_headers(self):
         """When rows = vertical and cols = entity, legend labels should
-        say 'Shape — Depth' and 'Color — Site'."""
+        say 'Dash — Depth' and 'Color — Site'."""
         state = _n_sites(2, 5.0)
         state.row_dim = "vertical"
         state.col_dim = "entity"
         build_assignment_matrix(state, "vertical", "entity")
         html = _build_legend_html(state)
-        assert "Shape — Depth:" in html
+        assert "Dash — Depth:" in html
         assert "Color — Site:" in html

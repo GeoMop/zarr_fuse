@@ -334,7 +334,7 @@ def build_table(state: SelectionState) -> pn.Column:
     return pn.Column(*rows, sizing_mode="stretch_width")
 
 
-from dashboard.plot_styles import COLORS, MARKER_SHAPES
+from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_DASH
 
 import pandas as pd
 
@@ -442,11 +442,15 @@ def build_assignment_matrix(
     selection_state._col_colors = col_colors
 
     rows: list[dict] = []
+    sites_lookup = {str(s["site_id"]): s["entity_index"] for s in selection_state.sites}
     for i, row_key in enumerate(row_keys):
+        eid = sites_lookup.get(str(row_key), np.nan) if row_dim == "entity" else np.nan
         row: dict = {
             "_index": i,
             "_row_label": str(row_key),
             "_marker": row_shapes.get(str(row_key), "circle"),
+            "entity_index": eid,
+            "_actions": "✕",
         }
         for col_key in col_keys:
             col_s = str(col_key)
@@ -469,6 +473,7 @@ def build_assignment_matrix(
     editors: dict = {
         "_row_label": None,
         "_marker": None,
+        "_actions": None,
         **{
             col: {"type": "tickCross", "tristate": True, "indeterminateValue": None}
             for col in selection_cols
@@ -478,12 +483,14 @@ def build_assignment_matrix(
     formatters: dict = {
         "_row_label": {"type": "text"},
         "_marker": {"type": "text"},
+        "_actions": {"type": "button", "label": "✕", "buttonType": "danger"},
         **{col: {"type": "tickCross"} for col in selection_cols},
     }
 
     editables: dict = {
         "_row_label": False,
         "_marker": False,
+        "_actions": False,
         **{col: True for col in selection_cols},
     }
 
@@ -525,12 +532,13 @@ def _build_legend_html(state):
     if row_keys:
         parts.append('<div style="display: flex; flex-wrap: wrap; gap: 4px 10px;">')
         if state.row_dim == "entity":
-            parts.append("<b>Shape — Site:</b>")
+            parts.append("<b>Dash — Site:</b>")
         else:
-            parts.append("<b>Shape — Depth:</b>")
+            parts.append("<b>Dash — Depth:</b>")
         for k in row_keys:
             shape = row_shapes.get(k, "circle")
-            parts.append(f"<span><i>{shape}</i> {k}</span>")
+            dash = SHAPE_TO_DASH.get(shape, "solid")
+            parts.append(f'<span><span style="display:inline-block;width:20px;height:2px;background:#aaa;vertical-align:middle;margin-right:3px;"></span> {dash} — {k}</span>')
         parts.append("</div>")
 
     parts.append("</div>")
@@ -584,13 +592,15 @@ def build_plot_selection_panel(
         state, state.row_dim, state.col_dim
     )
 
-    hidden = [c for c in df.columns if c.startswith("__valid_")]
+    hidden = [c for c in df.columns if c.startswith("__valid_") or c == "_marker" or c == "entity_index"]
+    if state.row_dim != "entity":
+        hidden.append("_actions")
     table = pn.widgets.Tabulator(
         df,
         editors=editors,
         formatters=formatters,
         hidden_columns=hidden,
-        frozen_columns=["_row_label", "_marker"],
+        frozen_columns=["_row_label", "_actions"],
         selectable=False,
         show_index=False,
         max_height=400,
@@ -610,7 +620,11 @@ def build_plot_selection_panel(
             new_df, new_editors, new_formatters, _, _, _ = build_assignment_matrix(
                 state, state.row_dim, state.col_dim
             )
-            new_hidden = [c for c in new_df.columns if c.startswith("__valid_")]
+            new_hidden = [c for c in new_df.columns if c.startswith("__valid_") or c == "_marker" or c == "entity_index"]
+            if state.row_dim != "entity":
+                new_hidden.append("_actions")
+            else:
+                new_hidden = [c for c in new_hidden if c != "_actions"]
             table.value = new_df
             table.editors = new_editors
             table.formatters = new_formatters
@@ -639,6 +653,17 @@ def build_plot_selection_panel(
 
     row_select.param.watch(_sync_orientation, "value")
     col_select.param.watch(_sync_orientation, "value")
+
+    def _on_table_cell_click(event):
+        """Handle clicks on the remove button column."""
+        if event.column != "_actions":
+            return
+        row_data = table.value.iloc[event.row]
+        eid = row_data.get("entity_index")
+        if eid is not None and not (isinstance(eid, float) and np.isnan(eid)):
+            state.remove_site(int(eid))
+
+    table.on_click(_on_table_cell_click)
 
     def _on_table_edit(event):
         """Handle user edits to the Tabulator."""

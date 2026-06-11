@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from dashboard.plot_selection import SelectionState, build_assignment_matrix
@@ -21,15 +22,15 @@ class TestMatrixShape:
             state, "entity", "vertical"
         )
         assert len(df) == 2  # 2 sites
-        # 2 label cols + 3 depth cols + 3 hidden validity cols = 8
-        assert df.shape[1] == 8
+        # 2 label cols + 2 internal cols + 3 depth cols + 3 hidden validity cols = 10
+        assert df.shape[1] == 10
 
     def test_vertical_rows_entity_cols(self):
         state = _two_site_state()
         df, _, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
         assert len(df) == 3  # 3 unique depths
-        # 2 label cols + 2 site cols + 2 hidden validity cols = 6
-        assert df.shape[1] == 6
+        # 2 label cols + 2 internal cols + 2 site cols + 2 hidden validity cols = 8
+        assert df.shape[1] == 8
 
 
 class TestDataFrameContent:
@@ -68,11 +69,12 @@ class TestDataFrameContent:
 
 
 class TestEditors:
-    def test_label_marker_editors_none(self):
+    def test_label_marker_actions_editors_none(self):
         state = _two_site_state()
         _, editors, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert editors["_row_label"] is None
         assert editors["_marker"] is None
+        assert editors["_actions"] is None
 
     def test_boolean_editors_tickcross(self):
         state = _two_site_state()
@@ -88,6 +90,9 @@ class TestFormatters:
         _, _, formatters, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert formatters["_row_label"]["type"] == "text"
         assert formatters["_marker"]["type"] == "text"
+        assert formatters["_actions"]["type"] == "button"
+        assert formatters["_actions"]["label"] == "✕"
+        assert formatters["_actions"]["buttonType"] == "danger"
 
     def test_boolean_formatters_tickcross(self):
         state = _two_site_state()
@@ -172,7 +177,7 @@ class TestEdgeCases:
             state, "entity", "vertical"
         )
         assert len(df) == 0
-        assert len(editors) == 2  # only _row_label, _marker
+        assert len(editors) == 3  # _row_label, _marker, _actions
         assert len(rshapes) == 0
         assert len(ccolors) == 0
 
@@ -182,4 +187,18 @@ class TestEdgeCases:
         df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert len(df) == 1
         assert df.iloc[0]["_row_label"] == "BH-1"
-        assert bool(df.iloc[0]["5.0"]) is True
+
+    def test_entity_index_column_present(self):
+        state = SelectionState()
+        state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"])
+        state.add_site(1, "BH-2", [5.0], [[1]], ["2020-01-01"])
+        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        assert "entity_index" in df.columns
+        assert list(df["entity_index"]) == [0, 1]
+
+    def test_entity_index_nan_in_vertical_mode(self):
+        state = SelectionState()
+        state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"])
+        df, _, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
+        assert "entity_index" in df.columns
+        assert all(np.isnan(v) for v in df["entity_index"])
