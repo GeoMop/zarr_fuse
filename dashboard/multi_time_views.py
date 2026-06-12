@@ -150,13 +150,7 @@ def build_timeseries_views(data, map_state, selection_state):
             print(f"[timeseries] Returning overlay with {len(curves)} curves")
         return hv.Overlay(curves)
 
-    def clamp_range(center, span):
-        if selection_state is None:
-            return (pd.Timestamp("1970-01-01"), pd.Timestamp("1970-01-02"))
-        times = next(
-            (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
-            pd.to_datetime([]),
-        )
+    def clamp_range(center, span, times):
         if len(times) == 0:
             return (pd.Timestamp("1970-01-01"), pd.Timestamp("1970-01-02"))
         min_t = times.min()
@@ -164,7 +158,6 @@ def build_timeseries_views(data, map_state, selection_state):
         total_span = max_t - min_t
         if span >= total_span:
             return (min_t, max_t)
-
         start = center - span / 2
         end = center + span / 2
         if start < min_t:
@@ -178,57 +171,30 @@ def build_timeseries_views(data, map_state, selection_state):
     mid_span = pd.Timedelta(days=middle_window_days)
     right_span = pd.Timedelta(hours=right_window_hours)
 
-    center_state = {
-        "center": None,
-        "force_left": True,
-        "force_mid": True,
-        "force_right": True,
-    }
-    # Pre-compute a default center from existing sites (e.g., after variable switch)
-    if selection_state.sites:
-        _first_times = next(
-            (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
-            None,
-        )
-        if _first_times is not None and len(_first_times) > 0:
-            _span = _first_times.max() - _first_times.min()
-            center_state["center"] = _first_times.min() + (_span / 2)
+    _center_time = None
     center_stream = streams.Stream.define("Center", center=None)()
+    borehole_stream = streams.Stream.define("Borehole", borehole_index=None)()
 
     left_tap = streams.Tap()
     mid_tap = streams.Tap()
     right_tap = streams.Tap()
 
-    _updating_center = False
-
     def update_center_from_tap(event):
-        nonlocal _updating_center
-        if _updating_center:
-            return
-        if event.new is None:
-            return
-
-        center = pd.to_datetime(event.new)
-        _updating_center = True
-        center_state["center"] = center
-        center_state["force_mid"] = True
-        center_state["force_right"] = True
-        center_stream.event(center=center)
-        _updating_center = False
-
-    def make_xrange_hook(xlim, force_flag_key=None):
-        def _hook(plot, element):
-            plot.state.x_range.bounds = xlim
-            if force_flag_key and center_state.get(force_flag_key, False):
-                plot.state.x_range.start = xlim[0]
-                plot.state.x_range.end = xlim[1]
-                center_state[force_flag_key] = False
-        return _hook
+        if event.new is not None:
+            nonlocal _center_time
+            _center_time = pd.to_datetime(event.new)
+            center_stream.event(center=_center_time)
 
     def _make_yrange_hook(ylim):
         def _hook(plot, element):
             plot.state.y_range.start = ylim[0]
             plot.state.y_range.end = ylim[1]
+        return _hook
+
+    def _make_xrange_hook(xlim):
+        def _hook(plot, element):
+            plot.state.x_range.start = xlim[0]
+            plot.state.x_range.end = xlim[1]
         return _hook
 
     left_tap.param.watch(update_center_from_tap, ["x"])
@@ -257,6 +223,7 @@ def build_timeseries_views(data, map_state, selection_state):
         return (ymin - padding, ymax + padding)
 
     def create_timeseries_view(center=None, view="left", **_):
+        nonlocal _center_time
         if selection_state is None:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
@@ -270,46 +237,38 @@ def build_timeseries_views(data, map_state, selection_state):
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
 
-        if center_state["center"] is None:
-            full_span = times.max() - times.min()
-            center_state["center"] = times.min() + (full_span / 2)
-            center_stream.event(center=center_state["center"])
+        if center is not None:
+            _center_time = center
+        elif _center_time is None:
+            _center_time = times.min() + (times.max() - times.min()) / 2
+        center_time = _center_time
 
-        center_time = center or center_state["center"]
         if view == "left":
             xlim = (times.min(), times.max())
         elif view == "mid":
-            xlim = clamp_range(center_time, mid_span)
+            xlim = clamp_range(center_time, mid_span, times)
         else:
-            xlim = clamp_range(center_time, right_span)
-            print(f"[right] center_time={center_time}, xlim={xlim}, n_times={len(times)}, times_min={times.min()}, times_max={times.max()}")
+            xlim = clamp_range(center_time, right_span, times)
 
         overlay = build_timeseries_overlay()
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
-        overlay = overlay.redim.range(**{time_dim: xlim})
 
         ylim = _compute_ylim(times, selected_combos, xlim)
-
-        if view == "left":
-            hooks = [make_xrange_hook(xlim, "force_left")]
-        else:
-            force_key = "force_mid" if view == "mid" else "force_right"
-            hooks = [make_xrange_hook(xlim, force_key)]
+        hooks = []
+        hooks.append(_make_xrange_hook(xlim))
         if ylim:
             hooks.append(_make_yrange_hook(ylim))
         n_sites = len(selection_state.sites)
         site_label = "1 site" if n_sites == 1 else f"{n_sites} sites"
-        opts = dict(
+        return overlay.opts(
             responsive=True,
             title=f"{metric_label} over Time ({site_label})",
             tools=["hover", "xwheel_zoom", "xpan", "tap", "reset"],
             active_tools=["xwheel_zoom", "xpan"],
-            axiswise=True,
-            shared_axes=False,
             show_legend=False,
+            framewise=True,
             hooks=hooks,
         )
-        return overlay.opts(**opts)
 
     line_left = hv.DynamicMap(
         lambda center=None, **kwargs: create_timeseries_view(
@@ -319,6 +278,7 @@ def build_timeseries_views(data, map_state, selection_state):
             streams.Params(selection_state, parameters=["version"]),
             left_tap,
             center_stream,
+            borehole_stream,
         ],
     )
 
@@ -330,6 +290,7 @@ def build_timeseries_views(data, map_state, selection_state):
             streams.Params(selection_state, parameters=["version"]),
             mid_tap,
             center_stream,
+            borehole_stream,
         ],
     )
 
@@ -341,6 +302,7 @@ def build_timeseries_views(data, map_state, selection_state):
             streams.Params(selection_state, parameters=["version"]),
             right_tap,
             center_stream,
+            borehole_stream,
         ],
     )
 
@@ -351,6 +313,8 @@ def build_timeseries_views(data, map_state, selection_state):
             print(f"[tap] marker_meta will be None (not computed for initial load)")
             print(f"[tap] Calling _fetch_timeseries with marker_meta=None")
             entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=None)
+            if entity_index is not None:
+                borehole_stream.event(borehole_index=entity_index)
             return entity_index
 
         print(f"[tap] Click detected: x={x}, y={y}")
@@ -381,6 +345,8 @@ def build_timeseries_views(data, map_state, selection_state):
         print(f"[tap] Selected marker_meta={marker_meta}")
         print(f"[tap] Calling _fetch_timeseries with marker_meta={marker_meta}")
         entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=marker_meta)
+        if entity_index is not None:
+            borehole_stream.event(borehole_index=entity_index)
         return entity_index
 
     print(f"[timing] build_timeseries_views: {time.perf_counter() - start_total:.3f}s")
