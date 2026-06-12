@@ -212,6 +212,52 @@ class SelectionState(param.Parameterized):
             self._checked.clear()
             self.version += 1
 
+    def set_all_for_row(self, row_key, value: bool):
+        """Check or uncheck all valid combos in the given row."""
+        changed = False
+        for site in self._sites:
+            depths_arr = np.asarray(site["depths"]).ravel()
+            for depth_val in depths_arr:
+                if self.row_dim == "entity":
+                    row_matches = (str(site["site_id"]) == str(row_key))
+                else:
+                    row_matches = (float(depth_val) == float(row_key))
+                if not row_matches:
+                    continue
+                key = (str(site["site_id"]), float(depth_val))
+                before = key in self._checked
+                if value and not before:
+                    self._checked.add(key)
+                    changed = True
+                elif not value and before:
+                    self._checked.discard(key)
+                    changed = True
+        if changed:
+            self.version += 1
+
+    def set_all_for_column(self, col_key, value: bool):
+        """Check or uncheck all valid combos in the given column."""
+        changed = False
+        for site in self._sites:
+            depths_arr = np.asarray(site["depths"]).ravel()
+            for depth_val in depths_arr:
+                if self.col_dim == "vertical":
+                    col_matches = (float(depth_val) == float(col_key))
+                else:
+                    col_matches = (str(site["site_id"]) == str(col_key))
+                if not col_matches:
+                    continue
+                key = (str(site["site_id"]), float(depth_val))
+                before = key in self._checked
+                if value and not before:
+                    self._checked.add(key)
+                    changed = True
+                elif not value and before:
+                    self._checked.discard(key)
+                    changed = True
+        if changed:
+            self.version += 1
+
     # ── queries ──────────────────────────────────────────────────────
 
     def get_selected_combinations(self):
@@ -459,20 +505,27 @@ def build_assignment_matrix(
         row: dict = {
             "_index": i,
             "_row_label": str(row_key),
+            "_row_sel": False,
             "_marker": row_shapes.get(str(row_key), "circle"),
             "entity_index": eid,
             "_actions": "✕",
         }
+        row_all_checked = True
+        row_any_valid = False
         for col_key in col_keys:
             col_s = str(col_key)
             valid = selection_state.is_valid(row_key, col_key)
             if valid:
+                row_any_valid = True
                 checked = selection_state.is_checked(row_key, col_key)
                 row[col_s] = bool(checked)
                 row[f"__valid_{col_s}"] = True
+                if not checked:
+                    row_all_checked = False
             else:
                 row[col_s] = None
                 row[f"__valid_{col_s}"] = False
+        row["_row_sel"] = row_all_checked if row_any_valid else False
         rows.append(row)
 
     df = pd.DataFrame(rows)
@@ -483,6 +536,7 @@ def build_assignment_matrix(
 
     editors: dict = {
         "_row_label": None,
+        "_row_sel": {"type": "tickCross", "tristate": True, "indeterminateValue": None},
         "_marker": None,
         "_actions": None,
         **{
@@ -493,6 +547,7 @@ def build_assignment_matrix(
 
     formatters: dict = {
         "_row_label": {"type": "text"},
+        "_row_sel": {"type": "tickCross"},
         "_marker": {"type": "text"},
         "_actions": {"type": "button", "label": "✕ Remove", "buttonType": "danger"},
         **{col: {"type": "tickCross"} for col in selection_cols},
@@ -500,6 +555,7 @@ def build_assignment_matrix(
 
     editables: dict = {
         "_row_label": False,
+        "_row_sel": True,
         "_marker": False,
         "_actions": False,
         **{col: True for col in selection_cols},
@@ -612,14 +668,14 @@ def build_plot_selection_panel(
         (k for k, v in available_dims.items() if v == state.row_dim),
         state.row_dim,
     )
-    titles = {"_row_label": _row_label_title, "_actions": "Remove"}
+    titles = {"_row_label": _row_label_title, "_row_sel": "All", "_actions": "Remove"}
     table = pn.widgets.Tabulator(
         df,
         titles=titles,
         editors=editors,
         formatters=formatters,
         hidden_columns=hidden,
-        frozen_columns=["_row_label", "_actions"],
+        frozen_columns=["_row_label", "_row_sel", "_actions"],
         selectable=False,
         show_index=False,
         max_height=400,
@@ -648,11 +704,12 @@ def build_plot_selection_panel(
                 (k for k, v in available_dims.items() if v == state.row_dim),
                 state.row_dim,
             )
-            table.titles = {"_row_label": _row_label_title, "_actions": "Remove"}
+            table.titles = {"_row_label": _row_label_title, "_row_sel": "All", "_actions": "Remove"}
             table.value = new_df
             table.editors = new_editors
             table.formatters = new_formatters
             table.hidden_columns = new_hidden
+            _rebuild_col_buttons()
         finally:
             _updating_table = False
 
@@ -686,19 +743,32 @@ def build_plot_selection_panel(
     col_select.param.watch(_sync_orientation, "value")
 
     def _on_table_cell_click(event):
-        """Handle clicks on the remove button column."""
-        if event.column != "_actions":
-            return
-        row_data = table.value.iloc[event.row]
-        eid = row_data.get("entity_index")
-        if eid is not None and not (isinstance(eid, float) and np.isnan(eid)):
-            if timeseries_loading is not None:
-                timeseries_loading.visible = True
-            state.remove_site(int(eid))
-            if timeseries_loading is not None:
-                pn.state.curdoc.add_timeout_callback(
-                    lambda: setattr(timeseries_loading, "visible", False), 400
-                )
+        """Handle clicks on action columns."""
+        if event.column == "_actions":
+            row_data = table.value.iloc[event.row]
+            eid = row_data.get("entity_index")
+            if eid is not None and not (isinstance(eid, float) and np.isnan(eid)):
+                if timeseries_loading is not None:
+                    timeseries_loading.visible = True
+                state.remove_site(int(eid))
+                if timeseries_loading is not None:
+                    pn.state.curdoc.add_timeout_callback(
+                        lambda: setattr(timeseries_loading, "visible", False), 400
+                    )
+        elif event.column == "_row_label":
+            row_data = table.value.iloc[event.row]
+            row_key = row_data["_row_label"]
+            any_unchecked = False
+            for col in table.value.columns:
+                if col.startswith("__valid_") or col in ("_row_label", "_row_sel", "_marker", "entity_index", "_actions", "_index"):
+                    continue
+                if row_data.get(f"__valid_{col}", False) and not row_data.get(col, False):
+                    any_unchecked = True
+                    break
+            _set_loading(True)
+            state.set_all_for_row(row_key, any_unchecked)
+            _rebuild_table()
+            _set_loading(False)
 
     table.on_click(_on_table_cell_click)
 
@@ -715,6 +785,14 @@ def build_plot_selection_panel(
             return
 
         row_key = table.value.iloc[row_idx]["_row_label"]
+
+        if col == "_row_sel":
+            _set_loading(True)
+            state.set_all_for_row(row_key, bool(new_value))
+            _rebuild_table()
+            _set_loading(False)
+            return
+
         state.set_checked(row_key, col, bool(new_value))
 
     table.on_edit(_on_table_edit)
@@ -723,6 +801,87 @@ def build_plot_selection_panel(
         _rebuild_table()
 
     state.param.watch(_on_layout_change, "layout_version")
+
+    # ── Loading indicator ──────────────────────────────────────────
+    selection_loading = pn.indicators.LoadingSpinner(
+        value=False, width=18, height=18, visible=False, margin=(1, 5, 0, 5)
+    )
+
+    def _set_loading(active: bool):
+        selection_loading.value = active
+        selection_loading.visible = active
+
+    # ── Select All / Deselect All ──────────────────────────────────
+    select_all_btn = pn.widgets.Button(
+        name="✓ Select All", button_type="primary", width=110, height=28
+    )
+    deselect_all_btn = pn.widgets.Button(
+        name="☐ Deselect All", width=110, height=28
+    )
+
+    def _on_select_all(event):
+        _set_loading(True)
+        state.select_all()
+        _rebuild_table()
+        _set_loading(False)
+
+    def _on_deselect_all(event):
+        _set_loading(True)
+        state.deselect_all()
+        _rebuild_table()
+        _set_loading(False)
+
+    select_all_btn.on_click(_on_select_all)
+    deselect_all_btn.on_click(_on_deselect_all)
+
+    action_bar = pn.Row(
+        select_all_btn,
+        deselect_all_btn,
+        selection_loading,
+        sizing_mode="stretch_width",
+    )
+
+    # ── Column toggle buttons ──────────────────────────────────────
+    col_sel_row = pn.Row(sizing_mode="stretch_width")
+
+    def _rebuild_col_buttons():
+        col_keys = list(state.col_keys)
+        children = []
+        for ck in col_keys:
+            ck_s = str(ck)
+
+            def _on_click(event, _c=ck_s):
+                any_unchecked = False
+                for site in state._sites:
+                    for d in np.asarray(site["depths"]).ravel():
+                        if state.col_dim == "vertical":
+                            col_matches = (float(d) == float(_c))
+                        else:
+                            col_matches = (str(site["site_id"]) == str(_c))
+                        key = (str(site["site_id"]), float(d))
+                        if col_matches and key not in state._checked:
+                            any_unchecked = True
+                            break
+                    if any_unchecked:
+                        break
+                _set_loading(True)
+                state.set_all_for_column(_c, any_unchecked)
+                _rebuild_table()
+                _set_loading(False)
+
+            btn = pn.widgets.Button(
+                name=ck_s,
+                width=65,
+                height=24,
+                button_type="default",
+                styles={"font-size": "11px", "padding": "1px 3px"},
+            )
+            btn.on_click(_on_click)
+            children.append(btn)
+        col_sel_row[:] = children
+
+    # Call once on init, and rebuild whenever the table is rebuilt
+    _rebuild_col_buttons()
 
     controls = pn.Row(row_select, col_select, sizing_mode="stretch_width")
 
@@ -742,6 +901,8 @@ def build_plot_selection_panel(
     panel = pn.Column(
         pn.pane.Markdown("**Plot Selection**", margin=(0, 0, 5, 0)),
         controls,
+        action_bar,
+        col_sel_row,
         table,
         legend_accordion,
         sizing_mode="stretch_width",
