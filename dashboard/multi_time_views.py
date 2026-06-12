@@ -1,6 +1,7 @@
 import holoviews as hv
 import numpy as np
 import pandas as pd
+import panel as pn
 import time
 
 from holoviews import streams
@@ -9,7 +10,7 @@ from dashboard.config import _resolve_fields_for_group_raw
 from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_DASH
 
 
-def build_timeseries_views(data, map_state, selection_state):
+def build_timeseries_views(data, map_state, selection_state, timeseries_loading=None):
     start_total = time.perf_counter()
     endpoint_config = data.client.get_endpoint(data.endpoint_name)
     defaults_config = endpoint_config["defaults"]
@@ -184,7 +185,13 @@ def build_timeseries_views(data, map_state, selection_state):
         if event.new is not None:
             nonlocal _center_time
             _center_time = pd.to_datetime(event.new)
+            if timeseries_loading is not None:
+                timeseries_loading.visible = True
             center_stream.event(center=_center_time)
+            if timeseries_loading is not None:
+                pn.state.curdoc.add_timeout_callback(
+                    lambda: setattr(timeseries_loading, "visible", False), 400
+                )
 
     def _make_yrange_hook(ylim):
         def _hook(plot, element):

@@ -71,9 +71,17 @@ def build_dashboard():
         group_path=data.group_path,
         schema_display=schema_display_tbl,
     )
+    timeseries_loading = pn.Row(
+        pn.indicators.LoadingSpinner(value=True, width=24, height=24),
+        pn.pane.Markdown("Loading timeseries data...", styles={"color": "#dbeafe"}),
+        visible=False,
+        sizing_mode="stretch_width",
+    )
+
     panel_table, selection_state = build_plot_selection_panel(
         state=selection_state,
         available_dims=available_dims,
+        timeseries_loading=timeseries_loading,
     )
     # ────────────────────────────────────────────────────────────────
 
@@ -246,15 +254,9 @@ def build_dashboard():
         data,
         map_state,
         selection_state=selection_state,
+        timeseries_loading=timeseries_loading,
     )
     map_handlers["on_map_tap"] = on_map_tap
-
-    timeseries_loading = pn.Row(
-        pn.indicators.LoadingSpinner(value=True, width=24, height=24),
-        pn.pane.Markdown("Loading timeseries data...", styles={"color": "#dbeafe"}),
-        visible=False,
-        sizing_mode="stretch_width",
-    )
 
     def on_tap_event(*_):
         if timeseries_loading.visible:

@@ -559,6 +559,7 @@ def _build_legend_html(state):
 def build_plot_selection_panel(
     state: SelectionState | None = None,
     available_dims: dict[str, str] | None = None,
+    timeseries_loading: pn.Row | None = None,
 ) -> tuple[pn.Column, SelectionState]:
     """Build the Tabulator-based Plot Selection panel.
 
@@ -684,7 +685,13 @@ def build_plot_selection_panel(
         row_data = table.value.iloc[event.row]
         eid = row_data.get("entity_index")
         if eid is not None and not (isinstance(eid, float) and np.isnan(eid)):
+            if timeseries_loading is not None:
+                timeseries_loading.visible = True
             state.remove_site(int(eid))
+            if timeseries_loading is not None:
+                pn.state.curdoc.add_timeout_callback(
+                    lambda: setattr(timeseries_loading, "visible", False), 400
+                )
 
     table.on_click(_on_table_cell_click)
 
