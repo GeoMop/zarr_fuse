@@ -672,6 +672,7 @@ def build_plot_selection_panel(
             state.row_dim = row_select.value
             state.col_dim = col_select.value
             _rebuild_table()
+            state.version += 1
         finally:
             _orientation_lock = False
 

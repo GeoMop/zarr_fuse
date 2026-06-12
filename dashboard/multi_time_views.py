@@ -7,7 +7,7 @@ import time
 from holoviews import streams
 
 from dashboard.config import _resolve_fields_for_group_raw
-from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_DASH
+from dashboard.plot_styles import SHAPE_TO_DASH
 
 
 def build_timeseries_views(data, map_state, selection_state, timeseries_loading=None):
@@ -111,13 +111,15 @@ def build_timeseries_views(data, map_state, selection_state, timeseries_loading=
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
 
         # ── style mapping ─────────────────────────────────────────────
-        # Color by depth: pick a distinct color for each unique depth
-        all_depths = selection_state.all_depths
-        depth_colors = {d: COLORS[i % len(COLORS)] for i, d in enumerate(all_depths)}
-        # Line dash by site entity_index — assign shape, then convert to dash
-        entity_indices = sorted({s["entity_index"] for s in selection_state.sites})
-        entity_shapes = {ei: MARKER_SHAPES[i % len(MARKER_SHAPES)] for i, ei in enumerate(entity_indices)}
-        entity_dashes = {ei: SHAPE_TO_DASH.get(shape, "solid") for ei, shape in entity_shapes.items()}
+        # Read orientation-aware style maps from the table panel.
+        # These are set by build_assignment_matrix() which assigns shapes
+        # by row_key and colors by col_key, matching the current row/col
+        # orientation.  When transposed, the maps swap accordingly.
+        row_shapes = getattr(selection_state, "_row_shapes", {})
+        col_colors = getattr(selection_state, "_col_colors", {})
+
+        row_dim = selection_state.row_dim
+        col_dim = selection_state.col_dim
 
         curves = []
         for entity_idx, depth_idx in selected_combos:
@@ -127,19 +129,27 @@ def build_timeseries_views(data, map_state, selection_state, timeseries_loading=
                 continue
             depths_arr = np.asarray(site["depths"]).ravel()
             depth_val = depths_arr[depth_idx] if depth_idx < len(depths_arr) else depth_idx
-            label = f"{site['site_id']} @ {depth_val:.2f}"
+            site_id = site["site_id"]
+            label = f"{site_id} @ {depth_val:.2f}"
+
+            # Orientation-aware style lookup
+            row_key = site_id if row_dim == "entity" else depth_val
+            col_key = depth_val if col_dim == "vertical" else site_id
+            shape = row_shapes.get(str(row_key), "circle")
+            dash = SHAPE_TO_DASH.get(shape, "solid")
+            color = col_colors.get(str(col_key), "#000000")
+
             series_vals = site["series"][depth_idx]
             n_valid = int(np.isfinite(series_vals).sum())
             print(f"[timeseries] curve entity={entity_idx} depth_idx={depth_idx} label={label} "
-                  f"n_times={len(times)} n_vals={len(series_vals)} n_finite={n_valid}")
+                  f"n_times={len(times)} n_vals={len(series_vals)} n_finite={n_valid} "
+                  f"style color={color} dash={dash}")
             curve_df = pd.DataFrame({
                 time_dim: times,
                 y_axis_label: series_vals,
             })
-            dash = entity_dashes.get(entity_idx, "solid")
-            print(f"[timeseries] style color={depth_colors.get(float(depth_val), '#000000')} dash={dash}")
             curve = hv.Curve(curve_df, time_dim, y_axis_label, label=label).opts(
-                color=depth_colors.get(float(depth_val), "#000000"),
+                color=color,
                 line_dash=dash,
             )
             curves.append(curve)
