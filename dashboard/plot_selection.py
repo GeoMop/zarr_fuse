@@ -671,8 +671,14 @@ def build_plot_selection_panel(
                     col_select.value = available_dims[other]
             state.row_dim = row_select.value
             state.col_dim = col_select.value
+            if timeseries_loading is not None:
+                timeseries_loading.visible = True
             _rebuild_table()
             state.version += 1
+            if timeseries_loading is not None:
+                pn.state.curdoc.add_timeout_callback(
+                    lambda: setattr(timeseries_loading, "visible", False), 400
+                )
         finally:
             _orientation_lock = False
 
