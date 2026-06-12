@@ -249,8 +249,35 @@ def build_dashboard():
     )
     map_handlers["on_map_tap"] = on_map_tap
 
+    timeseries_loading = pn.Row(
+        pn.indicators.LoadingSpinner(value=True, width=24, height=24),
+        pn.pane.Markdown("Loading timeseries data...", styles={"color": "#dbeafe"}),
+        visible=False,
+        sizing_mode="stretch_width",
+    )
+
     def on_tap_event(*_):
-        map_handlers["on_map_tap"](tap_stream.x, tap_stream.y)
+        if timeseries_loading.visible:
+            return  # debounce — already loading
+        timeseries_loading.visible = True
+        # Capture coordinates at tap time (avoid stale values after delay)
+        _x, _y = tap_stream.x, tap_stream.y
+        doc = pn.state.curdoc
+
+        def _do_tap():
+            try:
+                map_handlers["on_map_tap"](_x, _y)
+            finally:
+                timeseries_loading.visible = False
+
+        if doc is not None:
+            # Use timeout, not next_tick — next_tick runs synchronously during
+            # document unlock, batching visible=True + visible=False together
+            # so the frontend never sees the spinner.  A small timeout lets the
+            # UI flush visible=True before the blocking I/O starts.
+            doc.add_timeout_callback(_do_tap, 100)
+        else:
+            _do_tap()
 
     tap_stream.param.watch(on_tap_event, ["x", "y"])
 
@@ -263,6 +290,7 @@ def build_dashboard():
     )
     top_right = pn.Column(
         loading_indicator,
+        timeseries_loading,
         variable_info,
         panel_table,
         sizing_mode="stretch_both",
@@ -297,12 +325,16 @@ def build_dashboard():
         # ── Re-fetch existing sites with the current (possibly changed) variable ──
         lats = new_map_state.get("lats", [])
         lons = new_map_state.get("lons", [])
+        if saved_indices:
+            timeseries_loading.visible = True
         for idx in saved_indices:
             if idx < len(lats) and idx < len(lons):
                 lat = float(lats[idx])
                 lon = float(lons[idx])
                 new_on_map_tap(lon, lat)  # x=lon, y=lat
                 print(f"[refresh_views] Re-fetched site idx={idx} at ({lat:.4f}, {lon:.4f})")
+        if saved_indices:
+            timeseries_loading.visible = False
 
         print(f"[timing] refresh_views: done")
 
