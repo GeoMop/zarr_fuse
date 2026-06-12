@@ -272,6 +272,10 @@ def build_dashboard():
     bottom_right = pn.pane.HoloViews(line_right, sizing_mode="stretch_both")
 
     def refresh_views():
+        # Save existing site indices *before* rebuilding (they will get stale data
+        # replaced via force=True in _fetch_timeseries after the variable change)
+        saved_indices = [s["entity_index"] for s in selection_state.sites]
+
         print(f"[timing] refresh_views: start building map_view")
         new_map_view, new_map_state = build_map_view(data, tap_stream)
         print(f"[timing] refresh_views: map_view done, building timeseries")
@@ -289,6 +293,17 @@ def build_dashboard():
         bottom_left.object = new_line_left
         bottom_mid.object = new_line_mid
         bottom_right.object = new_line_right
+
+        # ── Re-fetch existing sites with the current (possibly changed) variable ──
+        lats = new_map_state.get("lats", [])
+        lons = new_map_state.get("lons", [])
+        for idx in saved_indices:
+            if idx < len(lats) and idx < len(lons):
+                lat = float(lats[idx])
+                lon = float(lons[idx])
+                new_on_map_tap(lon, lat)  # x=lon, y=lat
+                print(f"[refresh_views] Re-fetched site idx={idx} at ({lat:.4f}, {lon:.4f})")
+
         print(f"[timing] refresh_views: done")
 
     def on_store_change(event):

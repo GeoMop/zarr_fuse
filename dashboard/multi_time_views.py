@@ -85,8 +85,9 @@ def build_timeseries_views(data, map_state, selection_state):
             depths=depths,
             series=series,
             times=times,
+            force=True,
         )
-        print(f"[plot_selection] Site added: {site_id}")
+        print(f"[plot_selection] Site added/updated: {site_id}")
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
 

@@ -111,15 +111,26 @@ class SelectionState(param.Parameterized):
 
     # ── mutations ────────────────────────────────────────────────────
 
-    def add_site(self, entity_index, site_id, depths, series, times):
-        """Register a new site (or skip if already present).
+    def add_site(self, entity_index, site_id, depths, series, times, force=False):
+        """Register a new site (or replace data if *force* is True and site exists).
 
-        All of its depth levels are auto-selected by default.
+        When *force* is True and the entity_index already exists, the series/times
+        data is replaced (e.g. after a variable change).  Depth auto-selection is
+        **not** re-applied — existing checked states are preserved.
         Triggers a table rebuild (**layout_version*).
         """
         for site in self._sites:
             if site["entity_index"] == entity_index:
-                print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
+                if not force:
+                    print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
+                    return
+                # Replace data for a re-fetch (e.g. after variable change)
+                site["depths"] = np.asarray(depths, dtype=float).ravel()
+                site["series"] = series
+                site["times"] = times
+                self.layout_version += 1
+                self.version += 1
+                print(f"[SelectionState] Updated data for site {site_id} (idx={entity_index})")
                 return
 
         depths_arr = np.asarray(depths, dtype=float).ravel()
