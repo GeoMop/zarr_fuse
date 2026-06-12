@@ -92,7 +92,8 @@ def build_timeseries_views(data, map_state, selection_state, timeseries_loading=
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
 
-    def build_timeseries_overlay():
+    def build_timeseries_overlay(view="left"):
+        max_points = 5000 if view == "left" else None
         if selection_state is None:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
@@ -110,11 +111,13 @@ def build_timeseries_views(data, map_state, selection_state, timeseries_loading=
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
 
-        # ── style mapping ─────────────────────────────────────────────
-        # Read orientation-aware style maps from the table panel.
-        # These are set by build_assignment_matrix() which assigns shapes
-        # by row_key and colors by col_key, matching the current row/col
-        # orientation.  When transposed, the maps swap accordingly.
+        n_times = len(times)
+        if max_points is not None and n_times > max_points:
+            step = n_times // max_points
+            ds_times = times[::step]
+        else:
+            ds_times = times
+
         row_shapes = getattr(selection_state, "_row_shapes", {})
         col_colors = getattr(selection_state, "_col_colors", {})
 
@@ -132,7 +135,6 @@ def build_timeseries_views(data, map_state, selection_state, timeseries_loading=
             site_id = site["site_id"]
             label = f"{site_id} @ {depth_val:.2f}"
 
-            # Orientation-aware style lookup
             row_key = site_id if row_dim == "entity" else depth_val
             col_key = depth_val if col_dim == "vertical" else site_id
             shape = row_shapes.get(str(row_key), "circle")
@@ -140,13 +142,13 @@ def build_timeseries_views(data, map_state, selection_state, timeseries_loading=
             color = col_colors.get(str(col_key), "#000000")
 
             series_vals = site["series"][depth_idx]
-            n_valid = int(np.isfinite(series_vals).sum())
-            print(f"[timeseries] curve entity={entity_idx} depth_idx={depth_idx} label={label} "
-                  f"n_times={len(times)} n_vals={len(series_vals)} n_finite={n_valid} "
-                  f"style color={color} dash={dash}")
+            if max_points is not None and n_times > max_points:
+                local_vals = series_vals[::step]
+            else:
+                local_vals = series_vals
             curve_df = pd.DataFrame({
-                time_dim: times,
-                y_axis_label: series_vals,
+                time_dim: ds_times,
+                y_axis_label: local_vals,
             })
             curve = hv.Curve(curve_df, time_dim, y_axis_label, label=label).opts(
                 color=color,
@@ -246,10 +248,13 @@ def build_timeseries_views(data, map_state, selection_state, timeseries_loading=
 
     _left_ylim_cache = None
     _left_ylim_version = None
+    _overlay_cache = {}
+    _overlay_version = None
 
     def create_timeseries_view(center=None, view="left", **_):
         nonlocal _center_time
         nonlocal _left_ylim_cache, _left_ylim_version
+        nonlocal _overlay_cache, _overlay_version
         if selection_state is None:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
@@ -282,7 +287,11 @@ def build_timeseries_views(data, map_state, selection_state, timeseries_loading=
             xlim = clamp_range(center_time, right_span, times)
             ylim = _compute_ylim(times, selected_combos, xlim)
 
-        overlay = build_timeseries_overlay()
+        if _overlay_version != selection_state.version:
+            _overlay_cache["left"] = build_timeseries_overlay(view="left")
+            _overlay_cache["full"] = build_timeseries_overlay(view="full")
+            _overlay_version = selection_state.version
+        overlay = _overlay_cache["left"] if view == "left" else _overlay_cache["full"]
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
         n_visible = int(np.sum((times >= xlim[0]) & (times <= xlim[1])))
         print(f"[ylim] view={view} xlim=({xlim[0]}, {xlim[1]}) n_visible={n_visible} ylim={ylim}")
