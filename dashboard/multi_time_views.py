@@ -245,7 +245,7 @@ def build_timeseries_views(data, map_state, selection_state):
         if center is not None:
             _center_time = center
         elif _center_time is None:
-            _center_time = times.min() + (times.max() - times.min()) / 2
+            _center_time = times.max()
         center_time = _center_time
 
         if view == "left":
