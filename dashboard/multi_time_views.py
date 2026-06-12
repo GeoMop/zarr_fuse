@@ -244,8 +244,12 @@ def build_timeseries_views(data, map_state, selection_state, timeseries_loading=
         padding = (ymax - ymin) * 0.1 or 1.0
         return (ymin - padding, ymax + padding)
 
+    _left_ylim_cache = None
+    _left_ylim_version = None
+
     def create_timeseries_view(center=None, view="left", **_):
         nonlocal _center_time
+        nonlocal _left_ylim_cache, _left_ylim_version
         if selection_state is None:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
@@ -267,15 +271,19 @@ def build_timeseries_views(data, map_state, selection_state, timeseries_loading=
 
         if view == "left":
             xlim = (times.min(), times.max())
+            if _left_ylim_version != selection_state.version:
+                _left_ylim_cache = _compute_ylim(times, selected_combos, xlim)
+                _left_ylim_version = selection_state.version
+            ylim = _left_ylim_cache
         elif view == "mid":
             xlim = clamp_range(center_time, mid_span, times)
+            ylim = _compute_ylim(times, selected_combos, xlim)
         else:
             xlim = clamp_range(center_time, right_span, times)
+            ylim = _compute_ylim(times, selected_combos, xlim)
 
         overlay = build_timeseries_overlay()
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
-
-        ylim = _compute_ylim(times, selected_combos, xlim)
         n_visible = int(np.sum((times >= xlim[0]) & (times <= xlim[1])))
         print(f"[ylim] view={view} xlim=({xlim[0]}, {xlim[1]}) n_visible={n_visible} ylim={ylim}")
         if ylim is None:
