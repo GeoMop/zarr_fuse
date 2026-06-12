@@ -169,6 +169,7 @@ def build_dashboard():
                         variable_info.object = f"**Viewing: {var_name}**"
                         _update_metadata()
                     except Exception as e:
+                        import traceback; traceback.print_exc()
                         variable_info.object = f"❌ Error: {str(e)[:50]}"
                         print(f"[variables] Error viewing {var_name}: {e}")
                     finally:
@@ -297,9 +298,9 @@ def build_dashboard():
         panel_table,
         sizing_mode="stretch_both",
     )
-    bottom_left = pn.pane.HoloViews(line_left, sizing_mode="stretch_both")
-    bottom_mid = pn.pane.HoloViews(line_mid, sizing_mode="stretch_both")
-    bottom_right = pn.pane.HoloViews(line_right, sizing_mode="stretch_both")
+    bottom_left = pn.pane.HoloViews(line_left, sizing_mode="stretch_both", linked_axes=False)
+    bottom_mid = pn.pane.HoloViews(line_mid, sizing_mode="stretch_both", linked_axes=False)
+    bottom_right = pn.pane.HoloViews(line_right, sizing_mode="stretch_both", linked_axes=False)
 
     def refresh_views():
         # Save existing site indices *before* rebuilding (they will get stale data
