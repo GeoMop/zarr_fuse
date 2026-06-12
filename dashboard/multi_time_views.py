@@ -191,10 +191,14 @@ def build_timeseries_views(data, map_state, selection_state):
             plot.state.y_range.end = ylim[1]
         return _hook
 
-    def _make_xrange_hook(xlim):
+    def _make_xrange_hook(xlim, bounds=None, max_interval_ms=None):
         def _hook(plot, element):
             plot.state.x_range.start = xlim[0]
             plot.state.x_range.end = xlim[1]
+            if bounds is not None:
+                plot.state.x_range.bounds = bounds
+            if max_interval_ms is not None:
+                plot.state.x_range.max_interval = max_interval_ms
         return _hook
 
     left_tap.param.watch(update_center_from_tap, ["x"])
@@ -254,8 +258,20 @@ def build_timeseries_views(data, map_state, selection_state):
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
 
         ylim = _compute_ylim(times, selected_combos, xlim)
+        n_visible = int(np.sum((times >= xlim[0]) & (times <= xlim[1])))
+        print(f"[ylim] view={view} xlim=({xlim[0]}, {xlim[1]}) n_visible={n_visible} ylim={ylim}")
+        if ylim is None:
+            full_xlim = (times.min(), times.max())
+            ylim = _compute_ylim(times, selected_combos, full_xlim)
+            print(f"[ylim] fallback to full range: {ylim}")
+        full_bounds = (times.min(), times.max())
+        max_interval_ms = None
+        if view == "mid":
+            max_interval_ms = int(mid_span.total_seconds() * 1000)
+        elif view == "right":
+            max_interval_ms = int(right_span.total_seconds() * 1000)
         hooks = []
-        hooks.append(_make_xrange_hook(xlim))
+        hooks.append(_make_xrange_hook(xlim, bounds=full_bounds, max_interval_ms=max_interval_ms))
         if ylim:
             hooks.append(_make_yrange_hook(ylim))
         n_sites = len(selection_state.sites)
