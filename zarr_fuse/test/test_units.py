@@ -13,6 +13,15 @@ def test_quanity():
     assert np.all(raw_q == q)
 
 
+def test_datetime_unit_get_encoding():
+    unit = units.DateTimeUnit(tick="s", tz="UTC")
+
+    assert unit.get_encoding() == {
+        "units": "seconds since 1970-01-01 00:00:00",
+        "calendar": "proleptic_gregorian",
+        "dtype": "int64",
+    }
+
 
 # TODO: replace by Variable.convert_value
 @pytest.mark.skip

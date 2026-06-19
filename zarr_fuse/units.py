@@ -62,6 +62,16 @@ def build_tzinfos():
 
 TZINFOS = build_tzinfos()
 
+CF_DATETIME_UNITS = {
+    "D": "days",
+    "h": "hours",
+    "m": "minutes",
+    "s": "seconds",
+    "ms": "milliseconds",
+    "us": "microseconds",
+    "ns": "nanoseconds",
+}
+
 class Unit(ureg.Unit):
     def asdict(self, value_serializer, filter):
         return str(self)
@@ -74,6 +84,9 @@ class Unit(ureg.Unit):
 
     def delta_dtype(self, dtype):
         return dtype
+
+    def get_encoding(self):
+        return {}
 
 
 class NoneUnit(ureg.Unit):
@@ -92,6 +105,9 @@ class NoneUnit(ureg.Unit):
 
     def delta_dtype(self, dtype):
         return dtype
+
+    def get_encoding(self):
+        return {}
 
 
 class Quantity(ureg.Quantity):
@@ -157,6 +173,16 @@ class DateTimeUnit:
     def nat(self):
         """Return the NaT value for this DateTimeUnit."""
         return np.datetime64('NaT', self.tick)
+
+    def get_encoding(self):
+        cf_unit = CF_DATETIME_UNITS.get(self.tick)
+        if cf_unit is None:
+            raise ValueError(f"Unsupported datetime tick for zarr encoding: {self.tick}")
+        return {
+            "units": f"{cf_unit} since 1970-01-01 00:00:00",
+            "calendar": "proleptic_gregorian",
+            "dtype": "int64",
+        }
 
     def parse(self, value):
         v = str(value)
@@ -266,5 +292,4 @@ def _create_dt_quantity(values, dt_unit: DateTimeUnit, log:'SchemaCtx') -> DateT
 
 
 UnitType = Unit | NoneUnit | DateTimeUnit
-
 

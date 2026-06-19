@@ -2,6 +2,7 @@ from typing import *
 import shutil
 import time
 import os
+import copy
 from dotenv import load_dotenv
 
 
@@ -42,7 +43,6 @@ workdir = script_dir / "workdir"
 #     :param kwargs:
 #     :return:
 #     """
-#     node_schema = zf.zarr_storage._get_schema_safe(schema)
 #     options = zf.zarr_storage._zarr_fuse_options(node_schema, **kwargs)
 #     store = zf.zarr_storage._zarr_store_open(options)
 #     if not isinstance(store, FsspecStore):
@@ -53,7 +53,7 @@ workdir = script_dir / "workdir"
 #         return fsspec.asyn.sync(loop, get_items, store)
 
 def _store_ls(schema, **kwargs):
-    node_schema = zf.zarr_storage._get_schema_safe(schema)
+    node_schema = zf.schema.deserialize(schema) if not isinstance(schema, zf.zarr_schema.NodeSchema) else schema
     options = zf.zarr_storage._zarr_fuse_options(node_schema, **kwargs)
     store = zf.zarr_storage._zarr_store_open(options)
     if not isinstance(store, FsspecStore):
@@ -172,6 +172,54 @@ def test_node_logger_override(monkeypatch):
 def test_zarr_fuse_options_rejects_unknown_logger():
     with pytest.raises(zf.zarr_storage.ZFOptionError):
         zf.zarr_storage._zarr_fuse_options(None, LOGGER='unknown')
+
+
+def test_datetime_encoding_roundtrip(smart_tmp_path):
+    store_path = smart_tmp_path / "datetime_roundtrip.zarr"
+    shutil.rmtree(store_path, ignore_errors=True)
+    schema_dict = {
+        "VARS": {
+            "temperature": {
+                "unit": "K",
+                "df_col": "temp",
+                "coords": ["date_time"],
+            },
+        },
+        "COORDS": {
+            "date_time": {
+                "unit": {"tick": "s", "tz": "UTC"},
+                "source_unit": {"tick": "s", "tz": "UTC"},
+                "df_col": "timestamp",
+                "chunk_size": 8,
+            },
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
+
+    schema_dict_ms = copy.deepcopy(schema_dict)
+    schema_dict_ms["COORDS"]["date_time"]["source_unit"] = {"tick": "ms", "tz": "UTC"}
+
+    node = zf.open_store(schema_dict)
+    node.update(pl.DataFrame({
+        "timestamp": ["1970-01-01T00:00:01+00:00"],
+        "temp": [280.0],
+    }))
+
+    node = zf.open_store(schema_dict_ms)
+    node.update(pl.DataFrame({
+        "timestamp": ["1970-01-01T01:00:02.000+01:00"],
+        "temp": [281.0],
+    }))
+
+    reopened = zf.open_store(schema_dict).dataset
+    expected_times = np.array(
+        ["1970-01-01T00:00:01", "1970-01-01T00:00:02"],
+        dtype="datetime64[s]",
+    )
+    npt.assert_array_equal(reopened["date_time"].values.astype("datetime64[s]"), expected_times)
+    npt.assert_array_equal(reopened["temperature"].values, np.array([280.0, 281.0]))
 
 
 def test_update_from_ds_writes_schema_compatible_dataset():
