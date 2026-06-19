@@ -222,6 +222,59 @@ def test_datetime_encoding_roundtrip(smart_tmp_path):
     npt.assert_array_equal(reopened["temperature"].values, np.array([280.0, 281.0]))
 
 
+def test_merge_ds_unsorted(smart_tmp_path):
+    store_path = smart_tmp_path / "sparse_borehole_region.zarr"
+    shutil.rmtree(store_path, ignore_errors=True)
+    schema_dict = {
+        "VARS": {
+            "temperature": {
+                "unit": "degC",
+                "df_col": "temp",
+                "coords": ["date_time", "borehole"],
+            },
+        },
+        "COORDS": {
+            "date_time": {
+                "unit": {"tick": "s", "tz": "UTC"},
+                "source_unit": {"tick": "s", "tz": "UTC"},
+                "df_col": "timestamp",
+                "chunk_size": 2,
+            },
+            "borehole": {
+                "unit": "",
+                "type": "str[8]",
+                "df_col": "borehole",
+                "sorted": False,
+                "chunk_size": 2,
+            },
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
+
+    node = zf.open_store(schema_dict)
+    node.update(pl.DataFrame({
+        "timestamp": [
+            "1970-01-01T00:00:00+00:00",
+            "1970-01-01T00:00:00+00:00",
+            "1970-01-01T00:00:00+00:00",
+        ],
+        "borehole": ["A", "B", "C"],
+        "temp": [10.0, 11.0, 12.0],
+    }))
+
+    node = zf.open_store(schema_dict)
+    node.update(pl.DataFrame({
+        "timestamp": [
+            "1970-01-01T00:00:00+00:00",
+            "1970-01-01T00:00:00+00:00",
+        ],
+        "borehole": ["A", "C"],
+        "temp": [20.0, 22.0],
+    }))
+
+
 def test_update_from_ds_writes_schema_compatible_dataset():
     schema = zf.schema.deserialize(inputs_dir / "schema_open_store_tst.yaml")
 
