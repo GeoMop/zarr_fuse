@@ -122,6 +122,12 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
             # Same as default case.
             log.error(f"Ignoring unsupported interpolation for non-sorted coordinates (step_limits={schema.step_limits}\n)")
         update_old_part = new_sorted[:idx_split]
+        if len(update_old_part) > 0:
+            old_pos = {v: i for i, v in enumerate(old_values)}
+            selected_old_pos = np.array([old_pos[v] for v in update_old_part], dtype=int)
+            old_range_min = int(selected_old_pos.min())
+            old_range_max = int(selected_old_pos.max()) + 1
+            update_old_part = np.array(old_values[old_range_min:old_range_max])
 
     # Phase 2: determine extension
 
@@ -223,7 +229,8 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
     # )
     # combine: use linear where available, else nearest
     #ds_interpolated = ds_linear.combine_first(ds_nearest)
-    ds_interpolated = ds_linear
+    all_coords = {d: c for d, (c, idx) in coords_new if len(c) > 0}
+    ds_interpolated = ds_linear.reindex(all_coords, fill_value=np.nan)
     # meaningful methods available for multidim data:
     # “nearest”, “linear”, “pchip” (Piecewise Cubic Hermite Interpolating Polynomial)
     #
