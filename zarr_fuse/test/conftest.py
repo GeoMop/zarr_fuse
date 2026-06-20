@@ -3,6 +3,28 @@ import pytest
 import logging
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+
+def _repo_secret_env_files() -> list[Path]:
+    """Return supported local secret env files in preferred lookup order."""
+    repo_root = Path(__file__).resolve().parents[2]
+    return [
+        #repo_root / ".secret_env",
+        #repo_root / ".secrets_env",
+        repo_root / "tools" / ".secrets_env",
+    ]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def load_repo_secret_env() -> Path | None:
+    """Load repo-local secret environment variables for tests when available."""
+    for env_file in _repo_secret_env_files():
+        if env_file.exists():
+            load_dotenv(env_file, override=False)
+            return env_file
+    return None
+
 @pytest.fixture
 def smart_tmp_path(request):
     # Use persistent workdir for local/dev runs

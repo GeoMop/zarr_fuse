@@ -20,6 +20,8 @@
   suite run.
 - For S3-backed tests, prefer explicit skip conditions when required secrets or
   endpoints are unavailable.
+- Add a shared pytest fixture to load local secret environment variables from
+  `.secrets_env` for tests that opt into remote-backed execution.
 
 ### P1. Stabilize local store open behavior
 
@@ -66,6 +68,12 @@
 - Some existing tests already skip when S3 credentials are absent, but the repo
   still mixes local and remote assumptions. That boundary should be made more
   explicit during test-fix work.
+- Current pytest triage shows two separate failure classes:
+  - S3-backed tests reach the remote endpoint but fail with `AccessDenied` on
+    `test-zarr-storage`, so the injected credentials are present but do not
+    have the required bucket permissions for these tests.
+  - Local weather/time tests fail in timezone conversion paths and likely hinge
+    on `DateTimeUnit.tz_shift` using the current date's offset for `CET`.
 
 ## AGENT log
 
@@ -75,3 +83,7 @@
   priority of failing-test triage.
 - 2026-06-20: Updated `AGENTS.md` to clarify plan ownership and secret-gated
   test handling.
+- 2026-06-20: Confirmed repo-local `venv` and `.secrets_env` for pytest-based
+  failure triage.
+- 2026-06-20: Added a session pytest fixture to load repo-local secret env
+  files and ran `venv/bin/pytest` for baseline failure classification.
