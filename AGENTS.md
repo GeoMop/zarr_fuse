@@ -73,7 +73,10 @@ Project specific rules:
 - Iteratively add type hints and doc strings to touched code. 
 - Do not change anything you do not understand well.
 - Rather ask before change.
-
+- Basic zarr-fuse library does not depend on any plotting libraries. So these should not be
+  imported at module level in the tests, only imort them from specific plotting functions.
+  
+  
   
 ## Mandatory Finish Checklist
 
