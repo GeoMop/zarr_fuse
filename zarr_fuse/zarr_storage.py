@@ -196,19 +196,6 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
         )
     return options
 
-def _get_schema_safe(schema):
-    if isinstance(schema, NodeSchema):
-        return schema
-    if isinstance(schema, str):
-        if schema == '':
-            return NodeSchema.make_empty()
-        schema = Path(schema)
-    if isinstance(schema, Path):
-        return zarr_schema.deserialize(schema)
-    else:
-        raise TypeError(f"Unsupported schema type: {type(schema)}. Expected NodeSchema or Path.")
-
-
 def _wipe_store(store):
 
     # For fsspec-style filesystems
@@ -250,8 +237,13 @@ def _wipe_store(store):
         fsspec.asyn.sync(loop, session.close)
         type(fs).clear_instance_cache()
 
+def _get_schema(schema: zarr_schema.NodeSchema | Path | str | dict):
+    schema = Path(schema) if isinstance(schema, str) else schema
+    return schema if isinstance(schema, NodeSchema) else zarr_schema.deserialize(schema)
+
+
 def remove_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
-    node_schema = _get_schema_safe(schema)
+    node_schema = _get_schema(schema)
     options = _zarr_fuse_options(node_schema, **kwargs)
     try:
         store = _zarr_store_open(options)
@@ -262,7 +254,7 @@ def remove_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
     #store.delete_dir("")
 
 
-def open_store(schema: zarr_schema.NodeSchema | Path | str, **kwargs):
+def open_store(schema: zarr_schema.NodeSchema | Path | str | dict, **kwargs):
     """
     Open existing or create a new ZARR store according to given schema.
     'schema': Could be schema dict or YAML string or Path object to YAML file.
@@ -273,7 +265,7 @@ def open_store(schema: zarr_schema.NodeSchema | Path | str, **kwargs):
 
     Return: root Node
     """
-    node_schema = _get_schema_safe(schema)
+    node_schema = _get_schema(schema)
     options = _zarr_fuse_options(node_schema, **kwargs)
 
     try:
@@ -646,10 +638,7 @@ class Node:
         Original schema tree is spread over the storage groups represented by Nodes.
         :return:
         """
-        node_schema = zarr_schema.deserialize(
-            self.dataset.attrs['__structure__'],
-            source_description='<storage schema>'
-        )
+        node_schema = zarr_schema.deserialize(self.dataset.attrs['__structure__'], source_description='<storage schema>')
         return node_schema.ds
 
 
@@ -820,8 +809,15 @@ class Node:
         assert '__structure__' in written_ds.attrs
         return written_ds
 
+    def _coerce_encoding(self, ds):
+        schema_vars = {**self.schema.COORDS, **self.schema.VARS}
+        for name in ds.variables:
+            ds[name].encoding.update(schema_vars[name].get_encoding())
+        return ds
+
     def write_ds(self, ds, **kwargs):
         ds.attrs = self.ensure_schema_attrs(ds.attrs)
+        ds = self._coerce_encoding(ds)
 
         rel_path = self.group_path.strip(self.PATH_SEP)
         ds.to_zarr(self.store, group=rel_path, consolidated=False, **kwargs)

@@ -8,9 +8,11 @@ import re
 from zarr_fuse import schema as zf_schema
 
 try:
+    import matplotlib
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 except ImportError:
-    pass
+    plt = None
 
 # ---- adjust this import to match your module path! ----
 from zarr_fuse.interpolate import interpolate_ds, sort_by_coord, interpolate_coord, dflt_logger
@@ -392,5 +394,3 @@ def test_interpolate_ds():
     nan_mask = int_nan_mask & ex_nan_mask
     assert np.array_equal(merged_vals[valid_mask], exist_vals[valid_mask])
     assert np.all(np.isnan(merged_vals[nan_mask]))
-
-

@@ -22,15 +22,14 @@ ureg.define('false = 0 bool')
 _pint.set_application_registry(ureg)
 
 
-# Map common timezone abbreviations to fixed-offset tzinfo
-# Daylight saving time intantionaly forbiden to avoid duplicit times during transition.
-# Build TZINFOS mapping dynamically for all available fixed-offset (non-DST) IANA timezones
+# Map common timezone abbreviations to fixed-offset tzinfo.
+# Daylight saving time is intentionally forbidden to avoid ambiguous local times.
 import zoneinfo
 
 def build_tzinfos():
     """
-     Return dict mapping common timezone abbreviations to fixed-offset seconds (no DST), using pytz.
-     """
+    Return a mapping from timezone abbreviations to fixed-offset tzinfo objects.
+    """
     tzinfos = {}
     winter_instance = datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
     summer_instance = datetime.datetime(2000, 7, 1, tzinfo=datetime.timezone.utc)
@@ -49,18 +48,30 @@ def build_tzinfos():
             if not abbr or len(abbr) > 5:
                 continue
             # map abbreviation to offset seconds
+            new_offset = tzobj.utcoffset(instance)
+            if new_offset is None:
+                continue
+            new_tzinfo = datetime.timezone(new_offset, name=abbr)
             if abbr in tzinfos:
                 existing = tzinfos[abbr].utcoffset(instance)
-                new = tzobj.utcoffset(instance)
-                if existing != new:
+                if existing != new_offset:
                     inconsistent.add(abbr)
-            tzinfos[abbr] = tzobj
-    #print("Removing inconsistent TZ codes:", inconsistent)
+            tzinfos[abbr] = new_tzinfo
     for code in inconsistent:
         tzinfos.pop(code)
     return tzinfos
 
 TZINFOS = build_tzinfos()
+
+CF_DATETIME_UNITS = {
+    "D": "days",
+    "h": "hours",
+    "m": "minutes",
+    "s": "seconds",
+    "ms": "milliseconds",
+    "us": "microseconds",
+    "ns": "nanoseconds",
+}
 
 class Unit(ureg.Unit):
     def asdict(self, value_serializer, filter):
@@ -74,6 +85,9 @@ class Unit(ureg.Unit):
 
     def delta_dtype(self, dtype):
         return dtype
+
+    def get_encoding(self):
+        return {}
 
 
 class NoneUnit(ureg.Unit):
@@ -92,6 +106,9 @@ class NoneUnit(ureg.Unit):
 
     def delta_dtype(self, dtype):
         return dtype
+
+    def get_encoding(self):
+        return {}
 
 
 class Quantity(ureg.Quantity):
@@ -130,6 +147,9 @@ class DateTimeUnit:
             offset = datetime.timedelta(hours=hours, minutes=mins) * sign
             return datetime.timezone(offset)
 
+        if val in TZINFOS:
+            return TZINFOS[val]
+
         # named zone
         tzinfo = dateutil.tz.gettz(val)
         if tzinfo is None:
@@ -138,11 +158,14 @@ class DateTimeUnit:
 
     @property
     def tz_shift(self) -> float:
-        """Hours offset from UTC for the current datetime."""
+        """Hours offset from UTC for this unit's timezone."""
         tzinfo = self.tzinfo
         if tzinfo is None:
             return 0.0
-        offset = tzinfo.utcoffset(datetime.datetime.now())
+        reference = datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
+        offset = tzinfo.utcoffset(reference)
+        if offset is None:
+            return 0.0
         return offset.total_seconds() / 3600.0
 
     def default_dtype(self):
@@ -157,6 +180,16 @@ class DateTimeUnit:
     def nat(self):
         """Return the NaT value for this DateTimeUnit."""
         return np.datetime64('NaT', self.tick)
+
+    def get_encoding(self):
+        cf_unit = CF_DATETIME_UNITS.get(self.tick)
+        if cf_unit is None:
+            raise ValueError(f"Unsupported datetime tick for zarr encoding: {self.tick}")
+        return {
+            "units": f"{cf_unit} since 1970-01-01 00:00:00",
+            "calendar": "proleptic_gregorian",
+            "dtype": "int64",
+        }
 
     def parse(self, value):
         v = str(value)
@@ -266,5 +299,3 @@ def _create_dt_quantity(values, dt_unit: DateTimeUnit, log:'SchemaCtx') -> DateT
 
 
 UnitType = Unit | NoneUnit | DateTimeUnit
-
-
