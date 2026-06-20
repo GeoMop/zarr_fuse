@@ -27,6 +27,6 @@ jobs:
       shell: bash
       run: |
         # Preserve newlines exactly
-        printf "%s" "${{ secrets.ZF_TEST_DOTENV }}" > zarr_fuse/test/.env
+        printf "%s" "${{ secrets.ZF_TEST_DOTENV }}" > zarr_fuse/.secrets_env
     - name: Test with tox
       run: tox
