@@ -23,6 +23,13 @@ def test_datetime_unit_get_encoding():
     }
 
 
+def test_datetime_unit_timezone_abbreviation_uses_fixed_offset():
+    unit = units.DateTimeUnit(tick="h", tz="CET")
+
+    assert unit.tzinfo == units.datetime.timezone(units.datetime.timedelta(hours=1), name="CET")
+    assert unit.tz_shift == 1.0
+
+
 # TODO: replace by Variable.convert_value
 @pytest.mark.skip
 def test_create_quantity():

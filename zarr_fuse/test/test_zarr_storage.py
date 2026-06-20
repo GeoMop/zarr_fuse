@@ -460,7 +460,7 @@ def _run_local_validation(tree, df_map):
 
 
 @pytest.mark.parametrize("storage_type", ["local", "s3"])
-def test_node_tree(storage_type):
+def test_node_tree(storage_type, load_repo_secret_env):
     #import time
     #start = time.time()
     #print(f"[TIMING] test_node_tree({storage_type}) START")
@@ -495,8 +495,10 @@ def _check_ds_attrs_weather(ds, schema_ds):
                 assert sub_coord not in ds.coords
 
 @pytest.mark.parametrize("storage_type", ["local", "s3"])
-def test_update_weather(tmp_path, storage_type):
+def test_update_weather(tmp_path, storage_type, load_repo_secret_env):
     # Example YAML file content (as a string for illustration):
+    import pandas as pd
+
     schema, store, tree = aux_read_struc("schema_weather.yaml", storage_type=storage_type)
     ds_schema = schema.ds
     assert len(ds_schema.COORDS) == 2
@@ -564,9 +566,16 @@ def test_update_weather(tmp_path, storage_type):
     # Check the shape of the temperature variable.
     assert new_ds["temperature"].shape == (2,3)     #(3, 3)
 
-    # Check that the "time" coordinate, it is converted from explicit UTC ("...Z") to CET
-    # during forming the update DF and the converted back to UTC during actual update.
-    ref_vec = np.array([t1, t2], dtype='datetime64[h]') + np.timedelta64(1, 'h')  # CET is UTC+1 in May
+    source_dt_unit = tree.schema.COORDS["time of year"].source_unit
+    parsed_cet = np.array([source_dt_unit.parse(t1), source_dt_unit.parse(t2)], dtype="datetime64[h]")
+    ref_cet = (
+        pd.to_datetime([t1, t2]).values.astype("datetime64[h]") + np.timedelta64(1, "h")
+    )
+    np.testing.assert_array_equal(parsed_cet, ref_cet)
+
+    # Explicit UTC timestamps are first normalized to fixed CET local time and then
+    # converted back to UTC for storage. We intentionally do not model summer time.
+    ref_vec = pd.to_datetime([t1, t2]).values.astype("datetime64[h]")
     np.testing.assert_array_equal(new_ds["time of year"].values, ref_vec)
 
     # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]
@@ -612,9 +621,17 @@ def test_update_weather(tmp_path, storage_type):
     # Check that the "time" coordinate was updated to [1000, 2000]
 
     # check times are sorted
-    import pandas as pd
+    parsed_cet = np.array(
+        [source_dt_unit.parse(ts) for ts in [t1, t2, t3_5, t4]],
+        dtype="datetime64[ns]",
+    )
+    ref_cet = (
+        pd.to_datetime([t1, t2, t3_5, t4]).values.astype("datetime64[ns]")
+        + np.timedelta64(1, "h")
+    )
+    np.testing.assert_array_equal(parsed_cet, ref_cet)
 
-    times_pd = pd.to_datetime([t1, t2, t3_5, t4]) + 1.0 * pd.Timedelta(hours=1)  # CET to UTC
+    times_pd = pd.to_datetime([t1, t2, t3_5, t4])
     ref_times = times_pd.values.astype("datetime64[ns]")
     np.testing.assert_array_equal(new_ds["time of year"].values, ref_times)
     # !! Wrong order, not sorted
