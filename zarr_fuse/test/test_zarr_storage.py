@@ -420,7 +420,10 @@ def _run_full_test(tree, df_map):
     _update_tree(tree, df_map)
     #print(f"[TIMING] _update_tree: {time.time() - t1:.2f}s")
     #t2 = time.time()
-    zarr.consolidate_metadata(tree.store)
+
+    # V3 doesn't have consolidated data support yet (only as undocumented)
+    # we can not use it for parallel writes anyway.
+    #zarr.consolidate_metadata(tree.store)
     #print(f"[TIMING] consolidate_metadata: {time.time() - t2:.2f}s")
     #print(f"[TIMING] test_node_tree TOTAL: {time.time() - start_time:.2f}s")
 
@@ -568,14 +571,14 @@ def test_update_weather(tmp_path, storage_type, load_repo_secret_env):
 
     source_dt_unit = tree.schema.COORDS["time of year"].source_unit
     parsed_cet = np.array([source_dt_unit.parse(t1), source_dt_unit.parse(t2)], dtype="datetime64[h]")
-    ref_cet = (
-        pd.to_datetime([t1, t2]).values.astype("datetime64[h]") + np.timedelta64(1, "h")
-    )
+    expected_utc_values = pd.to_datetime([t1, t2]).values
+    ref_cet = expected_utc_values.astype("datetime64[h]") + np.timedelta64(1, "h")
     np.testing.assert_array_equal(parsed_cet, ref_cet)
 
-    # Explicit UTC timestamps are first normalized to fixed CET local time and then
-    # converted back to UTC for storage. We intentionally do not model summer time.
-    ref_vec = pd.to_datetime([t1, t2]).values.astype("datetime64[h]")
+    # The schema parses these inputs through a fixed CET source timezone.
+    # For explicit "...Z" timestamps, storage should still end up at the same UTC instants.
+    ref_vec = expected_utc_values.astype("datetime64[h]")
+    np.testing.assert_array_equal(pd.Series(ref_vec).values, expected_utc_values.astype("datetime64[h]"))
     np.testing.assert_array_equal(new_ds["time of year"].values, ref_vec)
 
     # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]

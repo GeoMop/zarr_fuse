@@ -4,6 +4,7 @@ from typing import Tuple, List, Dict
 import numpy as np
 import xarray as xr
 import attrs
+import warnings
 
 from .zarr_schema import Coord
 from . import units
@@ -20,6 +21,17 @@ class PartialOverlapError(ValueError):
         # Build your message from the fields
         return (f"The updating coord {self.coord_name} has"
                 f"overlap size [{self.idx_split}] < existing coord length [{self.coord_len}].")
+
+
+@attrs.define(frozen=True)
+class InterpolationFallbackWarning(UserWarning):
+    coord_names: Tuple[str, ...]
+
+    def __str__(self) -> str:
+        return (
+            f"Falling back from linear interpolation to nearest/P0 interpolation "
+            f"for coordinates {self.coord_names}."
+        )
 
 
 def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
@@ -74,7 +86,7 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     :param new_coords: coordinate values in the updating dataset
     :param old_coords: coordinate values in the existing dataset
     :param schema: schema dictionary
-    :return:
+    :return: (merged coords, split_index)
     1. asserts for non-sorted case
     2. replace part before split index by old values in same range
     3. for step_limit modify part after split index
@@ -199,38 +211,52 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
 
     # Phase 2: determine overlap and extension
     coords_new = [
-        (d,
+        (dim,
          interpolate_coord(
-             ds_update[d].values,
-             ds_existing[d].values,
-             dim_idx_sort[d],
-             schema[d], log)
+             ds_update[dim].values,
+             ds_existing[dim].values,
+             dim_idx_sort[dim],
+             schema[dim], log)
         )
-        for d in ds_update.dims
+        for dim in ds_update.dims
     ]
-    interp_coords = {d: c for d, (c, idx) in coords_new if schema[d].sorted and len(c) > 0}
-    split_indices = [(d, idx) for d, (c, idx) in coords_new]
+    interp_coords = {dim: coords for dim, (coords, idx) in coords_new
+                     if schema[dim].sorted and len(coords) > 0}
+    split_indices = [(dim, idx) for dim, (coords, idx) in coords_new]
 
     # Phase 3: interpolate ds_sorted to new coords
     dim_sorters = {d: sorter for d, (sorter, _) in dim_idx_sort.items()}
     ds_sorted = ds_update.isel(**dim_sorters)
 
-    # first attempt linear interpolation
-    ds_linear = ds_sorted.interp(
-        interp_coords,
-        method='linear',
-        assume_sorted=True
-    )
-    # then nearest-neighbor fallback to fill any NaNs
-    # ds_nearest = ds_sorted.interp(
-    #     interp_coords,
-    #     method='nearest',
-    #     assume_sorted=True
-    # )
-    # combine: use linear where available, else nearest
-    #ds_interpolated = ds_linear.combine_first(ds_nearest)
+    nearest_coords = {dim: interp_coords[dim] for dim, size in ds_sorted.sizes.items() if size <= 1}
+    linear_coords = {dim: coords for dim, coords in interp_coords.items() if dim not in nearest_coords}
+
+    ds_interpolated = ds_sorted.interp(
+            nearest_coords,
+            method='nearest',
+            assume_sorted=True
+        )
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            ds_linear = ds_interpolated.interp(
+                linear_coords,
+                method='linear',
+                assume_sorted=True
+            )
+    except RuntimeWarning as exc:
+        log.warning(
+            InterpolationFallbackWarning(linear_coords)
+        )
+        ds_interpolated = ds_sorted.interp(
+            linear_coords,
+            method='nearest',
+            assume_sorted=True
+        )
     all_coords = {d: c for d, (c, idx) in coords_new if len(c) > 0}
-    ds_interpolated = ds_linear.reindex(all_coords, fill_value=np.nan)
+    ds_interpolated = ds_interpolated.reindex(all_coords, fill_value=np.nan)
+
     # meaningful methods available for multidim data:
     # “nearest”, “linear”, “pchip” (Piecewise Cubic Hermite Interpolating Polynomial)
     #

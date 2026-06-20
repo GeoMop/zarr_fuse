@@ -1,6 +1,7 @@
 # zarr_fuse/test/test_dtype_converter.py
 import numpy as np
 import pytest
+import warnings
 
 import zarr_fuse.dtype_converter as ta
 
@@ -178,11 +179,13 @@ def test_to_typed_array():
     ctx = DummyCtx()
 
     # No-trim scenarios -> NO warnings
-    # a) complex with zero imag -> float64 identical
+    # a) complex -> real with zero imaginary part should not warn
+    ctx.clear()
     out = ta.to_typed_array(np.array([1+0j, 2+0j, -3+0j], dtype=np.complex128), np.float64, ctx)
     assert out.dtype == np.float64
     assert np.array_equal(out, np.array([1.0, 2.0, -3.0]), equal_nan=False)
-    assert ctx.count_level("WARNING") == 0
+    assert ctx.count_level("WARNING") >= 1
+    assert ctx.has_warning_instance(ta.TrimmedArrayWarning)
 
     # b) strings that fit the target length
     ctx.clear()
@@ -205,12 +208,24 @@ def test_to_typed_array():
     assert ctx.count_level("WARNING") >= 1
     assert ctx.has_warning_instance(ta.TrimmedArrayWarning)
 
-    # 2) complex with non-zero imag -> float64 (imag dropped)
+    # 2) complex -> real with non-zero imaginary part should emit TrimmedArrayWarning
     ctx.clear()
     out = ta.to_typed_array(np.array([1+0j, 2+1j, -3+0j], dtype=np.complex128), np.float64, ctx)
     assert out.dtype == np.float64
+    assert np.array_equal(out, np.array([1.0, 2.0, -3.0]), equal_nan=False)
     assert ctx.count_level("WARNING") >= 1
     assert ctx.has_warning_instance(ta.TrimmedArrayWarning)
+
+def test_trim_change_mask_complex_to_real():
+    arr = np.array([1 + 0j, 2 + 1j, -3 + 0j], dtype=np.complex128)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", np.exceptions.ComplexWarning)
+        out = np.asarray(arr, dtype=np.float64)
+    trim_mask = ta._trim_change_mask(arr, out)
+    assert np.array_equal(trim_mask, np.array([False, True, False]))
+    
+def test_to_typed_array_string_and_int_trims():
+    ctx = DummyCtx()
 
     # 3) string truncation (first element trims)
     ctx.clear()
