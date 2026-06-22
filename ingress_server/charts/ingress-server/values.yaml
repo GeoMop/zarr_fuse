@@ -56,7 +56,7 @@ deployment:
     # @default -- ~
     smtp:
       # -- Enable SMTP notifications; when false, password is not required
-      enabled: true
+      enabled: false
       # -- SMTP password for authentication
       password: ""
 
