@@ -228,8 +228,16 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
     dim_sorters = {d: sorter for d, (sorter, _) in dim_idx_sort.items()}
     ds_sorted = ds_update.isel(**dim_sorters)
 
-    nearest_coords = {dim: interp_coords[dim] for dim, size in ds_sorted.sizes.items() if size <= 1}
-    linear_coords = {dim: coords for dim, coords in interp_coords.items() if dim not in nearest_coords}
+    nearest_coords = {
+        dim: coords
+        for dim, coords in interp_coords.items()
+        if ds_sorted.sizes[dim] <= 1
+    }
+    linear_coords = {
+        dim: coords
+        for dim, coords in interp_coords.items()
+        if dim not in nearest_coords
+    }
 
     ds_interpolated = ds_sorted.interp(
             nearest_coords,

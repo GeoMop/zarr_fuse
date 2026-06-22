@@ -48,6 +48,15 @@
 - Fix or confirm the coordinate uniqueness validation noted in `_PLAN.md`.
 - Add tests only after the intended behavior is explicit.
 
+### P2. Fix interpolation lookup for unsorted dims
+
+- Reproduce the `KeyError` in `interpolate.py` when an unsorted dimension is
+  present in `ds_sorted` but absent from `interp_coords`.
+- Fix the nearest-coordinate selection to iterate over `interp_coords.items()`
+  and read the size from `ds_sorted` for the same key.
+- Add a regression test that covers a dataset with a sorted dimension and an
+  unsorted singleton dimension.
+
 ### P2. Separate S3 compatibility work
 
 - Keep S3 async/sync behavior review separate from local test stabilization.
@@ -216,3 +225,8 @@
   figures, removing the Tk teardown warnings from mixed local pytest runs.
 - 2026-06-20: Confirmed the remaining `logs/` warning is caused by plain text
   log files written inside the Zarr namespace, not by tree reconstruction.
+- 2026-06-22: Started interpolation regression work for unsorted singleton
+  dimensions in `interpolate.py`.
+- 2026-06-22: Fixed `interpolate_ds` nearest-coordinate lookup for unsorted
+  singleton dimensions and added a regression test in
+  `zarr_fuse/test/test_interpolate.py`.

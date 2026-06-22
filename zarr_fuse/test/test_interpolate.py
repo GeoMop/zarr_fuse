@@ -394,3 +394,45 @@ def test_interpolate_ds():
     nan_mask = int_nan_mask & ex_nan_mask
     assert np.array_equal(merged_vals[valid_mask], exist_vals[valid_mask])
     assert np.all(np.isnan(merged_vals[nan_mask]))
+
+
+def test_interpolate_ds_unsorted_singleton_dim():
+    # Regression for the KeyError in interpolate.py when an unsorted dimension
+    # is present in ds_sorted but intentionally excluded from interp_coords.
+    existing_x = np.array([0.0, 1.0])
+    update_x = np.array([0.0, 1.0])
+    existing_borehole = np.array(["A"])
+    update_borehole = np.array(["A"])
+
+    existing_ds = xr.Dataset(
+        {"data": (("x", "borehole"), np.array([[0.0], [1.0]]))},
+        coords={"x": existing_x, "borehole": existing_borehole},
+    )
+    update_ds = xr.Dataset(
+        {"data": (("x", "borehole"), np.array([[10.0], [11.0]]))},
+        coords={"x": update_x, "borehole": update_borehole},
+    )
+
+    coord_schema = lambda x: zf_schema.Coord(_ctx(x))
+    schema = {
+        "x": coord_schema(dict(
+            name="x",
+            unit="h",
+            sorted=True,
+            step_limits=[],
+        )),
+        "borehole": coord_schema(dict(
+            name="borehole",
+            unit="",
+            type="str[8]",
+            sorted=False,
+            step_limits=[],
+        )),
+    }
+
+    ds_int, splits = interpolate_ds(update_ds, existing_ds, schema)
+
+    assert dict(splits)["borehole"] == 1
+    np.testing.assert_array_equal(ds_int.coords["borehole"].values, np.array(["A"]))
+    np.testing.assert_array_equal(ds_int.coords["x"].values, np.array([0.0, 1.0]))
+    assert ds_int["data"].shape == (2, 1)
