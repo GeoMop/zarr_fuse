@@ -15,7 +15,7 @@ def send_failure_email(
     cron: str,
     failures: list[dict],
 ) -> None:
-    if not smtp_config.enabled:
+    if not smtp_config.enabled or not smtp_config.notify_to or not smtp_config.host:
         LOG.info(
             "Active scrapper notifications disabled for %s: smtp not configured",
             scrapper_name,

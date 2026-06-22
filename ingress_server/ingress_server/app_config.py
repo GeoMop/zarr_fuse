@@ -24,16 +24,13 @@ class BaseConfig:
 
 @dataclass(frozen=True)
 class SmtpConfig:
+    enabled: bool = True
     notify_to: list[str] = field(default_factory=list)
     host: str = ""
     port: int = 587
     from_email: str = ""
     username: str = ""
     password: str = ""
-
-    @property
-    def enabled(self) -> bool:
-        return bool(self.notify_to and self.host)
 
 
 @dataclass(frozen=True)
@@ -72,13 +69,18 @@ def _parse_base_config(raw: dict) -> BaseConfig:
 
 
 def _parse_smtp_config(raw: dict) -> SmtpConfig:
+    enabled = bool(raw.get("enabled", True))
     notify_to = raw.get("notify_to", [])
     if isinstance(notify_to, str):
         notify_to = [x.strip() for x in notify_to.split(",") if x.strip()]
 
-    password = os.getenv("SMTP_PASSWORD").strip()
+    password = ""
+    if enabled:
+        smtp_password_env = os.getenv("SMTP_PASSWORD")
+        password = smtp_password_env.strip() if smtp_password_env else ""
 
     return SmtpConfig(
+        enabled=enabled,
         notify_to=list(notify_to),
         host=raw.get("host", ""),
         port=int(raw.get("port", SmtpConfig.port)),
