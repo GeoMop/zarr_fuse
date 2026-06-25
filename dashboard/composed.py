@@ -66,7 +66,7 @@ def build_dashboard():
         name="Variable",
         options=[],
         value=None,
-        width=140,
+        width=120,
     )
 
     # ── Table-style plot selection ──────────────────────────────────

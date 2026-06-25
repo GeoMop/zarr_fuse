@@ -650,13 +650,13 @@ def build_plot_selection_panel(
         name="Rows",
         options=row_options,
         value=state.row_dim,
-        width=140,
+        width=120,
     )
     col_select = pn.widgets.Select(
         name="Columns",
         options=col_options,
         value=state.col_dim,
-        width=140,
+        width=120,
     )
 
     df, editors, formatters, editables, _rshapes, _ccolors = build_assignment_matrix(
@@ -816,10 +816,10 @@ def build_plot_selection_panel(
 
     # ── Select All / Deselect All ──────────────────────────────────
     select_all_btn = pn.widgets.Button(
-        name="✓ Select All", button_type="primary", width=110, height=28
+        name="✓ Select All", button_type="primary", width=90, height=26
     )
     deselect_all_btn = pn.widgets.Button(
-        name="☐ Deselect All", width=110, height=28
+        name="☐ Deselect All", width=90, height=26
     )
 
     def _on_select_all(event):
@@ -886,10 +886,17 @@ def build_plot_selection_panel(
     # Call once on init, and rebuild whenever the table is rebuilt
     _rebuild_col_buttons()
 
-    controls = pn.Row(
+    btn_col = pn.Column(
+        select_all_btn,
+        pn.Row(deselect_all_btn, selection_loading, sizing_mode="stretch_width"),
+        sizing_mode="stretch_width",
+    )
+    control_bar = pn.Row(
         row_select,
         col_select,
         plot_var_selector or pn.Spacer(width=0),
+        pn.layout.Spacer(width=5),
+        btn_col,
         sizing_mode="stretch_width",
     )
 
@@ -907,8 +914,7 @@ def build_plot_selection_panel(
     _update_legend(None)
 
     panel = pn.Column(
-        controls,
-        action_bar,
+        control_bar,
         col_sel_row,
         table,
         legend_accordion,
