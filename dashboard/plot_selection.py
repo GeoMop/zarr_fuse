@@ -667,11 +667,7 @@ def build_plot_selection_panel(
     if state.row_dim != "entity":
         hidden.append("_actions")
 
-    _row_label_title = next(
-        (k for k, v in available_dims.items() if v == state.row_dim),
-        state.row_dim,
-    )
-    titles = {"_row_label": _row_label_title, "_row_sel": "All", "_actions": "Remove"}
+    titles = {"_row_label": "", "_row_sel": "All", "_actions": "Remove"}
     table = pn.widgets.Tabulator(
         df,
         titles=titles,
@@ -703,11 +699,7 @@ def build_plot_selection_panel(
                 new_hidden.append("_actions")
             else:
                 new_hidden = [c for c in new_hidden if c != "_actions"]
-            _row_label_title = next(
-                (k for k, v in available_dims.items() if v == state.row_dim),
-                state.row_dim,
-            )
-            table.titles = {"_row_label": _row_label_title, "_row_sel": "All", "_actions": "Remove"}
+            table.titles = {"_row_label": "", "_row_sel": "All", "_actions": "Remove"}
             table.value = new_df
             table.editors = new_editors
             table.formatters = new_formatters
