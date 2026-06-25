@@ -61,6 +61,14 @@ def build_dashboard():
     )
     data.group_path = node_select.value
 
+    # ── Variable dropdown for the plot selection panel ──────────────
+    plot_var_selector = pn.widgets.Select(
+        name="Variable",
+        options=[],
+        value=None,
+        width=140,
+    )
+
     # ── Table-style plot selection ──────────────────────────────────
     endpoint_cfg = data.client.get_endpoint(endpoint_name)
     schema_display_tbl = endpoint_cfg.get("schema_display", {})
@@ -82,6 +90,7 @@ def build_dashboard():
         state=selection_state,
         available_dims=available_dims,
         timeseries_loading=timeseries_loading,
+        plot_var_selector=plot_var_selector,
     )
     # ────────────────────────────────────────────────────────────────
 
@@ -91,7 +100,10 @@ def build_dashboard():
 
     map_view, map_state = build_map_view(data, tap_stream)
 
+    _current_var_label: str | None = None
+
     def _populate_variable_selector(endpoint_name: str, group_path: str):
+        nonlocal _current_var_label
         try:
             print(f"[variables] Loading for endpoint={endpoint_name}, group={group_path}")
             t0 = time.perf_counter()
@@ -117,33 +129,41 @@ def build_dashboard():
 
                 if var_label:
                     var_name = var_label.split(" (")[0] if " (" in var_label else var_label
+                    _current_var_label = var_label
                     variable_metadata.visible = False
                     variable_selector.value = var_label
                     variable_info.object = f"**Viewing: {var_name}**"
+                    plot_var_selector.options = [var_label]
+                    plot_var_selector.value = var_label
                 else:
                     variable_selector.value = None
                     data.display_variable = ""
                     variable_info.object = "No variables found"
                     variable_metadata.visible = False
+                    plot_var_selector.options = []
 
                 print(f"[variables] Loaded {len(variables)} variables successfully")
             else:
                 variable_selector.options = []
                 variable_info.object = "⚠️ No variables found"
                 variable_metadata.visible = False
+                plot_var_selector.options = []
                 print(f"[variables] No variables in group {group_path}")
         except Exception as e:
             variable_selector.options = []
             variable_info.object = f"❌ Error: {str(e)[:50]}"
             variable_metadata.visible = False
+            plot_var_selector.options = []
             print(f"[variables] ERROR: {e}")
 
-    def _select_variable(var_name: str):
+    def _select_variable(var_name: str, label: str | None = None):
         if var_name != data.display_variable:
             print(f"[variables] Changing from {data.display_variable} to {var_name}")
             data.display_variable = var_name
             variable_info.object = f"**Loading {var_name}...**"
             loading_indicator.visible = True
+            display_label = label or var_name
+            plot_var_selector.value = display_label
 
             def _update_metadata():
                 meta = data.client.get_variable_metadata(
@@ -171,10 +191,12 @@ def build_dashboard():
                 try:
                     refresh_views()
                     variable_info.object = f"**Viewing: {var_name}**"
+                    plot_var_selector.value = display_label
                     _update_metadata()
                 except Exception as e:
                     import traceback; traceback.print_exc()
                     variable_info.object = f"❌ Error: {str(e)[:50]}"
+                    plot_var_selector.options = []
                     print(f"[variables] Error viewing {var_name}: {e}")
                 finally:
                     loading_indicator.visible = False
@@ -189,7 +211,7 @@ def build_dashboard():
         selected_label = event.new
         if selected_label:
             var_name = selected_label.split(" (")[0] if " (" in selected_label else selected_label
-            _select_variable(var_name)
+            _select_variable(var_name, label=selected_label)
 
     variable_selector.param.watch(on_variable_change, ["value"])
 
@@ -303,7 +325,6 @@ def build_dashboard():
     top_right = pn.Column(
         loading_indicator,
         timeseries_loading,
-        variable_info,
         panel_table,
         sizing_mode="stretch_both",
     )

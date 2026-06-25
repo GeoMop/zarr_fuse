@@ -616,6 +616,7 @@ def build_plot_selection_panel(
     state: SelectionState | None = None,
     available_dims: dict[str, str] | None = None,
     timeseries_loading: pn.Row | None = None,
+    plot_var_selector: pn.widgets.Select | None = None,
 ) -> tuple[pn.Column, SelectionState]:
     """Build the Tabulator-based Plot Selection panel.
 
@@ -627,6 +628,8 @@ def build_plot_selection_panel(
     available_dims : dict, optional
         ``{display_label: dim_key}`` from ``resolve_available_dimensions()``.
         Defaults to ``{"Site": "entity", "Depth": "vertical"}``.
+    plot_var_selector : pn.widgets.Select, optional
+        Variable name dropdown.  Placed at the top of the panel when provided.
 
     Returns
     -------
@@ -647,13 +650,13 @@ def build_plot_selection_panel(
         name="Rows",
         options=row_options,
         value=state.row_dim,
-        width=200,
+        width=140,
     )
     col_select = pn.widgets.Select(
         name="Columns",
         options=col_options,
         value=state.col_dim,
-        width=200,
+        width=140,
     )
 
     df, editors, formatters, editables, _rshapes, _ccolors = build_assignment_matrix(
@@ -883,7 +886,12 @@ def build_plot_selection_panel(
     # Call once on init, and rebuild whenever the table is rebuilt
     _rebuild_col_buttons()
 
-    controls = pn.Row(row_select, col_select, sizing_mode="stretch_width")
+    controls = pn.Row(
+        row_select,
+        col_select,
+        plot_var_selector or pn.Spacer(width=0),
+        sizing_mode="stretch_width",
+    )
 
     legend_pane = pn.pane.HTML("", sizing_mode="stretch_width", margin=(2, 0, 0, 0))
     legend_accordion = pn.Accordion(
