@@ -10,7 +10,7 @@ from dashboard.config import _resolve_fields_for_group_raw
 from dashboard.plot_styles import SHAPE_TO_DASH
 
 
-def build_timeseries_views(data, map_state, selection_state, timeseries_loading=None):
+def build_timeseries_views(data, map_state, selection_state, render_spinner=None):
     start_total = time.perf_counter()
     endpoint_config = data.client.get_endpoint(data.endpoint_name)
     defaults_config = endpoint_config["defaults"]
@@ -197,13 +197,16 @@ def build_timeseries_views(data, map_state, selection_state, timeseries_loading=
         if event.new is not None:
             nonlocal _center_time
             _center_time = pd.to_datetime(event.new)
-            if timeseries_loading is not None:
-                timeseries_loading.visible = True
+            if render_spinner is not None:
+                render_spinner.visible = True
             center_stream.event(center=_center_time)
-            if timeseries_loading is not None:
-                pn.state.curdoc.add_timeout_callback(
-                    lambda: setattr(timeseries_loading, "visible", False), 400
-                )
+            if render_spinner is not None:
+                try:
+                    pn.state.curdoc.add_timeout_callback(
+                        lambda: setattr(render_spinner, 'visible', False), 500
+                    )
+                except Exception:
+                    pass
 
     def _make_yrange_hook(ylim):
         def _hook(plot, element):

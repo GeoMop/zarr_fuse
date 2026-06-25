@@ -32,7 +32,9 @@ def _flatten_nodes(structure, depth: int = 0, items=None, prefixes=None, is_last
     return items
 
 
-def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
+def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
+                  loading_indicator=None, timeseries_loading=None,
+                  render_spinner=None, rendering_status=None):
     header = pn.pane.HTML("""
 <div style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
             padding: 12px 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
@@ -89,22 +91,53 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
 </div>
 """, sizing_mode="stretch_width")
 
-    status_section = pn.pane.HTML("""
-<div style="background: #0f172a; padding: 12px; border-radius: 8px; margin: 8px 0;">
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-        <span style="font-size: 12px; color: #94a3b8; font-weight: 600;">SERVICE STATUS</span>
-        <div style="display: flex; align-items: center; gap: 6px;">
-            <span style="width: 8px; height: 8px; background: #10b981; border-radius: 50%;
-                        box-shadow: 0 0 10px #10b981;"></span>
-            <span style="font-size: 11px; color: #10b981; font-weight: 600;">Active</span>
-        </div>
-    </div>
-    <div style="font-size: 10px; color: #64748b; display: flex; align-items: center; gap: 4px;">
-        <span>🕐</span>
-        <span>Updated: """ + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S") + """</span>
+    _status_header = pn.pane.HTML(sizing_mode="stretch_width")
+
+    def _update_status_header(*_):
+        if rendering_status is not None and rendering_status.visible:
+            text = "⚠️ Error"
+            dot_color = "#ef4444"
+        elif loading_indicator is not None and loading_indicator.visible:
+            text = "⏳ Loading dataset..."
+            dot_color = "#f59e0b"
+        elif timeseries_loading is not None and timeseries_loading.visible:
+            text = "⏳ Loading timeseries..."
+            dot_color = "#f59e0b"
+        elif render_spinner is not None and render_spinner.visible:
+            text = "⏳ Rendering..."
+            dot_color = "#f59e0b"
+        else:
+            text = "Active"
+            dot_color = "#10b981"
+        _status_header.object = f"""
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+    <span style="font-size: 12px; color: #94a3b8; font-weight: 600;">SERVICE STATUS</span>
+    <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="width: 8px; height: 8px; background: {dot_color}; border-radius: 50%;
+                    box-shadow: 0 0 10px {dot_color};"></span>
+        <span style="font-size: 11px; color: {dot_color}; font-weight: 600;">{text}</span>
     </div>
 </div>
-""", sizing_mode="stretch_width")
+"""
+
+    if loading_indicator is not None:
+        loading_indicator.param.watch(_update_status_header, ["visible"])
+    if timeseries_loading is not None:
+        timeseries_loading.param.watch(_update_status_header, ["visible"])
+    if render_spinner is not None:
+        render_spinner.param.watch(_update_status_header, ["visible"])
+    if rendering_status is not None:
+        rendering_status.param.watch(_update_status_header, ["visible"])
+    _update_status_header()
+
+    _status_children = [_status_header]
+    if rendering_status is not None:
+        _status_children.append(rendering_status)
+    status_section = pn.Column(
+        *_status_children,
+        styles={"background": "#0f172a", "padding": "12px", "border-radius": "8px", "margin": "8px 0"},
+        sizing_mode="stretch_width",
+    )
 
     reload_button = pn.widgets.Button(
         name="🔄 Reload Data",

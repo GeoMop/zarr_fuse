@@ -615,7 +615,6 @@ def _build_legend_html(state):
 def build_plot_selection_panel(
     state: SelectionState | None = None,
     available_dims: dict[str, str] | None = None,
-    timeseries_loading: pn.Row | None = None,
     plot_var_selector: pn.widgets.Select | None = None,
 ) -> tuple[pn.Column, SelectionState]:
     """Build the Tabulator-based Plot Selection panel.
@@ -723,14 +722,8 @@ def build_plot_selection_panel(
                     col_select.value = available_dims[other]
             state.row_dim = row_select.value
             state.col_dim = col_select.value
-            if timeseries_loading is not None:
-                timeseries_loading.visible = True
             _rebuild_table()
             state.version += 1
-            if timeseries_loading is not None:
-                pn.state.curdoc.add_timeout_callback(
-                    lambda: setattr(timeseries_loading, "visible", False), 400
-                )
         finally:
             _orientation_lock = False
 
@@ -743,13 +736,7 @@ def build_plot_selection_panel(
             row_data = table.value.iloc[event.row]
             eid = row_data.get("entity_index")
             if eid is not None and not (isinstance(eid, float) and np.isnan(eid)):
-                if timeseries_loading is not None:
-                    timeseries_loading.visible = True
                 state.remove_site(int(eid))
-                if timeseries_loading is not None:
-                    pn.state.curdoc.add_timeout_callback(
-                        lambda: setattr(timeseries_loading, "visible", False), 400
-                    )
         elif event.column == "_row_label":
             row_data = table.value.iloc[event.row]
             row_key = row_data["_row_label"]
@@ -797,15 +784,6 @@ def build_plot_selection_panel(
 
     state.param.watch(_on_layout_change, "layout_version")
 
-    # ── Loading indicator ──────────────────────────────────────────
-    selection_loading = pn.indicators.LoadingSpinner(
-        value=False, width=18, height=18, visible=False, margin=(1, 5, 0, 5)
-    )
-
-    def _set_loading(active: bool):
-        selection_loading.value = active
-        selection_loading.visible = active
-
     # ── Select All / Deselect All ──────────────────────────────────
     select_all_btn = pn.widgets.Button(
         name="✓ Select All", button_type="primary", width=90, height=26
@@ -815,26 +793,15 @@ def build_plot_selection_panel(
     )
 
     def _on_select_all(event):
-        _set_loading(True)
         state.select_all()
         _rebuild_table()
-        _set_loading(False)
 
     def _on_deselect_all(event):
-        _set_loading(True)
         state.deselect_all()
         _rebuild_table()
-        _set_loading(False)
 
     select_all_btn.on_click(_on_select_all)
     deselect_all_btn.on_click(_on_deselect_all)
-
-    action_bar = pn.Row(
-        select_all_btn,
-        deselect_all_btn,
-        selection_loading,
-        sizing_mode="stretch_width",
-    )
 
     # ── Column toggle buttons ──────────────────────────────────────
     col_sel_row = pn.Row(sizing_mode="stretch_width")
@@ -859,10 +826,8 @@ def build_plot_selection_panel(
                             break
                     if any_unchecked:
                         break
-                _set_loading(True)
                 state.set_all_for_column(_c, any_unchecked)
                 _rebuild_table()
-                _set_loading(False)
 
             btn = pn.widgets.Button(
                 name=ck_s,
@@ -880,7 +845,7 @@ def build_plot_selection_panel(
 
     btn_col = pn.Column(
         select_all_btn,
-        pn.Row(deselect_all_btn, selection_loading, sizing_mode="stretch_width"),
+        deselect_all_btn,
         sizing_mode="stretch_width",
     )
     control_bar = pn.Row(

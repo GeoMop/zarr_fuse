@@ -56,8 +56,34 @@ def build_dashboard():
     endpoint = endpoints.get(endpoint_name) or data.client.get_endpoint(endpoint_name)
     structure = data.client.get_structure(endpoint_name)
 
+    loading_indicator = pn.Row(
+        pn.indicators.LoadingSpinner(value=True, width=24, height=24),
+        pn.pane.Markdown("Loading selected dataset...", styles={"color": "#dbeafe"}),
+        visible=False,
+        sizing_mode="stretch_width",
+    )
+    timeseries_loading = pn.Row(
+        pn.indicators.LoadingSpinner(value=True, width=24, height=24),
+        pn.pane.Markdown("Loading timeseries data...", styles={"color": "#dbeafe"}),
+        visible=False,
+        sizing_mode="stretch_width",
+    )
+    rendering_status = pn.pane.Alert(
+        "",
+        alert_type="danger",
+        visible=False,
+        sizing_mode="stretch_width",
+    )
+    render_spinner = pn.Row(
+        pn.indicators.LoadingSpinner(value=True, width=24, height=24),
+        pn.pane.Markdown("Rendering...", styles={"color": "#dbeafe"}),
+        visible=False,
+        sizing_mode="stretch_width",
+    )
     controller, store_selector, node_select, variable_selector, variable_info, variable_metadata, node_hint, store_info = build_sidebar(
-        endpoint_name, endpoint, structure, endpoints=endpoints
+        endpoint_name, endpoint, structure, endpoints=endpoints,
+        loading_indicator=loading_indicator, timeseries_loading=timeseries_loading,
+        render_spinner=render_spinner, rendering_status=rendering_status,
     )
     data.group_path = node_select.value
 
@@ -79,17 +105,10 @@ def build_dashboard():
         group_path=data.group_path,
         schema_display=schema_display_tbl,
     )
-    timeseries_loading = pn.Row(
-        pn.indicators.LoadingSpinner(value=True, width=24, height=24),
-        pn.pane.Markdown("Loading timeseries data...", styles={"color": "#dbeafe"}),
-        visible=False,
-        sizing_mode="stretch_width",
-    )
 
     panel_table, selection_state = build_plot_selection_panel(
         state=selection_state,
         available_dims=available_dims,
-        timeseries_loading=timeseries_loading,
         plot_var_selector=plot_var_selector,
     )
     # ────────────────────────────────────────────────────────────────
@@ -197,6 +216,9 @@ def build_dashboard():
                     import traceback; traceback.print_exc()
                     variable_info.object = f"❌ Error: {str(e)[:50]}"
                     plot_var_selector.options = []
+                    rendering_status.object = f"⚠️ Render error: {str(e)[:80]}"
+                    rendering_status.visible = True
+                    pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
                     print(f"[variables] Error viewing {var_name}: {e}")
                 finally:
                     loading_indicator.visible = False
@@ -286,7 +308,7 @@ def build_dashboard():
         data,
         map_state,
         selection_state=selection_state,
-        timeseries_loading=timeseries_loading,
+        render_spinner=render_spinner,
     )
     map_handlers["on_map_tap"] = on_map_tap
 
@@ -316,15 +338,7 @@ def build_dashboard():
     tap_stream.param.watch(on_tap_event, ["x", "y"])
 
     top_left = pn.pane.HoloViews(map_view, sizing_mode="stretch_both")
-    loading_indicator = pn.Row(
-        pn.indicators.LoadingSpinner(value=True, width=24, height=24),
-        pn.pane.Markdown("Loading selected dataset...", styles={"color": "#dbeafe"}),
-        visible=False,
-        sizing_mode="stretch_width",
-    )
     top_right = pn.Column(
-        loading_indicator,
-        timeseries_loading,
         panel_table,
         sizing_mode="stretch_both",
     )
@@ -346,6 +360,7 @@ def build_dashboard():
             data,
             new_map_state,
             selection_state=selection_state,
+            render_spinner=render_spinner,
         )
         print(f"[timing] refresh_views: timeseries done, updating panes")
 
