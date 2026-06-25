@@ -98,22 +98,34 @@ def build_dashboard():
             variables = data.client.get_variables(endpoint_name, group_path)
             print(f"[timing] get_variables: {time.perf_counter() - t0:.3f}s")
             print(f"[variables] Found: {len(variables)} variables")
-            
+
             if variables:
                 var_options = [f"{name} ({unit})" if unit else name for name, unit in variables.items()]
 
-                # Log each variable
                 for name, unit in variables.items():
                     print(f"[variables]   - {name}: unit={unit}")
-                
-                placeholder = "-- Select variable --"
-                variable_selector.options = [placeholder] + var_options
-                variable_selector.value = placeholder
-                data.display_variable = ""
-                variable_metadata.visible = False
 
-                # Update info text
-                variable_info.object = f"**{len(variables)} variables available**\nClick to select"
+                variable_selector.options = var_options
+
+                endpoint_cfg = get_endpoint_config(endpoints_path, endpoint_name)
+                default_var = endpoint_cfg.defaults.display_variable if endpoint_cfg.defaults else None
+
+                if default_var and default_var in variables:
+                    var_label = default_var + (f" ({variables[default_var]})" if variables[default_var] else "")
+                else:
+                    var_label = var_options[0] if var_options else None
+
+                if var_label:
+                    var_name = var_label.split(" (")[0] if " (" in var_label else var_label
+                    variable_metadata.visible = False
+                    variable_selector.value = var_label
+                    variable_info.object = f"**Viewing: {var_name}**"
+                else:
+                    variable_selector.value = None
+                    data.display_variable = ""
+                    variable_info.object = "No variables found"
+                    variable_metadata.visible = False
+
                 print(f"[variables] Loaded {len(variables)} variables successfully")
             else:
                 variable_selector.options = []
@@ -126,65 +138,62 @@ def build_dashboard():
             variable_metadata.visible = False
             print(f"[variables] ERROR: {e}")
 
-    _initialized = False
+    def _select_variable(var_name: str):
+        if var_name != data.display_variable:
+            print(f"[variables] Changing from {data.display_variable} to {var_name}")
+            data.display_variable = var_name
+            variable_info.object = f"**Loading {var_name}...**"
+            loading_indicator.visible = True
+
+            def _update_metadata():
+                meta = data.client.get_variable_metadata(
+                    data.endpoint_name, data.group_path, var_name
+                )
+                if meta:
+                    coords_text = ", ".join(meta.get("coords", []))
+                    unit_text = f" ({meta['unit']})" if meta.get("unit") else ""
+                    variable_metadata.object = (
+                        "<div style='background: #1e293b; padding: 12px; border-radius: 8px; "
+                        "margin: 8px 0; border-left: 3px solid #10b981;'>"
+                        "<div style='font-size: 11px; color: #94a3b8; margin-bottom: 6px; "
+                        "font-weight: 600;'>📋 VARIABLE METADATA</div>"
+                        f"<div style='font-size: 13px; color: #e2e8f0; font-weight: 600; "
+                        f"margin-bottom: 6px;'>{meta['name']}{unit_text}</div>"
+                        f"<div style='font-size: 11px; color: #cbd5e1; line-height: 1.6;'>"
+                        f"<b>Description:</b> {meta.get('description', '—')}<br>"
+                        f"<b>Unit:</b> {meta.get('unit', '—')}<br>"
+                        f"<b>Coordinates:</b> {coords_text or '—'}"
+                        "</div></div>"
+                    )
+                    variable_metadata.visible = True
+
+            def _run_refresh():
+                try:
+                    refresh_views()
+                    variable_info.object = f"**Viewing: {var_name}**"
+                    _update_metadata()
+                except Exception as e:
+                    import traceback; traceback.print_exc()
+                    variable_info.object = f"❌ Error: {str(e)[:50]}"
+                    print(f"[variables] Error viewing {var_name}: {e}")
+                finally:
+                    loading_indicator.visible = False
+
+            doc = pn.state.curdoc
+            if doc is not None:
+                doc.add_next_tick_callback(_run_refresh)
+            else:
+                _run_refresh()
 
     def on_variable_change(event):
         selected_label = event.new
-        if selected_label and selected_label != "-- Select variable --":
-            if not _initialized:
-                variable_selector.value = "-- Select variable --"
-                return
+        if selected_label:
             var_name = selected_label.split(" (")[0] if " (" in selected_label else selected_label
-            if var_name != data.display_variable:
-                print(f"[variables] Changing from {data.display_variable} to {var_name}")
-                data.display_variable = var_name
-                variable_info.object = f"**Loading {var_name}...**"
-                loading_indicator.visible = True
-
-                def _update_metadata():
-                    meta = data.client.get_variable_metadata(
-                        data.endpoint_name, data.group_path, var_name
-                    )
-                    if meta:
-                        coords_text = ", ".join(meta.get("coords", []))
-                        unit_text = f" ({meta['unit']})" if meta.get("unit") else ""
-                        variable_metadata.object = (
-                            "<div style='background: #1e293b; padding: 12px; border-radius: 8px; "
-                            "margin: 8px 0; border-left: 3px solid #10b981;'>"
-                            "<div style='font-size: 11px; color: #94a3b8; margin-bottom: 6px; "
-                            "font-weight: 600;'>📋 VARIABLE METADATA</div>"
-                            f"<div style='font-size: 13px; color: #e2e8f0; font-weight: 600; "
-                            f"margin-bottom: 6px;'>{meta['name']}{unit_text}</div>"
-                            f"<div style='font-size: 11px; color: #cbd5e1; line-height: 1.6;'>"
-                            f"<b>Description:</b> {meta.get('description', '—')}<br>"
-                            f"<b>Unit:</b> {meta.get('unit', '—')}<br>"
-                            f"<b>Coordinates:</b> {coords_text or '—'}"
-                            "</div></div>"
-                        )
-                        variable_metadata.visible = True
-
-                def _run_refresh():
-                    try:
-                        refresh_views()
-                        variable_info.object = f"**Viewing: {var_name}**"
-                        _update_metadata()
-                    except Exception as e:
-                        import traceback; traceback.print_exc()
-                        variable_info.object = f"❌ Error: {str(e)[:50]}"
-                        print(f"[variables] Error viewing {var_name}: {e}")
-                    finally:
-                        loading_indicator.visible = False
-
-                doc = pn.state.curdoc
-                if doc is not None:
-                    doc.add_next_tick_callback(_run_refresh)
-                else:
-                    _run_refresh()
+            _select_variable(var_name)
 
     variable_selector.param.watch(on_variable_change, ["value"])
 
     _populate_variable_selector(endpoint_name, data.group_path)
-    _initialized = True
 
     def _refresh_sidebar_for_endpoint(selected_endpoint: str):
         nonlocal endpoints, endpoint, structure
