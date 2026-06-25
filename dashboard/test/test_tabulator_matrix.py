@@ -22,15 +22,15 @@ class TestMatrixShape:
             state, "entity", "vertical"
         )
         assert len(df) == 2  # 2 sites
-        # 3 label cols (_row_label, _row_sel, _marker) + 2 internal + 3 depth + 3 hidden valid = 11
-        assert df.shape[1] == 11
+        # 2 label cols (_row_label, _marker) + 2 internal + 3 depth + 3 hidden valid = 10
+        assert df.shape[1] == 10
 
     def test_vertical_rows_entity_cols(self):
         state = _two_site_state()
         df, _, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
         assert len(df) == 3  # 3 unique depths
-        # 3 label cols (_row_label, _row_sel, _marker) + 2 internal + 2 site + 2 hidden valid = 9
-        assert df.shape[1] == 9
+        # 2 label cols (_row_label, _marker) + 2 internal + 2 site + 2 hidden valid = 8
+        assert df.shape[1] == 8
 
 
 class TestDataFrameContent:
@@ -177,7 +177,7 @@ class TestEdgeCases:
             state, "entity", "vertical"
         )
         assert len(df) == 0
-        assert len(editors) == 4  # _row_label, _row_sel, _marker, _actions
+        assert len(editors) == 3  # _row_label, _marker, _actions
         assert len(rshapes) == 0
         assert len(ccolors) == 0
 

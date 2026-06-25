@@ -505,12 +505,10 @@ def build_assignment_matrix(
         row: dict = {
             "_index": i,
             "_row_label": str(row_key),
-            "_row_sel": False,
             "_marker": row_shapes.get(str(row_key), "circle"),
             "entity_index": eid,
             "_actions": "✕",
         }
-        row_all_checked = True
         row_any_valid = False
         for col_key in col_keys:
             col_s = str(col_key)
@@ -520,12 +518,9 @@ def build_assignment_matrix(
                 checked = selection_state.is_checked(row_key, col_key)
                 row[col_s] = bool(checked)
                 row[f"__valid_{col_s}"] = True
-                if not checked:
-                    row_all_checked = False
             else:
                 row[col_s] = None
                 row[f"__valid_{col_s}"] = False
-        row["_row_sel"] = row_all_checked if row_any_valid else False
         rows.append(row)
 
     df = pd.DataFrame(rows)
@@ -536,7 +531,6 @@ def build_assignment_matrix(
 
     editors: dict = {
         "_row_label": None,
-        "_row_sel": {"type": "tickCross", "tristate": True, "indeterminateValue": None},
         "_marker": None,
         "_actions": None,
         **{
@@ -547,7 +541,6 @@ def build_assignment_matrix(
 
     formatters: dict = {
         "_row_label": {"type": "text"},
-        "_row_sel": {"type": "tickCross"},
         "_marker": {"type": "text"},
         "_actions": {"type": "button", "label": "✕ Remove", "buttonType": "danger"},
         **{col: {"type": "tickCross"} for col in selection_cols},
@@ -555,7 +548,6 @@ def build_assignment_matrix(
 
     editables: dict = {
         "_row_label": False,
-        "_row_sel": True,
         "_marker": False,
         "_actions": False,
         **{col: True for col in selection_cols},
@@ -666,14 +658,14 @@ def build_plot_selection_panel(
     if state.row_dim != "entity":
         hidden.append("_actions")
 
-    titles = {"_row_label": "", "_row_sel": "All", "_actions": "Remove"}
+    titles = {"_row_label": "", "_actions": "Remove"}
     table = pn.widgets.Tabulator(
         df,
         titles=titles,
         editors=editors,
         formatters=formatters,
         hidden_columns=hidden,
-        frozen_columns=["_row_label", "_row_sel", "_actions"],
+        frozen_columns=["_row_label", "_actions"],
         selectable=False,
         show_index=False,
         max_height=400,
@@ -698,7 +690,7 @@ def build_plot_selection_panel(
                 new_hidden.append("_actions")
             else:
                 new_hidden = [c for c in new_hidden if c != "_actions"]
-            table.titles = {"_row_label": "", "_row_sel": "All", "_actions": "Remove"}
+            table.titles = {"_row_label": "", "_actions": "Remove"}
             table.value = new_df
             table.editors = new_editors
             table.formatters = new_formatters
@@ -742,15 +734,13 @@ def build_plot_selection_panel(
             row_key = row_data["_row_label"]
             any_unchecked = False
             for col in table.value.columns:
-                if col.startswith("__valid_") or col in ("_row_label", "_row_sel", "_marker", "entity_index", "_actions", "_index"):
+                if col.startswith("__valid_") or col in ("_row_label", "_marker", "entity_index", "_actions", "_index"):
                     continue
                 if row_data.get(f"__valid_{col}", False) and not row_data.get(col, False):
                     any_unchecked = True
                     break
-            _set_loading(True)
             state.set_all_for_row(row_key, any_unchecked)
             _rebuild_table()
-            _set_loading(False)
 
     table.on_click(_on_table_cell_click)
 
@@ -768,13 +758,6 @@ def build_plot_selection_panel(
 
         row_key = table.value.iloc[row_idx]["_row_label"]
 
-        if col == "_row_sel":
-            _set_loading(True)
-            state.set_all_for_row(row_key, bool(new_value))
-            _rebuild_table()
-            _set_loading(False)
-            return
-
         state.set_checked(row_key, col, bool(new_value))
 
     table.on_edit(_on_table_edit)
@@ -783,25 +766,6 @@ def build_plot_selection_panel(
         _rebuild_table()
 
     state.param.watch(_on_layout_change, "layout_version")
-
-    # ── Select All / Deselect All ──────────────────────────────────
-    select_all_btn = pn.widgets.Button(
-        name="✓ Select All", button_type="primary", width=90, height=26
-    )
-    deselect_all_btn = pn.widgets.Button(
-        name="☐ Deselect All", width=90, height=26
-    )
-
-    def _on_select_all(event):
-        state.select_all()
-        _rebuild_table()
-
-    def _on_deselect_all(event):
-        state.deselect_all()
-        _rebuild_table()
-
-    select_all_btn.on_click(_on_select_all)
-    deselect_all_btn.on_click(_on_deselect_all)
 
     # ── Column toggle buttons ──────────────────────────────────────
     col_sel_row = pn.Row(sizing_mode="stretch_width")
@@ -843,17 +807,10 @@ def build_plot_selection_panel(
     # Call once on init, and rebuild whenever the table is rebuilt
     _rebuild_col_buttons()
 
-    btn_col = pn.Column(
-        select_all_btn,
-        deselect_all_btn,
-        sizing_mode="stretch_width",
-    )
     control_bar = pn.Row(
         row_select,
         col_select,
         plot_var_selector or pn.Spacer(width=0),
-        pn.layout.Spacer(width=5),
-        btn_col,
         sizing_mode="stretch_width",
     )
 
