@@ -230,3 +230,6 @@
 - 2026-06-22: Fixed `interpolate_ds` nearest-coordinate lookup for unsorted
   singleton dimensions and added a regression test in
   `zarr_fuse/test/test_interpolate.py`.
+- 2026-06-25: Reproduced the ingress sorted-coordinate assertion with a
+  synthetic `interpolate_ds` datetime-coordinate test and improved the
+  diagnostic to report the first offending adjacent coordinate pair.

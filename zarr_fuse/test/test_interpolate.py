@@ -436,3 +436,49 @@ def test_interpolate_ds_unsorted_singleton_dim():
     np.testing.assert_array_equal(ds_int.coords["borehole"].values, np.array(["A"]))
     np.testing.assert_array_equal(ds_int.coords["x"].values, np.array([0.0, 1.0]))
     assert ds_int["data"].shape == (2, 1)
+
+
+def test_interpolate_ds_reports_unsorted_existing_datetime_coord():
+    """Reproduce the ingress failure path with a synthetic existing datetime coordinate."""
+    existing_time = np.array(
+        [
+            "2025-09-15T09:00:00",
+            "2025-09-15T10:00:00",
+            "2025-09-15T09:30:00",
+            "2025-09-15T10:30:00",
+        ],
+        dtype="datetime64[s]",
+    )
+    update_time = np.array(["2025-09-15T11:00:00"], dtype="datetime64[s]")
+    existing_borehole = np.array(["A"])
+    update_borehole = np.array(["A"])
+
+    existing_ds = xr.Dataset(
+        {"data": (("date_time", "borehole"), np.array([[0.0], [1.0], [2.0], [3.0]]))},
+        coords={"date_time": existing_time, "borehole": existing_borehole},
+    )
+    update_ds = xr.Dataset(
+        {"data": (("date_time", "borehole"), np.array([[10.0]]))},
+        coords={"date_time": update_time, "borehole": update_borehole},
+    )
+
+    coord_schema = lambda x: zf_schema.Coord(_ctx(x))
+    schema = {
+        "date_time": coord_schema(dict(
+            name="date_time",
+            unit={"tick": "s", "tz": "UTC"},
+            source_unit={"tick": "s", "tz": "UTC"},
+            sorted=True,
+            step_limits=[],
+        )),
+        "borehole": coord_schema(dict(
+            name="borehole",
+            unit="",
+            type="str[8]",
+            sorted=False,
+            step_limits=[],
+        )),
+    }
+
+    with pytest.raises(AssertionError, match="date_time.*positions 1 and 2"):
+        interpolate_ds(update_ds, existing_ds, schema)

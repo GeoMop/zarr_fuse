@@ -60,7 +60,14 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
         idx_sort = np.argsort(new_values)
         new_sorted = new_values[idx_sort]
         if len(old_values) > 0:
-            assert np.all(old_values[:-1]<=old_values[1:]), f"Existing coordinate values are not sorted, got {old_values}"
+            sorted_mask = old_values[:-1] <= old_values[1:]
+            if not np.all(sorted_mask):
+                bad_idx = int(np.flatnonzero(~sorted_mask)[0])
+                raise AssertionError(
+                    f"Existing coordinate values for {schema.name} are not sorted at positions "
+                    f"{bad_idx} and {bad_idx + 1}: {old_values[bad_idx]!r} > "
+                    f"{old_values[bad_idx + 1]!r}; got {old_values}"
+                )
             max_old = old_values[-1]
             idx_split = np.searchsorted(new_sorted, max_old, side='right')
         else:
