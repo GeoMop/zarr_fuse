@@ -907,7 +907,6 @@ def build_plot_selection_panel(
     _update_legend(None)
 
     panel = pn.Column(
-        pn.pane.Markdown("**Plot Selection**", margin=(0, 0, 5, 0)),
         controls,
         action_bar,
         col_sel_row,
