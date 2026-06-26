@@ -691,6 +691,7 @@ def build_plot_selection_panel(
             else:
                 new_hidden = [c for c in new_hidden if c != "_actions"]
             table.titles = {"_row_label": "", "_actions": "Remove"}
+            _rebuild_col_styles()
             table.value = new_df
             table.editors = new_editors
             table.formatters = new_formatters
@@ -775,6 +776,7 @@ def build_plot_selection_panel(
         children = []
         for ck in col_keys:
             ck_s = str(ck)
+            color = state._col_colors.get(ck_s, "#94a3b8")
 
             def _on_click(event, _c=ck_s):
                 any_unchecked = False
@@ -798,29 +800,49 @@ def build_plot_selection_panel(
                 width=65,
                 height=22,
                 button_type="default",
-                stylesheets=["""
-                    .bk-btn-default {
+                stylesheets=[f"""
+                    .bk-btn-default {{
                         background: none !important;
                         border: none !important;
-                        color: #94a3b8 !important;
+                        color: {color} !important;
                         font-size: 11px !important;
                         font-weight: 600 !important;
                         padding: 0 4px !important;
                         cursor: pointer !important;
-                    }
-                    .bk-btn-default:hover {
+                    }}
+                    .bk-btn-default:hover {{
                         color: #e2e8f0 !important;
                         background: #334155 !important;
                         border-radius: 3px !important;
-                    }
+                    }}
                 """],
             )
             label.on_click(_on_click)
             children.append(label)
         col_label_row[:] = children
 
-    # Call once on init, and rebuild whenever columns change
     _rebuild_col_labels()
+
+    # ── Column header colors (Tabulator) ──────────────────────────
+    def _rebuild_col_styles():
+        col_keys = list(state.col_keys)
+        config_columns = []
+        css_parts = []
+        for i, ck in enumerate(col_keys):
+            ck_s = str(ck)
+            color = state._col_colors.get(ck_s, "#94a3b8")
+            cls = f"colhdr-{i}"
+            config_columns.append({"field": ck_s, "cssClass": cls})
+            css_parts.append(
+                f".tabulator-col.{cls} .tabulator-col-title {{ color: {color} !important; }}"
+            )
+            css_parts.append(
+                f".tabulator-col.{cls} .tabulator-col-title:hover {{ color: #fff !important; }}"
+            )
+        table._configuration = {"columns": config_columns}
+        table.stylesheets = ["\n".join(css_parts)]
+
+    _rebuild_col_styles()
 
     control_bar = pn.Row(
         row_select,
