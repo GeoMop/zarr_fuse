@@ -89,7 +89,7 @@ class TestFormatters:
         state = _two_site_state()
         _, _, formatters, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert formatters["_row_label"]["type"] == "text"
-        assert formatters["_marker"]["type"] == "text"
+        assert formatters["_marker"]["type"] == "html"
         assert formatters["_actions"]["type"] == "button"
         assert formatters["_actions"]["label"] == "✕ Remove"
         assert formatters["_actions"]["buttonType"] == "danger"

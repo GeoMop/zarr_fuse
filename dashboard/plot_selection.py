@@ -391,7 +391,7 @@ def build_table(state: SelectionState) -> pn.Column:
     return pn.Column(*rows, sizing_mode="stretch_width")
 
 
-from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_DASH
+from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_SVG
 
 import pandas as pd
 
@@ -502,10 +502,11 @@ def build_assignment_matrix(
     sites_lookup = {str(s["site_id"]): s["entity_index"] for s in selection_state.sites}
     for i, row_key in enumerate(row_keys):
         eid = sites_lookup.get(str(row_key), np.nan) if row_dim == "entity" else np.nan
+        shape_name = row_shapes.get(str(row_key), "circle")
         row: dict = {
             "_index": i,
             "_row_label": str(row_key),
-            "_marker": row_shapes.get(str(row_key), "circle"),
+            "_marker": SHAPE_TO_SVG.get(shape_name, shape_name),
             "entity_index": eid,
             "_actions": "✕",
         }
@@ -541,7 +542,7 @@ def build_assignment_matrix(
 
     formatters: dict = {
         "_row_label": {"type": "text"},
-        "_marker": {"type": "text"},
+        "_marker": {"type": "html"},
         "_actions": {"type": "button", "label": "✕ Remove", "buttonType": "danger"},
         **{col: {"type": "tickCross"} for col in selection_cols},
     }
@@ -591,13 +592,13 @@ def _build_legend_html(state):
     if row_keys:
         parts.append('<div style="display: flex; flex-wrap: wrap; gap: 4px 10px;">')
         if state.row_dim == "entity":
-            parts.append("<b>Dash — Site:</b>")
+            parts.append("<b>Marker — Site:</b>")
         else:
-            parts.append("<b>Dash — Depth:</b>")
+            parts.append("<b>Marker — Depth:</b>")
         for k in row_keys:
             shape = row_shapes.get(k, "circle")
-            dash = SHAPE_TO_DASH.get(shape, "solid")
-            parts.append(f'<span><span style="display:inline-block;width:20px;height:2px;background:#aaa;vertical-align:middle;margin-right:3px;"></span> {dash} — {k}</span>')
+            svg = SHAPE_TO_SVG.get(shape, shape)
+            parts.append(f'<span style="display:inline-flex;align-items:center;gap:3px;color:#555;">{svg} {k}</span>')
         parts.append("</div>")
 
     parts.append("</div>")
@@ -828,11 +829,12 @@ def build_plot_selection_panel(
         col_keys = list(state.col_keys)
         config_columns = []
         css_parts = []
+        config_columns.append({"field": "_row_label", "width": 120})
         for i, ck in enumerate(col_keys):
             ck_s = str(ck)
             color = state._col_colors.get(ck_s, "#94a3b8")
             cls = f"colhdr-{i}"
-            config_columns.append({"field": ck_s, "cssClass": cls})
+            config_columns.append({"field": ck_s, "cssClass": cls, "width": 65})
             css_parts.append(
                 f".tabulator-col.{cls} .tabulator-col-title {{ color: {color} !important; }}"
             )

@@ -7,7 +7,6 @@ import time
 from holoviews import streams
 
 from dashboard.config import _resolve_fields_for_group_raw
-from dashboard.plot_styles import SHAPE_TO_DASH
 
 
 def build_timeseries_views(data, map_state, selection_state, render_spinner=None):
@@ -92,7 +91,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
 
-    def build_timeseries_overlay(view="left"):
+    def build_timeseries_overlay(view="left", x_range=None):
         max_points = 5000 if view == "left" else None
         if selection_state is None:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
@@ -124,6 +123,13 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         row_dim = selection_state.row_dim
         col_dim = selection_state.col_dim
 
+        # Compute marker positions from x_range
+        n_markers = 8
+        if x_range is not None and len(x_range) == 2:
+            marker_times = pd.date_range(start=x_range[0], end=x_range[1], periods=n_markers)
+        else:
+            marker_times = pd.date_range(start=times.min(), end=times.max(), periods=n_markers)
+
         curves = []
         for entity_idx, depth_idx in selected_combos:
             site = site_lookup.get(entity_idx)
@@ -138,7 +144,6 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             row_key = site_id if row_dim == "entity" else depth_val
             col_key = depth_val if col_dim == "vertical" else site_id
             shape = row_shapes.get(str(row_key), "circle")
-            dash = SHAPE_TO_DASH.get(shape, "solid")
             color = col_colors.get(str(col_key), "#000000")
 
             series_vals = site["series"][depth_idx]
@@ -146,15 +151,30 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
                 local_vals = series_vals[::step]
             else:
                 local_vals = series_vals
+
+            # Curve (solid line)
             curve_df = pd.DataFrame({
                 time_dim: ds_times,
                 y_axis_label: local_vals,
             })
             curve = hv.Curve(curve_df, time_dim, y_axis_label, label=label).opts(
                 color=color,
-                line_dash=dash,
             )
-            curves.append(curve)
+
+            # Scatter markers at tick-like positions
+            times_ns = np.array(times, dtype="datetime64[ns]").astype("int64")
+            marker_times_ns = np.array(marker_times, dtype="datetime64[ns]").astype("int64")
+            marker_y = np.interp(marker_times_ns, times_ns, series_vals)
+            marker_df = pd.DataFrame({
+                time_dim: marker_times,
+                y_axis_label: marker_y,
+            })
+            scatter = hv.Scatter(marker_df, time_dim, y_axis_label).opts(
+                color=color,
+                marker=shape,
+                size=8,
+            )
+            curves.append(curve * scatter)
 
         if not curves:
             print("[timeseries] No curves generated — returning empty overlay")
@@ -192,6 +212,10 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
     left_tap = streams.Tap()
     mid_tap = streams.Tap()
     right_tap = streams.Tap()
+
+    left_range_x = streams.RangeX()
+    mid_range_x = streams.RangeX()
+    right_range_x = streams.RangeX()
 
     def update_center_from_tap(event):
         if event.new is not None:
@@ -254,7 +278,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
     _overlay_cache = {}
     _overlay_version = None
 
-    def create_timeseries_view(center=None, view="left", **_):
+    def create_timeseries_view(center=None, view="left", x_range=None, **_):
         nonlocal _center_time
         nonlocal _left_ylim_cache, _left_ylim_version
         nonlocal _overlay_cache, _overlay_version
@@ -291,8 +315,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             ylim = _compute_ylim(times, selected_combos, xlim)
 
         if _overlay_version != selection_state.version:
-            _overlay_cache["left"] = build_timeseries_overlay(view="left")
-            _overlay_cache["full"] = build_timeseries_overlay(view="full")
+            _overlay_cache["left"] = build_timeseries_overlay(view="left", x_range=x_range)
+            _overlay_cache["full"] = build_timeseries_overlay(view="full", x_range=x_range)
             _overlay_version = selection_state.version
         overlay = _overlay_cache["left"] if view == "left" else _overlay_cache["full"]
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
@@ -325,38 +349,41 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         )
 
     line_left = hv.DynamicMap(
-        lambda center=None, **kwargs: create_timeseries_view(
-            center=center, view="left"
+        lambda center=None, x_range=None, **kwargs: create_timeseries_view(
+            center=center, view="left", x_range=x_range
         ),
         streams=[
             streams.Params(selection_state, parameters=["version"]),
             left_tap,
             center_stream,
             borehole_stream,
+            left_range_x,
         ],
     )
 
     line_mid = hv.DynamicMap(
-        lambda center=None, **kwargs: create_timeseries_view(
-            center=center, view="mid"
+        lambda center=None, x_range=None, **kwargs: create_timeseries_view(
+            center=center, view="mid", x_range=x_range
         ),
         streams=[
             streams.Params(selection_state, parameters=["version"]),
             mid_tap,
             center_stream,
             borehole_stream,
+            mid_range_x,
         ],
     )
 
     line_right = hv.DynamicMap(
-        lambda center=None, **kwargs: create_timeseries_view(
-            center=center, view="right"
+        lambda center=None, x_range=None, **kwargs: create_timeseries_view(
+            center=center, view="right", x_range=x_range
         ),
         streams=[
             streams.Params(selection_state, parameters=["version"]),
             right_tap,
             center_stream,
             borehole_stream,
+            right_range_x,
         ],
     )
 
