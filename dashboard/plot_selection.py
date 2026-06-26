@@ -695,7 +695,7 @@ def build_plot_selection_panel(
             table.editors = new_editors
             table.formatters = new_formatters
             table.hidden_columns = new_hidden
-            _rebuild_col_buttons()
+            _rebuild_col_labels()
         finally:
             _updating_table = False
 
@@ -767,10 +767,10 @@ def build_plot_selection_panel(
 
     state.param.watch(_on_layout_change, "layout_version")
 
-    # ── Column toggle buttons ──────────────────────────────────────
-    col_sel_row = pn.Row(sizing_mode="stretch_width")
+    # ── Column toggle labels ──────────────────────────────────────
+    col_label_row = pn.Row(sizing_mode="stretch_width", styles={"margin-bottom": "4px"})
 
-    def _rebuild_col_buttons():
+    def _rebuild_col_labels():
         col_keys = list(state.col_keys)
         children = []
         for ck in col_keys:
@@ -793,19 +793,34 @@ def build_plot_selection_panel(
                 state.set_all_for_column(_c, any_unchecked)
                 _rebuild_table()
 
-            btn = pn.widgets.Button(
+            label = pn.widgets.Button(
                 name=ck_s,
                 width=65,
-                height=24,
+                height=22,
                 button_type="default",
-                styles={"font-size": "11px", "padding": "1px 3px"},
+                stylesheets=["""
+                    .bk-btn-default {
+                        background: none !important;
+                        border: none !important;
+                        color: #94a3b8 !important;
+                        font-size: 11px !important;
+                        font-weight: 600 !important;
+                        padding: 0 4px !important;
+                        cursor: pointer !important;
+                    }
+                    .bk-btn-default:hover {
+                        color: #e2e8f0 !important;
+                        background: #334155 !important;
+                        border-radius: 3px !important;
+                    }
+                """],
             )
-            btn.on_click(_on_click)
-            children.append(btn)
-        col_sel_row[:] = children
+            label.on_click(_on_click)
+            children.append(label)
+        col_label_row[:] = children
 
-    # Call once on init, and rebuild whenever the table is rebuilt
-    _rebuild_col_buttons()
+    # Call once on init, and rebuild whenever columns change
+    _rebuild_col_labels()
 
     control_bar = pn.Row(
         row_select,
@@ -829,7 +844,7 @@ def build_plot_selection_panel(
 
     panel = pn.Column(
         control_bar,
-        col_sel_row,
+        col_label_row,
         table,
         legend_accordion,
         sizing_mode="stretch_width",
