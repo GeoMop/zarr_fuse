@@ -125,7 +125,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
 
         # Compute marker positions from x_range
         n_markers = 8
-        if x_range is not None and len(x_range) == 2:
+        if (x_range is not None and len(x_range) == 2
+                and not pd.isna(x_range[0]) and not pd.isna(x_range[1])):
             marker_times = pd.date_range(start=x_range[0], end=x_range[1], periods=n_markers)
         else:
             marker_times = pd.date_range(start=times.min(), end=times.max(), periods=n_markers)

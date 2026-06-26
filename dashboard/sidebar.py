@@ -170,12 +170,6 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
         width=320,
     )
 
-    variable_info = pn.pane.Markdown(
-        "Select a variable",
-        sizing_mode="stretch_width",
-        styles={"font-size": "11px", "color": "#94a3b8"},
-    )
-
     variable_metadata = pn.pane.HTML(
         "",
         visible=False,
@@ -197,7 +191,6 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
         reload_button,
         tree_view,
         variable_selector,
-        variable_info,
         variable_metadata,
         node_hint,
         pn.layout.VSpacer(),
@@ -205,7 +198,7 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
         styles={"padding": "10px"},
     )
 
-    return controller, store_selector, tree_view, variable_selector, variable_info, variable_metadata, node_hint, store_info
+    return controller, store_selector, tree_view, variable_selector, variable_metadata, node_hint, store_info
 
 
 

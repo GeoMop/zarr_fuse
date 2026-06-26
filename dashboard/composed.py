@@ -80,7 +80,7 @@ def build_dashboard():
         visible=False,
         sizing_mode="stretch_width",
     )
-    controller, store_selector, node_select, variable_selector, variable_info, variable_metadata, node_hint, store_info = build_sidebar(
+    controller, store_selector, node_select, variable_selector, variable_metadata, node_hint, store_info = build_sidebar(
         endpoint_name, endpoint, structure, endpoints=endpoints,
         loading_indicator=loading_indicator, timeseries_loading=timeseries_loading,
         render_spinner=render_spinner, rendering_status=rendering_status,
@@ -151,26 +151,22 @@ def build_dashboard():
                     _current_var_label = var_label
                     variable_metadata.visible = False
                     variable_selector.value = var_label
-                    variable_info.object = f"**Viewing: {var_name}**"
                     plot_var_selector.options = [var_label]
                     plot_var_selector.value = var_label
                 else:
                     variable_selector.value = None
                     data.display_variable = ""
-                    variable_info.object = "No variables found"
                     variable_metadata.visible = False
                     plot_var_selector.options = []
 
                 print(f"[variables] Loaded {len(variables)} variables successfully")
             else:
                 variable_selector.options = []
-                variable_info.object = "⚠️ No variables found"
                 variable_metadata.visible = False
                 plot_var_selector.options = []
                 print(f"[variables] No variables in group {group_path}")
         except Exception as e:
             variable_selector.options = []
-            variable_info.object = f"❌ Error: {str(e)[:50]}"
             variable_metadata.visible = False
             plot_var_selector.options = []
             print(f"[variables] ERROR: {e}")
@@ -179,7 +175,6 @@ def build_dashboard():
         if var_name != data.display_variable:
             print(f"[variables] Changing from {data.display_variable} to {var_name}")
             data.display_variable = var_name
-            variable_info.object = f"**Loading {var_name}...**"
             loading_indicator.visible = True
             display_label = label or var_name
             plot_var_selector.value = display_label
@@ -209,12 +204,10 @@ def build_dashboard():
             def _run_refresh():
                 try:
                     refresh_views()
-                    variable_info.object = f"**Viewing: {var_name}**"
                     plot_var_selector.value = display_label
                     _update_metadata()
                 except Exception as e:
                     import traceback; traceback.print_exc()
-                    variable_info.object = f"❌ Error: {str(e)[:50]}"
                     plot_var_selector.options = []
                     rendering_status.object = f"⚠️ Render error: {str(e)[:80]}"
                     rendering_status.visible = True
