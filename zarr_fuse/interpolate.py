@@ -63,11 +63,12 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
             sorted_mask = old_values[:-1] <= old_values[1:]
             if not np.all(sorted_mask):
                 bad_idx = int(np.flatnonzero(~sorted_mask)[0])
-                raise AssertionError(
-                    f"Existing coordinate values for {schema.name} are not sorted at positions "
+                log.warning(
+                    f"Existing coordinate '{schema.name}' is not sorted at positions "
                     f"{bad_idx} and {bad_idx + 1}: {old_values[bad_idx]!r} > "
-                    f"{old_values[bad_idx + 1]!r}; got {old_values}"
+                    f"{old_values[bad_idx + 1]!r}; using max for merge. Store may need repair."
                 )
+                old_values = np.sort(old_values)
             max_old = old_values[-1]
             idx_split = np.searchsorted(new_sorted, max_old, side='right')
         else:
@@ -124,6 +125,8 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
             print(new_values.astype(str).tolist())
             #print(np.stack((new_values[no_diff_10], new_values[no_diff_10 + 1]), axis=1))
 
+        if len(old_values) > 0 and not np.all(old_values[:-1] <= old_values[1:]):
+            old_values = np.sort(old_values)
         old_part_min = new_sorted[0]
         old_range_min = np.searchsorted(old_values, old_part_min, side='left')
         old_part_max = new_sorted[-1]

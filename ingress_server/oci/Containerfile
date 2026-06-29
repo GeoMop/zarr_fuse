@@ -2,7 +2,7 @@ FROM docker.io/library/python:3.11-slim-bullseye
 
 ARG APP_VERSION="devel"
 
-ARG zarr_fuse_branch="main"
+ARG zarr_fuse_branch="fix-zarr-fuse-sorting"
 ARG git_version="1:2.30.2-1+deb11u5"
 ARG waitress_version="3.0.2"
 
