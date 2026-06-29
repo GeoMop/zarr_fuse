@@ -124,6 +124,8 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
             print(new_values.astype(str).tolist())
             #print(np.stack((new_values[no_diff_10], new_values[no_diff_10 + 1]), axis=1))
 
+        if len(old_values) > 0 and not np.all(old_values[:-1] <= old_values[1:]):
+            old_values = np.sort(old_values)
         old_part_min = new_sorted[0]
         old_range_min = np.searchsorted(old_values, old_part_min, side='left')
         old_part_max = new_sorted[-1]
