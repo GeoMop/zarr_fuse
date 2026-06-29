@@ -9,5 +9,4 @@ deployment:
       enabled: true
       usersJson: "{}"
     smtp:
-      enabled: true
       password: "random-smtp-password"

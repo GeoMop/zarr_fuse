@@ -54,6 +54,25 @@ on:
         required: false
         type: string
         default: "main"
+    secrets:
+      DOCKER_PASSWORD:
+        description: "Docker registry password for pushing images"
+        required: false
+      KUBECONFIG:
+        description: "Base64-encoded kubeconfig for Kubernetes deployment"
+        required: false
+      S3_ACCESS_KEY:
+        description: "S3 access key"
+        required: false
+      S3_SECRET_KEY:
+        description: "S3 secret key"
+        required: false
+      BASIC_AUTH_USERS_JSON:
+        description: "JSON with basic auth users"
+        required: false
+      SMTP_PASSWORD:
+        description: "SMTP password for sending emails"
+        required: false
 jobs:
   get-version-tag:
     name: Get version tag
@@ -197,5 +216,6 @@ jobs:
           --set deployment.secrets.s3.endpointUrl="${{ vars.S3_ENDPOINT_URL }}" \
           --set deployment.secrets.s3.storeUrl='${{ inputs.s3-store-url }}' \
           --set-json deployment.secrets.basicAuth.usersJson='${{ secrets.BASIC_AUTH_USERS_JSON }}' \
+          --set deployment.secrets.smtp.password="${{ secrets.SMTP_PASSWORD }}" \
           --set app.name="${{ inputs.release-name }}" \
           ${{ inputs.extra-helm-args }}

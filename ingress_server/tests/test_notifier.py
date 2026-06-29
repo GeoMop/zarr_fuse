@@ -20,7 +20,7 @@ def smtp_config():
 
 
 def test_send_failure_email(smtp_config):
-    if not smtp_config.enabled:
+    if not smtp_config.host or not smtp_config.notify_to:
         pytest.skip("SMTP not configured (host or notify_to missing)")
     if not smtp_config.password:
         pytest.skip("SMTP_PASSWORD not set in .env")

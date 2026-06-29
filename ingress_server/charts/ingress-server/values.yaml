@@ -55,9 +55,7 @@ deployment:
     # -- Active scrapper failure notification configuration
     # @default -- ~
     smtp:
-      # -- Enable SMTP notifications; when false, password is not required
-      enabled: false
-      # -- SMTP password for authentication
+      # -- SMTP password for authentication (if is not provided, the SMTP configuration will be disabled)
       password: ""
 
 persistence:
