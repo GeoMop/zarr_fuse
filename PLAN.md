@@ -179,6 +179,18 @@
   - warnings that expose project behavior we may want to make explicit
   - warnings already eliminated by recent test changes but still present in
     older warning logs
+- Real Bukov worker reproduction under `ingress_server/tests/` is currently
+  blocked in this environment before merge/update: opening the S3-backed store
+  for `rancher-bukov-moc-test.zarr` fails with
+  `botocore.exceptions.ParamValidationError` for an empty object key during
+  root-group access. That appears distinct from the original sorted-coordinate
+  assertion and needs dependency/path handling review before the data bug can
+  be reproduced end-to-end.
+- 2026-06-30 local verification of datetime storage tests is currently blocked
+  before the delayed-update assertion: both the new regression and existing
+  `test_datetime_encoding_roundtrip` hang in `zarr.open_group` during the first
+  local `zf.open_store()` call. This conflicts with the older note that local
+  store-open behavior was no longer active and needs fresh triage.
 
 ## AGENT log
 
@@ -233,3 +245,12 @@
 - 2026-06-25: Reproduced the ingress sorted-coordinate assertion with a
   synthetic `interpolate_ds` datetime-coordinate test and improved the
   diagnostic to report the first offending adjacent coordinate pair.
+- 2026-06-25: Updated the Bukov test extractor fixture to accept the current
+  worker payload contract and load borehole metadata from test fixtures; real
+  `_process_one` reproduction now advances to S3 store open and is blocked
+  there by an empty-key `ParamValidationError`.
+- 2026-06-30: Added local `Node.update` regression tests for delayed
+  `date_time` batches written through separate reopened nodes. Both the
+  `date_time.merge = None` and `date_time.merge.step_limits = [15, 61, "m"]`
+  cases currently assert only that stored `date_time` coordinates are sorted
+  and print the stored coordinate size for debugging.
