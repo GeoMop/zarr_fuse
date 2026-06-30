@@ -503,10 +503,10 @@ def build_assignment_matrix(
 
     # ── Header row (row 0) — column labels ──
     header_row: dict = {
+        "_actions": "",
         "_row_label": "All",
         "_marker": "",
         "entity_index": np.nan,
-        "_actions": "",
     }
     for col_key in col_keys:
         col_s = str(col_key)
@@ -519,10 +519,10 @@ def build_assignment_matrix(
         eid = sites_lookup.get(str(row_key), np.nan) if row_dim == "entity" else np.nan
         shape_name = row_shapes.get(str(row_key), "circle")
         row: dict = {
+            "_actions": "✕",
             "_row_label": str(row_key),
             "_marker": SHAPE_TO_SVG.get(shape_name, shape_name),
             "entity_index": eid,
-            "_actions": "✕",
         }
         for col_key in col_keys:
             col_s = str(col_key)
@@ -673,7 +673,7 @@ def build_plot_selection_panel(
         editors=editors,
         formatters=formatters,
         hidden_columns=hidden,
-        frozen_columns=["_row_label", "_actions"],
+        frozen_columns=["_actions", "_row_label"],
         selectable=False,
         show_index=False,
         max_height=400,
@@ -802,8 +802,10 @@ def build_plot_selection_panel(
     # ── Column config (Tabulator) ─────────────────────────────────
     def _rebuild_col_styles():
         col_keys = list(state.col_keys)
-        config_columns = []
-        config_columns.append({"field": "_row_label", "width": 120})
+        config_columns = [
+            {"field": "_actions", "width": 20},
+            {"field": "_row_label", "width": 120},
+        ]
         for ck in col_keys:
             ck_s = str(ck)
             config_columns.append({"field": ck_s, "width": 65})
