@@ -32,6 +32,8 @@ class SelectionState(param.Parameterized):
         self._checked: set[tuple[str, float]] = set()
         self._row_shapes: dict[str, str] = {}
         self._col_colors: dict[str, str] = {}
+        self._valid_count: int = 0
+        self._checked_count: int = 0
 
     # ── read-only view of internal data ──────────────────────────────
 
@@ -103,8 +105,10 @@ class SelectionState(param.Parameterized):
         before = key in self._checked
         if value and not before:
             self._checked.add(key)
+            self._checked_count += 1
         elif not value and before:
             self._checked.discard(key)
+            self._checked_count -= 1
         else:
             return  # no change
         self.version += 1
@@ -134,6 +138,7 @@ class SelectionState(param.Parameterized):
                 return
 
         depths_arr = np.asarray(depths, dtype=float).ravel()
+        finite_depths = [float(d) for d in depths_arr if np.isfinite(float(d))]
 
         self._sites.append({
             "entity_index": int(entity_index),
@@ -143,13 +148,12 @@ class SelectionState(param.Parameterized):
             "times": times,
         })
 
-        for d in depths_arr:
-            dv = float(d)
-            if not np.isfinite(dv):
-                continue  # skip NaN/Inf — NaN != NaN breaks set lookup
+        for dv in finite_depths:
             key = (str(site_id), dv)
             self._checked.add(key)
 
+        self._valid_count += len(finite_depths)
+        self._checked_count += len(finite_depths)
         self.layout_version += 1
         self.version += 1
         print(f"[SelectionState] Added site {site_id} (idx={entity_index}), "
@@ -169,9 +173,14 @@ class SelectionState(param.Parameterized):
         site_id = site["site_id"]
         self._sites.remove(site)
 
+        depths_arr = np.asarray(site["depths"]).ravel()
+        finite_count = sum(1 for d in depths_arr if np.isfinite(float(d)))
+        self._valid_count -= finite_count
+
         for k in list(self._checked):
             if k[0] == site_id:
                 self._checked.discard(k)
+                self._checked_count -= 1
 
         self.layout_version += 1
         self.version += 1
@@ -180,41 +189,54 @@ class SelectionState(param.Parameterized):
     def set_selected(self, site_id, depth_value, value):
         """Check/uncheck a single (site, depth) cell.  Triggers plot re-render."""
         key = (str(site_id), float(depth_value))
-        if value:
+        before = key in self._checked
+        if value and not before:
             self._checked.add(key)
-        else:
+            self._checked_count += 1
+        elif not value and before:
             self._checked.discard(key)
+            self._checked_count -= 1
+        else:
+            return
         self.version += 1
 
     def clear(self):
         """Remove all sites and reset selection."""
         self._sites.clear()
         self._checked.clear()
+        self._valid_count = 0
+        self._checked_count = 0
         self.layout_version += 1
         self.version += 1
         print("[SelectionState] Cleared all sites")
 
     def select_all(self):
-        """Check every (site, depth) cell."""
+        """Check every valid (site, depth) cell."""
         changed = False
         for site in self._sites:
             for d in site["depths"]:
-                k = (str(site["site_id"]), float(d))
+                dv = float(d)
+                if not np.isfinite(dv):
+                    continue
+                k = (str(site["site_id"]), dv)
                 if k not in self._checked:
                     self._checked.add(k)
                     changed = True
         if changed:
+            self._checked_count = self._valid_count
             self.version += 1
 
     def deselect_all(self):
         """Uncheck every (site, depth) cell."""
         if self._checked:
             self._checked.clear()
+            self._checked_count = 0
             self.version += 1
 
     def set_all_for_row(self, row_key, value: bool):
         """Check or uncheck all valid combos in the given row."""
         changed = False
+        delta = 0
         for site in self._sites:
             depths_arr = np.asarray(site["depths"]).ravel()
             for depth_val in depths_arr:
@@ -229,15 +251,19 @@ class SelectionState(param.Parameterized):
                 if value and not before:
                     self._checked.add(key)
                     changed = True
+                    delta += 1
                 elif not value and before:
                     self._checked.discard(key)
                     changed = True
+                    delta -= 1
         if changed:
+            self._checked_count += delta
             self.version += 1
 
     def set_all_for_column(self, col_key, value: bool):
         """Check or uncheck all valid combos in the given column."""
         changed = False
+        delta = 0
         for site in self._sites:
             depths_arr = np.asarray(site["depths"]).ravel()
             for depth_val in depths_arr:
@@ -252,10 +278,13 @@ class SelectionState(param.Parameterized):
                 if value and not before:
                     self._checked.add(key)
                     changed = True
+                    delta += 1
                 elif not value and before:
                     self._checked.discard(key)
                     changed = True
+                    delta -= 1
         if changed:
+            self._checked_count += delta
             self.version += 1
 
     # ── queries ──────────────────────────────────────────────────────
@@ -740,9 +769,16 @@ def build_plot_selection_panel(
 
         row_data = table.value.iloc[row_idx]
 
-        # ── Header row (row 0) — toggle column ──
+        # ── Header row (row 0) — toggle column / toggle all ──
         if row_idx == 0:
-            if col in ("_actions", "_row_label"):
+            if col == "_actions":
+                return
+            if col == "_row_label":
+                if state._checked_count == state._valid_count:
+                    state.deselect_all()
+                else:
+                    state.select_all()
+                _rebuild_table()
                 return
             _updating_table_local = True
             try:
@@ -815,6 +851,7 @@ def build_plot_selection_panel(
     def _rebuild_cell_styles():
         parts = [
             '.tabulator-row-0 { background: #1e293b !important; }',
+            '.tabulator-row-0 .tabulator-cell[data-field="_row_label"] { cursor: pointer !important; }',
         ]
         table.stylesheets = ["\n".join(parts)]
 
