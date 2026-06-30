@@ -500,33 +500,43 @@ def build_assignment_matrix(
 
     rows: list[dict] = []
     sites_lookup = {str(s["site_id"]): s["entity_index"] for s in selection_state.sites}
+
+    # ── Header row (row 0) — column labels ──
+    header_row: dict = {
+        "_row_label": "All",
+        "_marker": "",
+        "entity_index": np.nan,
+        "_actions": "",
+    }
+    for col_key in col_keys:
+        col_s = str(col_key)
+        color = col_colors.get(col_s, "#94a3b8")
+        header_row[col_s] = f'<span style="color:{color};font-weight:bold">{col_key}</span>'
+        header_row[f"__valid_{col_s}"] = False
+    rows.append(header_row)
+
     for i, row_key in enumerate(row_keys):
         eid = sites_lookup.get(str(row_key), np.nan) if row_dim == "entity" else np.nan
         shape_name = row_shapes.get(str(row_key), "circle")
         row: dict = {
-            "_index": i,
             "_row_label": str(row_key),
             "_marker": SHAPE_TO_SVG.get(shape_name, shape_name),
             "entity_index": eid,
             "_actions": "✕",
         }
-        row_any_valid = False
         for col_key in col_keys:
             col_s = str(col_key)
             valid = selection_state.is_valid(row_key, col_key)
             if valid:
-                row_any_valid = True
                 checked = selection_state.is_checked(row_key, col_key)
-                row[col_s] = bool(checked)
+                row[col_s] = "✓" if bool(checked) else "✗"
                 row[f"__valid_{col_s}"] = True
             else:
-                row[col_s] = None
+                row[col_s] = ""
                 row[f"__valid_{col_s}"] = False
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    if "_index" in df.columns:
-        df = df.drop(columns=["_index"])
 
     selection_cols = [str(ck) for ck in col_keys]
 
@@ -534,24 +544,21 @@ def build_assignment_matrix(
         "_row_label": None,
         "_marker": None,
         "_actions": None,
-        **{
-            col: {"type": "tickCross", "tristate": True, "indeterminateValue": None}
-            for col in selection_cols
-        },
+        **{col: None for col in selection_cols},
     }
 
     formatters: dict = {
         "_row_label": {"type": "text"},
         "_marker": {"type": "html"},
         "_actions": {"type": "button", "label": "✕ Remove", "buttonType": "danger"},
-        **{col: {"type": "tickCross"} for col in selection_cols},
+        **{col: {"type": "html"} for col in selection_cols},
     }
 
     editables: dict = {
         "_row_label": False,
         "_marker": False,
         "_actions": False,
-        **{col: True for col in selection_cols},
+        **{col: False for col in selection_cols},
     }
 
     # Restore original orientation
@@ -691,13 +698,12 @@ def build_plot_selection_panel(
                 new_hidden.append("_actions")
             else:
                 new_hidden = [c for c in new_hidden if c != "_actions"]
-            table.titles = {"_row_label": "", "_actions": "Remove"}
             _rebuild_col_styles()
             table.value = new_df
             table.editors = new_editors
             table.formatters = new_formatters
             table.hidden_columns = new_hidden
-            _rebuild_col_labels()
+            _rebuild_cell_styles()
         finally:
             _updating_table = False
 
@@ -725,126 +731,93 @@ def build_plot_selection_panel(
     col_select.param.watch(_sync_orientation, "value")
 
     def _on_table_cell_click(event):
-        """Handle clicks on action columns."""
-        if event.column == "_actions":
-            row_data = table.value.iloc[event.row]
+        """Handle clicks on data cells: row toggle, column toggle, cell toggle, remove."""
+        col = event.column
+        row_idx = event.row
+
+        if col in ("_marker", "entity_index", "_index") or col.startswith("__valid_"):
+            return
+
+        row_data = table.value.iloc[row_idx]
+
+        # ── Header row (row 0) — toggle column ──
+        if row_idx == 0:
+            if col in ("_actions", "_row_label"):
+                return
+            _updating_table_local = True
+            try:
+                any_unchecked = False
+                for site in state._sites:
+                    for d in np.asarray(site["depths"]).ravel():
+                        if state.col_dim == "vertical":
+                            col_matches = (float(d) == float(col))
+                        else:
+                            col_matches = (str(site["site_id"]) == str(col))
+                        if col_matches:
+                            key = (str(site["site_id"]), float(d))
+                            if key not in state._checked:
+                                any_unchecked = True
+                                break
+                    if any_unchecked:
+                        break
+                state.set_all_for_column(col, any_unchecked)
+                _rebuild_table()
+            finally:
+                _updating_table_local = False
+            return
+
+        # ── Data rows ──
+        if col == "_actions":
             eid = row_data.get("entity_index")
             if eid is not None and not (isinstance(eid, float) and np.isnan(eid)):
                 state.remove_site(int(eid))
-        elif event.column == "_row_label":
-            row_data = table.value.iloc[event.row]
+            return
+
+        if col == "_row_label":
             row_key = row_data["_row_label"]
             any_unchecked = False
-            for col in table.value.columns:
-                if col.startswith("__valid_") or col in ("_row_label", "_marker", "entity_index", "_actions", "_index"):
-                    continue
-                if row_data.get(f"__valid_{col}", False) and not row_data.get(col, False):
+            for ck in state.col_keys:
+                ck_s = str(ck)
+                if state.is_valid(row_key, ck) and not state.is_checked(row_key, ck):
                     any_unchecked = True
                     break
             state.set_all_for_row(row_key, any_unchecked)
             _rebuild_table()
+            return
+
+        # Selection column — toggle individual cell
+        if row_data.get(f"__valid_{col}", False):
+            row_key = row_data["_row_label"]
+            current = state.is_checked(row_key, col)
+            state.set_checked(row_key, col, not current)
+            _rebuild_table()
 
     table.on_click(_on_table_cell_click)
-
-    def _on_table_edit(event):
-        """Handle user edits to the Tabulator."""
-        nonlocal _updating_table
-        if _updating_table:
-            return
-        col = event.column
-        row_idx = event.row
-        new_value = event.value
-
-        if col in ("_row_label", "_marker"):
-            return
-
-        row_key = table.value.iloc[row_idx]["_row_label"]
-
-        state.set_checked(row_key, col, bool(new_value))
-
-    table.on_edit(_on_table_edit)
 
     def _on_layout_change(event):
         _rebuild_table()
 
     state.param.watch(_on_layout_change, "layout_version")
 
-    # ── Column toggle labels ──────────────────────────────────────
-    col_label_row = pn.Row(sizing_mode="stretch_width", styles={"margin-bottom": "4px"})
-
-    def _rebuild_col_labels():
-        col_keys = list(state.col_keys)
-        children = []
-        for ck in col_keys:
-            ck_s = str(ck)
-            color = state._col_colors.get(ck_s, "#94a3b8")
-
-            def _on_click(event, _c=ck_s):
-                any_unchecked = False
-                for site in state._sites:
-                    for d in np.asarray(site["depths"]).ravel():
-                        if state.col_dim == "vertical":
-                            col_matches = (float(d) == float(_c))
-                        else:
-                            col_matches = (str(site["site_id"]) == str(_c))
-                        key = (str(site["site_id"]), float(d))
-                        if col_matches and key not in state._checked:
-                            any_unchecked = True
-                            break
-                    if any_unchecked:
-                        break
-                state.set_all_for_column(_c, any_unchecked)
-                _rebuild_table()
-
-            label = pn.widgets.Button(
-                name=ck_s,
-                width=65,
-                height=22,
-                button_type="default",
-                stylesheets=[f"""
-                    .bk-btn-default {{
-                        background: none !important;
-                        border: none !important;
-                        color: {color} !important;
-                        font-size: 11px !important;
-                        font-weight: 600 !important;
-                        padding: 0 4px !important;
-                        cursor: pointer !important;
-                    }}
-                    .bk-btn-default:hover {{
-                        color: #e2e8f0 !important;
-                        background: #334155 !important;
-                        border-radius: 3px !important;
-                    }}
-                """],
-            )
-            label.on_click(_on_click)
-            children.append(label)
-        col_label_row[:] = children
-
-    _rebuild_col_labels()
-
-    # ── Column header colors (Tabulator) ──────────────────────────
+    # ── Column config (Tabulator) ─────────────────────────────────
     def _rebuild_col_styles():
         col_keys = list(state.col_keys)
         config_columns = []
-        css_parts = []
         config_columns.append({"field": "_row_label", "width": 120})
-        for i, ck in enumerate(col_keys):
+        for ck in col_keys:
             ck_s = str(ck)
-            color = state._col_colors.get(ck_s, "#94a3b8")
-            cls = f"colhdr-{i}"
-            config_columns.append({"field": ck_s, "cssClass": cls, "width": 65})
-            css_parts.append(
-                f".tabulator-col.{cls} .tabulator-col-title {{ color: {color} !important; }}"
-            )
-            css_parts.append(
-                f".tabulator-col.{cls} .tabulator-col-title:hover {{ color: #fff !important; }}"
-            )
-        table._configuration = {"columns": config_columns}
-        table.stylesheets = ["\n".join(css_parts)]
+            config_columns.append({"field": ck_s, "width": 65})
+        table._configuration = {"headerVisible": False, "columns": config_columns}
+
+    # ── Header row cell styles ────────────────────────────────────
+    def _rebuild_cell_styles():
+        parts = [
+            '.tabulator-row-0 { background: #1e293b !important; }',
+        ]
+        table.stylesheets = ["\n".join(parts)]
 
     _rebuild_col_styles()
+    _rebuild_cell_styles()
 
     control_bar = pn.Row(
         row_select,
@@ -868,7 +841,6 @@ def build_plot_selection_panel(
 
     panel = pn.Column(
         control_bar,
-        col_label_row,
         table,
         legend_accordion,
         sizing_mode="stretch_width",
