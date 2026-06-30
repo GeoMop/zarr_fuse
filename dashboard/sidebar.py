@@ -95,30 +95,50 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
 
     def _update_status_header(*_):
         if rendering_status is not None and rendering_status.visible:
-            text = "⚠️ Error"
+            icon = "⚠️"
+            text = "Error"
             dot_color = "#ef4444"
+            anim = ""
         elif loading_indicator is not None and loading_indicator.visible:
-            text = "⏳ Loading dataset..."
+            icon = ""
+            text = "Loading dataset..."
             dot_color = "#f59e0b"
+            anim = "pulse"
         elif timeseries_loading is not None and timeseries_loading.visible:
-            text = "⏳ Loading timeseries..."
+            icon = ""
+            text = "Loading timeseries..."
             dot_color = "#f59e0b"
+            anim = "pulse"
         elif render_spinner is not None and render_spinner.visible:
-            text = "⏳ Rendering..."
+            icon = ""
+            text = "Rendering..."
             dot_color = "#f59e0b"
+            anim = "pulse"
         else:
+            icon = "✓"
             text = "Active"
             dot_color = "#10b981"
-        _status_header.object = f"""
+            anim = ""
+        spinner_html = (
+            f'<span style="display:inline-block;width:10px;height:10px;'
+            f'border:2px solid #334155;border-top-color:{dot_color};'
+            f'border-radius:50%;animation:sp 0.8s linear infinite;'
+            f'vertical-align:middle;"></span>'
+        ) if anim else icon
+        dot_anim = f"animation:{anim} 1.5s ease-in-out infinite;" if anim else ""
+        _status_header.object = f"""<style>
+@keyframes sp {{ to {{ transform:rotate(360deg); }} }}
+@keyframes pulse {{ 0%,100% {{ opacity:0.4; transform:scale(0.8); }} 50% {{ opacity:1; transform:scale(1.2); }} }}
+</style>
 <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
     <span style="font-size: 12px; color: #94a3b8; font-weight: 600;">SERVICE STATUS</span>
     <div style="display: flex; align-items: center; gap: 6px;">
-        <span style="width: 8px; height: 8px; background: {dot_color}; border-radius: 50%;
-                    box-shadow: 0 0 10px {dot_color};"></span>
+        <span style="width:8px;height:8px;background:{dot_color};border-radius:50%;
+                     box-shadow:0 0 10px {dot_color};{dot_anim}"></span>
+        {spinner_html}
         <span style="font-size: 11px; color: {dot_color}; font-weight: 600;">{text}</span>
     </div>
-</div>
-"""
+</div>"""
 
     if loading_indicator is not None:
         loading_indicator.param.watch(_update_status_header, ["visible"])

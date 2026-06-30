@@ -57,13 +57,13 @@ def build_dashboard():
     structure = data.client.get_structure(endpoint_name)
 
     loading_indicator = pn.Row(
-        pn.indicators.LoadingSpinner(value=True, width=24, height=24),
+        pn.indicators.LoadingSpinner(value=True, color='light', bgcolor='dark', size=32),
         pn.pane.Markdown("Loading selected dataset...", styles={"color": "#dbeafe"}),
         visible=False,
         sizing_mode="stretch_width",
     )
     timeseries_loading = pn.Row(
-        pn.indicators.LoadingSpinner(value=True, width=24, height=24),
+        pn.indicators.LoadingSpinner(value=True, color='light', bgcolor='dark', size=32),
         pn.pane.Markdown("Loading timeseries data...", styles={"color": "#dbeafe"}),
         visible=False,
         sizing_mode="stretch_width",
@@ -75,7 +75,7 @@ def build_dashboard():
         sizing_mode="stretch_width",
     )
     render_spinner = pn.Row(
-        pn.indicators.LoadingSpinner(value=True, width=24, height=24),
+        pn.indicators.LoadingSpinner(value=True, color='light', bgcolor='dark', size=32),
         pn.pane.Markdown("Rendering...", styles={"color": "#dbeafe"}),
         visible=False,
         sizing_mode="stretch_width",
