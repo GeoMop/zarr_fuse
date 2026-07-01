@@ -331,6 +331,7 @@ def build_dashboard():
             _do_tap()
 
     tap_stream.param.watch(on_tap_event, ["x", "y"])
+    map_handlers["on_map_tap"](tap_stream.x, tap_stream.y)
 
     top_left = pn.pane.HoloViews(map_view, sizing_mode="stretch_both")
     top_right = pn.Column(
