@@ -121,6 +121,29 @@ def build_dashboard():
 
     _current_var_label: str | None = None
 
+    def _fetch_and_show_metadata(var_name: str):
+        name_for_api = var_name
+        meta = data.client.get_variable_metadata(
+            data.endpoint_name, data.group_path, name_for_api
+        )
+        if meta:
+            coords_text = ", ".join(meta.get("coords", []))
+            unit_text = f" ({meta['unit']})" if meta.get("unit") else ""
+            variable_metadata.object = (
+                "<div style='background: #1e293b; padding: 12px; border-radius: 8px; "
+                "margin: 8px 0; border-left: 3px solid #10b981;'>"
+                "<div style='font-size: 11px; color: #94a3b8; margin-bottom: 6px; "
+                "font-weight: 600;'>📋 VARIABLE METADATA</div>"
+                f"<div style='font-size: 13px; color: #e2e8f0; font-weight: 600; "
+                f"margin-bottom: 6px;'>{meta['name']}{unit_text}</div>"
+                f"<div style='font-size: 11px; color: #cbd5e1; line-height: 1.6;'>"
+                f"<b>Description:</b> {meta.get('description', '—')}<br>"
+                f"<b>Unit:</b> {meta.get('unit', '—')}<br>"
+                f"<b>Coordinates:</b> {coords_text or '—'}"
+                "</div></div>"
+            )
+            variable_metadata.visible = True
+
     def _populate_variable_selector(endpoint_name: str, group_path: str):
         nonlocal _current_var_label
         try:
@@ -153,6 +176,7 @@ def build_dashboard():
                     variable_selector.value = var_label
                     plot_var_selector.options = [var_label]
                     plot_var_selector.value = var_label
+                    _fetch_and_show_metadata(var_name)
                 else:
                     variable_selector.value = None
                     data.display_variable = ""
@@ -179,33 +203,11 @@ def build_dashboard():
             display_label = label or var_name
             plot_var_selector.value = display_label
 
-            def _update_metadata():
-                meta = data.client.get_variable_metadata(
-                    data.endpoint_name, data.group_path, var_name
-                )
-                if meta:
-                    coords_text = ", ".join(meta.get("coords", []))
-                    unit_text = f" ({meta['unit']})" if meta.get("unit") else ""
-                    variable_metadata.object = (
-                        "<div style='background: #1e293b; padding: 12px; border-radius: 8px; "
-                        "margin: 8px 0; border-left: 3px solid #10b981;'>"
-                        "<div style='font-size: 11px; color: #94a3b8; margin-bottom: 6px; "
-                        "font-weight: 600;'>📋 VARIABLE METADATA</div>"
-                        f"<div style='font-size: 13px; color: #e2e8f0; font-weight: 600; "
-                        f"margin-bottom: 6px;'>{meta['name']}{unit_text}</div>"
-                        f"<div style='font-size: 11px; color: #cbd5e1; line-height: 1.6;'>"
-                        f"<b>Description:</b> {meta.get('description', '—')}<br>"
-                        f"<b>Unit:</b> {meta.get('unit', '—')}<br>"
-                        f"<b>Coordinates:</b> {coords_text or '—'}"
-                        "</div></div>"
-                    )
-                    variable_metadata.visible = True
-
             def _run_refresh():
                 try:
                     refresh_views()
                     plot_var_selector.value = display_label
-                    _update_metadata()
+                    _fetch_and_show_metadata(var_name)
                 except Exception as e:
                     import traceback; traceback.print_exc()
                     plot_var_selector.options = []

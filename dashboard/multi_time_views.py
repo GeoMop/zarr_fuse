@@ -340,6 +340,14 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             _last_reset_version[0] = selection_state.version
         if ylim:
             hooks.append(_make_yrange_hook(ylim))
+
+        def _apply_axis_theme(plot, element):
+            p = plot.state
+            p.axis.axis_line_color = "#e2e8f0"
+            p.axis.major_label_text_color = "#e2e8f0"
+            p.axis.axis_label_text_color = "#e2e8f0"
+        hooks.append(_apply_axis_theme)
+
         n_sites = len(selection_state.sites)
         site_label = "1 site" if n_sites == 1 else f"{n_sites} sites"
         return overlay.opts(
