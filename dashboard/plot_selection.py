@@ -534,7 +534,6 @@ def build_assignment_matrix(
     header_row: dict = {
         "_actions": "",
         "_row_label": "All",
-        "_marker": "",
         "entity_index": np.nan,
     }
     for col_key in col_keys:
@@ -549,8 +548,7 @@ def build_assignment_matrix(
         shape_name = row_shapes.get(str(row_key), "circle")
         row: dict = {
             "_actions": "✕",
-            "_row_label": str(row_key),
-            "_marker": SHAPE_TO_SVG.get(shape_name, shape_name),
+            "_row_label": f"{SHAPE_TO_SVG.get(shape_name, shape_name)} {str(row_key)}",
             "entity_index": eid,
         }
         for col_key in col_keys:
@@ -571,21 +569,18 @@ def build_assignment_matrix(
 
     editors: dict = {
         "_row_label": None,
-        "_marker": None,
         "_actions": None,
         **{col: None for col in selection_cols},
     }
 
     formatters: dict = {
-        "_row_label": {"type": "text"},
-        "_marker": {"type": "html"},
+        "_row_label": {"type": "html"},
         "_actions": {"type": "button", "label": "✕ Remove", "buttonType": "danger"},
         **{col: {"type": "html"} for col in selection_cols},
     }
 
     editables: dict = {
         "_row_label": False,
-        "_marker": False,
         "_actions": False,
         **{col: False for col in selection_cols},
     }
@@ -691,7 +686,7 @@ def build_plot_selection_panel(
         state, state.row_dim, state.col_dim
     )
 
-    hidden = [c for c in df.columns if c.startswith("__valid_") or c == "_marker" or c == "entity_index"]
+    hidden = [c for c in df.columns if c.startswith("__valid_") or c == "entity_index"]
     if state.row_dim != "entity":
         hidden.append("_actions")
 
@@ -722,7 +717,7 @@ def build_plot_selection_panel(
             new_df, new_editors, new_formatters, _, _, _ = build_assignment_matrix(
                 state, state.row_dim, state.col_dim
             )
-            new_hidden = [c for c in new_df.columns if c.startswith("__valid_") or c == "_marker" or c == "entity_index"]
+            new_hidden = [c for c in new_df.columns if c.startswith("__valid_") or c == "entity_index"]
             if state.row_dim != "entity":
                 new_hidden.append("_actions")
             else:
@@ -764,7 +759,7 @@ def build_plot_selection_panel(
         col = event.column
         row_idx = event.row
 
-        if col in ("_marker", "entity_index", "_index") or col.startswith("__valid_"):
+        if col in ("entity_index", "_index") or col.startswith("__valid_"):
             return
 
         row_data = table.value.iloc[row_idx]
