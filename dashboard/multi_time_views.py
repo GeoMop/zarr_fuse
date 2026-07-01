@@ -278,7 +278,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
     _left_ylim_version = None
     _overlay_cache = {}
     _overlay_version = None
-    _last_reset_version = [None]
+    _last_reset_key = [None]  # (version, center) tuple
 
     def create_timeseries_view(center=None, view="left", x_range=None, **_):
         nonlocal _center_time
@@ -335,9 +335,10 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         elif view == "right":
             max_interval_ms = int(right_span.total_seconds() * 1000)
         hooks = []
-        if x_range is None or _last_reset_version[0] != selection_state.version:
+        current_key = (selection_state.version, center)
+        if x_range is None or _last_reset_key[0] != current_key:
             hooks.append(_make_xrange_hook(xlim, bounds=full_bounds, max_interval_ms=max_interval_ms))
-            _last_reset_version[0] = selection_state.version
+            _last_reset_key[0] = current_key
         if ylim:
             hooks.append(_make_yrange_hook(ylim))
 
