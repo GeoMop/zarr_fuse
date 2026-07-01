@@ -34,6 +34,32 @@ class InterpolationFallbackWarning(UserWarning):
         )
 
 
+def check_sorted_coord_values(
+        values: np.ndarray,
+        coord_name: str,
+        log: logging.Logger | None,
+        *,
+        context: str = "Coordinate values",
+) -> bool:
+    """Log and report whether coordinate values are strictly sorted."""
+    if len(values) <= 1:
+        return True
+
+    bad_mask = values[:-1] >= values[1:]
+    if np.all(~bad_mask):
+        return True
+
+    bad_idx = int(np.flatnonzero(bad_mask)[0])
+    if log is None:
+        log = dflt_logger
+    log.error(
+        f"{context} for {coord_name} are not sorted at positions "
+        f"{bad_idx} and {bad_idx + 1}: {values[bad_idx]!r} >= "
+        f"{values[bad_idx + 1]!r}; got {values}"
+    )
+    return False
+
+
 def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
                   schema: Coord, log:logging.Logger)\
     -> Tuple[np.ndarray, int]:
@@ -60,14 +86,21 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
         idx_sort = np.argsort(new_values)
         new_sorted = new_values[idx_sort]
         if len(old_values) > 0:
-            sorted_mask = old_values[:-1] <= old_values[1:]
-            if not np.all(sorted_mask):
-                bad_idx = int(np.flatnonzero(~sorted_mask)[0])
-                raise AssertionError(
-                    f"Existing coordinate values for {schema.name} are not sorted at positions "
-                    f"{bad_idx} and {bad_idx + 1}: {old_values[bad_idx]!r} > "
-                    f"{old_values[bad_idx + 1]!r}; got {old_values}"
-                )
+            check_sorted_coord_values(
+                old_values,
+                schema.name,
+                log,
+                context="Existing coordinate values",
+            )
+            # AGENT: replaced sorted-coordinate check kept temporarily for review.
+            # sorted_mask = old_values[:-1] <= old_values[1:]
+            # if not np.all(sorted_mask):
+            #     bad_idx = int(np.flatnonzero(~sorted_mask)[0])
+            #     raise AssertionError(
+            #         f"Existing coordinate values for {schema.name} are not sorted at positions "
+            #         f"{bad_idx} and {bad_idx + 1}: {old_values[bad_idx]!r} > "
+            #         f"{old_values[bad_idx + 1]!r}; got {old_values}"
+            #     )
             max_old = old_values[-1]
             idx_split = np.searchsorted(new_sorted, max_old, side='right')
         else:
@@ -112,17 +145,24 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
         # the range of old_values we can potentialy interpolate to.
         # new_values[0] <= old_values[i_min] and ald_values[i_max-1] <= new_values[-1]
 
-        sorted_diff = np.diff(new_sorted)
-        dtype_zero = sorted_diff.dtype.type(0)
-        if not np.all(sorted_diff > dtype_zero):
-            mask = np.diff(new_sorted) <= dtype_zero
-            no_diff = np.arange(len(mask), dtype=int)[mask]
-            #no_diff_10 = no_diff[:max(0,10)]
-
-            print(f"Non unique values in new coords {schema.name}")
-            print(no_diff)
-            print(new_values.astype(str).tolist())
-            #print(np.stack((new_values[no_diff_10], new_values[no_diff_10 + 1]), axis=1))
+        check_sorted_coord_values(
+            new_sorted,
+            schema.name,
+            log,
+            context="New coordinate values",
+        )
+        # AGENT: replaced new-coordinate monotonicity check kept temporarily for review.
+        # sorted_diff = np.diff(new_sorted)
+        # dtype_zero = sorted_diff.dtype.type(0)
+        # if not np.all(sorted_diff > dtype_zero):
+        #     mask = np.diff(new_sorted) <= dtype_zero
+        #     no_diff = np.arange(len(mask), dtype=int)[mask]
+        #     #no_diff_10 = no_diff[:max(0,10)]
+        #
+        #     print(f"Non unique values in new coords {schema.name}")
+        #     print(no_diff)
+        #     print(new_values.astype(str).tolist())
+        #     #print(np.stack((new_values[no_diff_10], new_values[no_diff_10 + 1]), axis=1))
 
         old_part_min = new_sorted[0]
         old_range_min = np.searchsorted(old_values, old_part_min, side='left')

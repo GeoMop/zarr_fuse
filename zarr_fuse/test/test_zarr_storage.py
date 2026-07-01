@@ -225,7 +225,7 @@ def test_datetime_encoding_roundtrip(smart_tmp_path):
 def _delayed_datetime_schema(
         smart_tmp_path: Path,
         store_name: str,
-        date_time_merge,
+        date_time_step_limits,
 ) -> dict:
     """Prepare a clean local store and return a minimal delayed-update schema."""
     store_path = smart_tmp_path / store_name
@@ -235,11 +235,8 @@ def _delayed_datetime_schema(
         "source_unit": {"tick": "s", "tz": "UTC"},
         "df_col": "timestamp",
         "chunk_size": 2,
+        "step_limits": date_time_step_limits,
     }
-    if date_time_merge is not None:
-        coord["merge"] = date_time_merge
-    else:
-        coord["merge"] = None
 
     return {
         "VARS": {
@@ -261,10 +258,14 @@ def _delayed_datetime_schema(
 def _write_delayed_datetime_batches(
         smart_tmp_path: Path,
         store_name: str,
-        date_time_merge,
+        date_time_step_limits,
 ) -> xr.Dataset:
     """Prepare a schema and write delayed datetime batches through reopened nodes."""
-    schema_dict = _delayed_datetime_schema(smart_tmp_path, store_name, date_time_merge)
+    schema_dict = _delayed_datetime_schema(
+        smart_tmp_path,
+        store_name,
+        date_time_step_limits,
+    )
     updates = [
         ("2025-09-17T06:00:00+00:00", 17.25),
         ("2025-09-19T06:00:00+00:00", 19.25),
@@ -296,7 +297,7 @@ def test_update_sorted_merge_none(smart_tmp_path):
     reopened = _write_delayed_datetime_batches(
         smart_tmp_path,
         "delayed_datetime_batches_default.zarr",
-        date_time_merge=None,
+        date_time_step_limits=None,
     )
     _assert_date_time_sorted(reopened)
 
@@ -308,7 +309,7 @@ def test_update_sorted_merge_step(smart_tmp_path):
     reopened = _write_delayed_datetime_batches(
         smart_tmp_path,
         "delayed_datetime_batches_stepped.zarr",
-        date_time_merge={"step_limits": [15, 61, "m"]},
+        date_time_step_limits=[15, 61, "m"],
     )
     _assert_date_time_sorted(reopened)
 

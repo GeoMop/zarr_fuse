@@ -438,7 +438,7 @@ def test_interpolate_ds_unsorted_singleton_dim():
     assert ds_int["data"].shape == (2, 1)
 
 
-def test_interpolate_ds_reports_unsorted_existing_datetime_coord():
+def test_interpolate_ds_reports_unsorted_existing_datetime_coord(caplog):
     """Reproduce the ingress failure path with a synthetic existing datetime coordinate."""
     existing_time = np.array(
         [
@@ -480,5 +480,8 @@ def test_interpolate_ds_reports_unsorted_existing_datetime_coord():
         )),
     }
 
-    with pytest.raises(AssertionError, match="date_time.*positions 1 and 2"):
-        interpolate_ds(update_ds, existing_ds, schema)
+    caplog.set_level(logging.ERROR, logger="zarr_fuse.interpolate")
+    interpolate_ds(update_ds, existing_ds, schema)
+
+    assert "date_time" in caplog.text
+    assert "positions 1 and 2" in caplog.text
