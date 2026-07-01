@@ -534,6 +534,7 @@ def build_assignment_matrix(
     header_row: dict = {
         "_actions": "",
         "_row_label": "All",
+        "_row_key": "All",
         "entity_index": np.nan,
     }
     for col_key in col_keys:
@@ -549,6 +550,7 @@ def build_assignment_matrix(
         row: dict = {
             "_actions": "✕",
             "_row_label": f"{SHAPE_TO_SVG.get(shape_name, shape_name)} {str(row_key)}",
+            "_row_key": str(row_key),
             "entity_index": eid,
         }
         for col_key in col_keys:
@@ -691,7 +693,7 @@ def build_plot_selection_panel(
         state, state.row_dim, state.col_dim
     )
 
-    hidden = [c for c in df.columns if c.startswith("__valid_") or c == "entity_index"]
+    hidden = [c for c in df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")]
     if state.row_dim != "entity":
         hidden.append("_actions")
 
@@ -724,7 +726,7 @@ def build_plot_selection_panel(
             new_df, new_editors, new_formatters, _, _, _ = build_assignment_matrix(
                 state, state.row_dim, state.col_dim
             )
-            new_hidden = [c for c in new_df.columns if c.startswith("__valid_") or c == "entity_index"]
+            new_hidden = [c for c in new_df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")]
             if state.row_dim != "entity":
                 new_hidden.append("_actions")
             else:
@@ -825,7 +827,7 @@ def build_plot_selection_panel(
             return
 
         if col == "_row_label":
-            row_key = row_data["_row_label"]
+            row_key = row_data["_row_key"]
             any_unchecked = False
             for ck in state.col_keys:
                 ck_s = str(ck)
@@ -838,7 +840,7 @@ def build_plot_selection_panel(
 
         # Selection column — toggle individual cell
         if row_data.get(f"__valid_{col}", False):
-            row_key = row_data["_row_label"]
+            row_key = row_data["_row_key"]
             current = state.is_checked(row_key, col)
             state.set_checked(row_key, col, not current)
             _schedule_rebuild()

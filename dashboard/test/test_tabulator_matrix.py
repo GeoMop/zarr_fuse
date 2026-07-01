@@ -22,15 +22,15 @@ class TestMatrixShape:
             state, "entity", "vertical"
         )
         assert len(df) == 3  # header row + 2 sites
-        # 1 label col (_row_label) + 2 internal + 3 depth + 3 hidden valid = 9
-        assert df.shape[1] == 9
+        # 1 label col (_row_label) + 1 raw key (_row_key) + 2 internal + 3 depth + 3 hidden valid = 10
+        assert df.shape[1] == 10
 
     def test_vertical_rows_entity_cols(self):
         state = _two_site_state()
         df, _, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
         assert len(df) == 4  # header row + 3 unique depths
-        # 1 label col (_row_label) + 2 internal + 2 site + 2 hidden valid = 7
-        assert df.shape[1] == 7
+        # 1 label col (_row_label) + 1 raw key (_row_key) + 2 internal + 2 site + 2 hidden valid = 8
+        assert df.shape[1] == 8
 
 
 class TestDataFrameContent:
