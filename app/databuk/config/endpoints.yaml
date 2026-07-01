@@ -33,9 +33,6 @@ bukov_endpoint:
 
   visualization:
     map:
-      center_lat: 49.459
-      center_lon: 16.225
-      zoom: 14
       title: "Geographic Data View"
       point_size: 10
       alpha: 0.8

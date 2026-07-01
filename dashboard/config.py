@@ -500,9 +500,9 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
         ),
             visualization=VisualizationConfig(
             map=MapConfig(
-                center_lat=map_data["center_lat"],
-                center_lon=map_data["center_lon"],
-                zoom=map_data["zoom"],
+                center_lat=map_data.get("center_lat"),
+                center_lon=map_data.get("center_lon"),
+                zoom=map_data.get("zoom"),
                 title=map_data["title"],
                 point_size=map_data["point_size"],
                 alpha=map_data["alpha"],
