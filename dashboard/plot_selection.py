@@ -860,23 +860,9 @@ def build_plot_selection_panel(
         sizing_mode="stretch_width",
     )
 
-    legend_pane = pn.pane.HTML("", sizing_mode="stretch_width", margin=(2, 0, 0, 0))
-    legend_accordion = pn.Accordion(
-        ("Legend", legend_pane),
-        active=[],
-        sizing_mode="stretch_width",
-    )
-
-    def _update_legend(event):
-        legend_pane.object = _build_legend_html(state)
-
-    state.param.watch(_update_legend, "version")
-    _update_legend(None)
-
     panel = pn.Column(
         control_bar,
         table,
-        legend_accordion,
         sizing_mode="stretch_width",
     )
 
