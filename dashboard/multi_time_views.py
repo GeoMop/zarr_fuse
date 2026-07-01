@@ -343,9 +343,11 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
 
         def _apply_axis_theme(plot, element):
             p = plot.state
-            p.axis.axis_line_color = "#e2e8f0"
-            p.axis.major_label_text_color = "#e2e8f0"
-            p.axis.axis_label_text_color = "#e2e8f0"
+            p.axis.major_label_text_color = "#000000"
+            p.axis.axis_label_text_color = "#000000"
+            p.axis.axis_line_alpha = 0
+            p.axis.major_tick_line_alpha = 0
+            p.axis.minor_tick_line_alpha = 0
         hooks.append(_apply_axis_theme)
 
         n_sites = len(selection_state.sites)
