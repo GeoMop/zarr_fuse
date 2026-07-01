@@ -34,7 +34,8 @@ def _flatten_nodes(structure, depth: int = 0, items=None, prefixes=None, is_last
 
 def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
                   loading_indicator=None, timeseries_loading=None,
-                  render_spinner=None, rendering_status=None):
+                  render_spinner=None, rendering_status=None,
+                  table_loading=None):
     header = pn.pane.HTML("""
 <div style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
             padding: 12px 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
@@ -104,6 +105,11 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
             text = "Loading dataset..."
             dot_color = "#f59e0b"
             anim = "pulse"
+        elif table_loading is not None and table_loading.visible:
+            icon = ""
+            text = "Updating table..."
+            dot_color = "#f59e0b"
+            anim = "pulse"
         elif timeseries_loading is not None and timeseries_loading.visible:
             icon = ""
             text = "Loading timeseries..."
@@ -142,6 +148,8 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
 
     if loading_indicator is not None:
         loading_indicator.param.watch(_update_status_header, ["visible"])
+    if table_loading is not None:
+        table_loading.param.watch(_update_status_header, ["visible"])
     if timeseries_loading is not None:
         timeseries_loading.param.watch(_update_status_header, ["visible"])
     if render_spinner is not None:

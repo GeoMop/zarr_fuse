@@ -80,10 +80,12 @@ def build_dashboard():
         visible=False,
         sizing_mode="stretch_width",
     )
+    table_loading = pn.Row(visible=False)
     controller, store_selector, node_select, variable_selector, variable_metadata, node_hint, store_info = build_sidebar(
         endpoint_name, endpoint, structure, endpoints=endpoints,
         loading_indicator=loading_indicator, timeseries_loading=timeseries_loading,
         render_spinner=render_spinner, rendering_status=rendering_status,
+        table_loading=table_loading,
     )
     data.group_path = node_select.value
 
@@ -110,6 +112,7 @@ def build_dashboard():
         state=selection_state,
         available_dims=available_dims,
         plot_var_selector=plot_var_selector,
+        table_loading=table_loading,
     )
     # ────────────────────────────────────────────────────────────────
 

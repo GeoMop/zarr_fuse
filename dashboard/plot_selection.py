@@ -640,6 +640,7 @@ def build_plot_selection_panel(
     state: SelectionState | None = None,
     available_dims: dict[str, str] | None = None,
     plot_var_selector: pn.widgets.Select | None = None,
+    table_loading: pn.Row | None = None,
 ) -> tuple[pn.Column, SelectionState]:
     """Build the Tabulator-based Plot Selection panel.
 
@@ -653,6 +654,10 @@ def build_plot_selection_panel(
         Defaults to ``{"Site": "entity", "Depth": "vertical"}``.
     plot_var_selector : pn.widgets.Select, optional
         Variable name dropdown.  Placed at the top of the panel when provided.
+    table_loading : pn.Row, optional
+        Loading indicator Row whose ``visible`` property is set toggled
+        during table rebuilds.  When provided the built-in ``table.loading``
+        overlay is suppressed in favour of this external indicator.
 
     Returns
     -------
@@ -709,9 +714,11 @@ def build_plot_selection_panel(
 
     _orientation_lock = False
     _updating_table = False
+    _skip_layout_rebuild = False
 
     def _rebuild_table():
-        nonlocal _updating_table
+        nonlocal _updating_table, _skip_layout_rebuild
+        _skip_layout_rebuild = False
         _updating_table = True
         try:
             new_df, new_editors, new_formatters, _, _, _ = build_assignment_matrix(
@@ -729,7 +736,18 @@ def build_plot_selection_panel(
             table.hidden_columns = new_hidden
             _rebuild_cell_styles()
         finally:
+            if table_loading is not None:
+                table_loading.visible = False
             _updating_table = False
+
+    def _schedule_rebuild():
+        if table_loading is not None:
+            table_loading.visible = True
+        doc = pn.state.curdoc
+        if doc is not None:
+            doc.add_timeout_callback(_rebuild_table, 50)
+        else:
+            _rebuild_table()
 
     def _sync_orientation(event=None):
         nonlocal _orientation_lock
@@ -773,7 +791,7 @@ def build_plot_selection_panel(
                     state.deselect_all()
                 else:
                     state.select_all()
-                _rebuild_table()
+                _schedule_rebuild()
                 return
             _updating_table_local = True
             try:
@@ -792,7 +810,7 @@ def build_plot_selection_panel(
                     if any_unchecked:
                         break
                 state.set_all_for_column(col, any_unchecked)
-                _rebuild_table()
+                _schedule_rebuild()
             finally:
                 _updating_table_local = False
             return
@@ -801,7 +819,9 @@ def build_plot_selection_panel(
         if col == "_actions":
             eid = row_data.get("entity_index")
             if eid is not None and not (isinstance(eid, float) and np.isnan(eid)):
+                _skip_layout_rebuild = True
                 state.remove_site(int(eid))
+                _schedule_rebuild()
             return
 
         if col == "_row_label":
@@ -813,7 +833,7 @@ def build_plot_selection_panel(
                     any_unchecked = True
                     break
             state.set_all_for_row(row_key, any_unchecked)
-            _rebuild_table()
+            _schedule_rebuild()
             return
 
         # Selection column — toggle individual cell
@@ -821,11 +841,13 @@ def build_plot_selection_panel(
             row_key = row_data["_row_label"]
             current = state.is_checked(row_key, col)
             state.set_checked(row_key, col, not current)
-            _rebuild_table()
+            _schedule_rebuild()
 
     table.on_click(_on_table_cell_click)
 
     def _on_layout_change(event):
+        if _skip_layout_rebuild:
+            return
         _rebuild_table()
 
     state.param.watch(_on_layout_change, "layout_version")
