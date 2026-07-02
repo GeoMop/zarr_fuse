@@ -161,7 +161,7 @@ class SelectionState(param.Parameterized):
         print(f"[SelectionState] Added site {site_id} (idx={entity_index}), "
               f"depths={depths_arr.tolist()}")
 
-    def remove_site(self, entity_index):
+    def remove_site(self, entity_index, bump_version: bool = True, bump_layout: bool = True):
         """Remove a site by its *entity_index*.  Triggers both counters."""
         site = None
         for s in self._sites:
@@ -184,8 +184,10 @@ class SelectionState(param.Parameterized):
                 self._checked.discard(k)
                 self._checked_count -= 1
 
-        self.layout_version += 1
-        self.version += 1
+        if bump_layout:
+            self.layout_version += 1
+        if bump_version:
+            self.version += 1
         print(f"[SelectionState] Removed site {site_id} (idx={entity_index})")
 
     def set_selected(self, site_id, depth_value, value):
@@ -212,7 +214,7 @@ class SelectionState(param.Parameterized):
         self.version += 1
         print("[SelectionState] Cleared all sites")
 
-    def select_all(self):
+    def select_all(self, bump_version: bool = True, bump_layout: bool = True):
         """Check every valid (site, depth) cell."""
         changed = False
         for site in self._sites:
@@ -226,16 +228,22 @@ class SelectionState(param.Parameterized):
                     changed = True
         if changed:
             self._checked_count = self._valid_count
-            self.version += 1
+            if bump_layout:
+                self.layout_version += 1
+            if bump_version:
+                self.version += 1
 
-    def deselect_all(self):
+    def deselect_all(self, bump_version: bool = True, bump_layout: bool = True):
         """Uncheck every (site, depth) cell."""
         if self._checked:
             self._checked.clear()
             self._checked_count = 0
-            self.version += 1
+            if bump_layout:
+                self.layout_version += 1
+            if bump_version:
+                self.version += 1
 
-    def set_all_for_row(self, row_key, value: bool):
+    def set_all_for_row(self, row_key, value: bool, bump_version: bool = True, bump_layout: bool = True):
         """Check or uncheck all valid combos in the given row."""
         changed = False
         delta = 0
@@ -260,9 +268,12 @@ class SelectionState(param.Parameterized):
                     delta -= 1
         if changed:
             self._checked_count += delta
-            self.version += 1
+            if bump_layout:
+                self.layout_version += 1
+            if bump_version:
+                self.version += 1
 
-    def set_all_for_column(self, col_key, value: bool):
+    def set_all_for_column(self, col_key, value: bool, bump_version: bool = True, bump_layout: bool = True):
         """Check or uncheck all valid combos in the given column."""
         changed = False
         delta = 0
@@ -287,7 +298,10 @@ class SelectionState(param.Parameterized):
                     delta -= 1
         if changed:
             self._checked_count += delta
-            self.version += 1
+            if bump_layout:
+                self.layout_version += 1
+            if bump_version:
+                self.version += 1
 
     # ── queries ──────────────────────────────────────────────────────
 
@@ -740,13 +754,9 @@ def build_plot_selection_panel(
             table.hidden_columns = new_hidden
             _rebuild_cell_styles()
         finally:
-            if table_loading is not None:
-                table_loading.visible = False
             _updating_table = False
 
     def _schedule_rebuild():
-        if table_loading is not None:
-            table_loading.visible = True
         doc = pn.state.curdoc
         if doc is not None:
             doc.add_timeout_callback(_rebuild_table, 50)
@@ -786,16 +796,29 @@ def build_plot_selection_panel(
 
         row_data = table.value.iloc[row_idx]
 
+        if table_loading is not None:
+            table_loading.visible = True
+
+        def _deferred_bump():
+            doc = pn.state.curdoc
+            if doc is not None:
+                doc.add_next_tick_callback(lambda: (setattr(state, 'version', state.version + 1), setattr(table_loading, 'visible', False)))
+            else:
+                state.version += 1
+                table_loading.visible = False
+
         # ── Header row (row 0) — toggle column / toggle all ──
         if row_idx == 0:
             if col == "_actions":
+                if table_loading is not None:
+                    table_loading.visible = False
                 return
             if col == "_row_label":
                 if state._checked_count == state._valid_count:
-                    state.deselect_all()
+                    state.deselect_all(bump_version=False)
                 else:
-                    state.select_all()
-                _schedule_rebuild()
+                    state.select_all(bump_version=False)
+                _deferred_bump()
                 return
             _updating_table_local = True
             try:
@@ -813,19 +836,18 @@ def build_plot_selection_panel(
                                 break
                     if any_unchecked:
                         break
-                state.set_all_for_column(col, any_unchecked)
-                _schedule_rebuild()
+                state.set_all_for_column(col, any_unchecked, bump_version=False)
             finally:
                 _updating_table_local = False
+            _deferred_bump()
             return
 
         # ── Data rows ──
         if col == "_actions":
             eid = row_data.get("entity_index")
             if eid is not None and not (isinstance(eid, float) and np.isnan(eid)):
-                _skip_layout_rebuild = True
-                state.remove_site(int(eid))
-                _schedule_rebuild()
+                state.remove_site(int(eid), bump_version=False)
+            _deferred_bump()
             return
 
         if col == "_row_label":
@@ -836,8 +858,8 @@ def build_plot_selection_panel(
                 if state.is_valid(row_key, ck) and not state.is_checked(row_key, ck):
                     any_unchecked = True
                     break
-            state.set_all_for_row(row_key, any_unchecked)
-            _schedule_rebuild()
+            state.set_all_for_row(row_key, any_unchecked, bump_version=False)
+            _deferred_bump()
             return
 
         # Selection column — toggle individual cell
@@ -846,11 +868,7 @@ def build_plot_selection_panel(
             current = state.is_checked(row_key, col)
             state.set_checked(row_key, col, not current, bump_version=False)
             _rebuild_table()
-            doc = pn.state.curdoc
-            if doc is not None:
-                doc.add_next_tick_callback(lambda: setattr(state, 'version', state.version + 1))
-            else:
-                state.version += 1
+            _deferred_bump()
 
     table.on_click(_on_table_cell_click)
 
