@@ -92,11 +92,12 @@ class SelectionState(param.Parameterized):
         site_id, depth_value = self._resolve_canonical(row_key, col_key)
         return (str(site_id), float(depth_value)) in self._checked
 
-    def set_checked(self, row_key, col_key, value: bool):
+    def set_checked(self, row_key, col_key, value: bool, bump_version: bool = True):
         """Mark *(row_key, col_key)* as checked or unchecked.
 
         Only affects valid combinations; invalid combos are silently
-        ignored.  Bumps *version* on change.
+        ignored.  Bumps *version* on change (unless *bump_version* is
+        ``False``).
         """
         if not self.is_valid(row_key, col_key):
             return
@@ -111,7 +112,8 @@ class SelectionState(param.Parameterized):
             self._checked_count -= 1
         else:
             return  # no change
-        self.version += 1
+        if bump_version:
+            self.version += 1
 
     # ── mutations ────────────────────────────────────────────────────
 
@@ -842,8 +844,13 @@ def build_plot_selection_panel(
         if row_data.get(f"__valid_{col}", False):
             row_key = row_data["_row_key"]
             current = state.is_checked(row_key, col)
-            state.set_checked(row_key, col, not current)
-            _schedule_rebuild()
+            state.set_checked(row_key, col, not current, bump_version=False)
+            _rebuild_table()
+            doc = pn.state.curdoc
+            if doc is not None:
+                doc.add_next_tick_callback(lambda: setattr(state, 'version', state.version + 1))
+            else:
+                state.version += 1
 
     table.on_click(_on_table_cell_click)
 
