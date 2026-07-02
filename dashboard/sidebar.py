@@ -32,7 +32,10 @@ def _flatten_nodes(structure, depth: int = 0, items=None, prefixes=None, is_last
     return items
 
 
-def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
+def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
+                  loading_indicator=None, timeseries_loading=None,
+                  render_spinner=None, rendering_status=None,
+                  table_loading=None):
     header = pn.pane.HTML("""
 <div style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
             padding: 12px 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);
@@ -89,22 +92,80 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
 </div>
 """, sizing_mode="stretch_width")
 
-    status_section = pn.pane.HTML("""
-<div style="background: #0f172a; padding: 12px; border-radius: 8px; margin: 8px 0;">
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-        <span style="font-size: 12px; color: #94a3b8; font-weight: 600;">SERVICE STATUS</span>
-        <div style="display: flex; align-items: center; gap: 6px;">
-            <span style="width: 8px; height: 8px; background: #10b981; border-radius: 50%;
-                        box-shadow: 0 0 10px #10b981;"></span>
-            <span style="font-size: 11px; color: #10b981; font-weight: 600;">Active</span>
-        </div>
+    _status_header = pn.pane.HTML(sizing_mode="stretch_width")
+
+    def _update_status_header(*_):
+        if rendering_status is not None and rendering_status.visible:
+            icon = "⚠️"
+            text = "Error"
+            dot_color = "#ef4444"
+            anim = ""
+        elif loading_indicator is not None and loading_indicator.visible:
+            icon = ""
+            text = "Loading dataset..."
+            dot_color = "#f59e0b"
+            anim = "pulse"
+        elif table_loading is not None and table_loading.visible:
+            icon = ""
+            text = "Updating table..."
+            dot_color = "#f59e0b"
+            anim = "pulse"
+        elif timeseries_loading is not None and timeseries_loading.visible:
+            icon = ""
+            text = "Loading timeseries..."
+            dot_color = "#f59e0b"
+            anim = "pulse"
+        elif render_spinner is not None and render_spinner.visible:
+            icon = ""
+            text = "Rendering..."
+            dot_color = "#f59e0b"
+            anim = "pulse"
+        else:
+            icon = "✓"
+            text = "Active"
+            dot_color = "#10b981"
+            anim = ""
+        spinner_html = (
+            f'<span style="display:inline-block;width:10px;height:10px;'
+            f'border:2px solid #334155;border-top-color:{dot_color};'
+            f'border-radius:50%;animation:sp 0.8s linear infinite;'
+            f'vertical-align:middle;"></span>'
+        ) if anim else icon
+        dot_anim = f"animation:{anim} 1.5s ease-in-out infinite;" if anim else ""
+        _status_header.object = f"""<style>
+@keyframes sp {{ to {{ transform:rotate(360deg); }} }}
+@keyframes pulse {{ 0%,100% {{ opacity:0.4; transform:scale(0.8); }} 50% {{ opacity:1; transform:scale(1.2); }} }}
+</style>
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+    <span style="font-size: 12px; color: #94a3b8; font-weight: 600;">SERVICE STATUS</span>
+    <div style="display: flex; align-items: center; gap: 6px;">
+        <span style="width:8px;height:8px;background:{dot_color};border-radius:50%;
+                     box-shadow:0 0 10px {dot_color};{dot_anim}"></span>
+        {spinner_html}
+        <span style="font-size: 11px; color: {dot_color}; font-weight: 600;">{text}</span>
     </div>
-    <div style="font-size: 10px; color: #64748b; display: flex; align-items: center; gap: 4px;">
-        <span>🕐</span>
-        <span>Updated: """ + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S") + """</span>
-    </div>
-</div>
-""", sizing_mode="stretch_width")
+</div>"""
+
+    if loading_indicator is not None:
+        loading_indicator.param.watch(_update_status_header, ["visible"])
+    if table_loading is not None:
+        table_loading.param.watch(_update_status_header, ["visible"])
+    if timeseries_loading is not None:
+        timeseries_loading.param.watch(_update_status_header, ["visible"])
+    if render_spinner is not None:
+        render_spinner.param.watch(_update_status_header, ["visible"])
+    if rendering_status is not None:
+        rendering_status.param.watch(_update_status_header, ["visible"])
+    _update_status_header()
+
+    _status_children = [_status_header]
+    if rendering_status is not None:
+        _status_children.append(rendering_status)
+    status_section = pn.Column(
+        *_status_children,
+        styles={"background": "#0f172a", "padding": "12px", "border-radius": "8px", "margin": "8px 0"},
+        sizing_mode="stretch_width",
+    )
 
     reload_button = pn.widgets.Button(
         name="🔄 Reload Data",
@@ -137,10 +198,10 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         width=320,
     )
 
-    variable_info = pn.pane.Markdown(
-        "Select a variable",
+    variable_metadata = pn.pane.HTML(
+        "",
+        visible=False,
         sizing_mode="stretch_width",
-        styles={"font-size": "11px", "color": "#94a3b8"},
     )
 
     node_hint = pn.pane.Alert(
@@ -158,23 +219,14 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None):
         reload_button,
         tree_view,
         variable_selector,
-        variable_info,
+        variable_metadata,
         node_hint,
         pn.layout.VSpacer(),
         sizing_mode="stretch_width",
         styles={"padding": "10px"},
     )
 
-    return controller, store_selector, tree_view, variable_selector, variable_info, node_hint, store_info
+    return controller, store_selector, tree_view, variable_selector, variable_metadata, node_hint, store_info
 
 
-def build_depth_controls():
-    depth_selector = pn.widgets.CheckBoxGroup(
-        name="Depths (m)",
-        options=[],
-        value=[],
-        inline=False,
-        sizing_mode="stretch_width",
-    )
-    borehole_info = pn.pane.Markdown("### No borehole selected", sizing_mode="stretch_width")
-    return depth_selector, borehole_info
+

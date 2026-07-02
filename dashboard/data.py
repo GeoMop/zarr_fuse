@@ -13,6 +13,7 @@ import zarr_fuse as zf
 from dashboard.config import (
     get_endpoint_config,
     load_endpoints,
+    read_variable_metadata,
     resolve_endpoints_path,
     resolve_schema_fields,
 )
@@ -137,6 +138,23 @@ class LocalClient:
             variables[var_name] = unit
 
         return variables
+
+    def get_variable_metadata(
+        self,
+        endpoint_name: Optional[str],
+        group_path: str,
+        variable_name: str,
+    ) -> Optional[Dict[str, Any]]:
+        endpoint = self._endpoint_config(endpoint_name)
+        schema_path = Path(endpoint.schema.file)
+        if not schema_path.is_absolute():
+            schema_path = self.base_dir / schema_path
+
+        return read_variable_metadata(
+            schema_path,
+            variable_name=variable_name,
+            group_path=group_path,
+        )
 
     def get_map_data(
         self,
@@ -322,6 +340,7 @@ class LocalClient:
             values_local = _ensure_len(values_1d_final, entity_count)
 
             coord_valid_mask = np.isfinite(lats_local) & np.isfinite(lons_local)
+            entity_indices = np.arange(entity_count)
             try:
                 value_valid_mask = np.isfinite(values_local)
             except Exception:
@@ -344,6 +363,7 @@ class LocalClient:
                 lons_local = lons_local[keep_mask]
                 values_local = values_local[keep_mask]
                 entities_local = ent_1d_raw[keep_mask] if ent_1d_raw is not None else None
+                entity_indices = entity_indices[keep_mask]
                 value_valid_mask = value_valid_mask[keep_mask]
             else:
                 entities_local = ent_1d_raw
@@ -356,7 +376,7 @@ class LocalClient:
                 has_value = bool(np.isfinite(value_value)) if np.isscalar(value_value) else False
                 marker_meta.append(
                     {
-                        "entity_index": int(idx),
+                        "entity_index": int(entity_indices[idx]),
                         "site_id": None if entity_value is None else str(entity_value),
                         "value": None if not has_value else float(value_value),
                         "has_value": has_value,
@@ -574,9 +594,7 @@ def load_data(
     if not resolved_group_path:
         raise ValueError("group_path is required (set defaults.group_path or pass group_path explicitly)")
 
-    resolved_display_variable = display_variable or endpoint.defaults.display_variable
-    if not resolved_display_variable:
-        raise ValueError("display_variable is required (set defaults.display_variable or pass display_variable explicitly)")
+    resolved_display_variable = display_variable or endpoint.defaults.display_variable or ""
 
     return DashboardData(
         endpoint_name=endpoint_name,

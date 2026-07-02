@@ -29,6 +29,29 @@ def _zoom_to_span_meters(zoom: int) -> float:
     return world_width_m / (2 ** zoom)
 
 
+def _data_bounds(lats: np.ndarray, lons: np.ndarray, padding: float = 0.05):
+    """Return ``(min_lat, max_lat, min_lon, max_lon)`` of all points with padding.
+
+    Returns ``None`` when there are no valid points.
+    """
+    if len(lats) == 0:
+        return None
+    min_lat, max_lat = float(lats.min()), float(lats.max())
+    min_lon, max_lon = float(lons.min()), float(lons.max())
+    r_lat = max_lat - min_lat or 0.01
+    r_lon = max_lon - min_lon or 0.01
+    return (
+        min_lat - r_lat * padding,
+        max_lat + r_lat * padding,
+        min_lon - r_lon * padding,
+        max_lon + r_lon * padding,
+    )
+
+
+WORLD_XLIM = (-20037508.34, 20037508.34)
+WORLD_YLIM = (-20037508.34, 20037508.34)
+
+
 def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, eps_factor=0.05, buffer_factor=0.1):
     """
     Cluster borehole points based on current view extent.
@@ -201,15 +224,15 @@ def build_map_view(data, tap_stream):
 
     default_display_variable = data.display_variable
     if not default_display_variable:
-        raise ValueError(f"No display variable set for endpoint '{data.endpoint_name}'")
-
-    fig = data.client.get_map_data(
-        data.endpoint_name,
-        group_path=data.group_path,
-        variable=default_display_variable,
-        time_index=0,
-        depth_index=0,
-    )
+        fig = {"status": "error", "reason": "No variable selected"}
+    else:
+        fig = data.client.get_map_data(
+            data.endpoint_name,
+            group_path=data.group_path,
+            variable=default_display_variable,
+            time_index=0,
+            depth_index=0,
+        )
     total_points = 0  # Initialize for logging
     if fig.get("status") == "error":
         reason = fig.get("reason", "No map data available")
@@ -276,9 +299,6 @@ def build_map_view(data, tap_stream):
             "lats": lats,
             "lons": lons,
             "marker_meta": marker_meta,
-            "center_lat": map_config["center_lat"],
-            "center_lon": map_config["center_lon"],
-            "zoom": int(map_config["zoom"]),
             "variable": default_display_variable,
             "data_error_reason": reason,
         }
@@ -290,14 +310,8 @@ def build_map_view(data, tap_stream):
         map_points_dmap = hv.DynamicMap(points_callback, streams=[RangeXY()])
         tap_stream.source = map_points_dmap
 
-        center_lat = map_config["center_lat"]
-        center_lon = map_config["center_lon"]
-        zoom = int(map_config["zoom"])
-        center_x, center_y = _lonlat_to_web_mercator(center_lon, center_lat)
-        span_m = _zoom_to_span_meters(zoom)
-        half_span = span_m / 2.0
-        xlim = (center_x - half_span, center_x + half_span)
-        ylim = (center_y - half_span, center_y + half_span)
+        xlim = WORLD_XLIM
+        ylim = WORLD_YLIM
 
         map_view = (base_map * map_points_dmap).opts(
             xlim=xlim,
@@ -347,22 +361,21 @@ def build_map_view(data, tap_stream):
 
     selection_marker_dmap = hv.DynamicMap(_selection_marker, streams=[tap_stream])
 
-    center_lat = map_config["center_lat"]
-    center_lon = map_config["center_lon"]
-    zoom = int(map_config["zoom"])
-    center_x, center_y = _lonlat_to_web_mercator(center_lon, center_lat)
-    span_m = _zoom_to_span_meters(zoom)
-    half_span = span_m / 2.0
-    xlim = (center_x - half_span, center_x + half_span)
-    ylim = (center_y - half_span, center_y + half_span)
+    bounds = _data_bounds(lats, lons)
+    if bounds is not None:
+        min_lat, max_lat, min_lon, max_lon = bounds
+        min_x, max_y = _lonlat_to_web_mercator(min_lon, max_lat)
+        max_x, min_y = _lonlat_to_web_mercator(max_lon, min_lat)
+        xlim = (min_x, max_x)
+        ylim = (min_y, max_y)
+    else:
+        xlim = WORLD_XLIM
+        ylim = WORLD_YLIM
 
     map_state = {
         "lats": lats,
         "lons": lons,
         "marker_meta": marker_meta,
-        "center_lat": center_lat,
-        "center_lon": center_lon,
-        "zoom": zoom,
         "variable": default_display_variable,
         "data_error_reason": data_error_reason,
     }
