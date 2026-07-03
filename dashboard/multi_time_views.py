@@ -131,8 +131,21 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         else:
             marker_times = pd.date_range(start=times.min(), end=times.max(), periods=n_markers)
 
-        curves = []
+        # Select per-combo cache for this view type
+        cache = _left_curves if view == "left" else _full_curves
+        meta_cache = _left_meta if view == "left" else _full_meta
+
+        selected_set = set(selected_combos)
+
+        # Remove stale entries (deselected combos)
+        for key in list(cache):
+            if key not in selected_set:
+                del cache[key]
+                meta_cache.pop(key, None)
+
+        # Build only new / changed combos
         for entity_idx, depth_idx in selected_combos:
+            key = (entity_idx, depth_idx)
             site = site_lookup.get(entity_idx)
             if site is None or depth_idx >= len(site["series"]):
                 print(f"[timeseries] SKIP combo entity={entity_idx} depth_idx={depth_idx}: site=None or series too short")
@@ -146,44 +159,47 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             col_key = depth_val if col_dim == "vertical" else site_id
             shape = row_shapes.get(str(row_key), "circle")
             color = col_colors.get(str(col_key), "#000000")
+            meta = (shape, color)
 
-            series_vals = site["series"][depth_idx]
-            if max_points is not None and n_times > max_points:
-                local_vals = series_vals[::step]
-            else:
-                local_vals = series_vals
+            if key not in cache or meta_cache.get(key) != meta:
+                series_vals = site["series"][depth_idx]
+                if max_points is not None and n_times > max_points:
+                    local_vals = series_vals[::step]
+                else:
+                    local_vals = series_vals
 
-            # Curve (solid line)
-            curve_df = pd.DataFrame({
-                time_dim: ds_times,
-                y_axis_label: local_vals,
-            })
-            curve = hv.Curve(curve_df, time_dim, y_axis_label, label=label).opts(
-                color=color,
-            )
+                # Curve (solid line)
+                curve_df = pd.DataFrame({
+                    time_dim: ds_times,
+                    y_axis_label: local_vals,
+                })
+                curve = hv.Curve(curve_df, time_dim, y_axis_label, label=label).opts(
+                    color=color,
+                )
 
-            # Scatter markers at tick-like positions
-            times_ns = np.array(times, dtype="datetime64[ns]").astype("int64")
-            marker_times_ns = np.array(marker_times, dtype="datetime64[ns]").astype("int64")
-            marker_y = np.interp(marker_times_ns, times_ns, series_vals)
-            marker_df = pd.DataFrame({
-                time_dim: marker_times,
-                y_axis_label: marker_y,
-            })
-            scatter = hv.Scatter(marker_df, time_dim, y_axis_label).opts(
-                color=color,
-                marker=shape,
-                size=8,
-            )
-            curves.append(curve * scatter)
+                # Scatter markers at tick-like positions
+                times_ns = np.array(times, dtype="datetime64[ns]").astype("int64")
+                marker_times_ns = np.array(marker_times, dtype="datetime64[ns]").astype("int64")
+                marker_y = np.interp(marker_times_ns, times_ns, series_vals)
+                marker_df = pd.DataFrame({
+                    time_dim: marker_times,
+                    y_axis_label: marker_y,
+                })
+                scatter = hv.Scatter(marker_df, time_dim, y_axis_label).opts(
+                    color=color,
+                    marker=shape,
+                    size=8,
+                )
+                cache[key] = curve * scatter
+                meta_cache[key] = meta
 
-        if not curves:
+        if not cache:
             print("[timeseries] No curves generated — returning empty overlay")
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
-            curves = [hv.Curve(empty_df, time_dim, y_axis_label)]
-        else:
-            print(f"[timeseries] Returning overlay with {len(curves)} curves")
-        return hv.Overlay(curves)
+            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
+
+        print(f"[timeseries] Returning overlay with {len(cache)} curves")
+        return hv.Overlay(list(cache.values()))
 
     def clamp_range(center, span, times):
         if len(times) == 0:
@@ -276,8 +292,16 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
 
     _left_ylim_cache = None
     _left_ylim_version = None
+    _mid_ylim_cache = None
+    _mid_ylim_key = None
+    _right_ylim_cache = None
+    _right_ylim_key = None
     _overlay_cache = {}
     _overlay_version = None
+    _left_curves: dict[tuple[int, int], hv.Overlay] = {}
+    _left_meta: dict[tuple[int, int], tuple[str, str]] = {}
+    _full_curves: dict[tuple[int, int], hv.Overlay] = {}
+    _full_meta: dict[tuple[int, int], tuple[str, str]] = {}
     _left_reset_key = [None]  # (version, center) tuple per view
     _mid_reset_key = [None]
     _right_reset_key = [None]
@@ -285,6 +309,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
     def create_timeseries_view(center=None, view="left", x_range=None, **_):
         nonlocal _center_time
         nonlocal _left_ylim_cache, _left_ylim_version
+        nonlocal _mid_ylim_cache, _mid_ylim_key
+        nonlocal _right_ylim_cache, _right_ylim_key
         nonlocal _overlay_cache, _overlay_version
         if selection_state is None:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
@@ -313,10 +339,18 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             ylim = _left_ylim_cache
         elif view == "mid":
             xlim = clamp_range(center_time, mid_span, times)
-            ylim = _compute_ylim(times, selected_combos, xlim)
+            _mid_key = (selection_state.version, center_time)
+            if _mid_key != _mid_ylim_key:
+                _mid_ylim_cache = _compute_ylim(times, selected_combos, xlim)
+                _mid_ylim_key = _mid_key
+            ylim = _mid_ylim_cache
         else:
             xlim = clamp_range(center_time, right_span, times)
-            ylim = _compute_ylim(times, selected_combos, xlim)
+            _right_key = (selection_state.version, center_time)
+            if _right_key != _right_ylim_key:
+                _right_ylim_cache = _compute_ylim(times, selected_combos, xlim)
+                _right_ylim_key = _right_key
+            ylim = _right_ylim_cache
 
         if _overlay_version != selection_state.version:
             _overlay_cache["left"] = build_timeseries_overlay(view="left", x_range=x_range)
