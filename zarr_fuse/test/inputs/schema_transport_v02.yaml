@@ -25,14 +25,14 @@ run_XYZ:
       df_col: None
       sorted: False
       chunk_size: 1
-      merge: None
+      step_limits: None
     qmc:
       unit: "int"
       description: "Quasi Monte Carlo sub sample for Saltelli schema for Sobol indices."
       df_col: None
       sorted: False
       chunk_size: 1
-      merge: None
+      step_limits: None
 
     param_name:
       unit: "str"

@@ -156,7 +156,7 @@ class Interval(AddressMixin):
 
 
     @classmethod
-    def step_limits(cls, cfg, default_unit):
+    def step_limits(cls, cfg, default_unit, coord_unit):
         # backward compatible
         if cfg.cfg is None:
             cfg.cfg = "no_new"
@@ -173,12 +173,16 @@ class Interval(AddressMixin):
         if isinstance(cfg.cfg, list):
             start = cfg.cfg[0]
             end = cfg.cfg[1]
-            unit = unit_instance(cfg.get(2, None), default_unit)
+            unit_cfg = cfg.get(2, None)
         else:
             assert isinstance(cfg.cfg, dict)
             start = cfg.cfg['start']
             end = cfg.cfg['end']
-            unit = unit_instance(cfg.get("unit", None), default_unit)
+            unit_cfg = cfg.get("unit", None)
+        if unit_cfg.value() is None:
+            unit = default_unit
+        else:
+            unit = coord_unit.parse_delta_unit(unit_cfg)
         if start > end:
             cfg.schema_ctx.error(f"Invalid step_limits specification: start {start} > end {end}")
         return cls(start, end, unit)
@@ -397,7 +401,7 @@ class Coord(Variable):
 
         step_item = cfg.get("step_limits", "any_new")  # None value allowed
         default_step_unit = self.unit.delta_unit() # For DateTimeUnit the incremental/step unit is a pint.Unit of time.
-        self.step_limits = Interval.step_limits(step_item, default_step_unit)
+        self.step_limits = Interval.step_limits(step_item, default_step_unit, self.unit)
 
         self.sorted : bool = cfg.get('sorted', not self.is_composed()).value()
 

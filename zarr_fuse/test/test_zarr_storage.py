@@ -259,6 +259,7 @@ def _write_delayed_datetime_batches(
         smart_tmp_path: Path,
         store_name: str,
         date_time_step_limits,
+        update_count: int | None = None,
 ) -> xr.Dataset:
     """Prepare a schema and write delayed datetime batches through reopened nodes."""
     schema_dict = _delayed_datetime_schema(
@@ -272,7 +273,8 @@ def _write_delayed_datetime_batches(
         ("2025-09-18T22:00:00+00:00", 18.0),
         ("2025-09-17T22:00:00+00:00", 17.0),
     ]
-    for timestamp, temp in updates:
+    selected_updates = updates if update_count is None else updates[:update_count]
+    for timestamp, temp in selected_updates:
         node = zf.open_store(schema_dict)
         try:
             node.update(pl.DataFrame({"timestamp": [timestamp], "temp": [temp]}))
@@ -306,10 +308,19 @@ def test_update_sorted_merge_step(smart_tmp_path):
     """
     Stepped date_time merge reserves a gap and lets delayed real values update it later.
     """
+    initial_gap = _write_delayed_datetime_batches(
+        smart_tmp_path,
+        "delayed_datetime_batches_stepped.zarr",
+        date_time_step_limits=[15, 61, "minute"],
+        update_count=2,
+    )
+    assert initial_gap.sizes["date_time"] > 2
+    assert np.isnan(initial_gap["temperature"].values[1:-1]).all()
+
     reopened = _write_delayed_datetime_batches(
         smart_tmp_path,
         "delayed_datetime_batches_stepped.zarr",
-        date_time_step_limits=[15, 61, "m"],
+        date_time_step_limits=[15, 61, "minute"],
     )
     _assert_date_time_sorted(reopened)
 

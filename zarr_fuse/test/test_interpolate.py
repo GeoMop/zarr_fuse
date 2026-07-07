@@ -144,14 +144,14 @@ def test_interpolate_coord_sorted():
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
                     unit='h',
-                    step_limits={'start':72, 'end':126, 'unit':'minutes'}) # 1.2 h, 2.1 h
+                    step_limits={'start':72, 'end':126, 'unit':'minute'}) # 1.2 h, 2.1 h
     assert split == 2
     np.allclose(merged, [1, 2, 4, 5.75, 7.5, 8.75,  10])
 
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
                     unit='h',
-                    step_limits=dict(start=150, end=150, unit='minutes')) # 2.5 h
+                    step_limits=dict(start=150, end=150, unit='minute')) # 2.5 h
     assert split == 2
     np.allclose(merged, [1, 2, 3.5 + 1/3.0, 5 + 2/3.0, 7.5,  10])
 

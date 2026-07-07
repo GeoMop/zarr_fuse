@@ -7,7 +7,6 @@ import attrs
 import warnings
 
 from .zarr_schema import Coord
-from . import units
 from .tools import adjust_grid
 
 
@@ -93,6 +92,7 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
                 context="Existing coordinate values",
             )
             # AGENT: replaced sorted-coordinate check kept temporarily for review.
+            # Resolved: kept for review; replacement now logs through check_sorted_coord_values().
             # sorted_mask = old_values[:-1] <= old_values[1:]
             # if not np.all(sorted_mask):
             #     bad_idx = int(np.flatnonzero(~sorted_mask)[0])
@@ -152,6 +152,7 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
             context="New coordinate values",
         )
         # AGENT: replaced new-coordinate monotonicity check kept temporarily for review.
+        # Resolved: kept for review; replacement now logs through check_sorted_coord_values().
         # sorted_diff = np.diff(new_sorted)
         # dtype_zero = sorted_diff.dtype.type(0)
         # if not np.all(sorted_diff > dtype_zero):
@@ -206,13 +207,18 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     else:
         # Constrained coordinates step.
         # Construct adjusted coordinates grid.
-        step_range = schema.step_limits
-        range_array = np.array([step_range.start, step_range.end])
-        to_unit = schema.unit.delta_unit()
-        step_range = schema._make_quantity(range_array, from_unit = step_range.unit) \
-                    .to(to_unit).magnitude
-        # Have compatible dtype for DateTime base unit.
-        step_range = np.array(step_range, dtype=schema.unit.delta_dtype(schema.dtype))
+        # AGENT: explicit type check resolution is not allowed
+        # 1. analyze _make_quantity what kind of corner cases it covers
+        # 2. eliminate those that are not relevant for the two element, delta unit case
+        # 3. implement here the delta type conversion using only unit methods
+        #    completely polymorphic
+        # Resolved: step-limit delta conversion is encapsulated by unit methods.
+        step_values = np.array([schema.step_limits.start, schema.step_limits.end])
+        step_range = schema.unit.delta_array(
+            step_values,
+            from_unit=schema.step_limits.unit,
+            dtype=schema.dtype,
+        )
 
 
         if last_old < new_append[0]:
