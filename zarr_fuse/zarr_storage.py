@@ -912,6 +912,7 @@ class Node:
         3. write extended / interpolated parts (Phase 2)
         """
         ds_existing = self.dataset
+        last_written_ds = ds_existing
 
         # --- Phase 1: Dive (split by dimension) ---
         # We create a dict to hold the extension subset for each dimension.
@@ -926,7 +927,7 @@ class Node:
             ds_update,
             self.dataset,
             self.schema.COORDS)
-        last_written_ds = None
+
         ds_extend_dict = {}
         ds_overlap = ds_update.copy()
         dims_order = tuple(ds_update.coords.keys())
@@ -949,8 +950,11 @@ class Node:
             ## merged = ds1.combine_first(ds2).sortby("dim")
 
             dim_coord = ds_extend_dict[dim]
-            if dim_coord is None or dim_coord.sizes.get(dim, 0) == 0:
+            if dim_coord is None:
                 continue  # No new coordinates along this dimension.
+            extension_size = int(np.prod(list(dim_coord.sizes.values())))
+            if extension_size == 0:
+                continue
 
             # For all dimensions other than dim, reindex ds_ext so that the coordinate arrays
             # come from the store (i.e. the full arrays). This ensures consistency.
@@ -966,7 +970,6 @@ class Node:
             new_coords_for_dim = dim_coord[dim].values
             merged_coords[dim] = np.concatenate([merged_coords[dim], new_coords_for_dim])
 
-        assert last_written_ds is not None, "No data was written to the dataset."
         return last_written_ds, merged_coords
 
     """

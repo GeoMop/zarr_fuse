@@ -292,16 +292,19 @@ def _assert_date_time_sorted(ds: xr.Dataset) -> None:
     assert np.all(date_time[:-1] <= date_time[1:])
 
 
-def test_update_sorted_merge_none(smart_tmp_path):
+def test_update_sorted_merge_none(smart_tmp_path, caplog):
     """
     Default coordinate merge cannot insert delayed date_time values into an existing range.
     """
+    caplog.set_level(logging.ERROR, logger="zarr_fuse.interpolate")
     reopened = _write_delayed_datetime_batches(
         smart_tmp_path,
         "delayed_datetime_batches_default.zarr",
         date_time_step_limits=None,
     )
     _assert_date_time_sorted(reopened)
+    assert reopened.sizes["date_time"] == 1
+    assert "Rejected coordinates" in caplog.text
 
 
 def test_update_sorted_merge_step(smart_tmp_path):
@@ -376,6 +379,52 @@ def test_merge_ds_unsorted(smart_tmp_path):
         "borehole": ["A", "C"],
         "temp": [20.0, 22.0],
     }))
+
+
+def test_merge_ds_skips_empty_cartesian_extension(smart_tmp_path):
+    store_path = smart_tmp_path / "empty_cartesian_extension.zarr"
+    shutil.rmtree(store_path, ignore_errors=True)
+    schema_dict = {
+        "VARS": {
+            "data": {
+                "unit": "degC",
+                "coords": ["x", "p"],
+            },
+        },
+        "COORDS": {
+            "x": {
+                "unit": "h",
+                "sorted": True,
+                "step_limits": "no_new",
+            },
+            "p": {
+                "unit": "",
+                "type": "str[8]",
+                "sorted": False,
+                "step_limits": [],
+            },
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {"data": (("x", "p"), np.array([[10.0, 11.0], [20.0, 21.0]]))},
+        coords={"x": np.array([1.0, 2.0]), "p": np.array(["A", "B"])},
+    ))
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {"data": (("x", "p"), np.array([[30.0], [40.0]]))},
+        coords={"x": np.array([3.0, 10.0]), "p": np.array(["C"])},
+    ))
+
+    reopened = zf.open_store(schema_dict).dataset
+    np.testing.assert_array_equal(reopened.coords["x"].values, np.array([1.0, 2.0]))
+    np.testing.assert_array_equal(reopened.coords["p"].values, np.array(["A", "B"]))
+    assert reopened["data"].shape == (2, 2)
 
 
 def test_update_from_ds_schema():

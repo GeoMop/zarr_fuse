@@ -195,11 +195,11 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     last_old = old_values[-1] if len(old_values) > 0 else new_values[idx_split]
     if schema.step_limits.no_new() or len(new_append) == 0:
         # no extension allowed
-        if len(new_append) > 1:
-            # Non-fatal error.
-            log.error(f"Dimension {schema.name}: extension not allowed (step_limits=None). "
-                      f"Appended coordinates ignored: {new_append[1:]}.")
-        # one value in extension is allowed, but used only to interpolate
+        if len(new_append) > 0:
+            log.error(
+                f"Dimension {schema.name}: new coordinates are not allowed "
+                f"(step_limits=None). Rejected coordinates: {new_append}."
+            )
         update_new_part = np.array([], dtype=new_append.dtype)
     elif schema.step_limits.any_new() or not schema.sorted:
         # default case, add all new coords
@@ -223,7 +223,7 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
 
         if last_old < new_append[0]:
             extension_part = np.concatenate(
-                [np.array([last_old]),new_append]
+                [np.array([last_old]), new_append]
             )
         else:
             assert False, f"Old maximum {last_old} must be less than new append part first value {new_append}"
@@ -315,7 +315,7 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
             method='nearest',
             assume_sorted=True
         )
-    all_coords = {d: c for d, (c, idx) in coords_new if len(c) > 0}
+    all_coords = {d: c for d, (c, idx) in coords_new}
     ds_interpolated = ds_interpolated.reindex(all_coords, fill_value=np.nan)
 
     # meaningful methods available for multidim data:

@@ -136,7 +136,8 @@
     2. reserve and ignore the `logs/` prefix during hierarchy traversal
     3. encode logs in a Zarr-native array/group structure
 
-  AGENT: Postponed, we are going to introduce metadata zarr store to capture preovenence and log data specific to particular dataset updates.
+  AGENT: Postponed, we are going to introduce metadata zarr store to capture
+  preovenence and log data specific to particular dataset updates.
     
   
 *active warning issues*
@@ -151,20 +152,41 @@
 - Update this file before larger code changes and after major findings.
 - Record unresolved repo questions in the last section of this file.
 
+## Planned Work: Delayed date_time Merge
+
+### Goal
+
+
+4. Add unsupported schema-key diagnostics.
+   - Add validation for unsupported keys in schema config dictionaries.
+   - Prefer a clear error for unsupported nested `merge` blocks and other
+     ignored keys, so old or misspelled schema items cannot silently change
+     merge behavior.
+
+6. Update tests after implementation.
+   - For default `merge = None`, assert sorted `date_time`, assert delayed
+     in-range values are not inserted, and assert an error is logged.
+   - For stepped merge, assert intermediate coordinates are introduced after the
+     19th update.
+   - For stepped merge, assert generated intermediate dependent values are `NaN`
+     before the real delayed update arrives.
+   - For stepped merge, assert delayed real 18th and 17th night updates write
+     into the generated grid instead of appending unsorted values.
+   - For both modes, keep the final sorted-coordinate assertion.
+
 ## AGENT Questions And Remarks
 
-- The worktree contains many untracked files, including local secret-bearing
-  and environment-specific files. Treat them as user state and do not normalize
-  or clean them without an explicit request.
 - Some existing tests already skip when S3 credentials are absent, but the repo
   still mixes local and remote assumptions. That boundary should be made more
   explicit during test-fix work.
+  
 - Current pytest triage shows two separate failure classes:
   - S3-backed tests reach the remote endpoint but fail with `AccessDenied` on
     `test-zarr-storage`, so the injected credentials are present but do not
     have the required bucket permissions for these tests.
   - Local weather/time tests fail in timezone conversion paths and likely hinge
     on `DateTimeUnit.tz_shift` using the current date's offset for `CET`.
+
 - After bucket access was fixed, only the weather/time failures remained.
   Current assessment:
   - `TestPivotND::test_pivot_nd_weather` exposes a real conversion bug for
@@ -172,13 +194,16 @@
   - `test_update_weather` expectations appear inconsistent with the schema
     contract (`source_unit: CET`, `unit: UTC`) and likely need alignment to the
     corrected UTC conversion behavior.
+
 - Repo-local pytest secret loading also needed env-name bridging:
   some code paths consume `ZF_S3_*`, while others still read `S3_*`.
+
 - Warning triage should keep apart:
   - warnings that document deliberate Zarr v3 compatibility limits
   - warnings that expose project behavior we may want to make explicit
   - warnings already eliminated by recent test changes but still present in
     older warning logs
+
 - Real Bukov worker reproduction under `ingress_server/tests/` is currently
   blocked in this environment before merge/update: opening the S3-backed store
   for `rancher-bukov-moc-test.zarr` fails with
@@ -186,12 +211,17 @@
   root-group access. That appears distinct from the original sorted-coordinate
   assertion and needs dependency/path handling review before the data bug can
   be reproduced end-to-end.
+
 - 2026-06-30 local verification of datetime storage tests is currently blocked
   before the delayed-update assertion: both the new regression and existing
   `test_datetime_encoding_roundtrip` hang in `zarr.open_group` during the first
   local `zf.open_store()` call. This conflicts with the older note that local
   store-open behavior was no longer active and needs fresh triage.
 
+- AGENT: Should the sorted `any_new` schema warning be emitted only for the
+  implicit default, or also for an explicit `step_limits: "any_new"` or
+  equivalent schema spelling?
+  
 ## AGENT log
 
 - 2026-06-20: Reviewed `AGENTS.md`, `README.md`, `python_coding.md`, and
@@ -208,6 +238,12 @@
   bucket access was fixed; remaining work is isolated to datetime handling.
 - 2026-06-20: Fixed timezone abbreviation handling for `CET` by using a fixed
   offset instead of the current date's DST-sensitive offset.
+- 2026-07-02: Reworked datetime step-limit conversion to use unit polymorphism
+  instead of `Coord.step_limits_delta_array()`.
+- 2026-07-02: Removed `delta_unit_instance()` and made `Interval.step_limits()`
+  use `cfg.get(..., default_unit)` with coordinate unit methods.
+- 2026-07-03: Introduced `DeltaUnit` for step-unit context and fixed simplified
+  `delta_array()` handling for missing and fractional step units.
 - 2026-06-20: Aligned weather test expectations with the schema contract for
   explicit UTC input timestamps.
 - 2026-06-20: Extended pytest secret loading to support both repo-root and
@@ -254,3 +290,33 @@
   `date_time.merge = None` and `date_time.merge.step_limits = [15, 61, "m"]`
   cases currently assert only that stored `date_time` coordinates are sorted
   and print the stored coordinate size for debugging.
+- 2026-07-01: Completed delayed `date_time` plan steps 1-3: confirmed renamed
+  tests from commit `a950233`, unified sorted-coordinate diagnostics in
+  `interpolate.py`, migrated known schema fixtures to direct `step_limits`,
+  fixed datetime step-unit handling in `zarr_schema` so `"m"` means minutes,
+  and confirmed the stepped update path creates intermediate coordinates with
+  `NaN` dependent values before delayed data arrives.
+- 2026-07-01: Confirmed with the user that `merge = None` maps to
+  `step_limits = no_new`, affects only coordinate extension, and keeps the
+  default overwrite policy for existing coordinates.
+- 2026-07-01: Confirmed with the user that `step_limits` is a direct
+  coordinate-level schema item; nested `merge: {step_limits: ...}` is wrong
+  and test/schema fixtures should be migrated.
+- 2026-07-01: Confirmed with the user that `step_limits: [15, 61, "m"]`
+  provides bounds for the step-selection algorithm, which preserves input
+  times rather than forcing a fixed 15-minute or hourly grid.
+- 2026-07-07: Reverted the incorrect step 5 interpretation that allowed
+  `no_new` tail extension and updated the step 5 plan to treat `no_new` as no
+  new coordinate values at all.
+- 2026-07-07: Implemented delayed `date_time` plan step 5 for sorted
+  `step_limits: None` / `no_new`, including rejected-coordinate logging,
+  no-op handling for fully rejected updates, and focused regression coverage.
+- 2026-07-07: Confirmed with the user that `no_new` allows no new coordinate
+  values at all, while existing coordinates near the incoming coordinate range
+  should still be updated through the current interpolation behavior.
+- 2026-07-07: Resolved the `no_new` no-overlap case by logging the rejected
+  coordinate update and returning the existing dataset instead of raising the
+  previous `No data was written to the dataset` assertion.
+- 2026-07-08: Simplified `interpolate_ds()` to reindex with all coordinates
+  returned from `interpolate_coord()` and tightened `merge_ds()` so empty
+  multidimensional extension subsets remain no-op writes.
