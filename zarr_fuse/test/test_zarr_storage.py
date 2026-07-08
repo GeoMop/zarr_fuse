@@ -222,6 +222,112 @@ def test_datetime_encoding_roundtrip(smart_tmp_path):
     npt.assert_array_equal(reopened["temperature"].values, np.array([280.0, 281.0]))
 
 
+def _delayed_datetime_schema(
+        smart_tmp_path: Path,
+        store_name: str,
+        date_time_step_limits,
+) -> dict:
+    """Prepare a clean local store and return a minimal delayed-update schema."""
+    store_path = smart_tmp_path / store_name
+    shutil.rmtree(store_path, ignore_errors=True)
+    coord = {
+        "unit": {"tick": "s", "tz": "UTC"},
+        "source_unit": {"tick": "s", "tz": "UTC"},
+        "df_col": "timestamp",
+        "chunk_size": 2,
+        "step_limits": date_time_step_limits,
+    }
+
+    return {
+        "VARS": {
+            "temperature": {
+                "unit": "degC",
+                "df_col": "temp",
+                "coords": ["date_time"],
+            },
+        },
+        "COORDS": {
+            "date_time": coord,
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
+
+
+def _write_delayed_datetime_batches(
+        smart_tmp_path: Path,
+        store_name: str,
+        date_time_step_limits,
+        update_count: int | None = None,
+) -> xr.Dataset:
+    """Prepare a schema and write delayed datetime batches through reopened nodes."""
+    schema_dict = _delayed_datetime_schema(
+        smart_tmp_path,
+        store_name,
+        date_time_step_limits,
+    )
+    updates = [
+        ("2025-09-17T06:00:00+00:00", 17.25),
+        ("2025-09-19T06:00:00+00:00", 19.25),
+        ("2025-09-18T22:00:00+00:00", 18.0),
+        ("2025-09-17T22:00:00+00:00", 17.0),
+    ]
+    selected_updates = updates if update_count is None else updates[:update_count]
+    for timestamp, temp in selected_updates:
+        node = zf.open_store(schema_dict)
+        try:
+            node.update(pl.DataFrame({"timestamp": [timestamp], "temp": [temp]}))
+        except AssertionError:
+            print(f"date_time coord size: {node.dataset.sizes['date_time']}")
+            raise
+
+    return zf.open_store(schema_dict).dataset
+
+
+def _assert_date_time_sorted(ds: xr.Dataset) -> None:
+    """Report date_time coordinate size and assert monotonic nondecreasing order."""
+    date_time = ds["date_time"].values.astype("datetime64[s]")
+    print(f"date_time coord size: {date_time.size}")
+    assert np.all(date_time[:-1] <= date_time[1:])
+
+
+def test_update_sorted_merge_none(smart_tmp_path, caplog):
+    """
+    Default coordinate merge cannot insert delayed date_time values into an existing range.
+    """
+    caplog.set_level(logging.ERROR, logger="zarr_fuse.interpolate")
+    reopened = _write_delayed_datetime_batches(
+        smart_tmp_path,
+        "delayed_datetime_batches_default.zarr",
+        date_time_step_limits=None,
+    )
+    _assert_date_time_sorted(reopened)
+    assert reopened.sizes["date_time"] == 1
+    assert "Rejected coordinates" in caplog.text
+
+
+def test_update_sorted_merge_step(smart_tmp_path):
+    """
+    Stepped date_time merge reserves a gap and lets delayed real values update it later.
+    """
+    initial_gap = _write_delayed_datetime_batches(
+        smart_tmp_path,
+        "delayed_datetime_batches_stepped.zarr",
+        date_time_step_limits=[15, 61, "minute"],
+        update_count=2,
+    )
+    assert initial_gap.sizes["date_time"] > 2
+    assert np.isnan(initial_gap["temperature"].values[1:-1]).all()
+
+    reopened = _write_delayed_datetime_batches(
+        smart_tmp_path,
+        "delayed_datetime_batches_stepped.zarr",
+        date_time_step_limits=[15, 61, "minute"],
+    )
+    _assert_date_time_sorted(reopened)
+
+
 def test_merge_ds_unsorted(smart_tmp_path):
     store_path = smart_tmp_path / "sparse_borehole_region.zarr"
     shutil.rmtree(store_path, ignore_errors=True)
@@ -275,7 +381,53 @@ def test_merge_ds_unsorted(smart_tmp_path):
     }))
 
 
-def test_update_from_ds_writes_schema_compatible_dataset():
+def test_merge_ds_skips_empty_cartesian_extension(smart_tmp_path):
+    store_path = smart_tmp_path / "empty_cartesian_extension.zarr"
+    shutil.rmtree(store_path, ignore_errors=True)
+    schema_dict = {
+        "VARS": {
+            "data": {
+                "unit": "degC",
+                "coords": ["x", "p"],
+            },
+        },
+        "COORDS": {
+            "x": {
+                "unit": "h",
+                "sorted": True,
+                "step_limits": "no_new",
+            },
+            "p": {
+                "unit": "",
+                "type": "str[8]",
+                "sorted": False,
+                "step_limits": [],
+            },
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {"data": (("x", "p"), np.array([[10.0, 11.0], [20.0, 21.0]]))},
+        coords={"x": np.array([1.0, 2.0]), "p": np.array(["A", "B"])},
+    ))
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {"data": (("x", "p"), np.array([[30.0], [40.0]]))},
+        coords={"x": np.array([3.0, 10.0]), "p": np.array(["C"])},
+    ))
+
+    reopened = zf.open_store(schema_dict).dataset
+    np.testing.assert_array_equal(reopened.coords["x"].values, np.array([1.0, 2.0]))
+    np.testing.assert_array_equal(reopened.coords["p"].values, np.array(["A", "B"]))
+    assert reopened["data"].shape == (2, 2)
+
+
+def test_update_from_ds_schema():
     schema = zf.schema.deserialize(inputs_dir / "schema_open_store_tst.yaml")
 
     class DummyNode:

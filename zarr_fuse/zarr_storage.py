@@ -26,7 +26,7 @@ from . import zarr_schema, units
 from .schema_ctx import RaisingLogger
 from .dtype_converter import to_typed_array, TrimmedArrayWarning
 from .logger import get_logger
-from .interpolate import interpolate_ds
+from .interpolate import interpolate_ds, check_sorted_coord_values
 from .zarr_schema import DatasetSchema, NodeSchema
 from .tools import recursive_update
 """
@@ -673,7 +673,7 @@ class Node:
 
         written_ds, merged_coords = self.merge_ds(ds)
         # check unique coordsregion="auto",
-        dup_dict = check_unique_coords(written_ds)
+        dup_dict = check_unique_coords(written_ds, self.logger)
         if  dup_dict:
             self.logger.error(dup_dict)
         #return written_ds
@@ -691,7 +691,7 @@ class Node:
         ds = dataset_from_np(self.schema, vars)
         written_ds, merged_coords = self.merge_ds(ds)
         # check unique coordsregion="auto",
-        dup_dict = check_unique_coords(written_ds)
+        dup_dict = check_unique_coords(written_ds, self.logger)
         if dup_dict:
             self.logger.error(dup_dict)
         #return written_ds
@@ -786,7 +786,7 @@ class Node:
         written_ds, merged_coords = self.merge_ds(ds)
 
         # Optional: still check for duplicated coordinates and log them
-        dup_dict = check_unique_coords(written_ds)
+        dup_dict = check_unique_coords(written_ds, self.logger)
         if dup_dict:
             self.logger.error(dup_dict)
 
@@ -912,6 +912,7 @@ class Node:
         3. write extended / interpolated parts (Phase 2)
         """
         ds_existing = self.dataset
+        last_written_ds = ds_existing
 
         # --- Phase 1: Dive (split by dimension) ---
         # We create a dict to hold the extension subset for each dimension.
@@ -926,7 +927,7 @@ class Node:
             ds_update,
             self.dataset,
             self.schema.COORDS)
-        last_written_ds = None
+
         ds_extend_dict = {}
         ds_overlap = ds_update.copy()
         dims_order = tuple(ds_update.coords.keys())
@@ -949,8 +950,11 @@ class Node:
             ## merged = ds1.combine_first(ds2).sortby("dim")
 
             dim_coord = ds_extend_dict[dim]
-            if dim_coord is None or dim_coord.sizes.get(dim, 0) == 0:
+            if dim_coord is None:
                 continue  # No new coordinates along this dimension.
+            extension_size = int(np.prod(list(dim_coord.sizes.values())))
+            if extension_size == 0:
+                continue
 
             # For all dimensions other than dim, reindex ds_ext so that the coordinate arrays
             # come from the store (i.e. the full arrays). This ensures consistency.
@@ -966,7 +970,6 @@ class Node:
             new_coords_for_dim = dim_coord[dim].values
             merged_coords[dim] = np.concatenate([merged_coords[dim], new_coords_for_dim])
 
-        assert last_written_ds is not None, "No data was written to the dataset."
         return last_written_ds, merged_coords
 
     """
@@ -1075,9 +1078,9 @@ ds_update.combine_first(ds_zarr_tail).sortby(dim)
         return pl_df
 
 
-def check_unique_coords(ds):
+def check_unique_coords(ds, log: logging.Logger | None = None):
     """
-    Check that all coordinate rows are unique.
+    Check that all coordinate rows are unique and sorted coordinates are sorted.
 
     Parameters
     ----------
@@ -1094,11 +1097,23 @@ def check_unique_coords(ds):
         unique_vals, counts = np.unique(arr, return_counts=True)
         return arr[counts > 1]
 
-    return {
+    coord_errors = {
         name: dup_vals
         for name, coord in ds.coords.items()
         if (dup_vals := duplicities(coord.values)).size > 0
     }
+    if log is None:
+        log = logging.getLogger(__name__)
+
+    for name, coord in ds.coords.items():
+        if coord.attrs.get("sorted", True):
+            check_sorted_coord_values(
+                coord.values,
+                name,
+                log,
+                context="Stored coordinate values",
+            )
+    return coord_errors
 
 
 def eliminate_dims_if_equal(arr: np.ma.MaskedArray, dims_to_check: List[bool]) -> np.ndarray:

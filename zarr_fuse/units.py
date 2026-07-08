@@ -63,7 +63,7 @@ def build_tzinfos():
 
 TZINFOS = build_tzinfos()
 
-CF_DATETIME_UNITS = {
+DATETIME_TO_ZARR_ENCODING = {
     "D": "days",
     "h": "hours",
     "m": "minutes",
@@ -72,22 +72,51 @@ CF_DATETIME_UNITS = {
     "us": "microseconds",
     "ns": "nanoseconds",
 }
+# Unit names accepted by xarray's CF datetime encoder in the Zarr write path.
+# This mapping is only used by DateTimeUnit.get_encoding().
+
+DATETIME_TICK_TO_PINT_UNIT = {
+    "D": "day",
+    "h": "hour",
+    "m": "minute",
+    "s": "second",
+    "ms": "millisecond",
+    "us": "microsecond",
+    "ns": "nanosecond",
+}
 
 class Unit(ureg.Unit):
     def asdict(self, value_serializer, filter):
         return str(self)
 
+    def parse_delta_unit(self, unit_cfg: 'ContextCfg'):
+        return DeltaUnit(unit_cfg.value())
+
     def default_dtype(self):
         return np.dtype('float64')
 
     def delta_unit(self):
-        return self
+        return DeltaUnit(str(self))
+
+    def delta_array(self, values, from_unit, dtype):
+        assert isinstance(from_unit, DeltaUnit)
+        return Quantity(values, from_unit).to(self.delta_unit()).magnitude
 
     def delta_dtype(self, dtype):
         return dtype
 
     def get_encoding(self):
         return {}
+
+
+class DeltaUnit(Unit):
+    pass
+
+
+PINT_UNIT_TO_DATETIME_TICK = {
+    str(DeltaUnit(unit_name)): tick
+    for tick, unit_name in DATETIME_TICK_TO_PINT_UNIT.items()
+}
 
 
 class NoneUnit(ureg.Unit):
@@ -98,11 +127,23 @@ class NoneUnit(ureg.Unit):
     def asdict(self, value_serializer, filter):
         return None
 
+    def parse_delta_unit(self, unit_cfg: 'ContextCfg'):
+        unit = unit_cfg.value()
+        if unit != '':
+            unit_cfg.schema_ctx.error(
+                f"Step unit of a dimensionless quantity should be '', but getting {unit}."
+            )
+        return DeltaUnit('')
+
     def default_dtype(self):
         return None
 
     def delta_unit(self):
-        return self
+        return DeltaUnit('')
+
+    def delta_array(self, values, from_unit, dtype):
+        assert isinstance(from_unit, DeltaUnit)
+        return Quantity(values, from_unit).to(self.delta_unit()).magnitude
 
     def delta_dtype(self, dtype):
         return dtype
@@ -171,8 +212,29 @@ class DateTimeUnit:
     def default_dtype(self):
         return np.dtype(f'datetime64[{self.tick}]')
 
+    def parse_delta_unit(self, unit_cfg:'ContextCfg'):
+        unit_str = unit_cfg.value()
+        coerced_unit = DATETIME_TICK_TO_PINT_UNIT.get(unit_str, unit_str)
+        if coerced_unit != unit_str:
+            unit_cfg.schema_ctx.warning(
+                f"Deprecated datetime delta unit '{unit_str}' coerced to '{coerced_unit}'."
+            )
+        unit_str = coerced_unit
+        try:
+            unit = DeltaUnit(unit_str)
+        except:
+            unit_cfg.schema_ctx.error(f"Unsupported datetime delta unit: {unit_str}")
+        return unit
+
     def delta_unit(self):
-        return Unit(self.tick)  # TODO: change from 'str' to pint.Unit in DataTimeUnit
+        return DeltaUnit(DATETIME_TICK_TO_PINT_UNIT[self.tick])
+
+    def delta_array(self, values, from_unit: DeltaUnit, dtype):
+        assert isinstance(from_unit, DeltaUnit)
+        tick =  PINT_UNIT_TO_DATETIME_TICK[str(from_unit)]
+        values = np.asarray(values)
+        ticks = np.rint(values).astype(int)
+        return ticks.astype(f"timedelta64[{tick}]").astype(self.delta_dtype(dtype))
 
     def delta_dtype(self, dtype):
         return np.dtype(f'timedelta64[{self.tick}]')
@@ -182,7 +244,7 @@ class DateTimeUnit:
         return np.datetime64('NaT', self.tick)
 
     def get_encoding(self):
-        cf_unit = CF_DATETIME_UNITS.get(self.tick)
+        cf_unit = DATETIME_TO_ZARR_ENCODING.get(self.tick)
         if cf_unit is None:
             raise ValueError(f"Unsupported datetime tick for zarr encoding: {self.tick}")
         return {

@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from zarr_fuse import units
+from zarr_fuse.schema_ctx import ContextCfg, SchemaCtx, SchemaWarning
 
 def test_quanity():
     q = units.Quantity(np.array([1, 2, 3]), 'meter')
@@ -28,6 +29,73 @@ def test_datetime_unit_timezone_abbreviation_uses_fixed_offset():
 
     assert unit.tzinfo == units.datetime.timezone(units.datetime.timedelta(hours=1), name="CET")
     assert unit.tz_shift == 1.0
+
+
+@pytest.mark.parametrize(
+    "variants",
+    [
+        ("d", "day", "days"),
+        ("h", "hour", "hours"),
+        ("min", "minute", "minutes"),
+        ("s", "second", "seconds"),
+        ("ms", "millisecond", "milliseconds"),
+        ("us", "microsecond", "microseconds"),
+        ("ns", "nanosecond", "nanoseconds"),
+    ],
+)
+def test_pint_time_unit_variants_compare_equal(variants):
+    reference = units.DeltaUnit(variants[0])
+    for variant in variants[1:]:
+        assert units.DeltaUnit(variant) == reference
+
+
+def test_pint_ambiguous_numpy_ticks_do_not_compare_as_datetime_units():
+    assert units.DeltaUnit("m") != units.DeltaUnit("minute")
+    assert units.DeltaUnit("D") != units.DeltaUnit("day")
+
+
+@pytest.mark.parametrize(
+    ("legacy_tick", "canonical"),
+    [
+        ("D", "day"),
+        ("m", "minute"),
+    ],
+)
+def test_datetime_delta_units_coerce_legacy_tick_specs(legacy_tick, canonical):
+    class WarningLogger:
+        def __init__(self):
+            self.warnings = []
+
+        def warning(self, warn, *args, **kwargs):
+            self.warnings.append(warn)
+
+    dt_unit = units.DateTimeUnit(tick="s")
+    logger = WarningLogger()
+    unit_cfg = ContextCfg(legacy_tick, SchemaCtx(["unit"], logger=logger))
+
+    assert dt_unit.parse_delta_unit(unit_cfg) == units.DeltaUnit(canonical)
+    assert len(logger.warnings) == 1
+    assert isinstance(logger.warnings[0], SchemaWarning)
+    assert "Deprecated datetime delta unit" in str(logger.warnings[0])
+
+
+@pytest.mark.parametrize(
+    ("tick", "variants", "canonical"),
+    [
+        ("D", ("d", "day", "days"), "day"),
+        ("h", ("h", "hour", "hours"), "hour"),
+        ("m", ("min", "minute", "minutes"), "minute"),
+        ("s", ("s", "second", "seconds"), "second"),
+        ("ms", ("ms", "millisecond", "milliseconds"), "millisecond"),
+        ("us", ("us", "microsecond", "microseconds"), "microsecond"),
+        ("ns", ("ns", "nanosecond", "nanoseconds"), "nanosecond"),
+    ],
+)
+def test_datetime_delta_units_parse_to_canonical_pint_unit(tick, variants, canonical):
+    dt_unit = units.DateTimeUnit(tick=tick)
+    for variant in variants:
+        unit_cfg = ContextCfg(variant, SchemaCtx(["unit"]))
+        assert dt_unit.parse_delta_unit(unit_cfg) == units.DeltaUnit(canonical)
 
 
 # TODO: replace by Variable.convert_value

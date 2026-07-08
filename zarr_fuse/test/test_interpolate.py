@@ -123,37 +123,64 @@ def test_interpolate_coord_sorted():
     # sorted, step_limits - no extension
     merged, split = run_interp(old, [1, 1.5, 2.1], step_limits="no_new")
     assert split == 2
-    np.allclose(merged, [1, 2])
+    assert np.allclose(merged, [1, 2])
 
     new = [1, 1.5, 2.1, 3, 10]
     merged, split = run_interp(old, new, step_limits="no_new")
     # apendend coordinates ignored. Non-fatal error.
+    assert split == 2
     assert np.allclose(merged, [1, 2])
+
+    merged, split = run_interp(old, [3, 10], step_limits="no_new")
+    assert split == 0
+    assert len(merged) == 0
 
     # sorted, step_limits - full extension
     merged, split = run_interp(old, new, step_limits="any_new")
     assert split == 2
-    np.allclose(merged, [1, 2, 2.1, 3, 10])
+    assert np.allclose(merged, [1, 2, 2.1, 3, 10])
 
     new = [1, 1.5, 2, 3, 10]
     merged, split = run_interp(old, new, step_limits="any_new")
     assert split == 2
-    np.allclose(merged, [1, 2, 3, 10])
+    assert np.allclose(merged, [1, 2, 3, 10])
 
     # sorted, step_limits - unexact step limits
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
                     unit='h',
-                    step_limits={'start':72, 'end':126, 'unit':'minutes'}) # 1.2 h, 2.1 h
+                    step_limits={'start':72, 'end':126, 'unit':'minute'}) # 1.2 h, 2.1 h
     assert split == 2
     np.allclose(merged, [1, 2, 4, 5.75, 7.5, 8.75,  10])
 
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
                     unit='h',
-                    step_limits=dict(start=150, end=150, unit='minutes')) # 2.5 h
+                    step_limits=dict(start=150, end=150, unit='minute')) # 2.5 h
     assert split == 2
     np.allclose(merged, [1, 2, 3.5 + 1/3.0, 5 + 2/3.0, 7.5,  10])
+
+
+def test_interpolate_coord_sorted_no_new_logs_only_extension_values(caplog):
+    old = np.array([0.0, 1.0, 2.0])
+    new = np.array([1.0, 1.5, 2.1, 3.0, 10.0])
+    schema = zf_schema.Coord(_ctx(dict(
+        name="tst_coord",
+        unit="",
+        sorted=True,
+        step_limits="no_new",
+    )))
+
+    caplog.set_level(logging.ERROR, logger="zarr_fuse.interpolate")
+    idx_sorter = sort_by_coord(new, old, schema, dflt_logger)
+    merged, split = interpolate_coord(new, old, idx_sorter, schema, dflt_logger)
+
+    assert split == 2
+    assert np.allclose(merged, [1.0, 2.0])
+    assert "1.5" not in caplog.text
+    assert "2.1" in caplog.text
+    assert "3." in caplog.text or "3.0" in caplog.text
+    assert "10." in caplog.text or "10.0" in caplog.text
 
 
 
@@ -438,7 +465,43 @@ def test_interpolate_ds_unsorted_singleton_dim():
     assert ds_int["data"].shape == (2, 1)
 
 
-def test_interpolate_ds_reports_unsorted_existing_datetime_coord():
+def test_interpolate_ds_preserves_empty_target_coord():
+    existing_ds = xr.Dataset(
+        {"data": (("x", "p"), np.array([[10.0, 11.0], [20.0, 21.0]]))},
+        coords={"x": np.array([1.0, 2.0]), "p": np.array(["A", "B"])},
+    )
+    update_ds = xr.Dataset(
+        {"data": (("x", "p"), np.array([[30.0], [40.0]]))},
+        coords={"x": np.array([3.0, 10.0]), "p": np.array(["C"])},
+    )
+
+    coord_schema = lambda x: zf_schema.Coord(_ctx(x))
+    schema = {
+        "x": coord_schema(dict(
+            name="x",
+            unit="h",
+            sorted=True,
+            step_limits="no_new",
+        )),
+        "p": coord_schema(dict(
+            name="p",
+            unit="",
+            type="str[8]",
+            sorted=False,
+            step_limits=[],
+        )),
+    }
+
+    ds_int, splits = interpolate_ds(update_ds, existing_ds, schema)
+
+    assert dict(splits) == {"x": 0, "p": 0}
+    assert ds_int.sizes["x"] == 0
+    assert ds_int.sizes["p"] == 1
+    np.testing.assert_array_equal(ds_int.coords["p"].values, np.array(["C"]))
+    assert ds_int["data"].size == 0
+
+
+def test_interpolate_ds_reports_unsorted_existing_datetime_coord(caplog):
     """Reproduce the ingress failure path with a synthetic existing datetime coordinate."""
     existing_time = np.array(
         [
@@ -480,5 +543,8 @@ def test_interpolate_ds_reports_unsorted_existing_datetime_coord():
         )),
     }
 
-    with pytest.raises(AssertionError, match="date_time.*positions 1 and 2"):
-        interpolate_ds(update_ds, existing_ds, schema)
+    caplog.set_level(logging.ERROR, logger="zarr_fuse.interpolate")
+    interpolate_ds(update_ds, existing_ds, schema)
+
+    assert "date_time" in caplog.text
+    assert "positions 1 and 2" in caplog.text
