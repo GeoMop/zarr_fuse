@@ -91,16 +91,6 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
                 log,
                 context="Existing coordinate values",
             )
-            # AGENT: replaced sorted-coordinate check kept temporarily for review.
-            # Resolved: kept for review; replacement now logs through check_sorted_coord_values().
-            # sorted_mask = old_values[:-1] <= old_values[1:]
-            # if not np.all(sorted_mask):
-            #     bad_idx = int(np.flatnonzero(~sorted_mask)[0])
-            #     raise AssertionError(
-            #         f"Existing coordinate values for {schema.name} are not sorted at positions "
-            #         f"{bad_idx} and {bad_idx + 1}: {old_values[bad_idx]!r} > "
-            #         f"{old_values[bad_idx + 1]!r}; got {old_values}"
-            #     )
             max_old = old_values[-1]
             idx_split = np.searchsorted(new_sorted, max_old, side='right')
         else:
@@ -151,19 +141,6 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
             log,
             context="New coordinate values",
         )
-        # AGENT: replaced new-coordinate monotonicity check kept temporarily for review.
-        # Resolved: kept for review; replacement now logs through check_sorted_coord_values().
-        # sorted_diff = np.diff(new_sorted)
-        # dtype_zero = sorted_diff.dtype.type(0)
-        # if not np.all(sorted_diff > dtype_zero):
-        #     mask = np.diff(new_sorted) <= dtype_zero
-        #     no_diff = np.arange(len(mask), dtype=int)[mask]
-        #     #no_diff_10 = no_diff[:max(0,10)]
-        #
-        #     print(f"Non unique values in new coords {schema.name}")
-        #     print(no_diff)
-        #     print(new_values.astype(str).tolist())
-        #     #print(np.stack((new_values[no_diff_10], new_values[no_diff_10 + 1]), axis=1))
 
         old_part_min = new_sorted[0]
         old_range_min = np.searchsorted(old_values, old_part_min, side='left')
@@ -207,12 +184,6 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     else:
         # Constrained coordinates step.
         # Construct adjusted coordinates grid.
-        # AGENT: explicit type check resolution is not allowed
-        # 1. analyze _make_quantity what kind of corner cases it covers
-        # 2. eliminate those that are not relevant for the two element, delta unit case
-        # 3. implement here the delta type conversion using only unit methods
-        #    completely polymorphic
-        # Resolved: step-limit delta conversion is encapsulated by unit methods.
         step_values = np.array([schema.step_limits.start, schema.step_limits.end])
         step_range = schema.unit.delta_array(
             step_values,
