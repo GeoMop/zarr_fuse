@@ -3,10 +3,6 @@ name: Dashboard reusable deploy
 on:
   workflow_call:
     inputs:
-      zarr_repo:
-        description: 'zarr_fuse repository (owner/repo)'
-        required: false
-        type: string
       zarr-fuse-ref:
         description: 'ref for zarr_fuse (branch or commit)'
         required: false
@@ -42,16 +38,6 @@ on:
         required: false
         type: string
         default: 'Dashboard reusable deploy'
-      containerize_job_name:
-        description: 'Display name for the containerize job'
-        required: false
-        type: string
-        default: 'Containerize frontend'
-      deploy_job_name:
-        description: 'Display name for the deploy job'
-        required: false
-        type: string
-        default: 'Deploy dashboard'
       namespace:
         description: 'Kubernetes namespace to deploy into'
         required: false
@@ -75,28 +61,11 @@ on:
         required: false
         type: string
         default: 'hlavo-config'
-      mount-endpoints-path:
-        description: 'Pod mount path for endpoints.yaml (empty = skip)'
-        required: false
-        type: string
-        default: '/opt/hlavo/dashboard/config/endpoints.yaml'
-      mount-schemas-path:
-        description: 'Pod mount path for schemas directory (empty = skip)'
-        required: false
-        type: string
-        default: '/opt/hlavo/dashboard/schemas'
-      mount-env-name:
-        description: 'Environment variable name pointing to endpoints.yaml'
-        required: false
-        type: string
-        default: 'ENDPOINTS_PATH'
     secrets:
       kubeconfig:
         required: true
       source_repo_token:
         required: true
-      zarr_repo_token:
-        required: false
       DOCKER_PASSWORD:
         required: false
       s3_access_key:
@@ -114,10 +83,9 @@ jobs:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.zarr_repo }}
+          repository: GeoMop/zarr_fuse
           ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
 
       - name: Get version tag
         id: get_version_tag
@@ -129,7 +97,7 @@ jobs:
           fi
 
   containerize-frontend:
-    name: ${{ inputs.containerize_job_name }}
+    name: Containerize frontend
     runs-on: ubuntu-latest
     container:
       image: quay.io/buildah/stable:v1.35.4
@@ -140,10 +108,9 @@ jobs:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.zarr_repo }}
+          repository: GeoMop/zarr_fuse
           ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
 
       - name: Containerize
         uses: ./main-repo/.github/actions/containerize
@@ -167,10 +134,9 @@ jobs:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.zarr_repo }}
+          repository: GeoMop/zarr_fuse
           ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
 
       - name: Lint helm chart
         uses: ./main-repo/.github/actions/helm-lint
@@ -178,7 +144,7 @@ jobs:
           working-directory: main-repo/dashboard/charts/holoviz
 
   deploy:
-    name: ${{ inputs.deploy_job_name }}
+    name: Deploy dashboard
     runs-on: ubuntu-latest
     if: ${{ inputs.deploy }}
     needs:
@@ -191,10 +157,9 @@ jobs:
       - name: Checkout zarr_fuse (main-repo)
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.zarr_repo }}
+          repository: GeoMop/zarr_fuse
           ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
 
       - name: Checkout source repo (HLAVO or caller)
         uses: actions/checkout@v4
@@ -259,6 +224,7 @@ jobs:
 
       - name: Deploy Helm chart from main-repo
         run: |
+          pod_config_path='/opt/dashboard/config'
           FLAGS="--install --atomic --timeout 10m \
             --namespace ${{ inputs.namespace }} \
             --set frontend.image.name=${{ inputs.frontend_image }} \
@@ -267,14 +233,16 @@ jobs:
             --set frontend.s3.secrets.secretKey=${{ secrets.s3_secret_key }}"
           if [[ -n "${{ inputs['mount-volume-name'] }}" ]]; then
             FLAGS+=" \
-              --set frontend.extraEnv[0].name=${{ inputs['mount-env-name'] }} \
-              --set frontend.extraEnv[0].value=${{ inputs['mount-endpoints-path'] }} \
+              --set frontend.extraEnv[0].name='ENDPOINTS_PATH' \
+              --set frontend.extraEnv[0].value=$pod_config_path \
+              --set frontend.extraEnv[1].name='SCHEMAS_PATH' \
+              --set frontend.extraEnv[1].value=$pod_config_path/schemas \
               --set frontend.extraVolumes[0].name=${{ inputs['mount-volume-name'] }} \
               --set frontend.extraVolumes[0].configMap.name=${{ inputs.configmap_name }} \
               --set frontend.extraVolumeMounts[0].name=${{ inputs['mount-volume-name'] }} \
-              --set frontend.extraVolumeMounts[0].mountPath=${{ inputs['mount-endpoints-path'] }} \
+              --set frontend.extraVolumeMounts[0].mountPath=$pod_config_path \
               --set frontend.extraVolumeMounts[0].subPath=endpoints.yaml \
               --set frontend.extraVolumeMounts[1].name=${{ inputs['mount-volume-name'] }} \
-              --set frontend.extraVolumeMounts[1].mountPath=${{ inputs['mount-schemas-path'] }}"
+              --set frontend.extraVolumeMounts[1].mountPath=$pod_config_path/schemas"
           fi
           helm upgrade "${{ inputs['release-name'] }}" main-repo/dashboard/charts/holoviz $FLAGS
