@@ -28,6 +28,9 @@ jobs:
       release-name: holoviz-development
       configmap_name: holoviz-dashboard-config
       mount-volume-name: ''
+      mount-endpoints-path: ''
+      mount-schemas-path: ''
+      mount-env-name: ENDPOINTS_PATH
     secrets:
       kubeconfig: ${{ secrets.KUBECONFIG }}
       source_repo_token: ${{ secrets.GITHUB_TOKEN }}
