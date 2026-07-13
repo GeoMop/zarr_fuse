@@ -733,6 +733,7 @@ def build_plot_selection_panel(
     _orientation_lock = False
     _updating_table = False
     _skip_layout_rebuild = False
+    _pending_bump = False
 
     def _rebuild_table():
         nonlocal _updating_table, _skip_layout_rebuild
@@ -762,6 +763,24 @@ def build_plot_selection_panel(
             doc.add_timeout_callback(_rebuild_table, 50)
         else:
             _rebuild_table()
+
+    def _schedule_bump():
+        nonlocal _pending_bump
+        if _pending_bump:
+            return
+        _pending_bump = True
+        doc = pn.state.curdoc
+        if doc is not None:
+            doc.add_next_tick_callback(_flush_bump)
+        else:
+            _flush_bump()
+
+    def _flush_bump():
+        nonlocal _pending_bump
+        _pending_bump = False
+        state.version += 1
+        if table_loading is not None:
+            table_loading.visible = False
 
     def _sync_orientation(event=None):
         nonlocal _orientation_lock
@@ -799,14 +818,6 @@ def build_plot_selection_panel(
         if table_loading is not None:
             table_loading.visible = True
 
-        def _deferred_bump():
-            doc = pn.state.curdoc
-            if doc is not None:
-                doc.add_next_tick_callback(lambda: (setattr(state, 'version', state.version + 1), setattr(table_loading, 'visible', False)))
-            else:
-                state.version += 1
-                table_loading.visible = False
-
         # ── Header row (row 0) — toggle column / toggle all ──
         if row_idx == 0:
             if col == "_actions":
@@ -818,7 +829,7 @@ def build_plot_selection_panel(
                     state.deselect_all(bump_version=False)
                 else:
                     state.select_all(bump_version=False)
-                _deferred_bump()
+                _schedule_bump()
                 return
             _updating_table_local = True
             try:
@@ -839,7 +850,7 @@ def build_plot_selection_panel(
                 state.set_all_for_column(col, any_unchecked, bump_version=False)
             finally:
                 _updating_table_local = False
-            _deferred_bump()
+            _schedule_bump()
             return
 
         # ── Data rows ──
@@ -847,7 +858,7 @@ def build_plot_selection_panel(
             eid = row_data.get("entity_index")
             if eid is not None and not (isinstance(eid, float) and np.isnan(eid)):
                 state.remove_site(int(eid), bump_version=False)
-            _deferred_bump()
+            _schedule_bump()
             return
 
         if col == "_row_label":
@@ -859,7 +870,7 @@ def build_plot_selection_panel(
                     any_unchecked = True
                     break
             state.set_all_for_row(row_key, any_unchecked, bump_version=False)
-            _deferred_bump()
+            _schedule_bump()
             return
 
         # Selection column — toggle individual cell
@@ -868,7 +879,7 @@ def build_plot_selection_panel(
             current = state.is_checked(row_key, col)
             state.set_checked(row_key, col, not current, bump_version=False)
             _rebuild_table()
-            _deferred_bump()
+            _schedule_bump()
 
     table.on_click(_on_table_cell_click)
 
