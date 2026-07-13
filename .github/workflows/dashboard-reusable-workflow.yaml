@@ -75,21 +75,6 @@ on:
         required: false
         type: string
         default: 'hlavo-config'
-      mount-endpoints-path:
-        description: 'Pod mount path for endpoints.yaml (empty = skip)'
-        required: false
-        type: string
-        default: '/opt/hlavo/dashboard/config/endpoints.yaml'
-      mount-schemas-path:
-        description: 'Pod mount path for schemas directory (empty = skip)'
-        required: false
-        type: string
-        default: '/opt/hlavo/dashboard/schemas'
-      mount-env-name:
-        description: 'Environment variable name pointing to endpoints.yaml'
-        required: false
-        type: string
-        default: 'ENDPOINTS_PATH'
     secrets:
       kubeconfig:
         required: true
@@ -267,14 +252,14 @@ jobs:
             --set frontend.s3.secrets.secretKey=${{ secrets.s3_secret_key }}"
           if [[ -n "${{ inputs['mount-volume-name'] }}" ]]; then
             FLAGS+=" \
-              --set frontend.extraEnv[0].name=${{ inputs['mount-env-name'] }} \
-              --set frontend.extraEnv[0].value=${{ inputs['mount-endpoints-path'] }} \
+              --set frontend.extraEnv[0].name=ENDPOINTS_PATH \
+              --set frontend.extraEnv[0].value=/opt/dashboard/config \
               --set frontend.extraVolumes[0].name=${{ inputs['mount-volume-name'] }} \
               --set frontend.extraVolumes[0].configMap.name=${{ inputs.configmap_name }} \
               --set frontend.extraVolumeMounts[0].name=${{ inputs['mount-volume-name'] }} \
-              --set frontend.extraVolumeMounts[0].mountPath=${{ inputs['mount-endpoints-path'] }} \
+              --set frontend.extraVolumeMounts[0].mountPath=/opt/dashboard/config \
               --set frontend.extraVolumeMounts[0].subPath=endpoints.yaml \
               --set frontend.extraVolumeMounts[1].name=${{ inputs['mount-volume-name'] }} \
-              --set frontend.extraVolumeMounts[1].mountPath=${{ inputs['mount-schemas-path'] }}"
+              --set frontend.extraVolumeMounts[1].mountPath=/opt/dashboard/schemas"
           fi
           helm upgrade "${{ inputs['release-name'] }}" main-repo/dashboard/charts/holoviz $FLAGS
