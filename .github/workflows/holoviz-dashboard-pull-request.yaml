@@ -10,8 +10,9 @@ on:
 
 jobs:
   deploy:
-    uses: ./.github/workflows/dashboard-reusable-workflow.yaml
+    uses: GeoMop/zarr_fuse/.github/workflows/dashboard-reusable-workflow.yaml@feature/dashboard-multiple-selection
     with:
+      zarr_repo: GeoMop/zarr_fuse
       zarr-fuse-ref: ${{ github.ref }}
       source_repo: ${{ github.repository }}
       source_ref: ${{ github.ref }}
@@ -22,11 +23,18 @@ jobs:
       push-container: true
       tag: generate
       workflow_name: HoloViz reusable deploy
+      containerize_job_name: Containerize HoloViz frontend
+      deploy_job_name: Deploy HoloViz (reusable)
       release-name: holoviz-development
       configmap_name: holoviz-dashboard-config
+      mount-volume-name: ''
+      mount-endpoints-path: ''
+      mount-schemas-path: ''
+      mount-env-name: ENDPOINTS_PATH
     secrets:
       kubeconfig: ${{ secrets.KUBECONFIG }}
       source_repo_token: ${{ secrets.GITHUB_TOKEN }}
+      zarr_repo_token: ${{ secrets.GITHUB_TOKEN }}
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       s3_access_key: ${{ secrets.S3_ACCESS_KEY }}
       s3_secret_key: ${{ secrets.S3_SECRET_KEY }}
