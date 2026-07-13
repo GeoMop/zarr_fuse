@@ -253,7 +253,7 @@ jobs:
           if [[ -n "${{ inputs['mount-volume-name'] }}" ]]; then
             FLAGS+=" \
               --set frontend.extraEnv[0].name=ENDPOINTS_PATH \
-              --set frontend.extraEnv[0].value=/opt/dashboard/config \
+              --set frontend.extraEnv[0].value=/opt/dashboard/config/endpoints.yaml \
               --set frontend.extraVolumes[0].name=${{ inputs['mount-volume-name'] }} \
               --set frontend.extraVolumes[0].configMap.name=${{ inputs.configmap_name }} \
               --set frontend.extraVolumeMounts[0].name=${{ inputs['mount-volume-name'] }} \
