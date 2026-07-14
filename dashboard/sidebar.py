@@ -121,7 +121,7 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
             dot_color = "#f59e0b"
             anim = "pulse"
         else:
-            icon = "✓"
+            icon = ""
             text = "Active"
             dot_color = "#10b981"
             anim = ""
