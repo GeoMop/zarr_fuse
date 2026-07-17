@@ -2,9 +2,49 @@
 
 from __future__ import annotations
 
+import threading
+import time
 import numpy as np
 import panel as pn
 import param
+
+
+class _PerfMetrics:
+    """Collects lightweight performance counters for the plot selection table.
+
+    Reset via ``reset()``.  Read via ``report()``.
+    """
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.cell_click_count = 0
+        self.full_rebuild_count = 0
+        self.patch_count = 0
+        self.version_bump_count = 0
+        self.click_to_rebuild_ms: list[float] = []
+        self.rebuild_duration_ms: list[float] = []
+
+    def report(self) -> str:
+        click_avg = (
+            sum(self.click_to_rebuild_ms) / len(self.click_to_rebuild_ms)
+            if self.click_to_rebuild_ms else 0.0
+        )
+        rebuild_avg = (
+            sum(self.rebuild_duration_ms) / len(self.rebuild_duration_ms)
+            if self.rebuild_duration_ms else 0.0
+        )
+        return (
+            f"[PerfMetrics] clicks={self.cell_click_count} "
+            f"full_rebuilds={self.full_rebuild_count} patches={self.patch_count} "
+            f"version_bumps={self.version_bump_count} "
+            f"click->rebuild_avg={click_avg:.1f}ms "
+            f"rebuild_avg={rebuild_avg:.1f}ms"
+        )
+
+
+perf = _PerfMetrics()
 
 
 class SelectionState(param.Parameterized):
@@ -34,6 +74,30 @@ class SelectionState(param.Parameterized):
         self._col_colors: dict[str, str] = {}
         self._valid_count: int = 0
         self._checked_count: int = 0
+
+    def _cancel_panel_bump(self, *, clear_loading=False):
+        """Cancel any pending debounced version bump scheduled by the panel.
+
+        Called internally before direct ``version`` or ``layout_version``
+        mutations to prevent a stale debounce callback from firing after
+        the state has already been updated.
+        """
+        fn = getattr(self, "_panel_cancel_bump", None)
+        if fn is not None:
+            fn(clear_loading=clear_loading)
+
+    def _bump_version(self, *, clear_loading=False):
+        """Increment ``version`` after cancelling any pending debounce.
+
+        Every method on SelectionState that directly increments
+        ``self.version`` should go through this helper so that a
+        stale panel debounce timer is always invalidated first.
+        """
+        self._cancel_panel_bump(clear_loading=clear_loading)
+        inv = getattr(self, "_panel_invalidate_bump_generation", None)
+        if inv is not None:
+            inv()
+        self.version += 1
 
     # ── read-only view of internal data ──────────────────────────────
 
@@ -113,7 +177,7 @@ class SelectionState(param.Parameterized):
         else:
             return  # no change
         if bump_version:
-            self.version += 1
+            self._bump_version()
 
     # ── mutations ────────────────────────────────────────────────────
 
@@ -131,11 +195,12 @@ class SelectionState(param.Parameterized):
                     print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
                     return
                 # Replace data for a re-fetch (e.g. after variable change)
+                self._cancel_panel_bump()
                 site["depths"] = np.asarray(depths, dtype=float).ravel()
                 site["series"] = series
                 site["times"] = times
                 self.layout_version += 1
-                self.version += 1
+                self._bump_version()
                 print(f"[SelectionState] Updated data for site {site_id} (idx={entity_index})")
                 return
 
@@ -157,7 +222,7 @@ class SelectionState(param.Parameterized):
         self._valid_count += len(finite_depths)
         self._checked_count += len(finite_depths)
         self.layout_version += 1
-        self.version += 1
+        self._bump_version()
         print(f"[SelectionState] Added site {site_id} (idx={entity_index}), "
               f"depths={depths_arr.tolist()}")
 
@@ -187,17 +252,18 @@ class SelectionState(param.Parameterized):
         if bump_layout:
             self.layout_version += 1
         if bump_version:
-            self.version += 1
+            self._bump_version()
         print(f"[SelectionState] Removed site {site_id} (idx={entity_index})")
 
     def clear(self):
         """Remove all sites and reset selection."""
+        self._cancel_panel_bump(clear_loading=True)
         self._sites.clear()
         self._checked.clear()
         self._valid_count = 0
         self._checked_count = 0
         self.layout_version += 1
-        self.version += 1
+        self._bump_version(clear_loading=True)
         print("[SelectionState] Cleared all sites")
 
     def select_all(self, bump_version: bool = True, bump_layout: bool = True):
@@ -217,7 +283,7 @@ class SelectionState(param.Parameterized):
             if bump_layout:
                 self.layout_version += 1
             if bump_version:
-                self.version += 1
+                self._bump_version()
 
     def deselect_all(self, bump_version: bool = True, bump_layout: bool = True):
         """Uncheck every (site, depth) cell."""
@@ -227,7 +293,7 @@ class SelectionState(param.Parameterized):
             if bump_layout:
                 self.layout_version += 1
             if bump_version:
-                self.version += 1
+                self._bump_version()
 
     def set_all_for_row(self, row_key, value: bool, bump_version: bool = True, bump_layout: bool = True):
         """Check or uncheck all valid combos in the given row."""
@@ -257,7 +323,7 @@ class SelectionState(param.Parameterized):
             if bump_layout:
                 self.layout_version += 1
             if bump_version:
-                self.version += 1
+                self._bump_version()
 
     def set_all_for_column(self, col_key, value: bool, bump_version: bool = True, bump_layout: bool = True):
         """Check or uncheck all valid combos in the given column."""
@@ -287,7 +353,7 @@ class SelectionState(param.Parameterized):
             if bump_layout:
                 self.layout_version += 1
             if bump_version:
-                self.version += 1
+                self._bump_version()
 
     # ── queries ──────────────────────────────────────────────────────
 
@@ -490,6 +556,7 @@ def build_plot_selection_panel(
     available_dims: dict[str, str] | None = None,
     plot_var_selector: pn.widgets.Select | None = None,
     table_loading: pn.Row | None = None,
+    _bump_delay_ms: float = 150,
 ) -> tuple[pn.Column, SelectionState]:
     """Build the Tabulator-based Plot Selection panel.
 
@@ -507,6 +574,9 @@ def build_plot_selection_panel(
         Loading indicator Row whose ``visible`` property is set toggled
         during table rebuilds.  When provided the built-in ``table.loading``
         overlay is suppressed in favour of this external indicator.
+    _bump_delay_ms : float, optional
+        Trailing debounce delay in milliseconds before bumping ``state.version``
+        after a selection change.  Defaults to 150.  Exposed for testing.
 
     Returns
     -------
@@ -564,12 +634,15 @@ def build_plot_selection_panel(
     _orientation_lock = False
     _updating_table = False
     _skip_layout_rebuild = False
-    _pending_bump = False
+    _bump_timer = None
+    _bump_generation = 0
 
     def _rebuild_table():
         nonlocal _updating_table, _skip_layout_rebuild
         _skip_layout_rebuild = False
         _updating_table = True
+        perf.full_rebuild_count += 1
+        t0 = time.perf_counter()
         try:
             new_df, new_editors, new_formatters, _, _, _ = build_assignment_matrix(
                 state, state.row_dim, state.col_dim
@@ -587,6 +660,9 @@ def build_plot_selection_panel(
             _rebuild_cell_styles()
         finally:
             _updating_table = False
+            elapsed = (time.perf_counter() - t0) * 1000
+            perf.rebuild_duration_ms.append(elapsed)
+            print(f"[perf] _rebuild_table #{perf.full_rebuild_count}: {elapsed:.1f}ms")
 
     def _schedule_rebuild():
         doc = pn.state.curdoc
@@ -595,23 +671,50 @@ def build_plot_selection_panel(
         else:
             _rebuild_table()
 
-    def _schedule_bump():
-        nonlocal _pending_bump
-        if _pending_bump:
+    def _cancel_bump_timer(*, clear_loading=False):
+        nonlocal _bump_timer
+        if _bump_timer is None:
             return
-        _pending_bump = True
         doc = pn.state.curdoc
         if doc is not None:
-            doc.add_next_tick_callback(_flush_bump)
-        else:
-            _flush_bump()
+            try:
+                doc.remove_timeout_callback(_bump_timer)
+            except ValueError:
+                pass
+        elif isinstance(_bump_timer, threading.Timer):
+            _bump_timer.cancel()
+        _bump_timer = None
+        if clear_loading and table_loading is not None:
+            table_loading.visible = False
 
-    def _flush_bump():
-        nonlocal _pending_bump
-        _pending_bump = False
+    def _schedule_bump():
+        nonlocal _bump_generation, _bump_timer
+        _bump_generation += 1
+        gen = _bump_generation
+        _cancel_bump_timer()
+
+        def _run():
+            _flush_bump(generation=gen)
+
+        doc = pn.state.curdoc
+        if doc is not None:
+            _bump_timer = doc.add_timeout_callback(_run, _bump_delay_ms)
+        else:
+            _bump_timer = threading.Timer(_bump_delay_ms / 1000.0, _run)
+            _bump_timer.daemon = True
+            _bump_timer.start()
+
+    def _flush_bump(generation=None):
+        nonlocal _bump_timer
+        if generation is not None and generation != _bump_generation:
+            return
+        _bump_timer = None
+        perf.version_bump_count += 1
         state.version += 1
         if table_loading is not None:
             table_loading.visible = False
+        print(f"[perf] _flush_bump -> version={state.version} (total bumps={perf.version_bump_count})")
+        print(perf.report())
 
     def _sync_orientation(event=None):
         nonlocal _orientation_lock
@@ -628,6 +731,7 @@ def build_plot_selection_panel(
                     col_select.value = available_dims[other]
             state.row_dim = row_select.value
             state.col_dim = col_select.value
+            _cancel_bump_timer(clear_loading=True)
             _rebuild_table()
             state.version += 1
         finally:
@@ -640,6 +744,8 @@ def build_plot_selection_panel(
         """Handle clicks on data cells: row toggle, column toggle, cell toggle, remove."""
         col = event.column
         row_idx = event.row
+        perf.cell_click_count += 1
+        t_click_start = time.perf_counter()
 
         if col in ("entity_index", "_index") or col.startswith("__valid_"):
             return
@@ -708,9 +814,31 @@ def build_plot_selection_panel(
         if row_data.get(f"__valid_{col}", False):
             row_key = row_data["_row_key"]
             current = state.is_checked(row_key, col)
-            state.set_checked(row_key, col, not current, bump_version=False)
-            _rebuild_table()
+            new_checked = not current
+            state.set_checked(row_key, col, new_checked, bump_version=False)
+
+            new_value = "\u2713" if new_checked else "\u2717"
+            t_patch = time.perf_counter()
+            try:
+                table.patch(
+                    {col: [(row_idx, new_value)]},
+                    as_index=False,
+                )
+            except Exception:
+                state.set_checked(
+                    row_key, col, current, bump_version=False,
+                )
+                if table_loading is not None:
+                    table_loading.visible = False
+                raise
+            patch_elapsed = (time.perf_counter() - t_patch) * 1000
+            perf.patch_count += 1
+
             _schedule_bump()
+            elapsed = (time.perf_counter() - t_click_start) * 1000
+            perf.click_to_rebuild_ms.append(elapsed)
+            print(f"[perf] cell_click #{perf.cell_click_count} ({row_key},{col}): "
+                  f"{elapsed:.1f}ms (state->patch->schedule) patch={patch_elapsed:.1f}ms")
 
     table.on_click(_on_table_cell_click)
 
@@ -756,6 +884,17 @@ def build_plot_selection_panel(
         table,
         sizing_mode="stretch_width",
     )
+
+    state._panel_schedule_bump = _schedule_bump
+    state._panel_cancel_bump = _cancel_bump_timer
+    state._panel_flush_bump = _flush_bump
+    state._panel_bump_generation = lambda: _bump_generation
+
+    def _invalidate_bump_generation():
+        nonlocal _bump_generation
+        _bump_generation += 1
+
+    state._panel_invalidate_bump_generation = _invalidate_bump_generation
 
     return panel, state
 

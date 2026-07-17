@@ -8,6 +8,8 @@ from holoviews import streams
 
 from dashboard.config import _resolve_fields_for_group_raw
 
+_perf_plot_redraws = 0
+
 
 def build_timeseries_views(data, map_state, selection_state, render_spinner=None):
     start_total = time.perf_counter()
@@ -312,6 +314,9 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         nonlocal _mid_ylim_cache, _mid_ylim_key
         nonlocal _right_ylim_cache, _right_ylim_key
         nonlocal _overlay_cache, _overlay_version
+        global _perf_plot_redraws
+        t_view = time.perf_counter()
+        _perf_plot_redraws += 1
         if selection_state is None:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
@@ -390,6 +395,9 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
 
         n_sites = len(selection_state.sites)
         site_label = "1 site" if n_sites == 1 else f"{n_sites} sites"
+        elapsed = (time.perf_counter() - t_view) * 1000
+        print(f"[perf] create_timeseries_view(view={view}) #{_perf_plot_redraws}: {elapsed:.1f}ms "
+              f"version={selection_state.version}")
         return overlay.opts(
             responsive=True,
             title=f"{metric_label} over Time ({site_label})",
