@@ -137,8 +137,8 @@ class TestStyleMaps:
 class TestOrientationSwapPreservesSelection:
     def test_checked_state_survives_swap(self):
         state = _two_site_state()
-        state.set_selected("BH-1", 0.0, False)
-        state.set_selected("BH-2", 2.0, True)
+        state.set_checked("BH-1", 0.0, False)
+        state.set_checked("BH-2", 2.0, True)
 
         df1, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert df1[df1["_row_label"].str.endswith("BH-1")].iloc[0]["0.0"] == "✗"

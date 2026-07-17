@@ -7,7 +7,6 @@ import pytest
 
 from dashboard.plot_selection import (
     SelectionState,
-    _build_legend_html,
     build_assignment_matrix,
 )
 from dashboard.plot_styles import COLORS, MARKER_SHAPES
@@ -80,39 +79,3 @@ class TestStyleMapsSwap:
         build_assignment_matrix(state, "vertical", "entity")
         assert set(state._row_shapes.keys()) == {"1.0"}
         assert set(state._col_colors.keys()) == {"BH-0", "BH-1"}
-
-
-class TestLegendHTML:
-    def test_legend_empty_no_sites(self):
-        state = SelectionState()
-        html = _build_legend_html(state)
-        assert "No curves selected" in html and "<i>" in html
-
-    def test_legend_shows_markers_and_colors(self):
-        state = _n_sites(2, 5.0)
-        build_assignment_matrix(state, "entity", "vertical")
-        html = _build_legend_html(state)
-        assert "<circle" in html or "<rect" in html
-        assert "#e6194b" in html or "#3cb44b" in html
-        assert "Color" in html
-        assert "Marker" in html
-
-    def test_legend_headers_reflect_orientation(self):
-        """When rows = entity and cols = vertical, legend labels should
-        say 'Marker — Site' and 'Color — Depth'."""
-        state = _n_sites(2, 5.0)
-        build_assignment_matrix(state, "entity", "vertical")
-        html = _build_legend_html(state)
-        assert "Marker — Site:" in html
-        assert "Color — Depth:" in html
-
-    def test_legend_swapped_headers(self):
-        """When rows = vertical and cols = entity, legend labels should
-        say 'Marker — Depth' and 'Color — Site'."""
-        state = _n_sites(2, 5.0)
-        state.row_dim = "vertical"
-        state.col_dim = "entity"
-        build_assignment_matrix(state, "vertical", "entity")
-        html = _build_legend_html(state)
-        assert "Marker — Depth:" in html
-        assert "Color — Site:" in html

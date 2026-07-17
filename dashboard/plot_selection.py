@@ -190,20 +190,6 @@ class SelectionState(param.Parameterized):
             self.version += 1
         print(f"[SelectionState] Removed site {site_id} (idx={entity_index})")
 
-    def set_selected(self, site_id, depth_value, value):
-        """Check/uncheck a single (site, depth) cell.  Triggers plot re-render."""
-        key = (str(site_id), float(depth_value))
-        before = key in self._checked
-        if value and not before:
-            self._checked.add(key)
-            self._checked_count += 1
-        elif not value and before:
-            self._checked.discard(key)
-            self._checked_count -= 1
-        else:
-            return
-        self.version += 1
-
     def clear(self):
         """Remove all sites and reset selection."""
         self._sites.clear()
@@ -323,117 +309,6 @@ class SelectionState(param.Parameterized):
             for d in np.asarray(site["depths"]).ravel():
                 result.add(float(d))
         return sorted(result)
-
-
-LBL_WIDTH = 120
-CELL_WIDTH = 70
-BTN_WIDTH = 40
-
-
-def _format_depth(depth_value: float) -> str:
-    return f"{depth_value:.2f}"
-
-
-def build_table(state: SelectionState) -> pn.Column:
-    """Build the site × depth checkbox matrix from *state* (legacy).
-
-    Orientation is controlled by ``state.row_dim`` / ``state.col_dim``:
-
-    ``row_dim="entity"``
-      Rows = sites, columns = depths.  Each row has a site label, one checkbox
-      per depth, and a remove button.
-
-    ``row_dim="vertical"``
-      Rows = depths, columns = sites.  Each row has a depth label and one
-      checkbox per site.  No remove buttons in this orientation.
-    """
-    rows: list[pn.Row] = []
-
-    is_depth_rows = state.row_dim == "vertical"
-
-    if is_depth_rows:
-        header_cells: list = [
-            pn.pane.Markdown("**Depth**", width=LBL_WIDTH),
-            *[
-                pn.pane.Markdown(f"**{s['site_id']}**", width=CELL_WIDTH)
-                for s in state.sites
-            ],
-        ]
-        rows.append(pn.Row(*header_cells, sizing_mode="stretch_width"))
-
-        for depth_val in state.all_depths:
-            cells: list = [
-                pn.pane.Markdown(f"**{_format_depth(depth_val)}**", width=LBL_WIDTH),
-            ]
-            for site in state.sites:
-                site_id = site["site_id"]
-                site_depths = set(float(d) for d in np.asarray(site["depths"]).ravel())
-                if depth_val in site_depths:
-                    cb = pn.widgets.Checkbox(
-                        value=(str(site_id), float(depth_val)) in state._checked,
-                        width=CELL_WIDTH,
-                    )
-
-                    def _on_cb(event, _site_id=site_id, _depth=depth_val):
-                        state.set_selected(_site_id, _depth, event.new)
-
-                    cb.param.watch(_on_cb, "value")
-                    cells.append(cb)
-                else:
-                    cells.append(pn.pane.Markdown("—", width=CELL_WIDTH))
-
-            rows.append(pn.Row(*cells, sizing_mode="stretch_width"))
-    else:
-        header_cells: list = [
-            pn.pane.Markdown("", width=BTN_WIDTH),
-            pn.pane.Markdown("**Site**", width=LBL_WIDTH),
-            *[
-                pn.pane.Markdown(f"**{_format_depth(d)}**", width=CELL_WIDTH)
-                for d in state.all_depths
-            ],
-        ]
-        rows.append(pn.Row(*header_cells, sizing_mode="stretch_width"))
-
-        for site in state.sites:
-            site_id = site["site_id"]
-            site_depths = set(float(d) for d in np.asarray(site["depths"]).ravel())
-
-            remove_btn = pn.widgets.Button(
-                name="✕",
-                width=BTN_WIDTH,
-                height=30,
-                button_type="danger",
-                stylesheets=[".bk-btn-danger { padding: 0px !important; font-size: 12px; }"],
-            )
-
-            def _on_remove(event, _idx=site["entity_index"]):
-                state.remove_site(_idx)
-
-            remove_btn.on_click(_on_remove)
-
-            cells: list = [
-                remove_btn,
-                pn.pane.Markdown(f"**{site_id}**", width=LBL_WIDTH),
-            ]
-
-            for depth_val in state.all_depths:
-                if depth_val in site_depths:
-                    cb = pn.widgets.Checkbox(
-                        value=(str(site_id), float(depth_val)) in state._checked,
-                        width=CELL_WIDTH,
-                    )
-
-                    def _on_cb(event, _site_id=site_id, _depth=depth_val):
-                        state.set_selected(_site_id, _depth, event.new)
-
-                    cb.param.watch(_on_cb, "value")
-                    cells.append(cb)
-                else:
-                    cells.append(pn.pane.Markdown("—", width=CELL_WIDTH))
-
-            rows.append(pn.Row(*cells, sizing_mode="stretch_width"))
-
-    return pn.Column(*rows, sizing_mode="stretch_width")
 
 
 from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_SVG
@@ -608,50 +483,6 @@ def build_assignment_matrix(
     selection_state.col_dim = _orig_col
 
     return df, editors, formatters, editables, row_shapes, col_colors
-
-
-def _build_legend_html(state):
-    """Compact HTML legend showing row shapes and column colors."""
-    combos = state.get_selected_combinations()
-    if not combos or not state.sites:
-        return "<i>No curves selected</i>"
-
-    row_shapes = getattr(state, "_row_shapes", {})
-    col_colors = getattr(state, "_col_colors", {})
-
-    parts = ['<div style="font-size: 11px; line-height: 1.6;">']
-
-    keys = list(col_colors.keys())
-    if keys:
-        parts.append('<div style="display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 2px;">')
-        if state.col_dim == "vertical":
-            parts.append("<b>Color — Depth:</b>")
-        else:
-            parts.append("<b>Color — Site:</b>")
-        for k in keys:
-            color = col_colors.get(k, "#888")
-            swatch = (
-                f'<span style="display:inline-block;width:10px;height:10px;'
-                f'background:{color};border-radius:2px;vertical-align:middle;"></span>'
-            )
-            parts.append(f"<span>{swatch} {k}</span>")
-        parts.append("</div>")
-
-    row_keys = list(row_shapes.keys())
-    if row_keys:
-        parts.append('<div style="display: flex; flex-wrap: wrap; gap: 4px 10px;">')
-        if state.row_dim == "entity":
-            parts.append("<b>Marker — Site:</b>")
-        else:
-            parts.append("<b>Marker — Depth:</b>")
-        for k in row_keys:
-            shape = row_shapes.get(k, "circle")
-            svg = SHAPE_TO_SVG.get(shape, shape)
-            parts.append(f'<span style="display:inline-flex;align-items:center;gap:3px;color:#555;">{svg} {k}</span>')
-        parts.append("</div>")
-
-    parts.append("</div>")
-    return "".join(parts)
 
 
 def build_plot_selection_panel(

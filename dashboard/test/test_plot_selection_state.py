@@ -119,7 +119,7 @@ class TestCanonicalResolution:
 
     def test_is_checked_works_in_both_orientations(self):
         state = _make_state()
-        state.set_selected("BH-1", 0.0, True)
+        state.set_checked("BH-1", 0.0, True)
         # entity rows
         assert state.is_checked("BH-1", 0.0) is True
         # vertical rows (row=depth, col=site)
@@ -131,9 +131,9 @@ class TestCanonicalResolution:
 class TestOrientationSwap:
     def test_swap_preserves_checked(self):
         state = _make_state()
-        state.set_selected("BH-1", 0.0, True)
-        state.set_selected("BH-1", 1.0, True)
-        state.set_selected("BH-2", 3.0, True)
+        state.set_checked("BH-1", 0.0, True)
+        state.set_checked("BH-1", 1.0, True)
+        state.set_checked("BH-2", 3.0, True)
         checked_before = set(state._checked)
         state.row_dim = "vertical"
         state.col_dim = "entity"
@@ -154,8 +154,8 @@ class TestOrientationSwap:
 class TestGetSelectedCombinations:
     def test_returns_checked_only(self):
         state = _make_state()
-        state.set_selected("BH-1", 0.0, False)
-        state.set_selected("BH-2", 3.0, True)
+        state.set_checked("BH-1", 0.0, False)
+        state.set_checked("BH-2", 3.0, True)
         combos = state.get_selected_combinations()
         # BH-1's depth 0 unchecked, BH-1 depths 1,2 still checked by default
         # BH-2 all depths checked, BH-2 depth 3 checked by default
@@ -172,8 +172,8 @@ class TestGetSelectedCombinations:
 class TestSelectDeselectAll:
     def test_select_all(self):
         state = _make_state()
-        state.set_selected("BH-1", 0.0, False)
-        state.set_selected("BH-1", 1.0, False)
+        state.set_checked("BH-1", 0.0, False)
+        state.set_checked("BH-1", 1.0, False)
         state.select_all()
         assert state.is_checked("BH-1", 0.0) is True
         assert state.is_checked("BH-1", 1.0) is True
