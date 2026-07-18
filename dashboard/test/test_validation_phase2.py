@@ -154,18 +154,16 @@ class TestValidationPhase2:
     # ── Scenario 1: One valid cell click ──
 
     def test_scenario1_one_valid_cell_click(self):
-        """Click one valid cell: patch fires, no rebuild, version bumps once."""
+        """Click one valid cell: state updates, no patch, no rebuild, version bumps once."""
         panel, state, table, loading = _make_full_setup()
         v_before = state.version
-        patches_before = perf.patch_count
         rebuilds_before = perf.full_rebuild_count
 
         # Click BH-1 at depth 0.0 (row 1, col "0.0") — should toggle unchecked
         assert state.is_checked("BH-1", 0.0) is True
         _fire_toggle(table, "0.0", 1, state)
 
-        # Immediately after click: cell patched, state updated, no rebuild
-        assert perf.patch_count == patches_before + 1, "one patch must have fired"
+        # Immediately after click: state updated, no rebuild
         assert perf.full_rebuild_count == rebuilds_before, "zero rebuilds"
         assert state.is_checked("BH-1", 0.0) is False, "state must be unchecked"
         assert _cell_value(table, "0.0", 1) is False, "table display must show unchecked"
@@ -393,9 +391,8 @@ class TestValidationPhase2:
             f"no delayed bump after settle (was {v_settled}, now {state.version})"
 
     def test_patch_and_rebuild_counts(self):
-        """Summary: count patches vs rebuilds for all click scenarios."""
+        """Summary: count rebuilds and bumps for all click scenarios (no patches for cell edits)."""
         panel, state, table, loading = _make_full_setup()
-        patches_before = perf.patch_count
         rebuilds_before = perf.full_rebuild_count
         bumps_before = perf.version_bump_count
 
@@ -413,19 +410,15 @@ class TestValidationPhase2:
 
         _time.sleep(_WAIT)
 
-        patches_after = perf.patch_count
         rebuilds_after = perf.full_rebuild_count
         bumps_after = perf.version_bump_count
 
-        print(f"\n[validation] patches={patches_after - patches_before} "
-              f"rebuilds={rebuilds_after - rebuilds_before} "
+        print(f"\n[validation] rebuilds={rebuilds_after - rebuilds_before} "
               f"bumps={bumps_after - bumps_before}")
         print(f"[validation] click->patch avg: "
               f"{sum(perf.click_to_rebuild_ms)/len(perf.click_to_rebuild_ms):.2f}ms"
               if perf.click_to_rebuild_ms else "")
         print(perf.report())
 
-        assert patches_after - patches_before >= 12, \
-            f"expected >= 12 patches, got {patches_after - patches_before}"
         assert rebuilds_after - rebuilds_before == 0, \
             f"expected 0 rebuilds, got {rebuilds_after - rebuilds_before}"

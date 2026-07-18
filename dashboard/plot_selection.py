@@ -834,9 +834,10 @@ def build_plot_selection_panel(
     def _on_edit_cell(event):
         """Handle native tickCross Boolean edits.
 
-        The browser updates the cell display immediately.  This callback
-        synchronises SelectionState and schedules the debounced plot redraw.
-        Invalid edits are reverted without changing state.
+        The browser updates the cell display immediately via Tabulator.js.
+        This callback synchronises SelectionState and schedules the debounced
+        plot redraw.  No ``table.patch()`` call — the DataFrame stays stale
+        until the next ``_rebuild_table()`` (structural change).
         """
         col = event.column
         if col.startswith("__valid_") or col in ("entity_index", "_index",
@@ -860,23 +861,11 @@ def build_plot_selection_panel(
 
         state.set_checked(row_key, col, new_value, bump_version=False)
 
-        try:
-            table.patch(
-                {col: [(row_idx, new_value)]},
-                as_index=False,
-            )
-        except Exception:
-            state.set_checked(row_key, col, current, bump_version=False)
-            if table_loading is not None:
-                table_loading.visible = False
-            raise
-
-        perf.patch_count += 1
         _schedule_bump()
         edit_elapsed = (time.perf_counter() - t_edit) * 1000
         perf.click_to_rebuild_ms.append(edit_elapsed)
         print(f"[perf] on_edit ({row_key},{col})={new_value}: "
-              f"{edit_elapsed:.1f}ms (state->patch->schedule)")
+              f"{edit_elapsed:.1f}ms (state->schedule, no Bokeh round-trip)")
 
     table.on_edit(_on_edit_cell)
 

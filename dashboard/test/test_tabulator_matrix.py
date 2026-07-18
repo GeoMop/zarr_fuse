@@ -214,7 +214,7 @@ class TestEdgeCases:
 
 
 class TestIndividualCellPatch:
-    """Phase 1: individual cell toggle must patch, not rebuild."""
+    """table.patch mechanics for bulk operations (header/row/column toggles)."""
 
     def _make_tabulator(self):
         state = _two_site_state()
@@ -236,7 +236,7 @@ class TestIndividualCellPatch:
         return table, state
 
     def test_patch_called_instead_of_rebuild(self):
-        """One cell toggle must call table.patch with as_index=False, not table.value setter."""
+        """Bulk toggle must call table.patch with as_index=False, not table.value setter."""
         table, state = self._make_tabulator()
         patch_calls = []
         patch_kwargs_list = []
@@ -317,132 +317,6 @@ class TestIndividualCellPatch:
         state.set_checked("BH-1", 0.0, True, bump_version=False)
         table.patch({"0.0": [(1, True)]}, as_index=False)
         assert state._checked_count == initial_count
-
-
-class TestPatchFailureRecovery:
-    """Phase 1: patch failure must roll back state and clear loading."""
-
-    def _make_tabulator_and_loading(self):
-        state = _two_site_state()
-        df, editors, formatters, editables, _, _ = build_assignment_matrix(
-            state, "entity", "vertical"
-        )
-        hidden = [c for c in df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")]
-        table = pn.widgets.Tabulator(
-            df,
-            editors=editors,
-            formatters=formatters,
-            hidden_columns=hidden,
-            selectable=False,
-            show_index=False,
-            sizing_mode="stretch_width",
-            layout="fit_data_table",
-            sortable=False,
-        )
-        loading = pn.Row(visible=True)
-        return table, state, loading
-
-    def test_patch_failure_rolls_back_state(self):
-        """If table.patch raises, the canonical state must revert."""
-        table, state, loading = self._make_tabulator_and_loading()
-
-        row_idx = 1
-        col = "0.0"
-        row_key = "BH-1"
-        current = state.is_checked(row_key, col)
-        assert current is True
-
-        state.set_checked(row_key, col, False, bump_version=False)
-
-        def bad_patch(*args, **kwargs):
-            raise RuntimeError("patch failed")
-
-        table.patch = bad_patch
-
-        try:
-            new_value = False
-            try:
-                table.patch({col: [(row_idx, new_value)]}, as_index=False)
-            except Exception:
-                state.set_checked(row_key, col, current, bump_version=False)
-                if loading is not None:
-                    loading.visible = False
-                raise
-        except RuntimeError:
-            pass
-
-        assert state.is_checked(row_key, col) is True
-        assert ("BH-1", 0.0) in state._checked
-
-    def test_loading_cleared_on_patch_failure(self):
-        """Loading indicator must be hidden after patch failure."""
-        table, state, loading = self._make_tabulator_and_loading()
-        assert loading.visible is True
-
-        def bad_patch(*args, **kwargs):
-            raise RuntimeError("patch failed")
-
-        table.patch = bad_patch
-
-        state.set_checked("BH-1", 0.0, False, bump_version=False)
-        try:
-            try:
-                table.patch({"0.0": [(1, False)]}, as_index=False)
-            except Exception:
-                state.set_checked("BH-1", 0.0, True, bump_version=False)
-                loading.visible = False
-                raise
-        except RuntimeError:
-            pass
-
-        assert loading.visible is False
-
-    def test_no_version_bump_on_patch_failure(self):
-        """Version must not increment when patch fails and state rolls back."""
-        table, state, loading = self._make_tabulator_and_loading()
-        v_before = state.version
-
-        def bad_patch(*args, **kwargs):
-            raise RuntimeError("patch failed")
-
-        table.patch = bad_patch
-
-        state.set_checked("BH-1", 0.0, False, bump_version=False)
-        try:
-            try:
-                table.patch({"0.0": [(1, False)]}, as_index=False)
-            except Exception:
-                state.set_checked("BH-1", 0.0, True, bump_version=False)
-                loading.visible = False
-                raise
-        except RuntimeError:
-            pass
-
-        assert state.version == v_before
-
-    def test_loading_none_handled_on_patch_failure(self):
-        """When loading is None, patch failure must not raise AttributeError."""
-        table, state, _ = self._make_tabulator_and_loading()
-
-        def bad_patch(*args, **kwargs):
-            raise RuntimeError("patch failed")
-
-        table.patch = bad_patch
-
-        state.set_checked("BH-1", 0.0, False, bump_version=False)
-        exc_caught = False
-        try:
-            try:
-                table.patch({"0.0": [(1, False)]}, as_index=False)
-            except Exception:
-                state.set_checked("BH-1", 0.0, True, bump_version=False)
-                exc_caught = True
-                raise
-        except RuntimeError:
-            exc_caught = True
-
-        assert exc_caught
-        assert state.is_checked("BH-1", 0.0) is True
 
 
 _MS = 50  # debounce delay for tests (ms)
@@ -1090,44 +964,5 @@ class TestPhase3TickCross:
                 for idx, val in items:
                     assert isinstance(val, bool), f"Row toggle must patch bool, got {type(val)}"
 
-    def test_edit_rollback_on_patch_failure(self):
-        """If patch fails during edit, state must revert to previous value."""
-        state = _two_site_state()
-        loading = pn.Row(visible=False)
-        panel, state = build_plot_selection_panel(
-            state=state, table_loading=loading,
-        )
-        table = None
-        for child in panel.objects:
-            if isinstance(child, pn.widgets.Tabulator):
-                table = child
-                break
-            if isinstance(child, pn.Column):
-                for sub in child.objects:
-                    if isinstance(sub, pn.widgets.Tabulator):
-                        table = sub
-                        break
-            if table:
-                break
-        assert table is not None
-        row_idx = 1
-        col = "0.0"
-        assert state.is_checked("BH-1", 0.0) is True
 
-        table.value.at[table.value.index[row_idx], col] = False
-        original_patch = table.patch
-        def failing_patch(*a, **kw):
-            raise RuntimeError("patch boom")
-        table.patch = failing_patch
 
-        event = type("E", (), {
-            "event_name": "table-edit", "column": col, "row": row_idx,
-            "value": False, "pre": False, "old": True,
-        })()
-        try:
-            for cb in table._on_edit_callbacks:
-                cb(event)
-        except RuntimeError:
-            pass
-
-        assert state.is_checked("BH-1", 0.0) is True, "state must revert on patch failure"
