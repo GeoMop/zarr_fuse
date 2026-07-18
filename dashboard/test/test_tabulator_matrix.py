@@ -62,19 +62,19 @@ class TestDataFrameContent:
         assert "__valid_2.0" in df.columns
 
     def test_invalid_cell_empty_string(self):
-        """BH-1 has depths [0.0, 1.0]; 2.0 should be empty."""
+        """BH-1 has depths [0.0, 1.0]; 2.0 should be None (empty for tickCross)."""
         state = _two_site_state()
         df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         bh1 = df[df["_row_label"].str.endswith("BH-1")].iloc[0]
-        assert bh1["2.0"] == ""
+        assert bh1["2.0"] is None
         assert bool(bh1["__valid_2.0"]) is False
-        assert bh1["0.0"] == "✓"
+        assert bh1["0.0"] is True
 
     def test_valid_cell_display(self):
         state = _two_site_state()
         df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         bh2 = df[df["_row_label"].str.endswith("BH-2")].iloc[0]
-        assert bh2["1.0"] == "✓"
+        assert bh2["1.0"] is True
         assert bool(bh2["__valid_1.0"]) is True
 
 
@@ -85,11 +85,11 @@ class TestEditors:
         assert editors["_row_label"] is None
         assert editors["_actions"] is None
 
-    def test_boolean_editors_none(self):
+    def test_boolean_editors_tickcross(self):
         state = _two_site_state()
         _, editors, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         for col in ["0.0", "1.0", "2.0"]:
-            assert editors[col] is None
+            assert editors[col] == {"type": "tickCross"}
 
 
 class TestFormatters:
@@ -98,14 +98,15 @@ class TestFormatters:
         _, _, formatters, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert formatters["_row_label"]["type"] == "html"
         assert formatters["_actions"]["type"] == "button"
-        assert formatters["_actions"]["label"] == "✕ Remove"
+        assert formatters["_actions"]["label"] == "\u2715 Remove"
         assert formatters["_actions"]["buttonType"] == "danger"
 
-    def test_boolean_formatters_html(self):
+    def test_boolean_formatters_tickcross(self):
         state = _two_site_state()
         _, _, formatters, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         for col in ["0.0", "1.0", "2.0"]:
-            assert formatters[col]["type"] == "html"
+            assert formatters[col]["type"] == "tickCross"
+            assert formatters[col]["allowEmpty"] is True
 
 
 class TestEditables:
@@ -114,11 +115,11 @@ class TestEditables:
         _, _, _, editables, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert editables["_row_label"] is False
 
-    def test_boolean_cols_not_editable(self):
+    def test_boolean_cols_editable(self):
         state = _two_site_state()
         _, _, _, editables, _, _ = build_assignment_matrix(state, "entity", "vertical")
         for col in ["0.0", "1.0", "2.0"]:
-            assert editables[col] is False
+            assert editables[col] is True
 
 
 class TestStyleMaps:
@@ -146,17 +147,17 @@ class TestOrientationSwapPreservesSelection:
         state.set_checked("BH-2", 2.0, True)
 
         df1, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
-        assert df1[df1["_row_label"].str.endswith("BH-1")].iloc[0]["0.0"] == "✗"
-        assert df1[df1["_row_label"].str.endswith("BH-2")].iloc[0]["2.0"] == "✓"
+        assert df1[df1["_row_label"].str.endswith("BH-1")].iloc[0]["0.0"] is False
+        assert df1[df1["_row_label"].str.endswith("BH-2")].iloc[0]["2.0"] is True
 
         df2, _, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
         depth0_row = df2[df2["_row_label"].str.endswith("0.0")].iloc[0]
         # BH-1 at depth 0.0 was unchecked
-        assert depth0_row["BH-1"] == "✗"
+        assert depth0_row["BH-1"] is False
 
         depth2_row = df2[df2["_row_label"].str.endswith("2.0")].iloc[0]
         # BH-2 at depth 2.0 was checked
-        assert depth2_row["BH-2"] == "✓"
+        assert depth2_row["BH-2"] is True
 
 
 class TestStateOrientationRestored:
@@ -260,14 +261,14 @@ class TestIndividualCellPatch:
         assert current is True
         new_checked = not current
         state.set_checked(row_key, col, new_checked, bump_version=False)
-        new_value = "\u2713" if new_checked else "\u2717"
+        new_value = new_checked
         table.patch({col: [(row_idx, new_value)]}, as_index=False)
 
         assert state.is_checked("BH-1", 0.0) is False
         assert len(patch_calls) == 1
         assert "0.0" in patch_calls[0]
         assert table.value is df_before
-        assert table.value.iloc[row_idx]["0.0"] == "\u2717"
+        assert table.value.iloc[row_idx]["0.0"] == False
         assert patch_kwargs_list[0].get("as_index") is False
 
     def test_as_index_false_uses_positional_row(self):
@@ -276,8 +277,8 @@ class TestIndividualCellPatch:
         row_idx = 1
         col = "0.0"
         state.set_checked("BH-1", 0.0, False, bump_version=False)
-        table.patch({col: [(row_idx, "\u2717")]}, as_index=False)
-        assert table.value.iloc[row_idx][col] == "\u2717"
+        table.patch({col: [(row_idx, False)]}, as_index=False)
+        assert table.value.iloc[row_idx][col] == False
 
     def test_toggle_back_restores_original(self):
         """Toggle twice restores the original checked state."""
@@ -286,23 +287,23 @@ class TestIndividualCellPatch:
         col = "0.0"
 
         state.set_checked("BH-1", 0.0, False, bump_version=False)
-        table.patch({col: [(row_idx, "\u2717")]}, as_index=False)
-        assert table.value.iloc[row_idx][col] == "\u2717"
+        table.patch({col: [(row_idx, False)]}, as_index=False)
+        assert table.value.iloc[row_idx][col] == False
 
         state.set_checked("BH-1", 0.0, True, bump_version=False)
-        table.patch({col: [(row_idx, "\u2713")]}, as_index=False)
-        assert table.value.iloc[row_idx][col] == "\u2713"
+        table.patch({col: [(row_idx, True)]}, as_index=False)
+        assert table.value.iloc[row_idx][col] == True
         assert state.is_checked("BH-1", 0.0) is True
 
     def test_invalid_cell_not_patched(self):
-        """Invalid cells (empty string) must not be patched."""
+        """Invalid cells (None) must not be patched."""
         table, state = self._make_tabulator()
         row_idx = 1
         col = "2.0"
         row_data = table.value.iloc[row_idx]
         assert row_data["_row_key"] == "BH-1"
         assert row_data.get(f"__valid_{col}", False) == False
-        assert row_data[col] == ""
+        assert row_data[col] is None
 
     def test_patch_count_and_state_in_sync(self):
         """After patching, _checked_count matches actual checked cells."""
@@ -310,11 +311,11 @@ class TestIndividualCellPatch:
         initial_count = state._checked_count
 
         state.set_checked("BH-1", 0.0, False, bump_version=False)
-        table.patch({"0.0": [(1, "\u2717")]}, as_index=False)
+        table.patch({"0.0": [(1, False)]}, as_index=False)
         assert state._checked_count == initial_count - 1
 
         state.set_checked("BH-1", 0.0, True, bump_version=False)
-        table.patch({"0.0": [(1, "\u2713")]}, as_index=False)
+        table.patch({"0.0": [(1, True)]}, as_index=False)
         assert state._checked_count == initial_count
 
 
@@ -359,7 +360,7 @@ class TestPatchFailureRecovery:
         table.patch = bad_patch
 
         try:
-            new_value = "\u2717"
+            new_value = False
             try:
                 table.patch({col: [(row_idx, new_value)]}, as_index=False)
             except Exception:
@@ -386,7 +387,7 @@ class TestPatchFailureRecovery:
         state.set_checked("BH-1", 0.0, False, bump_version=False)
         try:
             try:
-                table.patch({"0.0": [(1, "\u2717")]}, as_index=False)
+                table.patch({"0.0": [(1, False)]}, as_index=False)
             except Exception:
                 state.set_checked("BH-1", 0.0, True, bump_version=False)
                 loading.visible = False
@@ -409,7 +410,7 @@ class TestPatchFailureRecovery:
         state.set_checked("BH-1", 0.0, False, bump_version=False)
         try:
             try:
-                table.patch({"0.0": [(1, "\u2717")]}, as_index=False)
+                table.patch({"0.0": [(1, False)]}, as_index=False)
             except Exception:
                 state.set_checked("BH-1", 0.0, True, bump_version=False)
                 loading.visible = False
@@ -432,7 +433,7 @@ class TestPatchFailureRecovery:
         exc_caught = False
         try:
             try:
-                table.patch({"0.0": [(1, "\u2717")]}, as_index=False)
+                table.patch({"0.0": [(1, False)]}, as_index=False)
             except Exception:
                 state.set_checked("BH-1", 0.0, True, bump_version=False)
                 exc_caught = True
@@ -849,3 +850,300 @@ class TestTrailingDebounce:
             f"Expected exactly 1 self.version += 1 (in _bump_version), found {len(lines)}: {lines}"
         )
         assert "_bump_version" in source
+
+
+class TestPhase3TickCross:
+    """Phase 3: native Boolean tickCross editor replaces HTML tick/cross display."""
+
+    def _make_tabulator(self):
+        state = _two_site_state()
+        df, editors, formatters, editables, _, _ = build_assignment_matrix(
+            state, "entity", "vertical"
+        )
+        hidden = [c for c in df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")]
+        table = pn.widgets.Tabulator(
+            df,
+            editors=editors,
+            formatters=formatters,
+            hidden_columns=hidden,
+            selectable=False,
+            show_index=False,
+            sizing_mode="stretch_width",
+            layout="fit_data_table",
+            sortable=False,
+        )
+        return table, state
+
+    def test_valid_cells_are_boolean(self):
+        """Valid cells must contain Python bool, not string tick/cross."""
+        state = _two_site_state()
+        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        bh1 = df[df["_row_label"].str.endswith("BH-1")].iloc[0]
+        assert isinstance(bh1["0.0"], bool)
+        assert bh1["0.0"] is True
+        assert isinstance(bh1["1.0"], bool)
+        assert bh1["1.0"] is True
+
+    def test_invalid_cells_are_none(self):
+        """Invalid cells must contain None (empty for tickCross formatter)."""
+        state = _two_site_state()
+        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        bh1 = df[df["_row_label"].str.endswith("BH-1")].iloc[0]
+        assert bh1["2.0"] is None
+        bh2 = df[df["_row_label"].str.endswith("BH-2")].iloc[0]
+        assert bh2["0.0"] is None
+
+    def test_editor_is_tickcross(self):
+        """Selection columns must use tickCross editor."""
+        _, editors, _, _, _, _ = build_assignment_matrix(_two_site_state(), "entity", "vertical")
+        for col in ["0.0", "1.0", "2.0"]:
+            assert editors[col]["type"] == "tickCross"
+
+    def test_formatter_is_tickcross_with_allow_empty(self):
+        """Selection columns must use tickCross formatter with allowEmpty=True."""
+        _, _, formatters, _, _, _ = build_assignment_matrix(_two_site_state(), "entity", "vertical")
+        for col in ["0.0", "1.0", "2.0"]:
+            assert formatters[col]["type"] == "tickCross"
+            assert formatters[col]["allowEmpty"] is True
+
+    def test_selection_columns_are_editable(self):
+        """Selection columns must be editable for tickCross interaction."""
+        _, _, _, editables, _, _ = build_assignment_matrix(_two_site_state(), "entity", "vertical")
+        for col in ["0.0", "1.0", "2.0"]:
+            assert editables[col] is True
+
+    def test_on_click_ignores_selection_data_cells(self):
+        """Clicking a selection cell on a data row must not toggle state."""
+        table, state = self._make_tabulator()
+        row_idx = 1
+        col = "0.0"
+        assert state.is_checked("BH-1", 0.0) is True
+
+        event = type("E", (), {
+            "event_name": "cell_click", "column": col, "row": row_idx, "value": None
+        })()
+        table._process_event(event)
+        assert state.is_checked("BH-1", 0.0) is True, "click on data selection cell must not change state"
+
+    def test_edit_toggles_valid_cell(self):
+        """Simulated edit on a valid cell must toggle state and patch."""
+        state = _two_site_state()
+        loading = pn.Row(visible=False)
+        panel, state = build_plot_selection_panel(
+            state=state, table_loading=loading,
+        )
+        table = None
+        for child in panel.objects:
+            if isinstance(child, pn.widgets.Tabulator):
+                table = child
+                break
+            if isinstance(child, pn.Column):
+                for sub in child.objects:
+                    if isinstance(sub, pn.widgets.Tabulator):
+                        table = sub
+                        break
+            if table:
+                break
+        assert table is not None
+        row_idx = 1
+        col = "0.0"
+        assert state.is_checked("BH-1", 0.0) is True
+
+        table.value.at[table.value.index[row_idx], col] = False
+        event = type("E", (), {
+            "event_name": "table-edit", "column": col, "row": row_idx,
+            "value": False, "pre": False, "old": True,
+        })()
+        for cb in table._on_edit_callbacks:
+            cb(event)
+
+        assert state.is_checked("BH-1", 0.0) is False
+        assert table.value.iloc[row_idx][col] is False
+
+    def test_edit_skips_invalid_cell(self):
+        """Edit on an invalid cell must not change state."""
+        table, state = self._make_tabulator()
+        row_idx = 1
+        col = "2.0"
+        assert bool(table.value.iloc[row_idx].get(f"__valid_{col}", False)) is False
+
+        event = type("E", (), {
+            "event_name": "table-edit", "column": col, "row": row_idx,
+            "value": True, "pre": False, "old": None,
+        })()
+        for cb in table._on_edit_callbacks:
+            cb(event)
+
+        assert table.value.iloc[row_idx][col] is None, "invalid cell must remain None"
+
+    def test_edit_skips_header_row(self):
+        """Edit on header row (row 0) selection column must not crash."""
+        table, state = self._make_tabulator()
+        event = type("E", (), {
+            "event_name": "table-edit", "column": "0.0", "row": 0,
+            "value": True, "pre": False, "old": None,
+        })()
+        try:
+            for cb in table._on_edit_callbacks:
+                cb(event)
+        except (IndexError, KeyError):
+            pytest.fail("Edit on header row must not raise")
+
+    def test_boolean_values_survive_rebuild(self):
+        """After _rebuild_table, valid cells must still be Boolean."""
+        state = _two_site_state()
+        state.set_checked("BH-1", 0.0, False)
+        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        bh1 = df[df["_row_label"].str.endswith("BH-1")].iloc[0]
+        assert bh1["0.0"] is False
+        assert bh1["1.0"] is True
+        bh2 = df[df["_row_label"].str.endswith("BH-2")].iloc[0]
+        assert bh2["1.0"] is True
+        assert bh2["2.0"] is True
+
+    def test_orientation_swap_preserves_boolean(self):
+        """After orientation swap, cells must still be Boolean."""
+        state = _two_site_state()
+        state.set_checked("BH-1", 0.0, False)
+        df1, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        assert df1[df1["_row_label"].str.endswith("BH-1")].iloc[0]["0.0"] is False
+
+        df2, _, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
+        depth0 = df2[df2["_row_label"].str.endswith("0.0")].iloc[0]
+        assert depth0["BH-1"] is False
+        assert isinstance(depth0["BH-1"], bool)
+
+    def test_column_toggle_patches_boolean(self):
+        """Column header click must patch Boolean values to all valid rows."""
+        state = _two_site_state()
+        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        table = pn.widgets.Tabulator(
+            df,
+            editors={"0.0": {"type": "tickCross"}, "1.0": {"type": "tickCross"}, "2.0": {"type": "tickCross"}},
+            hidden_columns=[c for c in df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")],
+            selectable=False,
+            show_index=False,
+            sizing_mode="stretch_width",
+            layout="fit_data_table",
+            sortable=False,
+        )
+        patches = []
+        original_patch = table.patch
+        def capture_patch(patches_dict, **kw):
+            patches.append(patches_dict)
+            original_patch(patches_dict, **kw)
+        table.patch = capture_patch
+
+        for cb in table._on_click_callbacks.get(None, []):
+            event = type("E", (), {
+                "event_name": "cell_click", "column": "0.0", "row": 0, "value": None
+            })()
+            cb(event)
+        for p in patches:
+            for col_name, items in p.items():
+                for idx, val in items:
+                    assert isinstance(val, bool), f"Column toggle must patch bool, got {type(val)}"
+
+    def test_select_all_patches_boolean(self):
+        """Clicking _row_label on header row must patch Boolean True to all valid cells."""
+        state = _two_site_state()
+        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        table = pn.widgets.Tabulator(
+            df,
+            hidden_columns=[c for c in df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")],
+            selectable=False,
+            show_index=False,
+            sizing_mode="stretch_width",
+            layout="fit_data_table",
+            sortable=False,
+        )
+        patches = []
+        original_patch = table.patch
+        def capture_patch(patches_dict, **kw):
+            patches.append(patches_dict)
+            original_patch(patches_dict, **kw)
+        table.patch = capture_patch
+
+        for cb in table._on_click_callbacks.get(None, []):
+            event = type("E", (), {
+                "event_name": "cell_click", "column": "_row_label", "row": 0, "value": None
+            })()
+            cb(event)
+
+        for p in patches:
+            for col_name, items in p.items():
+                for idx, val in items:
+                    assert isinstance(val, bool), f"Select-all must patch bool, got {type(val)}"
+
+    def test_row_toggle_patches_boolean(self):
+        """Row label click must patch Boolean values to all valid columns."""
+        state = _two_site_state()
+        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        table = pn.widgets.Tabulator(
+            df,
+            hidden_columns=[c for c in df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")],
+            selectable=False,
+            show_index=False,
+            sizing_mode="stretch_width",
+            layout="fit_data_table",
+            sortable=False,
+        )
+        patches = []
+        original_patch = table.patch
+        def capture_patch(patches_dict, **kw):
+            patches.append(patches_dict)
+            original_patch(patches_dict, **kw)
+        table.patch = capture_patch
+
+        for cb in table._on_click_callbacks.get(None, []):
+            event = type("E", (), {
+                "event_name": "cell_click", "column": "_row_label", "row": 1, "value": None
+            })()
+            cb(event)
+
+        for p in patches:
+            for col_name, items in p.items():
+                for idx, val in items:
+                    assert isinstance(val, bool), f"Row toggle must patch bool, got {type(val)}"
+
+    def test_edit_rollback_on_patch_failure(self):
+        """If patch fails during edit, state must revert to previous value."""
+        state = _two_site_state()
+        loading = pn.Row(visible=False)
+        panel, state = build_plot_selection_panel(
+            state=state, table_loading=loading,
+        )
+        table = None
+        for child in panel.objects:
+            if isinstance(child, pn.widgets.Tabulator):
+                table = child
+                break
+            if isinstance(child, pn.Column):
+                for sub in child.objects:
+                    if isinstance(sub, pn.widgets.Tabulator):
+                        table = sub
+                        break
+            if table:
+                break
+        assert table is not None
+        row_idx = 1
+        col = "0.0"
+        assert state.is_checked("BH-1", 0.0) is True
+
+        table.value.at[table.value.index[row_idx], col] = False
+        original_patch = table.patch
+        def failing_patch(*a, **kw):
+            raise RuntimeError("patch boom")
+        table.patch = failing_patch
+
+        event = type("E", (), {
+            "event_name": "table-edit", "column": col, "row": row_idx,
+            "value": False, "pre": False, "old": True,
+        })()
+        try:
+            for cb in table._on_edit_callbacks:
+                cb(event)
+        except RuntimeError:
+            pass
+
+        assert state.is_checked("BH-1", 0.0) is True, "state must revert on patch failure"

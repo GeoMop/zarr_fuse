@@ -496,8 +496,7 @@ def build_assignment_matrix(
     }
     for col_key in col_keys:
         col_s = str(col_key)
-        color = col_colors.get(col_s, "#94a3b8")
-        header_row[col_s] = f'<span style="color:{color};font-weight:bold">{col_key}</span>'
+        header_row[col_s] = None
         header_row[f"__valid_{col_s}"] = False
     rows.append(header_row)
 
@@ -505,7 +504,7 @@ def build_assignment_matrix(
         eid = sites_lookup.get(str(row_key), np.nan) if row_dim == "entity" else np.nan
         shape_name = row_shapes.get(str(row_key), "circle")
         row: dict = {
-            "_actions": "✕",
+            "_actions": "\u2715",
             "_row_label": f"{SHAPE_TO_SVG.get(shape_name, shape_name)} {str(row_key)}",
             "_row_key": str(row_key),
             "entity_index": eid,
@@ -515,10 +514,10 @@ def build_assignment_matrix(
             valid = selection_state.is_valid(row_key, col_key)
             if valid:
                 checked = selection_state.is_checked(row_key, col_key)
-                row[col_s] = "✓" if bool(checked) else "✗"
+                row[col_s] = bool(checked)
                 row[f"__valid_{col_s}"] = True
             else:
-                row[col_s] = ""
+                row[col_s] = None
                 row[f"__valid_{col_s}"] = False
         rows.append(row)
 
@@ -529,19 +528,19 @@ def build_assignment_matrix(
     editors: dict = {
         "_row_label": None,
         "_actions": None,
-        **{col: None for col in selection_cols},
+        **{col: {"type": "tickCross"} for col in selection_cols},
     }
 
     formatters: dict = {
         "_row_label": {"type": "html"},
-        "_actions": {"type": "button", "label": "✕ Remove", "buttonType": "danger"},
-        **{col: {"type": "html"} for col in selection_cols},
+        "_actions": {"type": "button", "label": "\u2715 Remove", "buttonType": "danger"},
+        **{col: {"type": "tickCross", "allowEmpty": True} for col in selection_cols},
     }
 
     editables: dict = {
         "_row_label": False,
         "_actions": False,
-        **{col: False for col in selection_cols},
+        **{col: True for col in selection_cols},
     }
 
     # Restore original orientation
@@ -741,11 +740,14 @@ def build_plot_selection_panel(
     col_select.param.watch(_sync_orientation, "value")
 
     def _on_table_cell_click(event):
-        """Handle clicks on data cells: row toggle, column toggle, cell toggle, remove."""
+        """Handle clicks on header row, row labels, column headers, remove actions.
+
+        Individual selection-cell edits are handled by ``_on_edit_cell`` via
+        ``table.on_edit()`` — tickCross editor handles the browser-side toggle.
+        """
         col = event.column
         row_idx = event.row
         perf.cell_click_count += 1
-        t_click_start = time.perf_counter()
 
         if col in ("entity_index", "_index") or col.startswith("__valid_"):
             return
@@ -763,9 +765,19 @@ def build_plot_selection_panel(
                 return
             if col == "_row_label":
                 if state._checked_count == state._valid_count:
-                    state.deselect_all(bump_version=False)
+                    state.deselect_all(bump_version=False, bump_layout=False)
+                    for r in range(1, len(table.value)):
+                        for ck in state.col_keys:
+                            ck_s = str(ck)
+                            if table.value.iloc[r].get(f"__valid_{ck_s}", False):
+                                table.patch({ck_s: [(r, False)]}, as_index=False)
                 else:
-                    state.select_all(bump_version=False)
+                    state.select_all(bump_version=False, bump_layout=False)
+                    for r in range(1, len(table.value)):
+                        for ck in state.col_keys:
+                            ck_s = str(ck)
+                            if table.value.iloc[r].get(f"__valid_{ck_s}", False):
+                                table.patch({ck_s: [(r, True)]}, as_index=False)
                 _schedule_bump()
                 return
             _updating_table_local = True
@@ -784,7 +796,10 @@ def build_plot_selection_panel(
                                 break
                     if any_unchecked:
                         break
-                state.set_all_for_column(col, any_unchecked, bump_version=False)
+                state.set_all_for_column(col, any_unchecked, bump_version=False, bump_layout=False)
+                for r in range(1, len(table.value)):
+                    if table.value.iloc[r].get(f"__valid_{col}", False):
+                        table.patch({col: [(r, any_unchecked)]}, as_index=False)
             finally:
                 _updating_table_local = False
             _schedule_bump()
@@ -806,41 +821,70 @@ def build_plot_selection_panel(
                 if state.is_valid(row_key, ck) and not state.is_checked(row_key, ck):
                     any_unchecked = True
                     break
-            state.set_all_for_row(row_key, any_unchecked, bump_version=False)
+            state.set_all_for_row(row_key, any_unchecked, bump_version=False, bump_layout=False)
+            for ck in state.col_keys:
+                ck_s = str(ck)
+                if row_data.get(f"__valid_{ck_s}", False):
+                    table.patch({ck_s: [(row_idx, any_unchecked)]}, as_index=False)
             _schedule_bump()
             return
 
-        # Selection column — toggle individual cell
-        if row_data.get(f"__valid_{col}", False):
-            row_key = row_data["_row_key"]
-            current = state.is_checked(row_key, col)
-            new_checked = not current
-            state.set_checked(row_key, col, new_checked, bump_version=False)
-
-            new_value = "\u2713" if new_checked else "\u2717"
-            t_patch = time.perf_counter()
-            try:
-                table.patch(
-                    {col: [(row_idx, new_value)]},
-                    as_index=False,
-                )
-            except Exception:
-                state.set_checked(
-                    row_key, col, current, bump_version=False,
-                )
-                if table_loading is not None:
-                    table_loading.visible = False
-                raise
-            patch_elapsed = (time.perf_counter() - t_patch) * 1000
-            perf.patch_count += 1
-
-            _schedule_bump()
-            elapsed = (time.perf_counter() - t_click_start) * 1000
-            perf.click_to_rebuild_ms.append(elapsed)
-            print(f"[perf] cell_click #{perf.cell_click_count} ({row_key},{col}): "
-                  f"{elapsed:.1f}ms (state->patch->schedule) patch={patch_elapsed:.1f}ms")
-
     table.on_click(_on_table_cell_click)
+
+    def _on_edit_cell(event):
+        """Handle native tickCross Boolean edits.
+
+        The browser updates the cell display immediately.  This callback
+        synchronises SelectionState and schedules the debounced plot redraw.
+        Invalid edits are reverted without changing state.
+        """
+        col = event.column
+        if col.startswith("__valid_") or col in ("entity_index", "_index",
+                                                   "_row_label", "_actions"):
+            return
+        if table_loading is not None:
+            table_loading.visible = True
+
+        row_idx = event.row
+        row_data = table.value.iloc[row_idx]
+        valid = row_data.get(f"__valid_{col}", False)
+
+        if not valid:
+            if table_loading is not None:
+                table_loading.visible = False
+            return
+
+        row_key = row_data["_row_key"]
+        new_value = bool(event.value)
+        t_edit = time.perf_counter()
+
+        current = state.is_checked(row_key, col)
+        if current == new_value:
+            if table_loading is not None:
+                table_loading.visible = False
+            return
+
+        state.set_checked(row_key, col, new_value, bump_version=False)
+
+        try:
+            table.patch(
+                {col: [(row_idx, new_value)]},
+                as_index=False,
+            )
+        except Exception:
+            state.set_checked(row_key, col, current, bump_version=False)
+            if table_loading is not None:
+                table_loading.visible = False
+            raise
+
+        perf.patch_count += 1
+        _schedule_bump()
+        edit_elapsed = (time.perf_counter() - t_edit) * 1000
+        perf.click_to_rebuild_ms.append(edit_elapsed)
+        print(f"[perf] on_edit ({row_key},{col})={new_value}: "
+              f"{edit_elapsed:.1f}ms (state->patch->schedule)")
+
+    table.on_edit(_on_edit_cell)
 
     def _on_layout_change(event):
         if _skip_layout_rebuild:
@@ -851,21 +895,33 @@ def build_plot_selection_panel(
 
     # ── Column config (Tabulator) ─────────────────────────────────
     def _rebuild_col_styles():
-        col_keys = list(state.col_keys)
+        col_keys_list = list(state.col_keys)
         config_columns = [
-            {"field": "_actions", "width": 20},
-            {"field": "_row_label", "width": 120},
+            {"field": "_actions", "width": 24, "title": "", "headerSort": False},
+            {"field": "_row_label", "width": 120, "title": "", "headerSort": False},
         ]
-        for ck in col_keys:
+        for ck in col_keys_list:
             ck_s = str(ck)
-            config_columns.append({"field": ck_s, "width": 65})
-        table._configuration = {"headerVisible": False, "columns": config_columns}
+            color = state._col_colors.get(ck_s, "#94a3b8")
+            config_columns.append({
+                "field": ck_s,
+                "width": 65,
+                "title": f'<span style="color:{color};font-weight:bold">{ck}</span>',
+                "titleFormatter": "html",
+                "headerSort": False,
+            })
+        table._configuration = {"headerVisible": True, "columns": config_columns}
 
     # ── Header row cell styles ────────────────────────────────────
     def _rebuild_cell_styles():
         parts = [
             '.tabulator-row-0 { background: #1e293b !important; }',
             '.tabulator-row-0 .tabulator-cell[data-field="_row_label"] { cursor: pointer !important; }',
+            '.tabulator-header .tabulator-col { background: #0f172a !important; }',
+            '.tabulator-header .tabulator-col .tabulator-col-content { padding: 4px 2px !important; }',
+            '.tabulator-header .tabulator-col .tabulator-title-editor input { color: #e2e8f0 !important; }',
+            '.tabulator-cell .tabulator-checked .tabulator-icon { color: #10b981 !important; }',
+            '.tabulator-cell .tabulator-unchecked .tabulator-icon { color: #64748b !important; }',
         ]
         table.stylesheets = ["\n".join(parts)]
 

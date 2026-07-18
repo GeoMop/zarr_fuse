@@ -1,8 +1,8 @@
-"""Automated validation of Phase 2: debounce + patch vs rebuild.
+"""Automated validation of Phase 2+3: debounce + patch vs rebuild + Boolean tickCross edits.
 
-Fires events through Panel's Bokeh event dispatch path (table._process_bokeh_event)
-rather than calling the Python handler directly.  Captures all perf metrics
-and verifies acceptance criteria.
+Fires events through Panel's Bokeh event dispatch path (table._process_event)
+rather than calling the Python handler directly.  Selection cell toggles use
+CellEditEvent (_on_edit_cell) per Phase 3; structural ops use CellClickEvent.
 
 Run: python -m pytest dashboard/test/test_validation_phase2.py -v -s
 """
@@ -65,7 +65,7 @@ def _make_full_setup(debounce_ms=_MS):
 
 
 class _CellClickEvent:
-    """Mimics the Bokeh event object that Tabulator._process_event expects."""
+    """Mimics the Bokeh cell_click event object."""
 
     def __init__(self, column: str, row: int):
         self.event_name = "cell_click"
@@ -74,10 +74,43 @@ class _CellClickEvent:
         self.value = None
 
 
+class _CellEditEvent:
+    """Mimics the Bokeh table-edit event object (Phase 3 tickCross edits)."""
+
+    def __init__(self, column: str, row: int, value):
+        self.event_name = "table-edit"
+        self.column = column
+        self.row = row
+        self.value = value
+        self.pre = False
+        self.old = None
+
+
 def _fire_click(table, column: str, row: int):
     """Fire a click through Panel's event dispatch path (same as WebSocket)."""
     event = _CellClickEvent(column, row)
     table._process_event(event)
+
+
+def _fire_edit(table, column: str, row: int, value: bool):
+    """Fire a tickCross edit event through Panel's dispatch path.
+
+    Panel's _process_event overwrites event.value with the DataFrame cell
+    value.  In production the browser syncs the DataFrame before the event
+    arrives, so the cell already holds the new value.  We replicate this by
+    patching the DataFrame *before* dispatching the event.
+    """
+    df = table.value
+    if column in df.columns:
+        df.at[df.index[row], column] = value
+    event = _CellEditEvent(column, row, value)
+    table._process_event(event)
+
+
+def _fire_toggle(table, column: str, row: int, state):
+    """Fire a tickCross edit that toggles the cell (flips current value)."""
+    current = bool(state.is_checked(table.value.iloc[row]["_row_key"], column))
+    _fire_edit(table, column, row, not current)
 
 
 def _cell_value(table, col: str, row_idx: int):
@@ -101,7 +134,7 @@ def _all_checked(table, state):
             is_checked = state.is_checked(row_key, col)
             if is_checked is None:
                 continue
-            expected = "\u2713" if is_checked else "\u2717"
+            expected = is_checked
             if cell_val != expected:
                 mismatches.append(
                     f"  row={idx} col={col} row_key={row_key}: "
@@ -129,13 +162,13 @@ class TestValidationPhase2:
 
         # Click BH-1 at depth 0.0 (row 1, col "0.0") — should toggle unchecked
         assert state.is_checked("BH-1", 0.0) is True
-        _fire_click(table, "0.0", 1)
+        _fire_toggle(table, "0.0", 1, state)
 
         # Immediately after click: cell patched, state updated, no rebuild
         assert perf.patch_count == patches_before + 1, "one patch must have fired"
         assert perf.full_rebuild_count == rebuilds_before, "zero rebuilds"
         assert state.is_checked("BH-1", 0.0) is False, "state must be unchecked"
-        assert _cell_value(table, "0.0", 1) == "\u2717", "table display must show cross"
+        assert _cell_value(table, "0.0", 1) is False, "table display must show unchecked"
         assert state.version == v_before, "version must not change immediately"
 
         # Wait for debounce
@@ -154,15 +187,15 @@ class TestValidationPhase2:
         rebuilds_before = perf.full_rebuild_count
 
         clicks = [
-            ("0.0", 1, "BH-1", 0.0),   # toggle off
-            ("1.0", 1, "BH-1", 1.0),   # toggle off
-            ("1.0", 2, "BH-2", 1.0),   # toggle off
-            ("2.0", 2, "BH-2", 2.0),   # toggle off
-            ("0.0", 1, "BH-1", 0.0),   # toggle back on
+            ("0.0", 1),   # toggle off
+            ("1.0", 1),   # toggle off
+            ("1.0", 2),   # toggle off
+            ("2.0", 2),   # toggle off
+            ("0.0", 1),   # toggle back on
         ]
 
-        for col, row, rk, ck in clicks:
-            _fire_click(table, col, row)
+        for col, row in clicks:
+            _fire_toggle(table, col, row, state)
             _time.sleep(0.003)
 
         # All state changes immediate
@@ -193,12 +226,12 @@ class TestValidationPhase2:
 
         # Start checked. Toggle 5 times: off, on, off, on, off
         for i in range(5):
-            _fire_click(table, "0.0", 1)
+            _fire_toggle(table, "0.0", 1, state)
             _time.sleep(0.003)
 
         # Final state: off (odd number of toggles)
         assert state.is_checked("BH-1", 0.0) is False
-        assert _cell_value(table, "0.0", 1) == "\u2717"
+        assert _cell_value(table, "0.0", 1) is False
 
         _time.sleep(_WAIT)
         assert state.version == v_before + 1, "exactly one version bump"
@@ -215,7 +248,7 @@ class TestValidationPhase2:
         v_before = state.version
 
         # Click a cell to schedule a bump
-        _fire_click(table, "0.0", 1)
+        _fire_toggle(table, "0.0", 1, state)
         _time.sleep(0.003)
         assert state.version == v_before, "bump not yet fired"
 
@@ -262,7 +295,7 @@ class TestValidationPhase2:
         panel, state, table, loading = _make_full_setup()
         v_before = state.version
 
-        _fire_click(table, "0.0", 1)
+        _fire_toggle(table, "0.0", 1, state)
         _time.sleep(0.003)
 
         # add_site triggers _cancel_panel_bump
@@ -281,7 +314,7 @@ class TestValidationPhase2:
         panel, state, table, loading = _make_full_setup()
         v_before = state.version
 
-        _fire_click(table, "0.0", 1)
+        _fire_toggle(table, "0.0", 1, state)
         _time.sleep(0.003)
 
         state.add_site(0, "BH-1", [0.0, 1.0, 5.0], [[1, 2, 9], [3, 4, 10]], ["2020-01-01", "2020-01-02"], force=True)
@@ -297,7 +330,7 @@ class TestValidationPhase2:
         panel, state, table, loading = _make_full_setup()
         v_before = state.version
 
-        _fire_click(table, "0.0", 1)
+        _fire_toggle(table, "0.0", 1, state)
         _time.sleep(0.003)
 
         state.clear()
@@ -319,7 +352,7 @@ class TestValidationPhase2:
         for col, row in [("0.0", 1), ("1.0", 1), ("1.0", 2), ("2.0", 2),
                          ("0.0", 1), ("1.0", 1), ("1.0", 2), ("2.0", 2),
                          ("0.0", 1), ("1.0", 1)]:
-            _fire_click(table, col, row)
+            _fire_toggle(table, col, row, state)
             _time.sleep(0.003)
 
         _time.sleep(_WAIT)
@@ -331,7 +364,7 @@ class TestValidationPhase2:
         panel, state, table, loading = _make_full_setup()
 
         for col, row in [("0.0", 1), ("1.0", 2), ("2.0", 2)]:
-            _fire_click(table, col, row)
+            _fire_toggle(table, col, row, state)
             assert loading.visible is True, "loading must be visible immediately after click"
             _time.sleep(_WAIT)
             assert loading.visible is False, "loading must be hidden after debounce"
@@ -341,7 +374,7 @@ class TestValidationPhase2:
         panel, state, table, loading = _make_full_setup()
         try:
             for col, row in [("0.0", 1), ("1.0", 1), ("1.0", 2), ("2.0", 2)]:
-                _fire_click(table, col, row)
+                _fire_toggle(table, col, row, state)
                 _time.sleep(0.003)
             _time.sleep(_WAIT)
         except Exception as e:
@@ -350,7 +383,7 @@ class TestValidationPhase2:
     def test_stale_callback_does_not_fire_later(self):
         """After debounce settles, no further version increments must occur."""
         panel, state, table, loading = _make_full_setup()
-        _fire_click(table, "0.0", 1)
+        _fire_toggle(table, "0.0", 1, state)
         _time.sleep(_WAIT)
         v_settled = state.version
 
@@ -375,7 +408,7 @@ class TestValidationPhase2:
             ("0.0", 1), ("1.0", 1), ("0.0", 1),
         ]
         for col, row in clicks:
-            _fire_click(table, col, row)
+            _fire_toggle(table, col, row, state)
             _time.sleep(0.003)
 
         _time.sleep(_WAIT)
