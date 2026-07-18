@@ -847,12 +847,6 @@ def build_plot_selection_panel(
 
         row_idx = event.row
         row_data = table.value.iloc[row_idx]
-        valid = row_data.get(f"__valid_{col}", False)
-
-        if not valid:
-            if table_loading is not None:
-                table_loading.visible = False
-            return
 
         row_key = row_data["_row_key"]
         new_value = bool(event.value)

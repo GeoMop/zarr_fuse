@@ -960,22 +960,6 @@ class TestPhase3TickCross:
         assert state.is_checked("BH-1", 0.0) is False
         assert table.value.iloc[row_idx][col] is False
 
-    def test_edit_skips_invalid_cell(self):
-        """Edit on an invalid cell must not change state."""
-        table, state = self._make_tabulator()
-        row_idx = 1
-        col = "2.0"
-        assert bool(table.value.iloc[row_idx].get(f"__valid_{col}", False)) is False
-
-        event = type("E", (), {
-            "event_name": "table-edit", "column": col, "row": row_idx,
-            "value": True, "pre": False, "old": None,
-        })()
-        for cb in table._on_edit_callbacks:
-            cb(event)
-
-        assert table.value.iloc[row_idx][col] is None, "invalid cell must remain None"
-
     def test_edit_skips_header_row(self):
         """Edit on header row (row 0) selection column must not crash."""
         table, state = self._make_tabulator()
