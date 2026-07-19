@@ -7,6 +7,7 @@ import time
 import numpy as np
 import panel as pn
 import param
+from panel.io.model import JSCode
 
 
 class _PerfMetrics:
@@ -434,6 +435,20 @@ def resolve_available_dimensions(
     return dims
 
 
+_SELECTION_FORMATTER = JSCode("""function(cell, formatterParams, onRendered) {
+    var data = cell.getRow().getData();
+    if (data._row_key === 'All') {
+        var color = formatterParams.color || '#94a3b8';
+        return '<span style="color:' + color + ';font-weight:bold">' + cell.getField() + '</span>';
+    } else if (cell.getValue() === true) {
+        return '<span style="color:#10b981">&#10003;</span>';
+    } else if (cell.getValue() === false) {
+        return '<span style="color:#64748b">&#10007;</span>';
+    }
+    return '';
+}""")
+
+
 def build_assignment_matrix(
     selection_state: SelectionState,
     row_dim: str | None = None,
@@ -534,7 +549,7 @@ def build_assignment_matrix(
     formatters: dict = {
         "_row_label": {"type": "html"},
         "_actions": {"type": "button", "label": "\u2715 Remove", "buttonType": "danger"},
-        **{col: {"type": "tickCross", "allowEmpty": True} for col in selection_cols},
+        **{col: {"type": _SELECTION_FORMATTER, "color": col_colors[col]} for col in selection_cols},
     }
 
     editables: dict = {
@@ -847,6 +862,8 @@ def build_plot_selection_panel(
             table_loading.visible = True
 
         row_idx = event.row
+        if row_idx == 0:
+            return
         row_data = table.value.iloc[row_idx]
 
         row_key = row_data["_row_key"]
@@ -880,31 +897,23 @@ def build_plot_selection_panel(
     def _rebuild_col_styles():
         col_keys_list = list(state.col_keys)
         config_columns = [
-            {"field": "_actions", "width": 24, "title": "", "headerSort": False},
-            {"field": "_row_label", "width": 120, "title": "", "headerSort": False},
+            {"field": "_actions", "width": 24, "headerSort": False},
+            {"field": "_row_label", "width": 120, "headerSort": False},
         ]
         for ck in col_keys_list:
             ck_s = str(ck)
-            color = state._col_colors.get(ck_s, "#94a3b8")
             config_columns.append({
                 "field": ck_s,
                 "width": 65,
-                "title": f'<span style="color:{color};font-weight:bold">{ck}</span>',
-                "titleFormatter": "html",
                 "headerSort": False,
             })
-        table._configuration = {"headerVisible": True, "columns": config_columns}
+        table._configuration = {"headerVisible": False, "columns": config_columns}
 
     # ── Header row cell styles ────────────────────────────────────
     def _rebuild_cell_styles():
         parts = [
             '.tabulator-row-0 { background: #1e293b !important; }',
             '.tabulator-row-0 .tabulator-cell[data-field="_row_label"] { cursor: pointer !important; }',
-            '.tabulator-header .tabulator-col { background: #0f172a !important; }',
-            '.tabulator-header .tabulator-col .tabulator-col-content { padding: 4px 2px !important; }',
-            '.tabulator-header .tabulator-col .tabulator-title-editor input { color: #e2e8f0 !important; }',
-            '.tabulator-cell .tabulator-checked .tabulator-icon { color: #10b981 !important; }',
-            '.tabulator-cell .tabulator-unchecked .tabulator-icon { color: #64748b !important; }',
         ]
         table.stylesheets = ["\n".join(parts)]
 

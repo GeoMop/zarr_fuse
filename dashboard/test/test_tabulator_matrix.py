@@ -10,7 +10,7 @@ import pandas as pd
 import panel as pn
 import pytest
 
-from dashboard.plot_selection import SelectionState, build_assignment_matrix, build_plot_selection_panel
+from dashboard.plot_selection import SelectionState, build_assignment_matrix, build_plot_selection_panel, _SELECTION_FORMATTER
 
 
 def _two_site_state():
@@ -101,12 +101,12 @@ class TestFormatters:
         assert formatters["_actions"]["label"] == "\u2715 Remove"
         assert formatters["_actions"]["buttonType"] == "danger"
 
-    def test_boolean_formatters_tickcross(self):
+    def test_boolean_formatters_jscode(self):
         state = _two_site_state()
         _, _, formatters, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         for col in ["0.0", "1.0", "2.0"]:
-            assert formatters[col]["type"] == "tickCross"
-            assert formatters[col]["allowEmpty"] is True
+            assert formatters[col]["type"] is _SELECTION_FORMATTER
+            assert "color" in formatters[col]
 
 
 class TestEditables:
@@ -773,12 +773,12 @@ class TestPhase3TickCross:
         for col in ["0.0", "1.0", "2.0"]:
             assert editors[col]["type"] == "tickCross"
 
-    def test_formatter_is_tickcross_with_allow_empty(self):
-        """Selection columns must use tickCross formatter with allowEmpty=True."""
+    def test_formatter_is_jscode_with_color(self):
+        """Selection columns must use JSCode formatter with per-column color."""
         _, _, formatters, _, _, _ = build_assignment_matrix(_two_site_state(), "entity", "vertical")
         for col in ["0.0", "1.0", "2.0"]:
-            assert formatters[col]["type"] == "tickCross"
-            assert formatters[col]["allowEmpty"] is True
+            assert formatters[col]["type"] is _SELECTION_FORMATTER
+            assert "color" in formatters[col]
 
     def test_selection_columns_are_editable(self):
         """Selection columns must be editable for tickCross interaction."""
@@ -835,8 +835,9 @@ class TestPhase3TickCross:
         assert table.value.iloc[row_idx][col] is False
 
     def test_edit_skips_header_row(self):
-        """Edit on header row (row 0) selection column must not crash."""
+        """Edit on header row (row 0) selection column must not change state."""
         table, state = self._make_tabulator()
+        row_key_before = table.value.iloc[0]["_row_key"]
         event = type("E", (), {
             "event_name": "table-edit", "column": "0.0", "row": 0,
             "value": True, "pre": False, "old": None,
@@ -846,6 +847,7 @@ class TestPhase3TickCross:
                 cb(event)
         except (IndexError, KeyError):
             pytest.fail("Edit on header row must not raise")
+        assert table.value.iloc[0]["_row_key"] == row_key_before
 
     def test_boolean_values_survive_rebuild(self):
         """After _rebuild_table, valid cells must still be Boolean."""
