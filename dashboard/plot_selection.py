@@ -22,7 +22,6 @@ class _PerfMetrics:
     def reset(self):
         self.cell_click_count = 0
         self.full_rebuild_count = 0
-        self.patch_count = 0
         self.version_bump_count = 0
         self.click_to_rebuild_ms: list[float] = []
         self.rebuild_duration_ms: list[float] = []
@@ -38,7 +37,7 @@ class _PerfMetrics:
         )
         return (
             f"[PerfMetrics] clicks={self.cell_click_count} "
-            f"full_rebuilds={self.full_rebuild_count} patches={self.patch_count} "
+            f"full_rebuilds={self.full_rebuild_count} "
             f"version_bumps={self.version_bump_count} "
             f"click->rebuild_avg={click_avg:.1f}ms "
             f"rebuild_avg={rebuild_avg:.1f}ms"
@@ -646,15 +645,13 @@ def build_plot_selection_panel(
     )
 
     _orientation_lock = False
-    _updating_table = False
     _skip_layout_rebuild = False
     _bump_timer = None
     _bump_generation = 0
 
     def _rebuild_table():
-        nonlocal _updating_table, _skip_layout_rebuild
+        nonlocal _skip_layout_rebuild
         _skip_layout_rebuild = False
-        _updating_table = True
         perf.full_rebuild_count += 1
         t0 = time.perf_counter()
         try:
@@ -673,17 +670,9 @@ def build_plot_selection_panel(
             table.hidden_columns = new_hidden
             _rebuild_cell_styles()
         finally:
-            _updating_table = False
             elapsed = (time.perf_counter() - t0) * 1000
             perf.rebuild_duration_ms.append(elapsed)
             print(f"[perf] _rebuild_table #{perf.full_rebuild_count}: {elapsed:.1f}ms")
-
-    def _schedule_rebuild():
-        doc = pn.state.curdoc
-        if doc is not None:
-            doc.add_timeout_callback(_rebuild_table, 50)
-        else:
-            _rebuild_table()
 
     def _cancel_bump_timer(*, clear_loading=False):
         nonlocal _bump_timer
@@ -795,28 +784,24 @@ def build_plot_selection_panel(
                                 table.patch({ck_s: [(r, True)]}, as_index=False)
                 _schedule_bump()
                 return
-            _updating_table_local = True
-            try:
-                any_unchecked = False
-                for site in state._sites:
-                    for d in np.asarray(site["depths"]).ravel():
-                        if state.col_dim == "vertical":
-                            col_matches = (float(d) == float(col))
-                        else:
-                            col_matches = (str(site["site_id"]) == str(col))
-                        if col_matches:
-                            key = (str(site["site_id"]), float(d))
-                            if key not in state._checked:
-                                any_unchecked = True
-                                break
-                    if any_unchecked:
-                        break
-                state.set_all_for_column(col, any_unchecked, bump_version=False, bump_layout=False)
-                for r in range(1, len(table.value)):
-                    if table.value.iloc[r].get(f"__valid_{col}", False):
-                        table.patch({col: [(r, any_unchecked)]}, as_index=False)
-            finally:
-                _updating_table_local = False
+            any_unchecked = False
+            for site in state._sites:
+                for d in np.asarray(site["depths"]).ravel():
+                    if state.col_dim == "vertical":
+                        col_matches = (float(d) == float(col))
+                    else:
+                        col_matches = (str(site["site_id"]) == str(col))
+                    if col_matches:
+                        key = (str(site["site_id"]), float(d))
+                        if key not in state._checked:
+                            any_unchecked = True
+                            break
+                if any_unchecked:
+                    break
+            state.set_all_for_column(col, any_unchecked, bump_version=False, bump_layout=False)
+            for r in range(1, len(table.value)):
+                if table.value.iloc[r].get(f"__valid_{col}", False):
+                    table.patch({col: [(r, any_unchecked)]}, as_index=False)
             _schedule_bump()
             return
 
@@ -832,7 +817,6 @@ def build_plot_selection_panel(
             row_key = row_data["_row_key"]
             any_unchecked = False
             for ck in state.col_keys:
-                ck_s = str(ck)
                 if state.is_valid(row_key, ck) and not state.is_checked(row_key, ck):
                     any_unchecked = True
                     break
