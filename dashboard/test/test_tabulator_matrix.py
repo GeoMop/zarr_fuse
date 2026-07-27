@@ -23,7 +23,7 @@ def _two_site_state():
 class TestMatrixShape:
     def test_entity_rows_vertical_cols(self):
         state = _two_site_state()
-        df, editors, formatters, editables, rshapes, ccolors = build_assignment_matrix(
+        df, editors, formatters, rshapes, ccolors = build_assignment_matrix(
             state, "entity", "vertical"
         )
         assert len(df) == 3  # header row + 2 sites
@@ -32,7 +32,7 @@ class TestMatrixShape:
 
     def test_vertical_rows_entity_cols(self):
         state = _two_site_state()
-        df, _, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
+        df, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
         assert len(df) == 4  # header row + 3 unique depths
         # 1 label col (_row_label) + 1 raw key (_row_key) + 2 internal + 2 site + 2 hidden valid = 8
         assert df.shape[1] == 8
@@ -41,14 +41,14 @@ class TestMatrixShape:
 class TestDataFrameContent:
     def test_row_labels(self):
         state = _two_site_state()
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert df["_row_label"].iloc[0] == "All"
         assert str(df["_row_label"].iloc[1]).endswith("BH-1")
         assert str(df["_row_label"].iloc[2]).endswith("BH-2")
 
     def test_row_labels_swapped(self):
         state = _two_site_state()
-        df, _, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
+        df, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
         assert df["_row_label"].iloc[0] == "All"
         assert str(df["_row_label"].iloc[1]).endswith("0.0")
         assert str(df["_row_label"].iloc[2]).endswith("1.0")
@@ -56,7 +56,7 @@ class TestDataFrameContent:
 
     def test_hidden_validity_columns(self):
         state = _two_site_state()
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert "__valid_0.0" in df.columns
         assert "__valid_1.0" in df.columns
         assert "__valid_2.0" in df.columns
@@ -64,7 +64,7 @@ class TestDataFrameContent:
     def test_invalid_cell_empty_string(self):
         """BH-1 has depths [0.0, 1.0]; 2.0 should be None (empty for tickCross)."""
         state = _two_site_state()
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         bh1 = df[df["_row_label"].str.endswith("BH-1")].iloc[0]
         assert bh1["2.0"] is None
         assert bool(bh1["__valid_2.0"]) is False
@@ -72,7 +72,7 @@ class TestDataFrameContent:
 
     def test_valid_cell_display(self):
         state = _two_site_state()
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         bh2 = df[df["_row_label"].str.endswith("BH-2")].iloc[0]
         assert bh2["1.0"] is True
         assert bool(bh2["__valid_1.0"]) is True
@@ -81,13 +81,13 @@ class TestDataFrameContent:
 class TestEditors:
     def test_label_marker_actions_editors_none(self):
         state = _two_site_state()
-        _, editors, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        _, editors, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert editors["_row_label"] is None
         assert editors["_actions"] is None
 
     def test_boolean_editors_tickcross(self):
         state = _two_site_state()
-        _, editors, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        _, editors, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         for col in ["0.0", "1.0", "2.0"]:
             assert editors[col] == {"type": "tickCross"}
 
@@ -95,7 +95,7 @@ class TestEditors:
 class TestFormatters:
     def test_label_formatters_text(self):
         state = _two_site_state()
-        _, _, formatters, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        _, _, formatters, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert formatters["_row_label"]["type"] is _ROW_LABEL_FORMATTER
         assert formatters["_actions"]["type"] == "button"
         assert formatters["_actions"]["label"] == "\u2715 Remove"
@@ -103,34 +103,21 @@ class TestFormatters:
 
     def test_boolean_formatters_jscode(self):
         state = _two_site_state()
-        _, _, formatters, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        _, _, formatters, _, _ = build_assignment_matrix(state, "entity", "vertical")
         for col in ["0.0", "1.0", "2.0"]:
             assert formatters[col]["type"] is _SELECTION_FORMATTER
             assert "color" in formatters[col]
 
 
-class TestEditables:
-    def test_labels_not_editable(self):
-        state = _two_site_state()
-        _, _, _, editables, _, _ = build_assignment_matrix(state, "entity", "vertical")
-        assert editables["_row_label"] is False
-
-    def test_boolean_cols_editable(self):
-        state = _two_site_state()
-        _, _, _, editables, _, _ = build_assignment_matrix(state, "entity", "vertical")
-        for col in ["0.0", "1.0", "2.0"]:
-            assert editables[col] is True
-
-
 class TestStyleMaps:
     def test_row_shapes_assigned(self):
         state = _two_site_state()
-        _, _, _, _, rshapes, _ = build_assignment_matrix(state, "entity", "vertical")
+        _, _, _, rshapes, _ = build_assignment_matrix(state, "entity", "vertical")
         assert set(rshapes.keys()) == {"BH-1", "BH-2"}
 
     def test_col_colors_assigned(self):
         state = _two_site_state()
-        _, _, _, _, _, ccolors = build_assignment_matrix(state, "entity", "vertical")
+        _, _, _, _, ccolors = build_assignment_matrix(state, "entity", "vertical")
         assert set(ccolors.keys()) == {"0.0", "1.0", "2.0"}
 
     def test_style_maps_on_state(self):
@@ -146,11 +133,11 @@ class TestOrientationSwapPreservesSelection:
         state.set_checked("BH-1", 0.0, False)
         state.set_checked("BH-2", 2.0, True)
 
-        df1, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df1, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert df1[df1["_row_label"].str.endswith("BH-1")].iloc[0]["0.0"] is False
         assert df1[df1["_row_label"].str.endswith("BH-2")].iloc[0]["2.0"] is True
 
-        df2, _, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
+        df2, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
         depth0_row = df2[df2["_row_label"].str.endswith("0.0")].iloc[0]
         # BH-1 at depth 0.0 was unchecked
         assert depth0_row["BH-1"] is False
@@ -180,7 +167,7 @@ class TestStateOrientationRestored:
 class TestEdgeCases:
     def test_empty_state(self):
         state = SelectionState()
-        df, editors, formatters, editables, rshapes, ccolors = build_assignment_matrix(
+        df, editors, formatters, rshapes, ccolors = build_assignment_matrix(
             state, "entity", "vertical"
         )
         assert len(df) == 1  # just the header row
@@ -192,7 +179,7 @@ class TestEdgeCases:
     def test_single_site(self):
         state = SelectionState()
         state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"])
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert len(df) == 2  # header row + 1 site
         assert str(df.iloc[1]["_row_label"]).endswith("BH-1")
 
@@ -200,14 +187,14 @@ class TestEdgeCases:
         state = SelectionState()
         state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"])
         state.add_site(1, "BH-2", [5.0], [[1]], ["2020-01-01"])
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert "entity_index" in df.columns
         assert list(df["entity_index"])[1:] == [0.0, 1.0]
 
     def test_entity_index_nan_in_vertical_mode(self):
         state = SelectionState()
         state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"])
-        df, _, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
+        df, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
         assert "entity_index" in df.columns
         # header row has NaN, data row also has NaN in vertical mode
         assert all(np.isnan(v) for v in df["entity_index"])
@@ -218,7 +205,7 @@ class TestIndividualCellPatch:
 
     def _make_tabulator(self):
         state = _two_site_state()
-        df, editors, formatters, editables, _, _ = build_assignment_matrix(
+        df, editors, formatters, _, _ = build_assignment_matrix(
             state, "entity", "vertical"
         )
         hidden = [c for c in df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")]
@@ -731,7 +718,7 @@ class TestPhase3TickCross:
 
     def _make_tabulator(self):
         state = _two_site_state()
-        df, editors, formatters, editables, _, _ = build_assignment_matrix(
+        df, editors, formatters, _, _ = build_assignment_matrix(
             state, "entity", "vertical"
         )
         hidden = [c for c in df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")]
@@ -751,7 +738,7 @@ class TestPhase3TickCross:
     def test_valid_cells_are_boolean(self):
         """Valid cells must contain Python bool, not string tick/cross."""
         state = _two_site_state()
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         bh1 = df[df["_row_label"].str.endswith("BH-1")].iloc[0]
         assert isinstance(bh1["0.0"], bool)
         assert bh1["0.0"] is True
@@ -761,7 +748,7 @@ class TestPhase3TickCross:
     def test_invalid_cells_are_none(self):
         """Invalid cells must contain None (empty for tickCross formatter)."""
         state = _two_site_state()
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         bh1 = df[df["_row_label"].str.endswith("BH-1")].iloc[0]
         assert bh1["2.0"] is None
         bh2 = df[df["_row_label"].str.endswith("BH-2")].iloc[0]
@@ -769,22 +756,16 @@ class TestPhase3TickCross:
 
     def test_editor_is_tickcross(self):
         """Selection columns must use tickCross editor."""
-        _, editors, _, _, _, _ = build_assignment_matrix(_two_site_state(), "entity", "vertical")
+        _, editors, _, _, _ = build_assignment_matrix(_two_site_state(), "entity", "vertical")
         for col in ["0.0", "1.0", "2.0"]:
             assert editors[col]["type"] == "tickCross"
 
     def test_formatter_is_jscode_with_color(self):
         """Selection columns must use JSCode formatter with per-column color."""
-        _, _, formatters, _, _, _ = build_assignment_matrix(_two_site_state(), "entity", "vertical")
+        _, _, formatters, _, _ = build_assignment_matrix(_two_site_state(), "entity", "vertical")
         for col in ["0.0", "1.0", "2.0"]:
             assert formatters[col]["type"] is _SELECTION_FORMATTER
             assert "color" in formatters[col]
-
-    def test_selection_columns_are_editable(self):
-        """Selection columns must be editable for tickCross interaction."""
-        _, _, _, editables, _, _ = build_assignment_matrix(_two_site_state(), "entity", "vertical")
-        for col in ["0.0", "1.0", "2.0"]:
-            assert editables[col] is True
 
     def test_on_click_ignores_selection_data_cells(self):
         """Clicking a selection cell on a data row must not toggle state."""
@@ -853,7 +834,7 @@ class TestPhase3TickCross:
         """After _rebuild_table, valid cells must still be Boolean."""
         state = _two_site_state()
         state.set_checked("BH-1", 0.0, False)
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         bh1 = df[df["_row_label"].str.endswith("BH-1")].iloc[0]
         assert bh1["0.0"] is False
         assert bh1["1.0"] is True
@@ -865,10 +846,10 @@ class TestPhase3TickCross:
         """After orientation swap, cells must still be Boolean."""
         state = _two_site_state()
         state.set_checked("BH-1", 0.0, False)
-        df1, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df1, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert df1[df1["_row_label"].str.endswith("BH-1")].iloc[0]["0.0"] is False
 
-        df2, _, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
+        df2, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
         depth0 = df2[df2["_row_label"].str.endswith("0.0")].iloc[0]
         assert depth0["BH-1"] is False
         assert isinstance(depth0["BH-1"], bool)
@@ -876,7 +857,7 @@ class TestPhase3TickCross:
     def test_column_toggle_patches_boolean(self):
         """Column header click must patch Boolean values to all valid rows."""
         state = _two_site_state()
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         table = pn.widgets.Tabulator(
             df,
             editors={"0.0": {"type": "tickCross"}, "1.0": {"type": "tickCross"}, "2.0": {"type": "tickCross"}},
@@ -907,7 +888,7 @@ class TestPhase3TickCross:
     def test_select_all_patches_boolean(self):
         """Clicking _row_label on header row must patch Boolean True to all valid cells."""
         state = _two_site_state()
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         table = pn.widgets.Tabulator(
             df,
             hidden_columns=[c for c in df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")],
@@ -938,7 +919,7 @@ class TestPhase3TickCross:
     def test_row_toggle_patches_boolean(self):
         """Row label click must patch Boolean values to all valid columns."""
         state = _two_site_state()
-        df, _, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
+        df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         table = pn.widgets.Tabulator(
             df,
             hidden_columns=[c for c in df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")],

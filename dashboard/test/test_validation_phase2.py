@@ -416,8 +416,8 @@ class TestValidationPhase2:
         print(f"\n[validation] rebuilds={rebuilds_after - rebuilds_before} "
               f"bumps={bumps_after - bumps_before}")
         print(f"[validation] click->patch avg: "
-              f"{sum(perf.click_to_rebuild_ms)/len(perf.click_to_rebuild_ms):.2f}ms"
-              if perf.click_to_rebuild_ms else "")
+              f"{sum(perf.edit_handler_ms)/len(perf.edit_handler_ms):.2f}ms"
+              if perf.edit_handler_ms else "")
         print(perf.report())
 
         assert rebuilds_after - rebuilds_before == 0, \

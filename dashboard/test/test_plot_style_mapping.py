@@ -36,12 +36,12 @@ def _one_site_n_depths(count: int):
 class TestRowShapesCycle:
     def test_fewer_rows_than_shapes(self):
         state = _one_site_one_depth()
-        _, _, _, _, rshapes, _ = build_assignment_matrix(state, "entity", "vertical")
+        _, _, _, rshapes, _ = build_assignment_matrix(state, "entity", "vertical")
         assert rshapes == {"BH-1": "circle"}
 
     def test_shapes_cycle(self):
         state = _n_sites(len(MARKER_SHAPES) + 1)
-        _, _, _, _, rshapes, _ = build_assignment_matrix(state, "entity", "vertical")
+        _, _, _, rshapes, _ = build_assignment_matrix(state, "entity", "vertical")
         assert len(rshapes) == len(MARKER_SHAPES) + 1
         # First row → "circle", last row (index 13) → "circle" again (cycles)
         assert rshapes["BH-0"] == "circle"
@@ -51,12 +51,12 @@ class TestRowShapesCycle:
 class TestColColorsCycle:
     def test_fewer_cols_than_colors(self):
         state = _one_site_one_depth()
-        _, _, _, _, _, ccolors = build_assignment_matrix(state, "entity", "vertical")
+        _, _, _, _, ccolors = build_assignment_matrix(state, "entity", "vertical")
         assert ccolors == {"5.0": "#e6194b"}
 
     def test_colors_cycle(self):
         state = _one_site_n_depths(len(COLORS) + 1)
-        _, _, _, _, _, ccolors = build_assignment_matrix(state, "entity", "vertical")
+        _, _, _, _, ccolors = build_assignment_matrix(state, "entity", "vertical")
         assert len(ccolors) == len(COLORS) + 1
         keys = sorted(ccolors.keys(), key=float)
         assert ccolors[keys[0]] == COLORS[0]
@@ -67,7 +67,7 @@ class TestStyleMapsSwap:
     def test_vertical_rows_entity_cols(self):
         """Shapes → depths, colors → sites."""
         state = _n_sites(3)
-        _, _, _, _, rshapes, ccolors = build_assignment_matrix(state, "vertical", "entity")
+        _, _, _, rshapes, ccolors = build_assignment_matrix(state, "vertical", "entity")
         assert set(rshapes.keys()) == {"0.0"}          # a single depth
         assert set(ccolors.keys()) == {"BH-0", "BH-1", "BH-2"}
         assert rshapes["0.0"] == "circle"

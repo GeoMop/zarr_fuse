@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import threading
 import time
+
 import numpy as np
+import pandas as pd
 import panel as pn
 import param
 from panel.io.model import JSCode
+
+from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_SVG
 
 
 class _PerfMetrics:
@@ -23,13 +27,13 @@ class _PerfMetrics:
         self.cell_click_count = 0
         self.full_rebuild_count = 0
         self.version_bump_count = 0
-        self.click_to_rebuild_ms: list[float] = []
+        self.edit_handler_ms: list[float] = []
         self.rebuild_duration_ms: list[float] = []
 
     def report(self) -> str:
         click_avg = (
-            sum(self.click_to_rebuild_ms) / len(self.click_to_rebuild_ms)
-            if self.click_to_rebuild_ms else 0.0
+            sum(self.edit_handler_ms) / len(self.edit_handler_ms)
+            if self.edit_handler_ms else 0.0
         )
         rebuild_avg = (
             sum(self.rebuild_duration_ms) / len(self.rebuild_duration_ms)
@@ -377,11 +381,6 @@ class SelectionState(param.Parameterized):
         return sorted(result)
 
 
-from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_SVG
-
-import pandas as pd
-
-
 def resolve_available_dimensions(
     endpoint_config: dict | None = None,
     group_path: str | None = None,
@@ -653,11 +652,23 @@ function(cell) {
 """)
 
 
+def _hidden_columns(df: pd.DataFrame, row_dim: str) -> list[str]:
+    """Return list of columns to hide in the Tabulator widget."""
+    hidden = [
+        c
+        for c in df.columns
+        if c.startswith("__valid_") or c in ("entity_index", "_row_key")
+    ]
+    if row_dim != "entity":
+        hidden.append("_actions")
+    return hidden
+
+
 def build_assignment_matrix(
     selection_state: SelectionState,
     row_dim: str | None = None,
     col_dim: str | None = None,
-) -> tuple[pd.DataFrame, dict, dict, dict, dict[str, str], dict[str, str]]:
+) -> tuple[pd.DataFrame, dict, dict, dict[str, str], dict[str, str]]:
     """Build a Tabulator-ready assignment matrix from *selection_state*.
 
     Returns
@@ -669,8 +680,6 @@ def build_assignment_matrix(
         Per-column Tabulator editor config.
     formatters : dict
         Per-column Tabulator formatter config.
-    editables : dict
-        Per-column boolean editability flag.
     row_shapes : dict
         ``{row_key: marker_shape_name}``
     col_colors : dict
@@ -683,90 +692,84 @@ def build_assignment_matrix(
 
     # Temporarily switch state orientation so is_valid / is_checked
     # use the requested dimensions, then restore originals.
-    _orig_row = selection_state.row_dim
-    _orig_col = selection_state.col_dim
+    original_row_dim = selection_state.row_dim
+    original_col_dim = selection_state.col_dim
     selection_state.row_dim = row_dim
     selection_state.col_dim = col_dim
 
-    row_keys = list(selection_state.row_keys)
-    col_keys = list(selection_state.col_keys)
+    try:
+        row_keys = list(selection_state.row_keys)
+        col_keys = list(selection_state.col_keys)
 
-    row_shapes: dict[str, str] = {
-        str(rk): MARKER_SHAPES[i % len(MARKER_SHAPES)]
-        for i, rk in enumerate(row_keys)
-    }
-    col_colors: dict[str, str] = {
-        str(ck): COLORS[i % len(COLORS)]
-        for i, ck in enumerate(col_keys)
-    }
+        row_shapes: dict[str, str] = {
+            str(rk): MARKER_SHAPES[i % len(MARKER_SHAPES)]
+            for i, rk in enumerate(row_keys)
+        }
+        col_colors: dict[str, str] = {
+            str(ck): COLORS[i % len(COLORS)]
+            for i, ck in enumerate(col_keys)
+        }
 
-    selection_state._row_shapes = row_shapes
-    selection_state._col_colors = col_colors
+        selection_state._row_shapes = row_shapes
+        selection_state._col_colors = col_colors
 
-    rows: list[dict] = []
-    sites_lookup = {str(s["site_id"]): s["entity_index"] for s in selection_state.sites}
+        rows: list[dict] = []
+        sites_lookup = {str(s["site_id"]): s["entity_index"] for s in selection_state.sites}
 
-    # ── Header row (row 0) — column labels ──
-    header_row: dict = {
-        "_actions": "",
-        "_row_label": "All",
-        "_row_key": "All",
-        "entity_index": np.nan,
-    }
-    for col_key in col_keys:
-        col_s = str(col_key)
-        header_row[col_s] = None
-        header_row[f"__valid_{col_s}"] = False
-    rows.append(header_row)
-
-    for i, row_key in enumerate(row_keys):
-        eid = sites_lookup.get(str(row_key), np.nan) if row_dim == "entity" else np.nan
-        shape_name = row_shapes.get(str(row_key), "circle")
-        row: dict = {
-            "_actions": "\u2715",
-            "_row_label": f"{SHAPE_TO_SVG.get(shape_name, shape_name)} {str(row_key)}",
-            "_row_key": str(row_key),
-            "entity_index": eid,
+        # ── Header row (row 0) — column labels ──
+        header_row: dict = {
+            "_actions": "",
+            "_row_label": "All",
+            "_row_key": "All",
+            "entity_index": np.nan,
         }
         for col_key in col_keys:
             col_s = str(col_key)
-            valid = selection_state.is_valid(row_key, col_key)
-            if valid:
-                checked = selection_state.is_checked(row_key, col_key)
-                row[col_s] = bool(checked)
-                row[f"__valid_{col_s}"] = True
-            else:
-                row[col_s] = None
-                row[f"__valid_{col_s}"] = False
-        rows.append(row)
+            header_row[col_s] = None
+            header_row[f"__valid_{col_s}"] = False
+        rows.append(header_row)
 
-    df = pd.DataFrame(rows)
+        for row_key in row_keys:
+            eid = sites_lookup.get(str(row_key), np.nan) if row_dim == "entity" else np.nan
+            shape_name = row_shapes.get(str(row_key), "circle")
+            row: dict = {
+                "_actions": "\u2715",
+                "_row_label": f"{SHAPE_TO_SVG.get(shape_name, shape_name)} {str(row_key)}",
+                "_row_key": str(row_key),
+                "entity_index": eid,
+            }
+            for col_key in col_keys:
+                col_s = str(col_key)
+                valid = selection_state.is_valid(row_key, col_key)
+                if valid:
+                    checked = selection_state.is_checked(row_key, col_key)
+                    row[col_s] = bool(checked)
+                    row[f"__valid_{col_s}"] = True
+                else:
+                    row[col_s] = None
+                    row[f"__valid_{col_s}"] = False
+            rows.append(row)
 
-    selection_cols = [str(ck) for ck in col_keys]
+        df = pd.DataFrame(rows)
 
-    editors: dict = {
-        "_row_label": None,
-        "_actions": None,
-        **{col: {"type": "tickCross"} for col in selection_cols},
-    }
+        selection_cols = [str(ck) for ck in col_keys]
 
-    formatters: dict = {
-        "_row_label": {"type": _ROW_LABEL_FORMATTER},
-        "_actions": {"type": "button", "label": "\u2715 Remove", "buttonType": "danger"},
-        **{col: {"type": _SELECTION_FORMATTER, "color": col_colors[col]} for col in selection_cols},
-    }
+        editors: dict = {
+            "_row_label": None,
+            "_actions": None,
+            **{col: {"type": "tickCross"} for col in selection_cols},
+        }
 
-    editables: dict = {
-        "_row_label": False,
-        "_actions": False,
-        **{col: True for col in selection_cols},
-    }
+        formatters: dict = {
+            "_row_label": {"type": _ROW_LABEL_FORMATTER},
+            "_actions": {"type": "button", "label": "\u2715 Remove", "buttonType": "danger"},
+            **{col: {"type": _SELECTION_FORMATTER, "color": col_colors[col]} for col in selection_cols},
+        }
 
-    # Restore original orientation
-    selection_state.row_dim = _orig_row
-    selection_state.col_dim = _orig_col
-
-    return df, editors, formatters, editables, row_shapes, col_colors
+        return df, editors, formatters, row_shapes, col_colors
+    finally:
+        selection_state.row_dim = original_row_dim
+        selection_state.col_dim = original_col_dim
 
 
 def build_plot_selection_panel(
@@ -824,13 +827,11 @@ def build_plot_selection_panel(
         width=120,
     )
 
-    df, editors, formatters, editables, _rshapes, _ccolors = build_assignment_matrix(
+    df, editors, formatters, _rshapes, _ccolors = build_assignment_matrix(
         state, state.row_dim, state.col_dim
     )
 
-    hidden = [c for c in df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")]
-    if state.row_dim != "entity":
-        hidden.append("_actions")
+    hidden = _hidden_columns(df, state.row_dim)
 
     titles = {"_row_label": "", "_actions": "Remove"}
     table = pn.widgets.Tabulator(
@@ -850,30 +851,22 @@ def build_plot_selection_panel(
     )
 
     _orientation_lock = False
-    _skip_layout_rebuild = False
     _bump_timer = None
     _bump_generation = 0
 
     def _rebuild_table():
-        nonlocal _skip_layout_rebuild
-        _skip_layout_rebuild = False
         perf.full_rebuild_count += 1
         t0 = time.perf_counter()
         try:
-            new_df, new_editors, new_formatters, _, _, _ = build_assignment_matrix(
+            new_df, new_editors, new_formatters, _, _ = build_assignment_matrix(
                 state, state.row_dim, state.col_dim
             )
-            new_hidden = [c for c in new_df.columns if c.startswith("__valid_") or c in ("entity_index", "_row_key")]
-            if state.row_dim != "entity":
-                new_hidden.append("_actions")
-            else:
-                new_hidden = [c for c in new_hidden if c != "_actions"]
+            new_hidden = _hidden_columns(new_df, state.row_dim)
             _rebuild_col_styles()
             table.value = new_df
             table.editors = new_editors
             table.formatters = new_formatters
             table.hidden_columns = new_hidden
-            _rebuild_cell_styles()
         finally:
             elapsed = (time.perf_counter() - t0) * 1000
             perf.rebuild_duration_ms.append(elapsed)
@@ -1054,15 +1047,13 @@ def build_plot_selection_panel(
 
         _schedule_bump()
         edit_elapsed = (time.perf_counter() - t_edit) * 1000
-        perf.click_to_rebuild_ms.append(edit_elapsed)
+        perf.edit_handler_ms.append(edit_elapsed)
         print(f"[perf] on_edit ({row_key},{col})={new_value}: "
               f"{edit_elapsed:.1f}ms (state->schedule, no Bokeh round-trip)")
 
     table.on_edit(_on_edit_cell)
 
-    def _on_layout_change(event):
-        if _skip_layout_rebuild:
-            return
+    def _on_layout_change(_event):
         _rebuild_table()
 
     state.param.watch(_on_layout_change, "layout_version")
@@ -1085,15 +1076,16 @@ def build_plot_selection_panel(
         table._configuration = {"headerVisible": False, "columns": config_columns}
 
     # ── Header row cell styles ────────────────────────────────────
-    def _rebuild_cell_styles():
-        parts = [
-            '.tabulator-row-0 { background: #1e293b !important; }',
-            '.tabulator-row-0 .tabulator-cell[data-field="_row_label"] { cursor: pointer !important; }',
-        ]
-        table.stylesheets = ["\n".join(parts)]
-
     _rebuild_col_styles()
-    _rebuild_cell_styles()
+    table.stylesheets = ["""
+.tabulator-row-0 {
+    background: #1e293b !important;
+}
+
+.tabulator-row-0 .tabulator-cell[data-field="_row_label"] {
+    cursor: pointer !important;
+}
+"""]
 
     control_bar = pn.Row(
         row_select,
