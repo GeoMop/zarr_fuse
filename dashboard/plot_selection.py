@@ -434,18 +434,223 @@ def resolve_available_dimensions(
     return dims
 
 
-_SELECTION_FORMATTER = JSCode("""function(cell, formatterParams, onRendered) {
-    var data = cell.getRow().getData();
-    if (data._row_key === 'All') {
-        var color = formatterParams.color || '#94a3b8';
-        return '<span style="color:' + color + ';font-weight:bold">' + cell.getField() + '</span>';
-    } else if (cell.getValue() === true) {
+_SELECTION_FORMATTER = JSCode(r"""
+function(cell, formatterParams, onRendered) {
+    const data = cell.getRow().getData();
+
+    // Top "All" row: collective column toggle.
+    if (data._row_key === "All") {
+        const element = document.createElement("span");
+        const color = formatterParams.color || "#94a3b8";
+
+        element.textContent = cell.getField();
+        element.style.color = color;
+        element.style.fontWeight = "bold";
+        element.style.cursor = "pointer";
+        element.style.display = "block";
+        element.style.width = "100%";
+
+        element.addEventListener("click", function() {
+            const table = cell.getTable();
+            const field = cell.getField();
+            const rows = table.getRows();
+
+            // Select when at least one valid cell is currently unchecked.
+            let targetValue = false;
+
+            for (const row of rows) {
+                const rowData = row.getData();
+
+                if (
+                    rowData._row_key !== "All" &&
+                    rowData["__valid_" + field] === true &&
+                    rowData[field] !== true
+                ) {
+                    targetValue = true;
+                    break;
+                }
+            }
+
+            const updates = [];
+
+            for (const row of rows) {
+                const rowData = row.getData();
+
+                if (
+                    rowData._row_key === "All" ||
+                    rowData["__valid_" + field] !== true
+                ) {
+                    continue;
+                }
+
+                const update = {_index: rowData._index};
+                update[field] = targetValue;
+                updates.push(update);
+            }
+
+            // Wait until the click has propagated to Panel, then update
+            // Tabulator locally in the next browser frame.
+            if (updates.length) {
+                requestAnimationFrame(function() {
+                    void table.updateData(updates);
+                });
+            }
+        });
+
+        return element;
+    }
+
+    if (cell.getValue() === true) {
         return '<span style="color:#10b981">&#10003;</span>';
-    } else if (cell.getValue() === false) {
+    }
+
+    if (cell.getValue() === false) {
         return '<span style="color:#64748b">&#10007;</span>';
     }
-    return '';
-}""")
+
+    return "";
+}
+""")
+
+_ROW_LABEL_FORMATTER = JSCode(r"""
+function(cell, formatterParams, onRendered) {
+    const element = document.createElement("span");
+
+    element.innerHTML = cell.getValue() || "";
+    element.style.cursor = "pointer";
+    element.style.display = "block";
+    element.style.width = "100%";
+
+    element.addEventListener("click", function() {
+        const table = cell.getTable();
+        const clickedRow = cell.getRow();
+        const clickedData = clickedRow.getData();
+
+        const ignoredFields = new Set([
+            "_index",
+            "_actions",
+            "_row_label",
+            "_row_key",
+            "entity_index"
+        ]);
+
+        const selectionFields = table
+            .getColumns()
+            .map(function(column) {
+                return column.getField();
+            })
+            .filter(function(field) {
+                return (
+                    field &&
+                    !ignoredFields.has(field) &&
+                    !field.startsWith("__valid_")
+                );
+            });
+
+        // Global "All" toggle.
+        if (clickedData._row_key === "All") {
+            const rows = table.getRows();
+            let targetValue = false;
+
+            outer:
+            for (const row of rows) {
+                const rowData = row.getData();
+
+                if (rowData._row_key === "All") {
+                    continue;
+                }
+
+                for (const field of selectionFields) {
+                    if (
+                        rowData["__valid_" + field] === true &&
+                        rowData[field] !== true
+                    ) {
+                        targetValue = true;
+                        break outer;
+                    }
+                }
+            }
+
+            const updates = [];
+
+            for (const row of rows) {
+                const rowData = row.getData();
+
+                if (rowData._row_key === "All") {
+                    continue;
+                }
+
+                const update = {_index: rowData._index};
+                let hasUpdate = false;
+
+                for (const field of selectionFields) {
+                    if (rowData["__valid_" + field] === true) {
+                        update[field] = targetValue;
+                        hasUpdate = true;
+                    }
+                }
+
+                if (hasUpdate) {
+                    updates.push(update);
+                }
+            }
+
+            if (updates.length) {
+                requestAnimationFrame(function() {
+                    void table.updateData(updates);
+                });
+            }
+
+            return;
+        }
+
+        // One collective row toggle.
+        let targetValue = false;
+
+        for (const field of selectionFields) {
+            if (
+                clickedData["__valid_" + field] === true &&
+                clickedData[field] !== true
+            ) {
+                targetValue = true;
+                break;
+            }
+        }
+
+        const update = {};
+        let hasUpdate = false;
+
+        for (const field of selectionFields) {
+            if (clickedData["__valid_" + field] === true) {
+                update[field] = targetValue;
+                hasUpdate = true;
+            }
+        }
+
+        if (hasUpdate) {
+            requestAnimationFrame(function() {
+                void clickedRow.update(update);
+            });
+        }
+    });
+
+    return element;
+}
+""")
+
+_SELECTION_CELL_EDITABLE = JSCode("""
+function(cell) {
+    const data = cell.getRow().getData();
+
+    // Collective column controls are clickable but not editable.
+    if (data._row_key === "All") {
+        return false;
+    }
+
+    // Only valid individual cells may use the tickCross editor.
+    return data["__valid_" + cell.getField()] === true;
+}
+""")
 
 
 def build_assignment_matrix(
@@ -546,7 +751,7 @@ def build_assignment_matrix(
     }
 
     formatters: dict = {
-        "_row_label": {"type": "html"},
+        "_row_label": {"type": _ROW_LABEL_FORMATTER},
         "_actions": {"type": "button", "label": "\u2715 Remove", "buttonType": "danger"},
         **{col: {"type": _SELECTION_FORMATTER, "color": col_colors[col]} for col in selection_cols},
     }
@@ -770,18 +975,8 @@ def build_plot_selection_panel(
             if col == "_row_label":
                 if state._checked_count == state._valid_count:
                     state.deselect_all(bump_version=False, bump_layout=False)
-                    for r in range(1, len(table.value)):
-                        for ck in state.col_keys:
-                            ck_s = str(ck)
-                            if table.value.iloc[r].get(f"__valid_{ck_s}", False):
-                                table.patch({ck_s: [(r, False)]}, as_index=False)
                 else:
                     state.select_all(bump_version=False, bump_layout=False)
-                    for r in range(1, len(table.value)):
-                        for ck in state.col_keys:
-                            ck_s = str(ck)
-                            if table.value.iloc[r].get(f"__valid_{ck_s}", False):
-                                table.patch({ck_s: [(r, True)]}, as_index=False)
                 _schedule_bump()
                 return
             any_unchecked = False
@@ -799,9 +994,6 @@ def build_plot_selection_panel(
                 if any_unchecked:
                     break
             state.set_all_for_column(col, any_unchecked, bump_version=False, bump_layout=False)
-            for r in range(1, len(table.value)):
-                if table.value.iloc[r].get(f"__valid_{col}", False):
-                    table.patch({col: [(r, any_unchecked)]}, as_index=False)
             _schedule_bump()
             return
 
@@ -821,10 +1013,6 @@ def build_plot_selection_panel(
                     any_unchecked = True
                     break
             state.set_all_for_row(row_key, any_unchecked, bump_version=False, bump_layout=False)
-            for ck in state.col_keys:
-                ck_s = str(ck)
-                if row_data.get(f"__valid_{ck_s}", False):
-                    table.patch({ck_s: [(row_idx, any_unchecked)]}, as_index=False)
             _schedule_bump()
             return
 
@@ -847,6 +1035,8 @@ def build_plot_selection_panel(
 
         row_idx = event.row
         if row_idx == 0:
+            if table_loading is not None:
+                table_loading.visible = False
             return
         row_data = table.value.iloc[row_idx]
 
@@ -890,6 +1080,7 @@ def build_plot_selection_panel(
                 "field": ck_s,
                 "width": 65,
                 "headerSort": False,
+                "editable": _SELECTION_CELL_EDITABLE,
             })
         table._configuration = {"headerVisible": False, "columns": config_columns}
 

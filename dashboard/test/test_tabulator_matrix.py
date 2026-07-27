@@ -10,7 +10,7 @@ import pandas as pd
 import panel as pn
 import pytest
 
-from dashboard.plot_selection import SelectionState, build_assignment_matrix, build_plot_selection_panel, _SELECTION_FORMATTER
+from dashboard.plot_selection import SelectionState, build_assignment_matrix, build_plot_selection_panel, _SELECTION_FORMATTER, _ROW_LABEL_FORMATTER
 
 
 def _two_site_state():
@@ -96,7 +96,7 @@ class TestFormatters:
     def test_label_formatters_text(self):
         state = _two_site_state()
         _, _, formatters, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
-        assert formatters["_row_label"]["type"] == "html"
+        assert formatters["_row_label"]["type"] is _ROW_LABEL_FORMATTER
         assert formatters["_actions"]["type"] == "button"
         assert formatters["_actions"]["label"] == "\u2715 Remove"
         assert formatters["_actions"]["buttonType"] == "danger"
