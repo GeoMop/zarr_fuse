@@ -499,15 +499,35 @@ function(cell, formatterParams, onRendered) {
         return element;
     }
 
-    if (cell.getValue() === true) {
-        return '<span style="color:#10b981">&#10003;</span>';
+    const value = cell.getValue();
+
+    // Invalid cells remain empty and non-clickable.
+    if (value !== true && value !== false) {
+        return "";
     }
 
-    if (cell.getValue() === false) {
-        return '<span style="color:#64748b">&#10007;</span>';
-    }
+    const element = document.createElement("span");
 
-    return "";
+    element.innerHTML = value ? "&#10003;" : "&#10007;";
+    element.style.color = value ? "#10b981" : "#64748b";
+    element.style.cursor = "pointer";
+    element.style.display = "flex";
+    element.style.alignItems = "center";
+    element.style.justifyContent = "center";
+    element.style.width = "100%";
+    element.style.height = "100%";
+    element.style.boxSizing = "border-box";
+
+    element.addEventListener("click", function(event) {
+        // Prevent the normal cell-click path and native editor.
+        event.preventDefault();
+        event.stopPropagation();
+
+        // Immediate browser-side value and icon update.
+        cell.setValue(cell.getValue() !== true, false);
+    });
+
+    return element;
 }
 """)
 
@@ -634,20 +654,6 @@ function(cell, formatterParams, onRendered) {
     });
 
     return element;
-}
-""")
-
-_SELECTION_CELL_EDITABLE = JSCode("""
-function(cell) {
-    const data = cell.getRow().getData();
-
-    // Collective column controls are clickable but not editable.
-    if (data._row_key === "All") {
-        return false;
-    }
-
-    // Only valid individual cells may use the tickCross editor.
-    return data["__valid_" + cell.getField()] === true;
 }
 """)
 
@@ -1071,7 +1077,7 @@ def build_plot_selection_panel(
                 "field": ck_s,
                 "width": 65,
                 "headerSort": False,
-                "editable": _SELECTION_CELL_EDITABLE,
+                "editable": False,
             })
         table._configuration = {"headerVisible": False, "columns": config_columns}
 
