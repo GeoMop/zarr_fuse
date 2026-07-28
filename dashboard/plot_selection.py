@@ -449,12 +449,15 @@ function(cell, formatterParams, onRendered) {
         element.style.display = "block";
         element.style.width = "100%";
 
-        element.addEventListener("click", function() {
+        element.addEventListener("click", function(event) {
+            event.preventDefault();
+            event.stopPropagation();
+
             const table = cell.getTable();
             const field = cell.getField();
             const rows = table.getRows();
 
-            // Select when at least one valid cell is currently unchecked.
+            // Determine the next value from current browser-side data.
             let targetValue = false;
 
             for (const row of rows) {
@@ -470,8 +473,7 @@ function(cell, formatterParams, onRendered) {
                 }
             }
 
-            const updates = [];
-
+            // Update synchronously. setValue triggers Panel's on_edit callback.
             for (const row of rows) {
                 const rowData = row.getData();
 
@@ -482,17 +484,14 @@ function(cell, formatterParams, onRendered) {
                     continue;
                 }
 
-                const update = {_index: rowData._index};
-                update[field] = targetValue;
-                updates.push(update);
-            }
+                const targetCell = row.getCell(field);
 
-            // Wait until the click has propagated to Panel, then update
-            // Tabulator locally in the next browser frame.
-            if (updates.length) {
-                requestAnimationFrame(function() {
-                    void table.updateData(updates);
-                });
+                if (
+                    targetCell &&
+                    targetCell.getValue() !== targetValue
+                ) {
+                    targetCell.setValue(targetValue, false);
+                }
             }
         });
 
@@ -540,7 +539,10 @@ function(cell, formatterParams, onRendered) {
     element.style.display = "block";
     element.style.width = "100%";
 
-    element.addEventListener("click", function() {
+    element.addEventListener("click", function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
         const table = cell.getTable();
         const clickedRow = cell.getRow();
         const clickedData = clickedRow.getData();
@@ -550,7 +552,7 @@ function(cell, formatterParams, onRendered) {
             "_actions",
             "_row_label",
             "_row_key",
-            "entity_index"
+            "entity_index",
         ]);
 
         const selectionFields = table
@@ -566,7 +568,7 @@ function(cell, formatterParams, onRendered) {
                 );
             });
 
-        // Global "All" toggle.
+        // Global All toggle.
         if (clickedData._row_key === "All") {
             const rows = table.getRows();
             let targetValue = false;
@@ -590,8 +592,6 @@ function(cell, formatterParams, onRendered) {
                 }
             }
 
-            const updates = [];
-
             for (const row of rows) {
                 const rowData = row.getData();
 
@@ -599,31 +599,26 @@ function(cell, formatterParams, onRendered) {
                     continue;
                 }
 
-                const update = {_index: rowData._index};
-                let hasUpdate = false;
-
                 for (const field of selectionFields) {
-                    if (rowData["__valid_" + field] === true) {
-                        update[field] = targetValue;
-                        hasUpdate = true;
+                    if (rowData["__valid_" + field] !== true) {
+                        continue;
+                    }
+
+                    const targetCell = row.getCell(field);
+
+                    if (
+                        targetCell &&
+                        targetCell.getValue() !== targetValue
+                    ) {
+                        targetCell.setValue(targetValue, false);
                     }
                 }
-
-                if (hasUpdate) {
-                    updates.push(update);
-                }
-            }
-
-            if (updates.length) {
-                requestAnimationFrame(function() {
-                    void table.updateData(updates);
-                });
             }
 
             return;
         }
 
-        // One collective row toggle.
+        // Single row toggle.
         let targetValue = false;
 
         for (const field of selectionFields) {
@@ -636,20 +631,19 @@ function(cell, formatterParams, onRendered) {
             }
         }
 
-        const update = {};
-        let hasUpdate = false;
-
         for (const field of selectionFields) {
-            if (clickedData["__valid_" + field] === true) {
-                update[field] = targetValue;
-                hasUpdate = true;
+            if (clickedData["__valid_" + field] !== true) {
+                continue;
             }
-        }
 
-        if (hasUpdate) {
-            requestAnimationFrame(function() {
-                void clickedRow.update(update);
-            });
+            const targetCell = clickedRow.getCell(field);
+
+            if (
+                targetCell &&
+                targetCell.getValue() !== targetValue
+            ) {
+                targetCell.setValue(targetValue, false);
+            }
         }
     });
 
@@ -880,17 +874,16 @@ def build_plot_selection_panel(
 
     def _cancel_bump_timer(*, clear_loading=False):
         nonlocal _bump_timer
-        if _bump_timer is None:
-            return
-        doc = pn.state.curdoc
-        if doc is not None:
-            try:
-                doc.remove_timeout_callback(_bump_timer)
-            except ValueError:
-                pass
-        elif isinstance(_bump_timer, threading.Timer):
-            _bump_timer.cancel()
-        _bump_timer = None
+        if _bump_timer is not None:
+            doc = pn.state.curdoc
+            if doc is not None:
+                try:
+                    doc.remove_timeout_callback(_bump_timer)
+                except ValueError:
+                    pass
+            elif isinstance(_bump_timer, threading.Timer):
+                _bump_timer.cancel()
+            _bump_timer = None
         if clear_loading and table_loading is not None:
             table_loading.visible = False
 
@@ -948,10 +941,12 @@ def build_plot_selection_panel(
     col_select.param.watch(_sync_orientation, "value")
 
     def _on_table_cell_click(event):
-        """Handle clicks on header row, row labels, column headers, remove actions.
+        """Handle clicks on remove actions only.
 
-        Individual selection-cell edits are handled by ``_on_edit_cell`` via
-        ``table.on_edit()`` — tickCross editor handles the browser-side toggle.
+        All selection toggling (individual cells, column toggles, row toggles,
+        global toggle) is handled by the JavaScript formatters using
+        ``cell.setValue()`` which triggers ``_on_edit_cell`` via Panel's
+        ``cellEdited`` synchronization.
         """
         col = event.column
         row_idx = event.row
@@ -960,43 +955,13 @@ def build_plot_selection_panel(
         if col in ("entity_index", "_index") or col.startswith("__valid_"):
             return
 
-        row_data = table.value.iloc[row_idx]
-
-        if table_loading is not None:
-            table_loading.visible = True
-
-        # ── Header row (row 0) — toggle column / toggle all ──
+        # Header row — handled by JavaScript formatters.
         if row_idx == 0:
-            if col == "_actions":
-                if table_loading is not None:
-                    table_loading.visible = False
-                return
-            if col == "_row_label":
-                if state._checked_count == state._valid_count:
-                    state.deselect_all(bump_version=False, bump_layout=False)
-                else:
-                    state.select_all(bump_version=False, bump_layout=False)
-                _schedule_bump()
-                return
-            any_unchecked = False
-            for site in state._sites:
-                for d in np.asarray(site["depths"]).ravel():
-                    if state.col_dim == "vertical":
-                        col_matches = (float(d) == float(col))
-                    else:
-                        col_matches = (str(site["site_id"]) == str(col))
-                    if col_matches:
-                        key = (str(site["site_id"]), float(d))
-                        if key not in state._checked:
-                            any_unchecked = True
-                            break
-                if any_unchecked:
-                    break
-            state.set_all_for_column(col, any_unchecked, bump_version=False, bump_layout=False)
-            _schedule_bump()
             return
 
-        # ── Data rows ──
+        row_data = table.value.iloc[row_idx]
+
+        # ── Remove action ──
         if col == "_actions":
             eid = row_data.get("entity_index")
             if eid is not None and not (isinstance(eid, float) and np.isnan(eid)):
@@ -1004,26 +969,18 @@ def build_plot_selection_panel(
             _schedule_bump()
             return
 
-        if col == "_row_label":
-            row_key = row_data["_row_key"]
-            any_unchecked = False
-            for ck in state.col_keys:
-                if state.is_valid(row_key, ck) and not state.is_checked(row_key, ck):
-                    any_unchecked = True
-                    break
-            state.set_all_for_row(row_key, any_unchecked, bump_version=False, bump_layout=False)
-            _schedule_bump()
-            return
+        # Row-label and selection cells — handled by JavaScript formatters.
+        return
 
     table.on_click(_on_table_cell_click)
 
     def _on_edit_cell(event):
-        """Handle native tickCross Boolean edits.
+        """Handle Boolean edits from the browser.
 
         The browser updates the cell display immediately via Tabulator.js.
         This callback synchronises SelectionState and schedules the debounced
-        plot redraw.  No ``table.patch()`` call — the DataFrame stays stale
-        until the next ``_rebuild_table()`` (structural change).
+        plot redraw.  No manual ``table.patch()`` is required because Panel
+        synchronizes the edited value back to ``table.value``.
         """
         col = event.column
         if col.startswith("__valid_") or col in ("entity_index", "_index",
@@ -1040,7 +997,21 @@ def build_plot_selection_panel(
         row_data = table.value.iloc[row_idx]
 
         row_key = row_data["_row_key"]
-        new_value = bool(event.value)
+
+        raw_value = event.value
+        if isinstance(raw_value, str):
+            normalized = raw_value.strip().lower()
+            if normalized == "true":
+                new_value = True
+            elif normalized == "false":
+                new_value = False
+            else:
+                if table_loading is not None:
+                    table_loading.visible = False
+                return
+        else:
+            new_value = bool(raw_value)
+
         t_edit = time.perf_counter()
 
         current = state.is_checked(row_key, col)
