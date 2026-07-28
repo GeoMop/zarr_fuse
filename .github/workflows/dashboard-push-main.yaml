@@ -9,7 +9,7 @@ on:
 jobs:
   build-and-deploy:
     name: Build and lint dashboard
-    uses: ./.github/workflows/dashboard-reusable-workflow.yaml
+    uses: ./.github/workflows/holoviz-dashboard-reusable-workflow.yaml
     with:
       tag: generate
       deploy: true

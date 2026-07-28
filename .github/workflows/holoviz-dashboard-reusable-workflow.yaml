@@ -1,12 +1,8 @@
-name: Dashboard reusable deploy
+name: HoloViz Dashboard reusable deploy
 
 on:
   workflow_call:
     inputs:
-      zarr_repo:
-        description: 'zarr_fuse repository (owner/repo)'
-        required: false
-        type: string
       zarr-fuse-ref:
         description: 'ref for zarr_fuse (branch or commit)'
         required: false
@@ -29,29 +25,18 @@ on:
         description: 'Git ref in source repo (branch or commit)'
         required: true
         type: string
-      configuration-dir-path:
-        description: 'Path to config directory containing endpoints.yaml and schemas/'
+      source-endpoints-path:
+        description: 'Path to endpoints.yaml in the source repository'
+        required: true
+        type: string
+      source-schemas-path:
+        description: 'Path to the schemas directory in the source repository'
         required: true
         type: string
       frontend_image:
         description: 'Frontend image name'
         required: true
         type: string
-      workflow_name:
-        description: 'Reusable workflow display name'
-        required: false
-        type: string
-        default: 'Dashboard reusable deploy'
-      containerize_job_name:
-        description: 'Display name for the containerize job'
-        required: false
-        type: string
-        default: 'Containerize frontend'
-      deploy_job_name:
-        description: 'Display name for the deploy job'
-        required: false
-        type: string
-        default: 'Deploy dashboard'
       namespace:
         description: 'Kubernetes namespace to deploy into'
         required: false
@@ -75,34 +60,21 @@ on:
         required: false
         type: string
         default: 'hlavo-config'
-      mount-endpoints-path:
-        description: 'Pod mount path for endpoints.yaml (empty = skip)'
-        required: false
-        type: string
-        default: '/opt/hlavo/dashboard/config/endpoints.yaml'
-      mount-schemas-path:
-        description: 'Pod mount path for schemas directory (empty = skip)'
-        required: false
-        type: string
-        default: '/opt/hlavo/dashboard/schemas'
-      mount-env-name:
-        description: 'Environment variable name pointing to endpoints.yaml'
-        required: false
-        type: string
-        default: 'ENDPOINTS_PATH'
     secrets:
       kubeconfig:
         required: true
       source_repo_token:
         required: true
-      zarr_repo_token:
-        required: false
       DOCKER_PASSWORD:
         required: false
       s3_access_key:
         required: true
       s3_secret_key:
         required: true
+
+env:
+  ENDPOINTS_POD_PATH: /opt/hlavo/dashboard/config/endpoints.yaml
+  SCHEMAS_POD_PATH: /opt/hlavo/dashboard/schemas
 
 jobs:
   get-version-tag:
@@ -114,10 +86,9 @@ jobs:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.zarr_repo }}
+          repository: GeoMop/zarr_fuse
           ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
 
       - name: Get version tag
         id: get_version_tag
@@ -129,7 +100,7 @@ jobs:
           fi
 
   containerize-frontend:
-    name: ${{ inputs.containerize_job_name }}
+    name: Containerize frontend
     runs-on: ubuntu-latest
     container:
       image: quay.io/buildah/stable:v1.35.4
@@ -140,10 +111,9 @@ jobs:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.zarr_repo }}
+          repository: GeoMop/zarr_fuse
           ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
 
       - name: Containerize
         uses: ./main-repo/.github/actions/containerize
@@ -167,10 +137,9 @@ jobs:
       - name: Checkout zarr_fuse
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.zarr_repo }}
+          repository: GeoMop/zarr_fuse
           ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
 
       - name: Lint helm chart
         uses: ./main-repo/.github/actions/helm-lint
@@ -178,7 +147,7 @@ jobs:
           working-directory: main-repo/dashboard/charts/holoviz
 
   deploy:
-    name: ${{ inputs.deploy_job_name }}
+    name: Deploy dashboard
     runs-on: ubuntu-latest
     if: ${{ inputs.deploy }}
     needs:
@@ -191,12 +160,11 @@ jobs:
       - name: Checkout zarr_fuse (main-repo)
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.zarr_repo }}
+          repository: GeoMop/zarr_fuse
           ref: ${{ inputs['zarr-fuse-ref'] }}
           path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
 
-      - name: Checkout source repo (HLAVO or caller)
+      - name: Checkout source repo
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.source_repo }}
@@ -231,22 +199,34 @@ jobs:
 
       - name: Validate source files
         run: |
-          echo "Checking config directory in source repo: ${{ inputs.source_repo }}@${{ inputs.source_ref }}"
-          ls -l "source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml" || (echo "MISSING endpoints.yaml" && exit 1)
-          ls -l "source-repo/${{ inputs['configuration-dir-path'] }}/schemas" || (echo "MISSING schemas dir" && exit 1)
+          set -euo pipefail
+
+          ENDPOINTS_FILE="source-repo/${{ inputs['source-endpoints-path'] }}"
+          SCHEMAS_DIR="source-repo/${{ inputs['source-schemas-path'] }}"
+
+          echo "Checking source files from ${{ inputs.source_repo }}@${{ inputs.source_ref }}"
+
+          test -f "$ENDPOINTS_FILE" || {
+            echo "Missing endpoints file: $ENDPOINTS_FILE"
+            exit 1
+          }
+          test -d "$SCHEMAS_DIR" || {
+            echo "Missing schemas directory: $SCHEMAS_DIR"
+            exit 1
+          }
 
       - name: Create ConfigMap from source files
         run: |
           set -o pipefail
           echo "Creating ConfigMap ${{ inputs.configmap_name }} in namespace '${{ inputs.namespace }}' from:"
-          echo " - endpoints: source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml"
-          echo " - schemas dir: source-repo/${{ inputs['configuration-dir-path'] }}/schemas"
+          echo " - endpoints: source-repo/${{ inputs['source-endpoints-path'] }}"
+          echo " - schemas dir: source-repo/${{ inputs['source-schemas-path'] }}"
 
-            if kubectl create configmap "${{ inputs.configmap_name }}" \
-              --namespace "${{ inputs.namespace }}" \
-              --from-file=endpoints.yaml=source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml \
-              --from-file=source-repo/${{ inputs['configuration-dir-path'] }}/schemas \
-              --dry-run=client -o yaml | kubectl apply -f -; then
+          if kubectl create configmap "${{ inputs.configmap_name }}" \
+            --namespace "${{ inputs.namespace }}" \
+            --from-file="endpoints.yaml=source-repo/${{ inputs['source-endpoints-path'] }}" \
+            --from-file="source-repo/${{ inputs['source-schemas-path'] }}" \
+            --dry-run=client -o yaml | kubectl apply -f -; then
             echo "ConfigMap applied successfully."
           else
             echo "Failed to create ConfigMap. Checking permissions and namespace..."
@@ -267,14 +247,16 @@ jobs:
             --set frontend.s3.secrets.secretKey=${{ secrets.s3_secret_key }}"
           if [[ -n "${{ inputs['mount-volume-name'] }}" ]]; then
             FLAGS+=" \
-              --set frontend.extraEnv[0].name=${{ inputs['mount-env-name'] }} \
-              --set frontend.extraEnv[0].value=${{ inputs['mount-endpoints-path'] }} \
+              --set frontend.extraEnv[0].name=ENDPOINTS_PATH \
+              --set frontend.extraEnv[0].value=${{ env.ENDPOINTS_POD_PATH }} \
+              --set frontend.extraEnv[1].name=SCHEMAS_PATH \
+              --set frontend.extraEnv[1].value=${{ env.SCHEMAS_POD_PATH }} \
               --set frontend.extraVolumes[0].name=${{ inputs['mount-volume-name'] }} \
               --set frontend.extraVolumes[0].configMap.name=${{ inputs.configmap_name }} \
               --set frontend.extraVolumeMounts[0].name=${{ inputs['mount-volume-name'] }} \
-              --set frontend.extraVolumeMounts[0].mountPath=${{ inputs['mount-endpoints-path'] }} \
+              --set frontend.extraVolumeMounts[0].mountPath=${{ env.ENDPOINTS_POD_PATH }} \
               --set frontend.extraVolumeMounts[0].subPath=endpoints.yaml \
               --set frontend.extraVolumeMounts[1].name=${{ inputs['mount-volume-name'] }} \
-              --set frontend.extraVolumeMounts[1].mountPath=${{ inputs['mount-schemas-path'] }}"
+              --set frontend.extraVolumeMounts[1].mountPath=${{ env.SCHEMAS_POD_PATH }}"
           fi
           helm upgrade "${{ inputs['release-name'] }}" main-repo/dashboard/charts/holoviz $FLAGS
