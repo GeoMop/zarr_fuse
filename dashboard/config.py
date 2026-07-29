@@ -503,7 +503,7 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
     )
 
     schema_for_display = SchemaConfig(
-        file=schema_file,
+        file=str(schema_file_path),
         fields=root_fields or SchemaFieldsConfig(),
         group_fields=group_fields,
     )
@@ -534,7 +534,7 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
             schema_path=schema_file,
         ),
         schema=SchemaConfig(
-            file=schema_file,
+            file=str(schema_file_path),
             fields=root_fields or SchemaFieldsConfig(),
             group_fields=group_fields,
         ),
