@@ -1,9 +1,0 @@
-apiVersion: v2
-name: dashboard
-description: Dashboard deployment (frontend-only Panel app)
-type: application
-version: 0.1.0
-appVersion: "0.1.0"
-home: https://github.com/geomop/zarr_fuse
-sources:
-  - https://github.com/geomop/zarr_fuse
