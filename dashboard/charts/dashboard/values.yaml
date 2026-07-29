@@ -2,12 +2,12 @@ registry:
   host: docker.io
 
 frontend:
-  name: holoviz-frontend
+  name: dashboard
   replicaCount: 1
   endpointName: bukov_endpoint
   cacheDir: /tmp/zf_tiles
   image:
-    name: jbrezmorf/zarr-fuse-holoviz-frontend
+    name: docker.io/dashboard-frontend
     tag: latest
     pullPolicy: Always
 
@@ -59,7 +59,10 @@ frontend:
         type: RuntimeDefault
 
 ingress:
+  name: dashboard-ingress
   className: "nginx"
+  host: ""
+  tlsSecretName: ""
   annotations:
     kubernetes.io/tls-acme: "true"
     cert-manager.io/cluster-issuer: "letsencrypt-prod"

@@ -1,6 +1,6 @@
-# HoloViz Dashboard Helm Deployment
+# Dashboard Helm Deployment
 
-This chart deploys the HoloViz dashboard frontend to Kubernetes using Helm.
+This chart deploys a dashboard frontend to Kubernetes using Helm.
 
 ## Prerequisites
 
@@ -11,20 +11,20 @@ This chart deploys the HoloViz dashboard frontend to Kubernetes using Helm.
 
 ## Chart Location
 
-- Chart: dashboard/charts/holoviz
+- Chart: dashboard/charts/dashboard
 
 ## Quick Deploy
 
 ```bash
 # set namespace and release name
-NAMESPACE=zarr-fuse-dashboard-development
-RELEASE=holoviz-development
+NAMESPACE=dashboard-development
+RELEASE=dashboard
 
 # create namespace if needed
 kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
 # deploy
-helm upgrade "$RELEASE" dashboard/charts/holoviz \
+helm upgrade "$RELEASE" dashboard/charts/dashboard \
   --install --atomic --timeout 10m --namespace "$NAMESPACE" \
   --set frontend.image.tag=<IMAGE_TAG> \
   --set frontend.s3.secrets.accessKey=<S3_ACCESS_KEY> \
@@ -37,12 +37,14 @@ Key values in values.yaml:
 
 - frontend.image.name, frontend.image.tag
 - frontend.resources
+- ingress.host (required for BOKEH_ALLOW_WS_ORIGIN and TLS)
 - ingress.className and ingress.annotations
+- ingress.tlsSecretName
 
 To override values without editing the chart:
 
 ```bash
-helm upgrade "$RELEASE" dashboard/charts/holoviz \
+helm upgrade "$RELEASE" dashboard/charts/dashboard \
   --install --atomic --timeout 10m --namespace "$NAMESPACE" \
   --set frontend.resources.requests.memory=256Mi \
   --set frontend.resources.limits.memory=512Mi
@@ -60,11 +62,3 @@ helm -n "$NAMESPACE" uninstall "$RELEASE"
 ```
 
 - If pods fail with quota errors, reduce memory limits/requests or ask the cluster admin to raise the namespace quota.
-
-## GitHub Actions
-
-The workflow that deploys this chart is:
-
-- .github/workflows/holoviz-dashboard-pull-request.yaml
-
-It runs the same Helm upgrade command with the tag and S3 secrets injected.

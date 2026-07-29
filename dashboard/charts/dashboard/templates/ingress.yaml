@@ -1,9 +1,9 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: holoviz-ingress
+  name: {{ .Values.ingress.name }}
   labels:
-    app.kubernetes.io/name: holoviz-ingress
+    app.kubernetes.io/name: {{ .Values.ingress.name }}
   {{- if .Values.ingress.annotations }}
   annotations:
     {{ .Values.ingress.annotations | toYaml | nindent 4 }}
@@ -11,7 +11,7 @@ metadata:
 spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
   rules:
-    - host: zarr-fuse-{{ .Release.Name }}.dyn.cloud.e-infra.cz
+    - host: {{ .Values.ingress.host }}
       http:
         paths:
           - path: /
@@ -22,6 +22,6 @@ spec:
                 port:
                   number: {{ .Values.frontend.service.externalPort.number | int }}
   tls:
-    - secretName: zarr-fuse-{{ .Release.Name }}-dyn-cloud-e-infra-cz-tls
+    - secretName: {{ .Values.ingress.tlsSecretName }}
       hosts:
-        - zarr-fuse-{{ .Release.Name }}.dyn.cloud.e-infra.cz
+        - {{ .Values.ingress.host }}

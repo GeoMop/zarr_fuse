@@ -10,23 +10,23 @@ on:
 
 jobs:
   deploy:
-    uses: ./.github/workflows/holoviz-dashboard-reusable-workflow.yaml
+    uses: ./.github/workflows/dashboard-reusable-workflow.yaml
     with:
-      zarr-fuse-ref: ${{ github.ref }}
-      source_repo: ${{ github.repository }}
-      source_ref: ${{ github.ref }}
-      source-endpoints-path: app/databuk/config/endpoints.yaml
-      source-schemas-path: app/databuk/config/schemas
-      frontend_image: jbrezmorf/zarr-fuse-holoviz-frontend
+      dashboard-ref: ${{ github.ref }}
+      config-repository: ${{ github.repository }}
+      config-ref: ${{ github.ref }}
+      endpoints-path: app/databuk/config/endpoints.yaml
+      schemas-path: app/databuk/config/schemas
+      image-name: jbrezmorf/zarr-fuse-holoviz-frontend
       namespace: zarr-fuse-dashboard-development
       deploy: true
       push-container: true
       tag: generate
       release-name: holoviz-development
-      configmap_name: holoviz-dashboard-config
+      configmap-name: holoviz-dashboard-config
     secrets:
       kubeconfig: ${{ secrets.KUBECONFIG }}
-      source_repo_token: ${{ secrets.GITHUB_TOKEN }}
+      config_repo_token: ${{ secrets.GITHUB_TOKEN }}
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       s3_access_key: ${{ secrets.S3_ACCESS_KEY }}
       s3_secret_key: ${{ secrets.S3_SECRET_KEY }}

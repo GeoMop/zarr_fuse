@@ -14,7 +14,7 @@ spec:
       labels:
         app.kubernetes.io/name: {{ .Values.frontend.name }}
         app.kubernetes.io/component: frontend
-        app.kubernetes.io/part-of: holoviz
+        app.kubernetes.io/part-of: {{ .Chart.Name }}
         app.kubernetes.io/managed-by: Helm
         app.kubernetes.io/version: {{ .Values.frontend.image.tag }}
         app.kubernetes.io/instance: {{ .Release.Name }}
@@ -41,7 +41,7 @@ spec:
             - name: HV_DASHBOARD_ENDPOINT
               value: {{ .Values.frontend.endpointName | quote }}
             - name: BOKEH_ALLOW_WS_ORIGIN
-              value: {{ printf "%s.dyn.cloud.e-infra.cz" (printf "zarr-fuse-%s" .Release.Name) | quote }}
+              value: {{ .Values.ingress.host | quote }}
             - name: ZF_CACHE_DIR
               value: {{ .Values.frontend.cacheDir | quote }}
             - name: HOME

@@ -1,6 +1,6 @@
 apiVersion: v2
-name: holoviz-dashboard
-description: HoloViz dashboard deployment (frontend-only Panel app)
+name: dashboard
+description: Dashboard deployment (frontend-only Panel app)
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
