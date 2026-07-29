@@ -6,6 +6,16 @@ from typing import Any, Dict, Optional
 import yaml
 from dotenv import load_dotenv
 
+ENDPOINTS_ENV_VAR = "ENDPOINTS_PATH"
+SCHEMAS_ENV_VAR = "SCHEMAS_PATH"
+
+POD_ENDPOINTS_PATH = Path(
+    "/opt/hlavo/dashboard/config/endpoints.yaml"
+)
+POD_SCHEMAS_PATH = Path(
+    "/opt/hlavo/dashboard/schemas"
+)
+
 
 @dataclass
 class SourceConfig:
@@ -123,12 +133,20 @@ def resolve_endpoints_path() -> Path:
        - config/endpoints.yaml
        - app/databuk/config/endpoints.yaml
     """
-    env_path = os.getenv("ENDPOINTS_PATH")
+    env_path = os.getenv(ENDPOINTS_ENV_VAR)
+
     if env_path:
         path = Path(env_path).expanduser().resolve()
-        print(f"[config] resolve_endpoints_path: from ENV ENDPOINTS_PATH={env_path} -> {path}")
+        print(
+            f"[config] resolve_endpoints_path: "
+            f"from ENV {ENDPOINTS_ENV_VAR}={env_path} -> {path}"
+        )
+
         if not path.exists():
-            raise FileNotFoundError(f"ENDPOINTS_PATH does not exist: {path}")
+            raise FileNotFoundError(
+                f"{ENDPOINTS_ENV_VAR} does not exist: {path}"
+            )
+
         return path
 
     cwd = Path.cwd().resolve()
@@ -450,12 +468,39 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
             raise ValueError(f"Endpoint '{endpoint_name}' is missing source.{field_name}")
 
     schema_file = source_data["schema_path"]
+    schemas_path = os.getenv(SCHEMAS_ENV_VAR)
 
-    schema_file_path = Path(schema_file)
-    if not schema_file_path.is_absolute():
-        schema_file_path = base_dir / schema_file_path
+    if schemas_path:
+        schemas_directory = Path(
+            schemas_path
+        ).expanduser().resolve()
 
-    print(f"[config] endpoint={endpoint_name} schema_path(raw)={schema_file} base_dir={base_dir} resolved={schema_file_path}")
+        if not schemas_directory.is_dir():
+            raise FileNotFoundError(
+                f"{SCHEMAS_ENV_VAR} is not a directory: "
+                f"{schemas_directory}"
+            )
+
+        schema_file_path = (
+            schemas_directory / Path(schema_file).name
+        )
+    else:
+        schema_file_path = Path(schema_file)
+
+        if not schema_file_path.is_absolute():
+            schema_file_path = base_dir / schema_file_path
+
+    if not schema_file_path.is_file():
+        raise FileNotFoundError(
+            f"Schema file does not exist: {schema_file_path}"
+        )
+
+    print(
+        f"[config] endpoint={endpoint_name} "
+        f"schema_path(raw)={schema_file} "
+        f"base_dir={base_dir} "
+        f"resolved={schema_file_path}"
+    )
 
     schema_for_display = SchemaConfig(
         file=schema_file,

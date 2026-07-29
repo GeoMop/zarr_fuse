@@ -11,9 +11,17 @@ jobs:
     name: Build and lint dashboard
     uses: ./.github/workflows/dashboard-reusable-workflow.yaml
     with:
-      tag: generate
-      deploy: true
+      zarr-fuse-ref: ${{ github.sha }}
+
+      source_repo: ${{ github.repository }}
+      source_ref: ${{ github.sha }}
+      source-endpoints-path: app/databuk/config/endpoints.yaml
+      source-schemas-path: app/databuk/config/schemas
+
+      frontend_image: jbrezmorf/zarr-fuse-holoviz-frontend
       namespace: zarr-fuse-dashboard-development
       release-name: dashboard-development
-      s3-bucket-name: hlavo-release
+
+      deploy: true
+      tag: generate
     secrets: inherit

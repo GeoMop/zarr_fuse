@@ -10,27 +10,26 @@ on:
 
 jobs:
   deploy:
-    uses: GeoMop/zarr_fuse/.github/workflows/dashboard-reusable-workflow.yaml@feature/dashboard-multiple-selection
+    name: HoloViz dashboard
+    uses: ./.github/workflows/dashboard-reusable-workflow.yaml
+
     with:
-      zarr_repo: GeoMop/zarr_fuse
-      zarr-fuse-ref: ${{ github.ref }}
+      zarr-fuse-ref: ${{ github.sha }}
+
       source_repo: ${{ github.repository }}
-      source_ref: ${{ github.ref }}
-      configuration-dir-path: app/databuk/config
+      source_ref: ${{ github.sha }}
+      source-endpoints-path: app/databuk/config/endpoints.yaml
+      source-schemas-path: app/databuk/config/schemas
+
       frontend_image: jbrezmorf/zarr-fuse-holoviz-frontend
       namespace: zarr-fuse-dashboard-development
+      release-name: holoviz-development
+      configmap_name: holoviz-dashboard-config
+
       deploy: true
       push-container: true
       tag: generate
-      workflow_name: HoloViz reusable deploy
-      containerize_job_name: Containerize HoloViz frontend
-      deploy_job_name: Deploy HoloViz (reusable)
-      release-name: holoviz-development
-      configmap_name: holoviz-dashboard-config
-      mount-volume-name: ''
-      mount-endpoints-path: ''
-      mount-schemas-path: ''
-      mount-env-name: ENDPOINTS_PATH
+
     secrets:
       kubeconfig: ${{ secrets.KUBECONFIG }}
       source_repo_token: ${{ secrets.GITHUB_TOKEN }}
