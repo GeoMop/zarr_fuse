@@ -6,14 +6,6 @@ from typing import Any, Dict, Optional
 import yaml
 from dotenv import load_dotenv
 
-# Environment variable names used in Kubernetes deployments.
-ENDPOINTS_ENV_VAR = "ENDPOINTS_PATH"
-SCHEMAS_ENV_VAR = "SCHEMAS_PATH"
-
-# Hard-coded pod paths for the HoloViz Kubernetes deployment.
-POD_ENDPOINTS_PATH = Path("/opt/hlavo/dashboard/config/endpoints.yaml")
-POD_SCHEMAS_PATH = Path("/opt/hlavo/dashboard/schemas")
-
 
 @dataclass
 class SourceConfig:
@@ -130,19 +122,13 @@ def resolve_endpoints_path() -> Path:
        - dashboard/config/endpoints.yaml
        - config/endpoints.yaml
        - app/databuk/config/endpoints.yaml
-
-    Schema file resolution:
-    - If SCHEMAS_PATH env var is set, schema files are resolved relative to it
-      (using only the filename from the schema_path in endpoints.yaml).
-    - Otherwise, schema paths are resolved relative to config_path.parent.parent,
-      preserving the directory structure from the source repository.
     """
-    env_path = os.getenv(ENDPOINTS_ENV_VAR)
+    env_path = os.getenv("ENDPOINTS_PATH")
     if env_path:
         path = Path(env_path).expanduser().resolve()
         print(f"[config] resolve_endpoints_path: from ENV ENDPOINTS_PATH={env_path} -> {path}")
         if not path.exists():
-            raise FileNotFoundError(f"{ENDPOINTS_ENV_VAR} does not exist: {path}")
+            raise FileNotFoundError(f"ENDPOINTS_PATH does not exist: {path}")
         return path
 
     cwd = Path.cwd().resolve()
@@ -156,11 +142,11 @@ def resolve_endpoints_path() -> Path:
                 return candidate
 
     raise FileNotFoundError(
-        f"Could not find endpoints.yaml. Checked:\n"
-        f"1. {ENDPOINTS_ENV_VAR} env var\n"
-        f"2. dashboard/config/endpoints.yaml\n"
-        f"3. config/endpoints.yaml\n"
-        f"4. app/databuk/config/endpoints.yaml"
+        "Could not find endpoints.yaml. Checked:\n"
+        "1. ENDPOINTS_PATH env var\n"
+        "2. dashboard/config/endpoints.yaml\n"
+        "3. config/endpoints.yaml\n"
+        "4. app/databuk/config/endpoints.yaml"
     )
 
 
@@ -465,21 +451,11 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
 
     schema_file = source_data["schema_path"]
 
-    schemas_override = os.getenv(SCHEMAS_ENV_VAR)
-    if schemas_override:
-        resolved = Path(schemas_override).expanduser().resolve()
-        if not resolved.is_dir():
-            raise FileNotFoundError(f"{SCHEMAS_ENV_VAR} is not a directory: {resolved}")
-        # Use only the basename: ConfigMap-mounted schema directories contain
-        # flat files (e.g. bukov_schema.yaml), not the nested directory structure
-        # from the source repository (e.g. config/schemas/bukov_schema.yaml).
-        schema_file_path = resolved / Path(schema_file).name
-    else:
-        schema_file_path = Path(schema_file)
-        if not schema_file_path.is_absolute():
-            schema_file_path = base_dir / schema_file_path
+    schema_file_path = Path(schema_file)
+    if not schema_file_path.is_absolute():
+        schema_file_path = base_dir / schema_file_path
 
-    print(f"[config] endpoint={endpoint_name} schema_path(raw)={schema_file} resolved={schema_file_path}")
+    print(f"[config] endpoint={endpoint_name} schema_path(raw)={schema_file} base_dir={base_dir} resolved={schema_file_path}")
 
     schema_for_display = SchemaConfig(
         file=schema_file,

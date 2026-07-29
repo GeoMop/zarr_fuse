@@ -1,0 +1,280 @@
+name: Dashboard reusable deploy
+
+on:
+  workflow_call:
+    inputs:
+      zarr_repo:
+        description: 'zarr_fuse repository (owner/repo)'
+        required: false
+        type: string
+      zarr-fuse-ref:
+        description: 'ref for zarr_fuse (branch or commit)'
+        required: false
+        type: string
+      deploy:
+        description: 'Whether to deploy the Helm chart'
+        required: false
+        type: boolean
+        default: false
+      push-container:
+        description: 'Whether to push the frontend image'
+        required: false
+        type: boolean
+        default: true
+      source_repo:
+        description: 'Repository containing endpoints and schemas (owner/repo)'
+        required: true
+        type: string
+      source_ref:
+        description: 'Git ref in source repo (branch or commit)'
+        required: true
+        type: string
+      configuration-dir-path:
+        description: 'Path to config directory containing endpoints.yaml and schemas/'
+        required: true
+        type: string
+      frontend_image:
+        description: 'Frontend image name'
+        required: true
+        type: string
+      workflow_name:
+        description: 'Reusable workflow display name'
+        required: false
+        type: string
+        default: 'Dashboard reusable deploy'
+      containerize_job_name:
+        description: 'Display name for the containerize job'
+        required: false
+        type: string
+        default: 'Containerize frontend'
+      deploy_job_name:
+        description: 'Display name for the deploy job'
+        required: false
+        type: string
+        default: 'Deploy dashboard'
+      namespace:
+        description: 'Kubernetes namespace to deploy into'
+        required: false
+        type: string
+      tag:
+        description: 'Image tag / version to deploy'
+        required: false
+        type: string
+        default: 'generate'
+      release-name:
+        description: 'Helm release name'
+        required: false
+        type: string
+      configmap_name:
+        description: 'ConfigMap name for endpoints and schemas'
+        required: false
+        type: string
+        default: 'dashboard-config'
+      mount-volume-name:
+        description: 'Kubernetes volume name for config mount (empty = skip)'
+        required: false
+        type: string
+        default: 'hlavo-config'
+      mount-endpoints-path:
+        description: 'Pod mount path for endpoints.yaml (empty = skip)'
+        required: false
+        type: string
+        default: '/opt/hlavo/dashboard/config/endpoints.yaml'
+      mount-schemas-path:
+        description: 'Pod mount path for schemas directory (empty = skip)'
+        required: false
+        type: string
+        default: '/opt/hlavo/dashboard/schemas'
+      mount-env-name:
+        description: 'Environment variable name pointing to endpoints.yaml'
+        required: false
+        type: string
+        default: 'ENDPOINTS_PATH'
+    secrets:
+      kubeconfig:
+        required: true
+      source_repo_token:
+        required: true
+      zarr_repo_token:
+        required: false
+      DOCKER_PASSWORD:
+        required: false
+      s3_access_key:
+        required: true
+      s3_secret_key:
+        required: true
+
+jobs:
+  get-version-tag:
+    name: Get version tag
+    runs-on: ubuntu-latest
+    outputs:
+      version-tag: ${{ steps.get_version_tag.outputs.version-tag }}
+    steps:
+      - name: Checkout zarr_fuse
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.zarr_repo }}
+          ref: ${{ inputs['zarr-fuse-ref'] }}
+          path: main-repo
+          token: ${{ secrets.zarr_repo_token }}
+
+      - name: Get version tag
+        id: get_version_tag
+        run: |
+          if [[ ${{ inputs.tag }} == "generate" ]]; then
+            echo "version-tag=ci-$(git -C main-repo rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+          else
+            echo "version-tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          fi
+
+  containerize-frontend:
+    name: ${{ inputs.containerize_job_name }}
+    runs-on: ubuntu-latest
+    container:
+      image: quay.io/buildah/stable:v1.35.4
+      options: --privileged
+    needs:
+      - get-version-tag
+    steps:
+      - name: Checkout zarr_fuse
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.zarr_repo }}
+          ref: ${{ inputs['zarr-fuse-ref'] }}
+          path: main-repo
+          token: ${{ secrets.zarr_repo_token }}
+
+      - name: Containerize
+        uses: ./main-repo/.github/actions/containerize
+        with:
+          repository: ${{ inputs.frontend_image }}
+          tag: ${{ needs.get-version-tag.outputs.version-tag }}
+          containerfile-path: dashboard/oci/frontend.Containerfile
+          push: ${{ inputs['push-container'] }}
+          registry-username: ${{ vars.DOCKER_USERNAME }}
+          registry-password: ${{ secrets.DOCKER_PASSWORD }}
+          working-directory: main-repo
+
+  lint-helm-chart:
+    name: Lint HoloViz Helm chart
+    runs-on: ubuntu-latest
+    container:
+      image: docker.io/alpine/k8s:1.29.14
+    needs:
+      - get-version-tag
+    steps:
+      - name: Checkout zarr_fuse
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.zarr_repo }}
+          ref: ${{ inputs['zarr-fuse-ref'] }}
+          path: main-repo
+          token: ${{ secrets.zarr_repo_token }}
+
+      - name: Lint helm chart
+        uses: ./main-repo/.github/actions/helm-lint
+        with:
+          working-directory: main-repo/dashboard/charts/holoviz
+
+  deploy:
+    name: ${{ inputs.deploy_job_name }}
+    runs-on: ubuntu-latest
+    if: ${{ inputs.deploy }}
+    needs:
+      - get-version-tag
+      - containerize-frontend
+      - lint-helm-chart
+    env:
+      KUBECONFIG: ./kubeconfig.yaml
+    steps:
+      - name: Checkout zarr_fuse (main-repo)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.zarr_repo }}
+          ref: ${{ inputs['zarr-fuse-ref'] }}
+          path: main-repo
+          token: ${{ secrets.zarr_repo_token }}
+
+      - name: Checkout source repo (HLAVO or caller)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.source_repo }}
+          ref: ${{ inputs.source_ref }}
+          path: source-repo
+          token: ${{ secrets.source_repo_token }}
+
+      - name: Decode kubeconfig
+        run: echo "${{ secrets.kubeconfig }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
+
+      - name: Ensure namespace exists (check permissions first)
+        run: |
+          set -euo pipefail
+          NS="${{ inputs.namespace }}"
+          echo "Checking namespace '$NS'..."
+          if kubectl get namespace "$NS" >/dev/null 2>&1; then
+            echo "Namespace '$NS' already exists."
+          else
+            echo "Namespace '$NS' does not exist. Checking permission to create namespaces..."
+            if kubectl auth can-i create namespace >/dev/null 2>&1; then
+              echo "Permission granted: creating namespace '$NS'..."
+              kubectl create namespace "$NS"
+            else
+              echo "Permission denied: this kubeconfig user cannot create namespaces."
+              echo "Please create the namespace '$NS' manually or provide a kubeconfig with namespace-create rights."
+              exit 1
+            fi
+          fi
+
+      - name: Set context to namespace
+        run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
+
+      - name: Validate source files
+        run: |
+          echo "Checking config directory in source repo: ${{ inputs.source_repo }}@${{ inputs.source_ref }}"
+          ls -l "source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml" || (echo "MISSING endpoints.yaml" && exit 1)
+          ls -l "source-repo/${{ inputs['configuration-dir-path'] }}/schemas" || (echo "MISSING schemas dir" && exit 1)
+
+      - name: Create ConfigMap from source files
+        run: |
+          set -o pipefail
+          echo "Creating ConfigMap ${{ inputs.configmap_name }} in namespace '${{ inputs.namespace }}' from:"
+          echo " - endpoints: source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml"
+          echo " - schemas dir: source-repo/${{ inputs['configuration-dir-path'] }}/schemas"
+
+            if kubectl create configmap "${{ inputs.configmap_name }}" \
+              --namespace "${{ inputs.namespace }}" \
+              --from-file=endpoints.yaml=source-repo/${{ inputs['configuration-dir-path'] }}/endpoints.yaml \
+              --from-file=source-repo/${{ inputs['configuration-dir-path'] }}/schemas \
+              --dry-run=client -o yaml | kubectl apply -f -; then
+            echo "ConfigMap applied successfully."
+          else
+            echo "Failed to create ConfigMap. Checking permissions and namespace..."
+            kubectl auth can-i create configmaps --namespace="${{ inputs.namespace }}" || true
+            kubectl get namespace "${{ inputs.namespace }}" -o yaml || true
+            kubectl get configmap --namespace="${{ inputs.namespace }}" -o name || true
+            echo "If this runner's kubeconfig user lacks permissions, update the KUBECONFIG secret or grant the user create/apply rights in the namespace."
+            exit 1
+          fi
+
+      - name: Deploy Helm chart from main-repo
+        run: |
+          FLAGS="--install --atomic --timeout 10m \
+            --namespace ${{ inputs.namespace }} \
+            --set frontend.image.name=${{ inputs.frontend_image }} \
+            --set frontend.image.tag=${{ needs.get-version-tag.outputs.version-tag }} \
+            --set frontend.s3.secrets.accessKey=${{ secrets.s3_access_key }} \
+            --set frontend.s3.secrets.secretKey=${{ secrets.s3_secret_key }}"
+          if [[ -n "${{ inputs['mount-volume-name'] }}" ]]; then
+            FLAGS+=" \
+              --set frontend.extraEnv[0].name=${{ inputs['mount-env-name'] }} \
+              --set frontend.extraEnv[0].value=${{ inputs['mount-endpoints-path'] }} \
+              --set frontend.extraVolumes[0].name=${{ inputs['mount-volume-name'] }} \
+              --set frontend.extraVolumes[0].configMap.name=${{ inputs.configmap_name }} \
+              --set frontend.extraVolumeMounts[0].name=${{ inputs['mount-volume-name'] }} \
+              --set frontend.extraVolumeMounts[0].mountPath=${{ inputs['mount-endpoints-path'] }} \
+              --set frontend.extraVolumeMounts[0].subPath=endpoints.yaml \
+              --set frontend.extraVolumeMounts[1].name=${{ inputs['mount-volume-name'] }} \
+              --set frontend.extraVolumeMounts[1].mountPath=${{ inputs['mount-schemas-path'] }}"
+          fi
+          helm upgrade "${{ inputs['release-name'] }}" main-repo/dashboard/charts/holoviz $FLAGS
