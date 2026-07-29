@@ -18,7 +18,7 @@ jobs:
       endpoints-path: app/databuk/config/endpoints.yaml
       schemas-path: app/databuk/config/schemas
       image-name: jbrezmorf/zarr-fuse-holoviz-frontend
-      namespace: zarr-fuse-dashboard-development
+      namespace: zarr-fuse-holoviz-development
       deploy: true
       push-container: true
       tag: generate

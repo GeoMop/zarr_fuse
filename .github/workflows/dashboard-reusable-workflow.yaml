@@ -244,7 +244,9 @@ jobs:
             --set frontend.image.name=${{ inputs.image-name }} \
             --set frontend.image.tag=${{ needs.get-version-tag.outputs.version-tag }} \
             --set frontend.s3.secrets.accessKey=${{ secrets.s3_access_key }} \
-            --set frontend.s3.secrets.secretKey=${{ secrets.s3_secret_key }}"
+            --set frontend.s3.secrets.secretKey=${{ secrets.s3_secret_key }} \
+            --set ingress.host=zarr-fuse-${{ inputs['release-name'] }}.dyn.cloud.e-infra.cz \
+            --set ingress.tlsSecretName=zarr-fuse-${{ inputs['release-name'] }}-dyn-cloud-e-infra-cz-tls"
           if [[ -n "${{ inputs['config-volume-name'] }}" ]]; then
             FLAGS+=" \
               --set frontend.extraEnv[0].name=ENDPOINTS_PATH \
