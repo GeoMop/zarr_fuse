@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       zarr-fuse-ref:
-        description: "Ref for the zarr_fuse repository"
+        description: "Ref for zarr_fuse (branch or commit)"
         required: true
         type: string
 
@@ -71,7 +71,7 @@ on:
         description: "Kubernetes ConfigMap volume name"
         required: false
         type: string
-        default: "hlavo-config"
+        default: "config"
     secrets:
       kubeconfig:
         required: true
@@ -237,71 +237,45 @@ jobs:
           ENDPOINTS_FILE="source-repo/${{ inputs['source-endpoints-path'] }}"
           SCHEMAS_DIR="source-repo/${{ inputs['source-schemas-path'] }}"
 
-          kubectl create configmap "${{ inputs.configmap_name }}" \
+          echo "Creating ConfigMap ${{ inputs.configmap_name }} in namespace '${{ inputs.namespace }}' from:"
+          echo " - endpoints: $ENDPOINTS_FILE"
+          echo " - schemas dir: $SCHEMAS_DIR"
+
+          if kubectl create configmap "${{ inputs.configmap_name }}" \
             --namespace "${{ inputs.namespace }}" \
             --from-file=endpoints.yaml="$ENDPOINTS_FILE" \
             --from-file="$SCHEMAS_DIR" \
-            --dry-run=client \
-            -o yaml |
-            kubectl apply -f -
+            --dry-run=client -o yaml | kubectl apply -f -; then
+            echo "ConfigMap applied successfully."
+          else
+            echo "Failed to create ConfigMap. Checking permissions and namespace..."
+            kubectl auth can-i create configmaps --namespace="${{ inputs.namespace }}" || true
+            kubectl get namespace "${{ inputs.namespace }}" -o yaml || true
+            kubectl get configmap --namespace="${{ inputs.namespace }}" -o name || true
+            echo "If this runner's kubeconfig user lacks permissions, update the KUBECONFIG secret or grant the user create/apply rights in the namespace."
+            exit 1
+          fi
 
       - name: Deploy Helm chart from main-repo
         shell: bash
         run: |
           set -euo pipefail
 
-          readonly POD_ENDPOINTS_PATH="/opt/hlavo/dashboard/config/endpoints.yaml"
-          readonly POD_SCHEMAS_PATH="/opt/hlavo/dashboard/schemas"
-
-          HELM_ARGS=(
-            --install
-            --atomic
-            --timeout
-            10m
-            --namespace
-            "${{ inputs.namespace }}"
-            --set-string
-            "frontend.image.name=${{ inputs.frontend_image }}"
-            --set-string
-            "frontend.image.tag=${{ needs.get-version-tag.outputs.version-tag }}"
-            --set-string
-            "frontend.s3.secrets.accessKey=${{ secrets.s3_access_key }}"
-            --set-string
-            "frontend.s3.secrets.secretKey=${{ secrets.s3_secret_key }}"
-          )
-
-          if [[ -n "${{ inputs['mount-volume-name'] }}" ]]; then
-            HELM_ARGS+=(
-              --set-string
-              "frontend.extraEnv[0].name=ENDPOINTS_PATH"
-              --set-string
-              "frontend.extraEnv[0].value=$POD_ENDPOINTS_PATH"
-
-              --set-string
-              "frontend.extraEnv[1].name=SCHEMAS_PATH"
-              --set-string
-              "frontend.extraEnv[1].value=$POD_SCHEMAS_PATH"
-
-              --set-string
-              "frontend.extraVolumes[0].name=${{ inputs['mount-volume-name'] }}"
-              --set-string
-              "frontend.extraVolumes[0].configMap.name=${{ inputs.configmap_name }}"
-
-              --set-string
-              "frontend.extraVolumeMounts[0].name=${{ inputs['mount-volume-name'] }}"
-              --set-string
-              "frontend.extraVolumeMounts[0].mountPath=$POD_ENDPOINTS_PATH"
-              --set-string
-              "frontend.extraVolumeMounts[0].subPath=endpoints.yaml"
-
-              --set-string
-              "frontend.extraVolumeMounts[1].name=${{ inputs['mount-volume-name'] }}"
-              --set-string
-              "frontend.extraVolumeMounts[1].mountPath=$POD_SCHEMAS_PATH"
-            )
-          fi
-
-          helm upgrade \
-            "${{ inputs['release-name'] }}" \
-            main-repo/dashboard/charts/holoviz \
-            "${HELM_ARGS[@]}"
+          helm upgrade "${{ inputs['release-name'] }}" main-repo/dashboard/charts/holoviz \
+            --install --atomic --timeout 10m \
+            --namespace "${{ inputs.namespace }}" \
+            --set "frontend.image.name=${{ inputs.frontend_image }}" \
+            --set "frontend.image.tag=${{ needs.get-version-tag.outputs.version-tag }}" \
+            --set "frontend.s3.secrets.accessKey=${{ secrets.s3_access_key }}" \
+            --set "frontend.s3.secrets.secretKey=${{ secrets.s3_secret_key }}" \
+            --set "frontend.extraEnv[0].name=ENDPOINTS_PATH" \
+            --set "frontend.extraEnv[0].value=/opt/dashboard/config/endpoints.yaml" \
+            --set "frontend.extraEnv[1].name=SCHEMAS_PATH" \
+            --set "frontend.extraEnv[1].value=/opt/dashboard/schemas" \
+            --set "frontend.extraVolumes[0].name=${{ inputs['mount-volume-name'] }}" \
+            --set "frontend.extraVolumes[0].configMap.name=${{ inputs.configmap_name }}" \
+            --set "frontend.extraVolumeMounts[0].name=${{ inputs['mount-volume-name'] }}" \
+            --set "frontend.extraVolumeMounts[0].mountPath=/opt/dashboard/config/endpoints.yaml" \
+            --set "frontend.extraVolumeMounts[0].subPath=endpoints.yaml" \
+            --set "frontend.extraVolumeMounts[1].name=${{ inputs['mount-volume-name'] }}" \
+            --set "frontend.extraVolumeMounts[1].mountPath=/opt/dashboard/schemas"

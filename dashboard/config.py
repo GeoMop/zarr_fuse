@@ -9,14 +9,6 @@ from dotenv import load_dotenv
 ENDPOINTS_ENV_VAR = "ENDPOINTS_PATH"
 SCHEMAS_ENV_VAR = "SCHEMAS_PATH"
 
-POD_ENDPOINTS_PATH = Path(
-    "/opt/hlavo/dashboard/config/endpoints.yaml"
-)
-POD_SCHEMAS_PATH = Path(
-    "/opt/hlavo/dashboard/schemas"
-)
-
-
 @dataclass
 class SourceConfig:
     type: str
