@@ -32,12 +32,22 @@ REPRO TEST COMMANDS:
 
 """
 
-import pytest
 import os
-import numpy as np
 from pathlib import Path
-from dotenv import load_dotenv
+import warnings
+
+import fsspec
+import numpy as np
+import pytest
+import zarr
+from zarr.errors import ZarrUserWarning
+
 import zarr_fuse
+
+
+TEST_S3_ENDPOINT_URL = "https://s3.cl4.du.cesnet.cz"
+TEST_S3_BUCKET_NAME = "test-zarr-storage"
+EXISTING_STORE_URL = "s3://hlavo-release/dashboard-test/structure_tree.zarr"
 
 def get_first_data_node(node):
     """
@@ -51,46 +61,70 @@ def get_first_data_node(node):
     return node  # fallback: return node itself if no child has data
 
 
-def load_s3_credentials():
-    """Load S3 credentials from .env file."""
-    # Updated path: C:\Users\fatih\Documents\GitHub\zarr_fuse\.env
-    env_path = Path(__file__).parent.parent.parent / '.env'
-    
-    if env_path.exists():
-        load_dotenv(env_path)
-        print(f"Loaded credentials from: {env_path}")
-    else:
-        print(f"No .env file found at: {env_path}")
-    
-    # Get credentials - try both with and without ZF_ prefix
-    endpoint_url = os.getenv('S3_ENDPOINT_URL')
-    access_key = os.getenv('ZF_S3_ACCESS_KEY') or os.getenv('S3_ACCESS_KEY')
-    secret_key = os.getenv('ZF_S3_SECRET_KEY') or os.getenv('S3_SECRET_KEY')
-    bucket_name = os.getenv('ZF_S3_BUCKET_NAME') or os.getenv('S3_BUCKET_NAME')
-    
-    if not all([endpoint_url, access_key, secret_key, bucket_name]):
-        pytest.skip("S3 credentials not available")
-    
+def load_s3_credentials(secret_getenv):
+    """Load only the S3 secret pair required by the prototype tests."""
     return {
-        'endpoint_url': endpoint_url,
-        'access_key': access_key,
-        'secret_key': secret_key,
-        'bucket_name': bucket_name
+        'access_key': secret_getenv('ZF_S3_ACCESS_KEY'),
+        'secret_key': secret_getenv('ZF_S3_SECRET_KEY'),
     }
 
 
-def setup_s3_environment(creds):
-    """Set up S3 credentials in environment variables.
-    
-    zarr_fuse expects: S3_ENDPOINT_URL, S3_ACCESS_KEY, S3_SECRET_KEY
-    (without ZF_ prefix)
-    """
-    os.environ['S3_ENDPOINT_URL'] = creds['endpoint_url']
-    os.environ['S3_ACCESS_KEY'] = creds['access_key']
-    os.environ['S3_SECRET_KEY'] = creds['secret_key']
+def _prototype_schema(store_url):
+    return {
+        "ATTRS": {
+            "STORE_URL": store_url,
+            "S3_ENDPOINT_URL": TEST_S3_ENDPOINT_URL,
+        },
+        "VARS": {
+            "temperature": {
+                "unit": "C",
+                "coords": ["time"],
+            },
+        },
+        "COORDS": {
+            "time": {
+                "unit": {"tick": "s", "tz": "UTC"},
+                "source_unit": {"tick": "s", "tz": "UTC"},
+                "chunk_size": 16,
+            },
+        },
+    }
 
 
-def test_read_s3_zarr_store_via_zarr_fuse_api():
+def _s3_storage_options(creds, *, asynchronous):
+    return {
+        "key": creds["access_key"],
+        "secret": creds["secret_key"],
+        "endpoint_url": TEST_S3_ENDPOINT_URL,
+        "asynchronous": asynchronous,
+        "config_kwargs": {
+            "request_checksum_calculation": "when_required",
+            "response_checksum_validation": "when_required",
+        },
+    }
+
+
+def _make_fsspec_store(creds, store_path):
+    fs = fsspec.filesystem("s3", **_s3_storage_options(creds, asynchronous=True))
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=".*fs .* was not created with `asynchronous=True`.*",
+            category=ZarrUserWarning,
+        )
+        store = zarr.storage.FsspecStore(fs, path=store_path)
+    return store
+
+
+def _cleanup_store(creds, store_path):
+    fs = fsspec.filesystem("s3", **_s3_storage_options(creds, asynchronous=False))
+    try:
+        fs.rm(store_path, recursive=True)
+    except FileNotFoundError:
+        pass
+
+
+def test_read_s3_zarr_store_via_zarr_fuse_api(secret_getenv):
     """Test writing and reading zarr data to/from S3 using zarr_fuse's native API.
     
     This test validates the complete S3 workflow using zarr_fuse's recommended approach:
@@ -113,23 +147,21 @@ def test_read_s3_zarr_store_via_zarr_fuse_api():
     Expected: Test PASSES (data successfully written and read from S3)
     """
     # Setup S3 credentials
-    creds = load_s3_credentials()
-    setup_s3_environment(creds)
+    creds = load_s3_credentials(secret_getenv)
     
-    # Load test schema configuration
     schema_path = Path(__file__).parent / 'inputs' / 'test_schema.yaml'
     if not schema_path.exists():
         pytest.skip(f"Schema file not found: {schema_path}")
-    
     schema = zarr_fuse.zarr_schema.deserialize(schema_path)
-    store_url = schema.ds.ATTRS['STORE_URL']
+    store_url = f"s3://{TEST_S3_BUCKET_NAME}/test_prototype/write_read_test.zarr"
+    schema.ds.ATTRS['STORE_URL'] = store_url
     
     print(f"\n=== STEP 1: Writing to S3 using zarr_fuse API ===")
     print(f"Store URL: {store_url}")
     print("Using: zf.open_store() + node.update(polars.DataFrame)")
     
     # Remove old store if exists - zarr_fuse handles S3 cleanup automatically
-    kwargs = {"S3_ENDPOINT_URL": creds['endpoint_url']}
+    kwargs = {"S3_ENDPOINT_URL": TEST_S3_ENDPOINT_URL}
     zarr_fuse.remove_store(schema, **kwargs)
     print("✓ Old store removed (if existed)")
     
@@ -154,7 +186,7 @@ def test_read_s3_zarr_store_via_zarr_fuse_api():
     print("Using: zf.open_store() + node.dataset\n")
     
     # Re-open the store for reading
-    kwargs = {"S3_ENDPOINT_URL": creds['endpoint_url']}
+    kwargs = {"S3_ENDPOINT_URL": TEST_S3_ENDPOINT_URL}
     node = zarr_fuse.open_store(schema, **kwargs)
     print("✓ Store opened")
     
@@ -178,7 +210,7 @@ def test_read_s3_zarr_store_via_zarr_fuse_api():
     print("\n✓ Test PASSED - Successfully wrote to and read from S3 using zarr_fuse API!")
 
 
-def test_write_with_pure_zarr_read_with_zarr_fuse():
+def test_write_with_pure_zarr_read_with_zarr_fuse(secret_getenv):
     """Test writing with pure zarr (no xarray) and reading with zarr_fuse.
     
     This test investigates what happens when data is written using pure zarr library
@@ -199,80 +231,44 @@ def test_write_with_pure_zarr_read_with_zarr_fuse():
     Purpose: Understand how zarr_fuse handles zarr stores without xarray metadata.
     """
     # Setup S3 credentials
-    creds = load_s3_credentials()
-    setup_s3_environment(creds)
+    creds = load_s3_credentials(secret_getenv)
     
-    import zarr
-    import s3fs
-    import tempfile
-    import shutil
-    
-    # Load test schema configuration
-    schema_path = Path(__file__).parent / 'inputs' / 'test_schema.yaml'
-    if not schema_path.exists():
-        pytest.skip(f"Schema file not found: {schema_path}")
-    
-    schema = zarr_fuse.zarr_schema.deserialize(schema_path)
-    store_url = schema.ds.ATTRS['STORE_URL']
+    store_url = f"s3://{TEST_S3_BUCKET_NAME}/test_prototype/write_read_test.zarr"
+    schema = zarr_fuse.zarr_schema.deserialize(_prototype_schema(store_url))
     
     print(f"\n=== STEP 1: Writing with PURE ZARR locally (no xarray metadata) ===")
     print(f"Target S3 URL: {store_url}")
     print("Method: Direct zarr.open_group() + create_dataset() on local filesystem")
     
-        # Write directly to S3 with pure zarr and fsspec
+    # Write directly to S3 with pure zarr and fsspec
     print("\nWriting data with pure zarr directly to S3...")
-    import asyncio
-    import fsspec
-    async def async_zarr_write():
-        s3_opts = {
-            'key': creds['access_key'],
-            'secret': creds['secret_key'],
-            'client_kwargs': {'endpoint_url': creds['endpoint_url']},
-            'config_kwargs': {
-                's3': {
-                    'addressing_style': 'path',
-                    'request_checksum_calculation': 'when_required',
-                    'response_checksum_validation': 'when_required'
-                }
-            },
-            'asynchronous': True
-        }
-        fs = fsspec.filesystem('s3', **s3_opts)
-        clean_path = store_url.replace('s3://', '')
-        # Remove old store if exists
-        try:
-            await fs._rm(clean_path, recursive=True)
-            print("✓ Old S3 store deleted")
-        except FileNotFoundError:
-            print("✓ No old S3 store to delete")
+    store_path = store_url.removeprefix("s3://")
+    _cleanup_store(creds, store_path)
+    store = _make_fsspec_store(creds, store_path)
+    root = zarr.open_group(store=store, mode="w")
+    root.attrs["__structure__"] = zarr_fuse.zarr_schema.serialize(schema)
 
-        store = zarr.storage.FsspecStore(fs, path=clean_path)
-        root = await zarr.open_group(store, mode='w')
+    # Create arrays WITHOUT _ARRAY_DIMENSIONS metadata
+    time_data = np.array([1000, 1001, 1002])
+    root.create_array("time", data=time_data, dimension_names=("time",))
+    temp_data = np.array([20.0, 21.0, 22.0])
+    root.create_array("temperature", data=temp_data, dimension_names=("time",))
 
-        # Create arrays WITHOUT _ARRAY_DIMENSIONS metadata
-        time_data = np.array([1000, 1001, 1002])
-        await root.create_array('time', data=time_data)
-        temp_data = np.array([20.0, 21.0, 22.0])
-        await root.create_array('temperature', data=temp_data)
+    print("✓ Data written to S3 with pure zarr (no _ARRAY_DIMENSIONS metadata)")
+    print(f"  - time: {time_data}")
+    print(f"  - temperature: {temp_data}")
 
-        print("✓ Data written to S3 with pure zarr (no _ARRAY_DIMENSIONS metadata)")
-        print(f"  - time: {time_data}")
-        print(f"  - temperature: {temp_data}")
-
-        # Verify no xarray metadata exists
-        print("\nChecking metadata...")
-        if '_ARRAY_DIMENSIONS' in root['temperature'].attrs:
-            print("  ⚠️  _ARRAY_DIMENSIONS found (unexpected!)")
-        else:
-            print("  ✓ No _ARRAY_DIMENSIONS metadata (as expected for pure zarr)")
-
-    asyncio.run(async_zarr_write())
+    print("\nChecking metadata...")
+    if "_ARRAY_DIMENSIONS" in root["temperature"].attrs:
+        print("  ⚠️  _ARRAY_DIMENSIONS found (unexpected!)")
+    else:
+        print("  ✓ No _ARRAY_DIMENSIONS metadata (as expected for pure zarr)")
     
     # Step 3: Read with zarr_fuse
     print("\n=== STEP 3: Reading with zarr_fuse ===")
     print("Question: Can zarr_fuse read zarr data without xarray metadata?\n")
     
-    kwargs = {"S3_ENDPOINT_URL": creds['endpoint_url']}
+    kwargs = {"S3_ENDPOINT_URL": TEST_S3_ENDPOINT_URL}
     
     print("Opening store with zarr_fuse...")
     node = zarr_fuse.open_store(schema, **kwargs)
@@ -315,7 +311,7 @@ def test_write_with_pure_zarr_read_with_zarr_fuse():
         raise
 
 
-def test_read_existing_s3_store():
+def test_read_existing_s3_store(secret_getenv):
     """Test reading an existing production zarr store from S3 (hlavo-release bucket).
     
     This test validates zarr_fuse's ability to read pre-existing zarr stores
@@ -333,8 +329,7 @@ def test_read_existing_s3_store():
     it indicates a bug in xarray's zarr backend that prevents accessing production S3 data.
     """
     # Setup S3 credentials for hlavo-release bucket
-    creds = load_s3_credentials()
-    setup_s3_environment(creds)
+    creds = load_s3_credentials(secret_getenv)
     
     print(f"\n=== Reading existing store from hlavo-release bucket ===")
     
@@ -346,11 +341,12 @@ def test_read_existing_s3_store():
     print(f"Loading schema from: {schema_path}")
     schema = zarr_fuse.zarr_schema.deserialize(schema_path)
     print(f"Source used: schema.yaml ({schema_path})")
-    store_url = schema.ds.ATTRS['STORE_URL']
+    store_url = EXISTING_STORE_URL
+    schema.ds.ATTRS['STORE_URL'] = store_url
     print(f"Store URL: {store_url}")
     print("\nGoal: Successfully read production data from S3\n")
     # Try to open and read the store using zarr_fuse API
-    kwargs = {"S3_ENDPOINT_URL": creds['endpoint_url']}
+    kwargs = {"S3_ENDPOINT_URL": TEST_S3_ENDPOINT_URL}
     print("Opening production zarr store...")
     node = zarr_fuse.open_store(schema, **kwargs)
     print("✓ Store opened")

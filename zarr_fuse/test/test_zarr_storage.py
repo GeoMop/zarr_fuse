@@ -2,6 +2,7 @@ from typing import *
 import shutil
 import time
 import os
+import copy
 from dotenv import load_dotenv
 
 
@@ -42,7 +43,6 @@ workdir = script_dir / "workdir"
 #     :param kwargs:
 #     :return:
 #     """
-#     node_schema = zf.zarr_storage._get_schema_safe(schema)
 #     options = zf.zarr_storage._zarr_fuse_options(node_schema, **kwargs)
 #     store = zf.zarr_storage._zarr_store_open(options)
 #     if not isinstance(store, FsspecStore):
@@ -53,7 +53,7 @@ workdir = script_dir / "workdir"
 #         return fsspec.asyn.sync(loop, get_items, store)
 
 def _store_ls(schema, **kwargs):
-    node_schema = zf.zarr_storage._get_schema_safe(schema)
+    node_schema = zf.schema.deserialize(schema) if not isinstance(schema, zf.zarr_schema.NodeSchema) else schema
     options = zf.zarr_storage._zarr_fuse_options(node_schema, **kwargs)
     store = zf.zarr_storage._zarr_store_open(options)
     if not isinstance(store, FsspecStore):
@@ -174,6 +174,318 @@ def test_zarr_fuse_options_rejects_unknown_logger():
         zf.zarr_storage._zarr_fuse_options(None, LOGGER='unknown')
 
 
+def test_datetime_encoding_roundtrip(smart_tmp_path):
+    store_path = smart_tmp_path / "datetime_roundtrip.zarr"
+    shutil.rmtree(store_path, ignore_errors=True)
+    schema_dict = {
+        "VARS": {
+            "temperature": {
+                "unit": "K",
+                "df_col": "temp",
+                "coords": ["date_time"],
+            },
+        },
+        "COORDS": {
+            "date_time": {
+                "unit": {"tick": "s", "tz": "UTC"},
+                "source_unit": {"tick": "s", "tz": "UTC"},
+                "df_col": "timestamp",
+                "chunk_size": 8,
+            },
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
+
+    schema_dict_ms = copy.deepcopy(schema_dict)
+    schema_dict_ms["COORDS"]["date_time"]["source_unit"] = {"tick": "ms", "tz": "UTC"}
+
+    node = zf.open_store(schema_dict)
+    node.update(pl.DataFrame({
+        "timestamp": ["1970-01-01T00:00:01+00:00"],
+        "temp": [280.0],
+    }))
+
+    node = zf.open_store(schema_dict_ms)
+    node.update(pl.DataFrame({
+        "timestamp": ["1970-01-01T01:00:02.000+01:00"],
+        "temp": [281.0],
+    }))
+
+    reopened = zf.open_store(schema_dict).dataset
+    expected_times = np.array(
+        ["1970-01-01T00:00:01", "1970-01-01T00:00:02"],
+        dtype="datetime64[s]",
+    )
+    npt.assert_array_equal(reopened["date_time"].values.astype("datetime64[s]"), expected_times)
+    npt.assert_array_equal(reopened["temperature"].values, np.array([280.0, 281.0]))
+
+
+def _delayed_datetime_schema(
+        smart_tmp_path: Path,
+        store_name: str,
+        date_time_step_limits,
+) -> dict:
+    """Prepare a clean local store and return a minimal delayed-update schema."""
+    store_path = smart_tmp_path / store_name
+    shutil.rmtree(store_path, ignore_errors=True)
+    coord = {
+        "unit": {"tick": "s", "tz": "UTC"},
+        "source_unit": {"tick": "s", "tz": "UTC"},
+        "df_col": "timestamp",
+        "chunk_size": 2,
+        "step_limits": date_time_step_limits,
+    }
+
+    return {
+        "VARS": {
+            "temperature": {
+                "unit": "degC",
+                "df_col": "temp",
+                "coords": ["date_time"],
+            },
+        },
+        "COORDS": {
+            "date_time": coord,
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
+
+
+def _write_delayed_datetime_batches(
+        smart_tmp_path: Path,
+        store_name: str,
+        date_time_step_limits,
+        update_count: int | None = None,
+) -> xr.Dataset:
+    """Prepare a schema and write delayed datetime batches through reopened nodes."""
+    schema_dict = _delayed_datetime_schema(
+        smart_tmp_path,
+        store_name,
+        date_time_step_limits,
+    )
+    updates = [
+        ("2025-09-17T06:00:00+00:00", 17.25),
+        ("2025-09-19T06:00:00+00:00", 19.25),
+        ("2025-09-18T22:00:00+00:00", 18.0),
+        ("2025-09-17T22:00:00+00:00", 17.0),
+    ]
+    selected_updates = updates if update_count is None else updates[:update_count]
+    for timestamp, temp in selected_updates:
+        node = zf.open_store(schema_dict)
+        try:
+            node.update(pl.DataFrame({"timestamp": [timestamp], "temp": [temp]}))
+        except AssertionError:
+            print(f"date_time coord size: {node.dataset.sizes['date_time']}")
+            raise
+
+    return zf.open_store(schema_dict).dataset
+
+
+def _assert_date_time_sorted(ds: xr.Dataset) -> None:
+    """Report date_time coordinate size and assert monotonic nondecreasing order."""
+    date_time = ds["date_time"].values.astype("datetime64[s]")
+    print(f"date_time coord size: {date_time.size}")
+    assert np.all(date_time[:-1] <= date_time[1:])
+
+
+def test_update_sorted_merge_none(smart_tmp_path, caplog):
+    """
+    Default coordinate merge cannot insert delayed date_time values into an existing range.
+    """
+    caplog.set_level(logging.ERROR, logger="zarr_fuse.interpolate")
+    reopened = _write_delayed_datetime_batches(
+        smart_tmp_path,
+        "delayed_datetime_batches_default.zarr",
+        date_time_step_limits=None,
+    )
+    _assert_date_time_sorted(reopened)
+    assert reopened.sizes["date_time"] == 1
+    assert "Rejected coordinates" in caplog.text
+
+
+def test_update_sorted_merge_step(smart_tmp_path):
+    """
+    Stepped date_time merge reserves a gap and lets delayed real values update it later.
+    """
+    initial_gap = _write_delayed_datetime_batches(
+        smart_tmp_path,
+        "delayed_datetime_batches_stepped.zarr",
+        date_time_step_limits=[15, 61, "minute"],
+        update_count=2,
+    )
+    assert initial_gap.sizes["date_time"] > 2
+    assert np.isnan(initial_gap["temperature"].values[1:-1]).all()
+
+    reopened = _write_delayed_datetime_batches(
+        smart_tmp_path,
+        "delayed_datetime_batches_stepped.zarr",
+        date_time_step_limits=[15, 61, "minute"],
+    )
+    _assert_date_time_sorted(reopened)
+
+
+def test_merge_ds_unsorted(smart_tmp_path):
+    store_path = smart_tmp_path / "sparse_borehole_region.zarr"
+    shutil.rmtree(store_path, ignore_errors=True)
+    schema_dict = {
+        "VARS": {
+            "temperature": {
+                "unit": "degC",
+                "df_col": "temp",
+                "coords": ["date_time", "borehole"],
+            },
+        },
+        "COORDS": {
+            "date_time": {
+                "unit": {"tick": "s", "tz": "UTC"},
+                "source_unit": {"tick": "s", "tz": "UTC"},
+                "df_col": "timestamp",
+                "chunk_size": 2,
+            },
+            "borehole": {
+                "unit": "",
+                "type": "str[8]",
+                "df_col": "borehole",
+                "sorted": False,
+                "chunk_size": 2,
+            },
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
+
+    node = zf.open_store(schema_dict)
+    node.update(pl.DataFrame({
+        "timestamp": [
+            "1970-01-01T00:00:00+00:00",
+            "1970-01-01T00:00:00+00:00",
+            "1970-01-01T00:00:00+00:00",
+        ],
+        "borehole": ["A", "B", "C"],
+        "temp": [10.0, 11.0, 12.0],
+    }))
+
+    node = zf.open_store(schema_dict)
+    node.update(pl.DataFrame({
+        "timestamp": [
+            "1970-01-01T00:00:00+00:00",
+            "1970-01-01T00:00:00+00:00",
+        ],
+        "borehole": ["A", "C"],
+        "temp": [20.0, 22.0],
+    }))
+
+
+def test_merge_ds_skips_empty_cartesian_extension(smart_tmp_path):
+    store_path = smart_tmp_path / "empty_cartesian_extension.zarr"
+    shutil.rmtree(store_path, ignore_errors=True)
+    schema_dict = {
+        "VARS": {
+            "data": {
+                "unit": "degC",
+                "coords": ["x", "p"],
+            },
+        },
+        "COORDS": {
+            "x": {
+                "unit": "h",
+                "sorted": True,
+                "step_limits": "no_new",
+            },
+            "p": {
+                "unit": "",
+                "type": "str[8]",
+                "sorted": False,
+                "step_limits": [],
+            },
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {"data": (("x", "p"), np.array([[10.0, 11.0], [20.0, 21.0]]))},
+        coords={"x": np.array([1.0, 2.0]), "p": np.array(["A", "B"])},
+    ))
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {"data": (("x", "p"), np.array([[30.0], [40.0]]))},
+        coords={"x": np.array([3.0, 10.0]), "p": np.array(["C"])},
+    ))
+
+    reopened = zf.open_store(schema_dict).dataset
+    np.testing.assert_array_equal(reopened.coords["x"].values, np.array([1.0, 2.0]))
+    np.testing.assert_array_equal(reopened.coords["p"].values, np.array(["A", "B"]))
+    assert reopened["data"].shape == (2, 2)
+
+
+def test_update_from_ds_schema():
+    schema = zf.schema.deserialize(inputs_dir / "schema_open_store_tst.yaml")
+
+    class DummyNode:
+        _validate_ds_against_schema = zf.Node._validate_ds_against_schema
+        update_from_ds = zf.Node.update_from_ds
+
+        def __init__(self, ds_schema):
+            self._schema = ds_schema
+            self.group_path = ""
+            self.logger = logging.getLogger("test_update_from_ds")
+            self.merged = None
+
+        @property
+        def schema(self):
+            return self._schema
+
+        def merge_ds(self, ds_update):
+            self.merged = ds_update
+            return ds_update, {}
+
+    node = DummyNode(schema.ds)
+
+    ds = xr.Dataset(
+        data_vars={
+            "temperature": (("time",), np.array([280.0, 281.0])),
+        },
+        coords={
+            "time": np.array([1000, 1001]),
+        },
+    )
+
+    written_ds = node.update_from_ds(ds)
+
+    assert node.merged is ds
+    npt.assert_array_equal(written_ds.coords["time"].values, np.array([1000, 1001]))
+    npt.assert_array_equal(written_ds["temperature"].values, np.array([280.0, 281.0]))
+
+    ds_bad_dims = xr.Dataset(
+        data_vars={
+            "temperature": (("sample",), np.array([280.0, 281.0])),
+        },
+        coords={
+            "time": ("sample", np.array([1000, 1001])),
+        },
+    )
+    with pytest.raises(ValueError, match=r"Coordinate 'time'.*must be 1D with dimension 'time'"):
+        node.update_from_ds(ds_bad_dims)
+
+    ds_bad_coord_values = xr.Dataset(
+        data_vars={
+            "temperature": (("time",), np.array([280.0, 281.0])),
+        },
+        coords={
+            "time": np.array([1000.0, np.nan]),
+        },
+    )
+    with pytest.raises(ValueError, match=r"Coordinate 'time'.*contains NaN/NaT values"):
+        node.update_from_ds(ds_bad_coord_values)
 
 
 def sync_remove_store(storage_options, path):
@@ -260,7 +572,10 @@ def _run_full_test(tree, df_map):
     _update_tree(tree, df_map)
     #print(f"[TIMING] _update_tree: {time.time() - t1:.2f}s")
     #t2 = time.time()
-    zarr.consolidate_metadata(tree.store)
+
+    # V3 doesn't have consolidated data support yet (only as undocumented)
+    # we can not use it for parallel writes anyway.
+    #zarr.consolidate_metadata(tree.store)
     #print(f"[TIMING] consolidate_metadata: {time.time() - t2:.2f}s")
     #print(f"[TIMING] test_node_tree TOTAL: {time.time() - start_time:.2f}s")
 
@@ -300,7 +615,7 @@ def _run_local_validation(tree, df_map):
 
 
 @pytest.mark.parametrize("storage_type", ["local", "s3"])
-def test_node_tree(storage_type):
+def test_node_tree(storage_type, load_repo_secret_env):
     #import time
     #start = time.time()
     #print(f"[TIMING] test_node_tree({storage_type}) START")
@@ -335,8 +650,10 @@ def _check_ds_attrs_weather(ds, schema_ds):
                 assert sub_coord not in ds.coords
 
 @pytest.mark.parametrize("storage_type", ["local", "s3"])
-def test_update_weather(tmp_path, storage_type):
+def test_update_weather(tmp_path, storage_type, load_repo_secret_env):
     # Example YAML file content (as a string for illustration):
+    import pandas as pd
+
     schema, store, tree = aux_read_struc("schema_weather.yaml", storage_type=storage_type)
     ds_schema = schema.ds
     assert len(ds_schema.COORDS) == 2
@@ -404,9 +721,16 @@ def test_update_weather(tmp_path, storage_type):
     # Check the shape of the temperature variable.
     assert new_ds["temperature"].shape == (2,3)     #(3, 3)
 
-    # Check that the "time" coordinate, it is converted from explicit UTC ("...Z") to CET
-    # during forming the update DF and the converted back to UTC during actual update.
-    ref_vec = np.array([t1, t2], dtype='datetime64[h]') + np.timedelta64(1, 'h')  # CET is UTC+1 in May
+    source_dt_unit = tree.schema.COORDS["time of year"].source_unit
+    parsed_cet = np.array([source_dt_unit.parse(t1), source_dt_unit.parse(t2)], dtype="datetime64[h]")
+    expected_utc_values = pd.to_datetime([t1, t2]).values
+    ref_cet = expected_utc_values.astype("datetime64[h]") + np.timedelta64(1, "h")
+    np.testing.assert_array_equal(parsed_cet, ref_cet)
+
+    # The schema parses these inputs through a fixed CET source timezone.
+    # For explicit "...Z" timestamps, storage should still end up at the same UTC instants.
+    ref_vec = expected_utc_values.astype("datetime64[h]")
+    np.testing.assert_array_equal(pd.Series(ref_vec).values, expected_utc_values.astype("datetime64[h]"))
     np.testing.assert_array_equal(new_ds["time of year"].values, ref_vec)
 
     # Check that the "lat" coordinate was updated to [10.0, 20.0, 30.0]
@@ -452,9 +776,17 @@ def test_update_weather(tmp_path, storage_type):
     # Check that the "time" coordinate was updated to [1000, 2000]
 
     # check times are sorted
-    import pandas as pd
+    parsed_cet = np.array(
+        [source_dt_unit.parse(ts) for ts in [t1, t2, t3_5, t4]],
+        dtype="datetime64[ns]",
+    )
+    ref_cet = (
+        pd.to_datetime([t1, t2, t3_5, t4]).values.astype("datetime64[ns]")
+        + np.timedelta64(1, "h")
+    )
+    np.testing.assert_array_equal(parsed_cet, ref_cet)
 
-    times_pd = pd.to_datetime([t1, t2, t3_5, t4]) + 1.0 * pd.Timedelta(hours=1)  # CET to UTC
+    times_pd = pd.to_datetime([t1, t2, t3_5, t4])
     ref_times = times_pd.values.astype("datetime64[ns]")
     np.testing.assert_array_equal(new_ds["time of year"].values, ref_times)
     # !! Wrong order, not sorted

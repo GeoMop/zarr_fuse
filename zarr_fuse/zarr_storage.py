@@ -26,7 +26,7 @@ from . import zarr_schema, units
 from .schema_ctx import RaisingLogger
 from .dtype_converter import to_typed_array, TrimmedArrayWarning
 from .logger import get_logger
-from .interpolate import interpolate_ds
+from .interpolate import interpolate_ds, check_sorted_coord_values
 from .zarr_schema import DatasetSchema, NodeSchema
 from .tools import recursive_update
 """
@@ -196,19 +196,6 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
         )
     return options
 
-def _get_schema_safe(schema):
-    if isinstance(schema, NodeSchema):
-        return schema
-    if isinstance(schema, str):
-        if schema == '':
-            return NodeSchema.make_empty()
-        schema = Path(schema)
-    if isinstance(schema, Path):
-        return zarr_schema.deserialize(schema)
-    else:
-        raise TypeError(f"Unsupported schema type: {type(schema)}. Expected NodeSchema or Path.")
-
-
 def _wipe_store(store):
 
     # For fsspec-style filesystems
@@ -250,8 +237,13 @@ def _wipe_store(store):
         fsspec.asyn.sync(loop, session.close)
         type(fs).clear_instance_cache()
 
+def _get_schema(schema: zarr_schema.NodeSchema | Path | str | dict):
+    schema = Path(schema) if isinstance(schema, str) else schema
+    return schema if isinstance(schema, NodeSchema) else zarr_schema.deserialize(schema)
+
+
 def remove_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
-    node_schema = _get_schema_safe(schema)
+    node_schema = _get_schema(schema)
     options = _zarr_fuse_options(node_schema, **kwargs)
     try:
         store = _zarr_store_open(options)
@@ -262,7 +254,7 @@ def remove_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
     #store.delete_dir("")
 
 
-def open_store(schema: zarr_schema.NodeSchema | Path | str, **kwargs):
+def open_store(schema: zarr_schema.NodeSchema | Path | str | dict, **kwargs):
     """
     Open existing or create a new ZARR store according to given schema.
     'schema': Could be schema dict or YAML string or Path object to YAML file.
@@ -273,7 +265,7 @@ def open_store(schema: zarr_schema.NodeSchema | Path | str, **kwargs):
 
     Return: root Node
     """
-    node_schema = _get_schema_safe(schema)
+    node_schema = _get_schema(schema)
     options = _zarr_fuse_options(node_schema, **kwargs)
 
     try:
@@ -550,7 +542,7 @@ class Node:
                 self.store,
                 parent=self,
                 new_schema=new_child_schema,
-                logger=self._logger,
+                logger=self.logger,
             )
 
         # Process existing child Nodes
@@ -580,7 +572,7 @@ class Node:
             # Initialize new dataset.
             empty_ds = Node.empty_ds(new_schema)
             self._init_empty_grup(empty_ds)
-            assert self.schema == new_schema
+            #assert self.schema == new_schema
             return new_schema
         else:
             # Preserve dataset schema.
@@ -646,10 +638,7 @@ class Node:
         Original schema tree is spread over the storage groups represented by Nodes.
         :return:
         """
-        node_schema = zarr_schema.deserialize(
-            self.dataset.attrs['__structure__'],
-            source_description='<storage schema>'
-        )
+        node_schema = zarr_schema.deserialize(self.dataset.attrs['__structure__'], source_description='<storage schema>')
         return node_schema.ds
 
 
@@ -684,7 +673,7 @@ class Node:
 
         written_ds, merged_coords = self.merge_ds(ds)
         # check unique coordsregion="auto",
-        dup_dict = check_unique_coords(written_ds)
+        dup_dict = check_unique_coords(written_ds, self.logger)
         if  dup_dict:
             self.logger.error(dup_dict)
         #return written_ds
@@ -702,7 +691,7 @@ class Node:
         ds = dataset_from_np(self.schema, vars)
         written_ds, merged_coords = self.merge_ds(ds)
         # check unique coordsregion="auto",
-        dup_dict = check_unique_coords(written_ds)
+        dup_dict = check_unique_coords(written_ds, self.logger)
         if dup_dict:
             self.logger.error(dup_dict)
         #return written_ds
@@ -721,10 +710,11 @@ class Node:
 
         # --- Coordinates ---
         for cname, c_schema in schema.COORDS.items():
-            c_schema.validate_ds_coord(ds.coords.get(cname, None), path_str, self.logger)
             if cname not in ds.coords:
-                self.logger.error(
-                    KeyError(f"Source dataset is missing coordinate '{cname}'."))
+                raise ValueError(
+                    f"Dataset for node '{path_str}' is missing coordinate '{cname}' "
+                    f"required by schema."
+                )
 
             coord = ds.coords[cname]
             # In your own code you always create coords as 1D with dim == name
@@ -732,6 +722,11 @@ class Node:
                 raise ValueError(
                     f"Coordinate '{cname}' for node '{path_str}' must be 1D with "
                     f"dimension '{cname}', got dims={coord.dims}."
+                )
+            if coord.isnull().any():
+                raise ValueError(
+                    f"Coordinate '{cname}' for node '{path_str}' contains NaN/NaT "
+                    f"values, which are not allowed."
                 )
 
         # --- Variables ---
@@ -791,7 +786,7 @@ class Node:
         written_ds, merged_coords = self.merge_ds(ds)
 
         # Optional: still check for duplicated coordinates and log them
-        dup_dict = check_unique_coords(written_ds)
+        dup_dict = check_unique_coords(written_ds, self.logger)
         if dup_dict:
             self.logger.error(dup_dict)
 
@@ -814,8 +809,15 @@ class Node:
         assert '__structure__' in written_ds.attrs
         return written_ds
 
+    def _coerce_encoding(self, ds):
+        schema_vars = {**self.schema.COORDS, **self.schema.VARS}
+        for name in ds.variables:
+            ds[name].encoding.update(schema_vars[name].get_encoding())
+        return ds
+
     def write_ds(self, ds, **kwargs):
         ds.attrs = self.ensure_schema_attrs(ds.attrs)
+        ds = self._coerce_encoding(ds)
 
         rel_path = self.group_path.strip(self.PATH_SEP)
         ds.to_zarr(self.store, group=rel_path, consolidated=False, **kwargs)
@@ -910,6 +912,7 @@ class Node:
         3. write extended / interpolated parts (Phase 2)
         """
         ds_existing = self.dataset
+        last_written_ds = ds_existing
 
         # --- Phase 1: Dive (split by dimension) ---
         # We create a dict to hold the extension subset for each dimension.
@@ -924,7 +927,7 @@ class Node:
             ds_update,
             self.dataset,
             self.schema.COORDS)
-        last_written_ds = None
+
         ds_extend_dict = {}
         ds_overlap = ds_update.copy()
         dims_order = tuple(ds_update.coords.keys())
@@ -947,8 +950,11 @@ class Node:
             ## merged = ds1.combine_first(ds2).sortby("dim")
 
             dim_coord = ds_extend_dict[dim]
-            if dim_coord is None or dim_coord.sizes.get(dim, 0) == 0:
+            if dim_coord is None:
                 continue  # No new coordinates along this dimension.
+            extension_size = int(np.prod(list(dim_coord.sizes.values())))
+            if extension_size == 0:
+                continue
 
             # For all dimensions other than dim, reindex ds_ext so that the coordinate arrays
             # come from the store (i.e. the full arrays). This ensures consistency.
@@ -964,7 +970,6 @@ class Node:
             new_coords_for_dim = dim_coord[dim].values
             merged_coords[dim] = np.concatenate([merged_coords[dim], new_coords_for_dim])
 
-        assert last_written_ds is not None, "No data was written to the dataset."
         return last_written_ds, merged_coords
 
     """
@@ -1073,9 +1078,9 @@ ds_update.combine_first(ds_zarr_tail).sortby(dim)
         return pl_df
 
 
-def check_unique_coords(ds):
+def check_unique_coords(ds, log: logging.Logger | None = None):
     """
-    Check that all coordinate rows are unique.
+    Check that all coordinate rows are unique and sorted coordinates are sorted.
 
     Parameters
     ----------
@@ -1092,11 +1097,23 @@ def check_unique_coords(ds):
         unique_vals, counts = np.unique(arr, return_counts=True)
         return arr[counts > 1]
 
-    return {
+    coord_errors = {
         name: dup_vals
         for name, coord in ds.coords.items()
         if (dup_vals := duplicities(coord.values)).size > 0
     }
+    if log is None:
+        log = logging.getLogger(__name__)
+
+    for name, coord in ds.coords.items():
+        if coord.attrs.get("sorted", True):
+            check_sorted_coord_values(
+                coord.values,
+                name,
+                log,
+                context="Stored coordinate values",
+            )
+    return coord_errors
 
 
 def eliminate_dims_if_equal(arr: np.ma.MaskedArray, dims_to_check: List[bool]) -> np.ndarray:

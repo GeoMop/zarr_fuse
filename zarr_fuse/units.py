@@ -22,15 +22,14 @@ ureg.define('false = 0 bool')
 _pint.set_application_registry(ureg)
 
 
-# Map common timezone abbreviations to fixed-offset tzinfo
-# Daylight saving time intantionaly forbiden to avoid duplicit times during transition.
-# Build TZINFOS mapping dynamically for all available fixed-offset (non-DST) IANA timezones
+# Map common timezone abbreviations to fixed-offset tzinfo.
+# Daylight saving time is intentionally forbidden to avoid ambiguous local times.
 import zoneinfo
 
 def build_tzinfos():
     """
-     Return dict mapping common timezone abbreviations to fixed-offset seconds (no DST), using pytz.
-     """
+    Return a mapping from timezone abbreviations to fixed-offset tzinfo objects.
+    """
     tzinfos = {}
     winter_instance = datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
     summer_instance = datetime.datetime(2000, 7, 1, tzinfo=datetime.timezone.utc)
@@ -49,31 +48,75 @@ def build_tzinfos():
             if not abbr or len(abbr) > 5:
                 continue
             # map abbreviation to offset seconds
+            new_offset = tzobj.utcoffset(instance)
+            if new_offset is None:
+                continue
+            new_tzinfo = datetime.timezone(new_offset, name=abbr)
             if abbr in tzinfos:
                 existing = tzinfos[abbr].utcoffset(instance)
-                new = tzobj.utcoffset(instance)
-                if existing != new:
+                if existing != new_offset:
                     inconsistent.add(abbr)
-            tzinfos[abbr] = tzobj
-    #print("Removing inconsistent TZ codes:", inconsistent)
+            tzinfos[abbr] = new_tzinfo
     for code in inconsistent:
         tzinfos.pop(code)
     return tzinfos
 
 TZINFOS = build_tzinfos()
 
+DATETIME_TO_ZARR_ENCODING = {
+    "D": "days",
+    "h": "hours",
+    "m": "minutes",
+    "s": "seconds",
+    "ms": "milliseconds",
+    "us": "microseconds",
+    "ns": "nanoseconds",
+}
+# Unit names accepted by xarray's CF datetime encoder in the Zarr write path.
+# This mapping is only used by DateTimeUnit.get_encoding().
+
+DATETIME_TICK_TO_PINT_UNIT = {
+    "D": "day",
+    "h": "hour",
+    "m": "minute",
+    "s": "second",
+    "ms": "millisecond",
+    "us": "microsecond",
+    "ns": "nanosecond",
+}
+
 class Unit(ureg.Unit):
     def asdict(self, value_serializer, filter):
         return str(self)
+
+    def parse_delta_unit(self, unit_cfg: 'ContextCfg'):
+        return DeltaUnit(unit_cfg.value())
 
     def default_dtype(self):
         return np.dtype('float64')
 
     def delta_unit(self):
-        return self
+        return DeltaUnit(str(self))
+
+    def delta_array(self, values, from_unit, dtype):
+        assert isinstance(from_unit, DeltaUnit)
+        return Quantity(values, from_unit).to(self.delta_unit()).magnitude
 
     def delta_dtype(self, dtype):
         return dtype
+
+    def get_encoding(self):
+        return {}
+
+
+class DeltaUnit(Unit):
+    pass
+
+
+PINT_UNIT_TO_DATETIME_TICK = {
+    str(DeltaUnit(unit_name)): tick
+    for tick, unit_name in DATETIME_TICK_TO_PINT_UNIT.items()
+}
 
 
 class NoneUnit(ureg.Unit):
@@ -84,14 +127,29 @@ class NoneUnit(ureg.Unit):
     def asdict(self, value_serializer, filter):
         return None
 
+    def parse_delta_unit(self, unit_cfg: 'ContextCfg'):
+        unit = unit_cfg.value()
+        if unit != '':
+            unit_cfg.schema_ctx.error(
+                f"Step unit of a dimensionless quantity should be '', but getting {unit}."
+            )
+        return DeltaUnit('')
+
     def default_dtype(self):
         return None
 
     def delta_unit(self):
-        return self
+        return DeltaUnit('')
+
+    def delta_array(self, values, from_unit, dtype):
+        assert isinstance(from_unit, DeltaUnit)
+        return Quantity(values, from_unit).to(self.delta_unit()).magnitude
 
     def delta_dtype(self, dtype):
         return dtype
+
+    def get_encoding(self):
+        return {}
 
 
 class Quantity(ureg.Quantity):
@@ -130,6 +188,9 @@ class DateTimeUnit:
             offset = datetime.timedelta(hours=hours, minutes=mins) * sign
             return datetime.timezone(offset)
 
+        if val in TZINFOS:
+            return TZINFOS[val]
+
         # named zone
         tzinfo = dateutil.tz.gettz(val)
         if tzinfo is None:
@@ -138,18 +199,42 @@ class DateTimeUnit:
 
     @property
     def tz_shift(self) -> float:
-        """Hours offset from UTC for the current datetime."""
+        """Hours offset from UTC for this unit's timezone."""
         tzinfo = self.tzinfo
         if tzinfo is None:
             return 0.0
-        offset = tzinfo.utcoffset(datetime.datetime.now())
+        reference = datetime.datetime(2000, 1, 1, tzinfo=datetime.timezone.utc)
+        offset = tzinfo.utcoffset(reference)
+        if offset is None:
+            return 0.0
         return offset.total_seconds() / 3600.0
 
     def default_dtype(self):
         return np.dtype(f'datetime64[{self.tick}]')
 
+    def parse_delta_unit(self, unit_cfg:'ContextCfg'):
+        unit_str = unit_cfg.value()
+        coerced_unit = DATETIME_TICK_TO_PINT_UNIT.get(unit_str, unit_str)
+        if coerced_unit != unit_str:
+            unit_cfg.schema_ctx.warning(
+                f"Deprecated datetime delta unit '{unit_str}' coerced to '{coerced_unit}'."
+            )
+        unit_str = coerced_unit
+        try:
+            unit = DeltaUnit(unit_str)
+        except:
+            unit_cfg.schema_ctx.error(f"Unsupported datetime delta unit: {unit_str}")
+        return unit
+
     def delta_unit(self):
-        return Unit(self.tick)  # TODO: change from 'str' to pint.Unit in DataTimeUnit
+        return DeltaUnit(DATETIME_TICK_TO_PINT_UNIT[self.tick])
+
+    def delta_array(self, values, from_unit: DeltaUnit, dtype):
+        assert isinstance(from_unit, DeltaUnit)
+        tick =  PINT_UNIT_TO_DATETIME_TICK[str(from_unit)]
+        values = np.asarray(values)
+        ticks = np.rint(values).astype(int)
+        return ticks.astype(f"timedelta64[{tick}]").astype(self.delta_dtype(dtype))
 
     def delta_dtype(self, dtype):
         return np.dtype(f'timedelta64[{self.tick}]')
@@ -157,6 +242,16 @@ class DateTimeUnit:
     def nat(self):
         """Return the NaT value for this DateTimeUnit."""
         return np.datetime64('NaT', self.tick)
+
+    def get_encoding(self):
+        cf_unit = DATETIME_TO_ZARR_ENCODING.get(self.tick)
+        if cf_unit is None:
+            raise ValueError(f"Unsupported datetime tick for zarr encoding: {self.tick}")
+        return {
+            "units": f"{cf_unit} since 1970-01-01 00:00:00",
+            "calendar": "proleptic_gregorian",
+            "dtype": "int64",
+        }
 
     def parse(self, value):
         v = str(value)
@@ -266,5 +361,3 @@ def _create_dt_quantity(values, dt_unit: DateTimeUnit, log:'SchemaCtx') -> DateT
 
 
 UnitType = Unit | NoneUnit | DateTimeUnit
-
-

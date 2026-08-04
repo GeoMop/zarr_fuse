@@ -107,5 +107,5 @@ class MetadataModel(BaseModel):
             extract_fn=data_source.extract_fn,
             fn_module=data_source.fn_module,
             dataframe_row=dataframe_row,
-            target_node=data_source.target_node,
+            target_node=data_source.target_node
         )

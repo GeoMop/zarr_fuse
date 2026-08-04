@@ -8,3 +8,5 @@ deployment:
     basicAuth:
       enabled: true
       usersJson: "{}"
+    smtp:
+      password: "random-smtp-password"

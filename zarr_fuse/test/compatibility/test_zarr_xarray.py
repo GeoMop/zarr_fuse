@@ -29,7 +29,7 @@ def make_ds(coords_, ds=None):
         coords=coords
     )
 
-consolidated = True
+consolidated = False
 
 def group_initialize(store, group):
     attrs = {"__empty__": True, "description": "just an init placeholder"}
@@ -115,7 +115,7 @@ def test_raw_zarr_operations():
     assert (store / "g1" / "zarr.json").exists()
     assert (store / "g1" / "g2"/"zarr.json").exists()
 
-    ds_g1 = xr.open_zarr(store, group="g1")
-    ds_g2 = xr.open_zarr(store, group="g1/g2")
+    ds_g1 = xr.open_zarr(store, group="g1", consolidated=consolidated)
+    ds_g2 = xr.open_zarr(store, group="g1/g2", consolidated=consolidated)
     assert ds_g1.sizes == ds_g2.sizes
     assert np.any(ds_g1["temp"].values != ds_g2["temp"].values)

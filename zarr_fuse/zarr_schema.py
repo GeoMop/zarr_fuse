@@ -1,4 +1,5 @@
 import re
+import copy
 from functools import cached_property
 from itertools import chain
 from typing import *
@@ -155,7 +156,7 @@ class Interval(AddressMixin):
 
 
     @classmethod
-    def step_limits(cls, cfg, default_unit):
+    def step_limits(cls, cfg, default_unit, coord_unit):
         # backward compatible
         if cfg.cfg is None:
             cfg.cfg = "no_new"
@@ -172,12 +173,16 @@ class Interval(AddressMixin):
         if isinstance(cfg.cfg, list):
             start = cfg.cfg[0]
             end = cfg.cfg[1]
-            unit = unit_instance(cfg.get(2, None), default_unit)
+            unit_cfg = cfg.get(2, None)
         else:
             assert isinstance(cfg.cfg, dict)
             start = cfg.cfg['start']
             end = cfg.cfg['end']
-            unit = unit_instance(cfg.get("unit", None), default_unit)
+            unit_cfg = cfg.get("unit", None)
+        if unit_cfg.value() is None:
+            unit = default_unit
+        else:
+            unit = coord_unit.parse_delta_unit(unit_cfg)
         if start > end:
             cfg.schema_ctx.error(f"Invalid step_limits specification: start {start} > end {end}")
         return cls(start, end, unit)
@@ -284,6 +289,9 @@ class Variable(AddressMixin):
 
     def zarr_attrs(self):
         return { k:convert_value(getattr(self, k)) for k in self._zarr_keys()}
+
+    def get_encoding(self):
+        return self.unit.get_encoding()
 
     def asdict(self, value_serializer, filter):
         """
@@ -393,7 +401,7 @@ class Coord(Variable):
 
         step_item = cfg.get("step_limits", "any_new")  # None value allowed
         default_step_unit = self.unit.delta_unit() # For DateTimeUnit the incremental/step unit is a pint.Unit of time.
-        self.step_limits = Interval.step_limits(step_item, default_step_unit)
+        self.step_limits = Interval.step_limits(step_item, default_step_unit, self.unit)
 
         self.sorted : bool = cfg.get('sorted', not self.is_composed()).value()
 
@@ -574,34 +582,35 @@ def build_nodeschema(content: ContextCfg) -> NodeSchema:
     return NodeSchema(_address=content.schema_ctx, ds=ds_schema, groups=children)
 
 
-def deserialize(source: Union[IO, str, bytes, Path],
+def deserialize(source: Union[IO, str, bytes, Path, Mapping],
                 source_description=None, log: zf_logger.Logger=None) -> NodeSchema:
     """
     Deserialize YAML from a file path, stream, or bytes containing YAML content.
 
     Parameters:
-      source:
-        - If str or Path, it is treated as a file path (and must exist).
+    source:
+        - If Path, it is treated as a file path (and must exist).
+        - If str, it is treated as YAML content.
         - If bytes, it is treated as YAML content (decoded as UTF-8).
         - Otherwise, it is assumed to be a file-like stream.
 
-    source_description: Used for address as a 'file_name' in case of string or YAML source
+      source_description: Used for address as a 'file_name' in case of string or YAML source
 
     Returns:
       A dictionary resulting from parsing the YAML and processing it with dict_deserialize().
 
     Raises:
-      ValueError if a string is provided that does not correspond to an existing file.
       TypeError for unsupported types.
     """
     file_name = source_description
-    if isinstance(source, Path):
+    if isinstance(source, Mapping):
+        raw_dict = copy.deepcopy(source)
+    elif isinstance(source, Path):
         # Try to open the source as a file path.
         file_name = str(source)
         with Path(source).open("r", encoding="utf-8") as file:
             content = file.read()
     elif isinstance(source, str):
-        # Assume it's a string containing YAML content.
         content = source
     elif isinstance(source, bytes):
         # Decode bytes using UTF-8.
@@ -613,7 +622,8 @@ def deserialize(source: Union[IO, str, bytes, Path],
         except Exception as e:
             raise TypeError("Provided source is not a supported type (IO, str, bytes, or Path)") from e
 
-    raw_dict = yaml.safe_load(content) or {}
+    if not isinstance(source, Mapping):
+        raw_dict = yaml.safe_load(content) or {}
     if log is None:
         log = default_logger()
     version = raw_dict.get('ATTRS', {}).get('VERSION', '0.2.0')

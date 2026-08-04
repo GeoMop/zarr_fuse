@@ -93,8 +93,7 @@ testing:
   COORDS:
     date_time:
       chunk_size: 1024
-      merge:
-        step_limits: [1, 1, "h"]
+      step_limits: [1, 1, "hour"]
 
     lat_lon:
       description: "Example of coordinate indexed uniquely by a tuple of values. The source columns are converted to the 1D list of tuples."
