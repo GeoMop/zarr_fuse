@@ -144,7 +144,9 @@ SMTP notifications. All settings except secrets live here — not in `.env`.
 ```yaml
 configuration:
   base:
-    queue_dir_path: ./var/zarr_fuse   # local ingestion queue directory
+    queue_dir_path: ./var/zarr_fuse   # ingestion queue: local directory, or
+                                      # "s3://bucket/prefix" to keep the queue
+                                      # in S3 (uses the ZF_S3_* credentials)
     log_level: INFO
     port: 8000
     worker_poll_interval: 30          # seconds between worker cycles

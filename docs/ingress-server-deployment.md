@@ -178,12 +178,24 @@ ingress_server/README.md
 
 ## Optional
 
-| Variable    | Description                   | Default           |
-| ----------- | ----------------------------- | ----------------- |
-| CONFIG_PATH | Configuration directory       | `inputs`          |
-| QUEUE_DIR   | Queue directory for ingestion | `./var/zarr_fuse` |
-| LOG_LEVEL   | Logging level                 | `INFO`            |
-| PORT        | Server port                   | `8000`            |
+| Variable       | Description                                                             | Default           |
+| -------------- | ----------------------------------------------------------------------- | ----------------- |
+| CONFIG_PATH    | Configuration directory                                                 | `inputs`          |
+| QUEUE_DIR_PATH | Ingestion queue: local directory or `s3://bucket/prefix` (uses `ZF_S3_*`) | `./var/zarr_fuse` |
+| LOG_LEVEL      | Logging level                                                           | `INFO`            |
+| PORT           | Server port                                                             | `8000`            |
+
+The ingestion queue (`accepted/success/failed`) can live either on a local
+volume (the default, backed by the chart's PVC) or in S3. To switch to S3, set
+`QUEUE_DIR_PATH` to an `s3://bucket/prefix` URL — the queue then reuses the
+`ZF_S3_*` credentials. In the helm chart this means:
+
+```bash
+--set deployment.queue.path=s3://my-bucket/ingress-queue --set persistence.enabled=false
+```
+
+The worker is a single consumer in both modes (no locking); keep
+`deployment.replicaCount: 1`.
 
 ---
 

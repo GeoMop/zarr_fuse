@@ -10,6 +10,7 @@ import zarr_fuse as zf
 from ingress_server.app_config import AppConfig, BaseConfig, SmtpConfig
 from ingress_server.io.time_filter import ExtractedItem, sort_by_data_time
 from ingress_server.models import MetadataModel
+from ingress_server.queue_storage import QueueStorage
 from ingress_server.worker import _process_available_files
 
 LOG = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ def _item(name: str, target_node: str, time_key) -> ExtractedItem:
         target_node=target_node,
     )
     return ExtractedItem(
-        data_path=Path(name),
+        key=name,
         metadata=metadata,
         schema_path=Path(BUKOV_SCHEMA),
         obj=pl.DataFrame(),
@@ -56,9 +57,9 @@ def test_sort_by_data_time():
 
     ordered = sort_by_data_time(items)
 
-    assert {item.data_path.name for item in ordered} == {"a", "b", "c", "d", "e"}
+    assert {item.key for item in ordered} == {"a", "b", "c", "d", "e"}
     n1_order = [
-        item.data_path.name for item in ordered
+        item.key for item in ordered
         if item.metadata.target_node == "n1"
     ]
     # Items without a time key keep receipt order and precede the time-ordered ones.
@@ -96,7 +97,7 @@ def test_worker_stores_batch_in_data_time_order(tmp_path, monkeypatch, caplog):
     assert set(names) == {NEWEST, MIDDLE, OLDEST}
 
     app_config = AppConfig(
-        queue_dir=queue_dir,
+        queue=QueueStorage.from_url(str(queue_dir)),
         config_path=TESTS_DIR / "inputs" / "endpoints_config.yaml",
         config={},
         base=BaseConfig(),

@@ -16,9 +16,13 @@ LOG = logging.getLogger(__name__)
 
 @dataclass(eq=False)
 class ExtractedItem:
-    """An extracted payload waiting to be written to the zarr store."""
+    """An extracted payload waiting to be written to the zarr store.
 
-    data_path: Path
+    `key` is the queue item key ("accepted/<endpoint>/<name>") or a local
+    file path for items processed outside the queue.
+    """
+
+    key: str
     metadata: MetadataModel
     schema_path: Path
     obj: DataObject
@@ -82,14 +86,14 @@ def _min_time_value(obj: DataObject, coord) -> Any:
 
 
 def make_extracted_item(
-    data_path: Path,
+    key: str,
     metadata: MetadataModel,
     schema_path: Path,
     obj: DataObject,
     schema_cache: dict | None = None,
 ) -> ExtractedItem:
     item = ExtractedItem(
-        data_path=data_path,
+        key=key,
         metadata=metadata,
         schema_path=schema_path,
         obj=obj,
@@ -103,7 +107,7 @@ def make_extracted_item(
     except Exception:
         LOG.warning(
             "Failed to determine data time for %s, it will be stored in receipt order",
-            data_path,
+            key,
             exc_info=True,
         )
 
