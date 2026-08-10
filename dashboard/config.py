@@ -179,12 +179,10 @@ def load_environment_from_config(config_path: Path) -> Path | None:
     if not isinstance(config, dict):
         return None
 
-    env_file = config.get("env_file")
-    if not isinstance(env_file, str) or not env_file.strip():
-        dashboard_meta = config.get("_dashboard")
-        if isinstance(dashboard_meta, dict):
-            env_file = dashboard_meta.get("env_file")
-
+    dashboard_meta = config.get("_dashboard")
+    if not isinstance(dashboard_meta, dict):
+        return None
+    env_file = dashboard_meta.get("env_file")
     if not isinstance(env_file, str) or not env_file.strip():
         return None
 
