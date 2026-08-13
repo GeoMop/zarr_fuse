@@ -339,3 +339,10 @@
   configured default endpoint). `dashboard/tile_service.py` now calls it with
   its own endpoints-path resolution and optional `HV_DASHBOARD_ENDPOINT`.
   Dashboard suite: 116 passed.
+- 2026-08-13: DRY consolidation of the tile service path resolution: removed
+  the duplicated `_resolve_endpoints_path()` from `dashboard/tile_service.py`
+  and reused `config.resolve_endpoints_path()` instead. The module now resolves
+  `ENDPOINTS_PATH` once at import, wrapped in try/except `FileNotFoundError`
+  to keep the fail-soft (never crash) behavior. Callers of
+  `resolve_endpoint_url` / `_cache_dir_from_endpoints` guard on
+  `ENDPOINTS_PATH is not None`. Dashboard suite: 116 passed.

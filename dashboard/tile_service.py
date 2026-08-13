@@ -8,7 +8,7 @@ import boto3
 import yaml
 from tornado.web import RequestHandler, HTTPError
 
-from dashboard.config import resolve_endpoint_url
+from dashboard.config import resolve_endpoint_url, resolve_endpoints_path
 
 ACCESS_KEY = os.getenv("ZF_S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("ZF_S3_SECRET_KEY")
@@ -20,30 +20,25 @@ DEFAULT_EXPIRES_IN = 300
 EXPIRY_BUFFER_SECONDS = 30
 
 
-def _resolve_endpoints_path() -> Path:
-    env_path = os.getenv("ENDPOINTS_PATH")
-    if env_path:
-        return Path(env_path)
-    return (
-        Path(__file__).resolve().parent.parent
-        / "app"
-        / "databuk"
-        / "config"
-        / "endpoints.yaml"
-    )
+try:
+    ENDPOINTS_PATH = resolve_endpoints_path()
+except FileNotFoundError:
+    ENDPOINTS_PATH = None
 
 
-ENDPOINT_URL = resolve_endpoint_url(
-    _resolve_endpoints_path(), os.getenv("HV_DASHBOARD_ENDPOINT")
+ENDPOINT_URL = (
+    resolve_endpoint_url(ENDPOINTS_PATH, os.getenv("HV_DASHBOARD_ENDPOINT"))
+    if ENDPOINTS_PATH is not None
+    else None
 )
 
 
 def _cache_dir_from_endpoints() -> str | None:
     endpoint_name = os.getenv("HV_DASHBOARD_ENDPOINT")
-    if not endpoint_name:
+    if not endpoint_name or ENDPOINTS_PATH is None:
         return None
 
-    endpoints_path = _resolve_endpoints_path()
+    endpoints_path = ENDPOINTS_PATH
     if not endpoints_path.exists():
         return None
 
