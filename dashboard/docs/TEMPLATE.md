@@ -10,7 +10,7 @@ my-dashboard-project/
 ├── .env                               # Local config (DO NOT commit)
 ├── requirements.txt                   # Optional: pin versions
 ├── config/
-│   └── endpoints.yaml                 # YOUR ENDPOINTS HERE
+│   └── zf_view.yaml                 # YOUR VIEWS HERE
 ├── schemas/
 │   └── my_schema.yaml                 # YOUR SCHEMA HERE
 └── venv/                              # Virtual environment
@@ -22,12 +22,12 @@ my-dashboard-project/
 # .env - Environment Configuration
 # Copy this and fill in YOUR values
 
-# REQUIRED: Your dataset name (must match endpoints.yaml key)
-HV_DASHBOARD_ENDPOINT=my_data
+# REQUIRED: Your view name (must match zf_view.yaml key)
+HV_DASHBOARD_VIEW=my_view
 
-# REQUIRED: Path to your endpoints.yaml
-# Use absolute path or $(pwd)/config/endpoints.yaml
-ENDPOINTS_PATH=/path/to/my-dashboard-project/config/endpoints.yaml
+# REQUIRED: Path to your zf_view.yaml
+# Use absolute path or $(pwd)/config/zf_view.yaml
+ZF_VIEW_PATH=/path/to/my-dashboard-project/config/zf_view.yaml
 
 # S3 Credentials (if your data is on S3)
 ZF_S3_ACCESS_KEY=your_key_here
@@ -44,13 +44,13 @@ TILE_PREFIX=my_tiles/
 # ZF_CACHE_DIR=/tmp/zf_tiles
 ```
 
-## File 2: config/endpoints.yaml (Copy and Customize)
+## File 2: config/zf_view.yaml (Copy and Customize)
 
 ```yaml
-# config/endpoints.yaml - Define your data sources
+# config/zf_view.yaml - Define your data sources
 
-# The key (e.g., "my_data") is what you put in HV_DASHBOARD_ENDPOINT
-my_data:
+# The key (e.g., "my_view") is what you put in HV_DASHBOARD_VIEW
+my_view:
   description: "My Scientific Dataset"
   version: "1.0.0"
   reload_interval: 300
@@ -188,14 +188,14 @@ pip install zarr-fuse zarr_fuse.dashboard
 
 # 5. Create .env file (copy from File 1 above and customize)
 cat > .env << 'EOF'
-HV_DASHBOARD_ENDPOINT=my_data
-ENDPOINTS_PATH=$(pwd)/config/endpoints.yaml
+HV_DASHBOARD_VIEW=my_view
+ZF_VIEW_PATH=$(pwd)/config/zf_view.yaml
 ZF_S3_ACCESS_KEY=your_key
 ZF_S3_SECRET_KEY=your_secret
 ZF_S3_ENDPOINT_URL=https://s3.example.com
 EOF
 
-# 6. Copy config/endpoints.yaml from File 2 above, customize for your data
+# 6. Copy config/zf_view.yaml from File 2 above, customize for your data
 
 # 7. Copy schemas/my_schema.yaml from File 3 above, customize for your data
 
@@ -207,10 +207,10 @@ zf-dashboard
 
 Before running, verify:
 
-✓ `config/endpoints.yaml` exists and has correct `uri` pointing to your data
+✓ `config/zf_view.yaml` exists and has correct `uri` pointing to your data
 ✓ `schemas/my_schema.yaml` exists and describes your Zarr structure
-✓ `.env` has correct `ENDPOINTS_PATH`
-✓ `.env` has correct `HV_DASHBOARD_ENDPOINT` matching endpoints.yaml key
+✓ `.env` has correct `ZF_VIEW_PATH`
+✓ `.env` has correct `HV_DASHBOARD_VIEW` matching zf_view.yaml key
 ✓ S3 credentials set (if using S3)
 ✓ Virtual environment activated
 ✓ Both packages installed: `pip list | grep zarr`
@@ -239,7 +239,7 @@ try:
     print(f"  Available groups: {list(node.children.keys())}")
 except Exception as e:
     print(f"✗ Failed to open store: {e}")
-    print("  Check ENDPOINTS_PATH, S3 credentials, and schema")
+    print("  Check ZF_VIEW_PATH, S3 credentials, and schema")
 EOF
 ```
 
@@ -279,7 +279,7 @@ visualization:
 
 **Use local Zarr instead of S3:**
 ```bash
-# In endpoints.yaml:
+# In zf_view.yaml:
 source:
   uri: "/path/to/local/data.zarr"
   
@@ -294,7 +294,7 @@ If it doesn't work:
 
 1. Check dashboard output for error messages
 2. Verify `schemas/my_schema.yaml` matches your actual Zarr structure
-3. Verify `config/endpoints.yaml` has correct field names
+3. Verify `config/zf_view.yaml` has correct field names
 4. Run the verification test above
 5. See QUICKSTART.md troubleshooting section
 

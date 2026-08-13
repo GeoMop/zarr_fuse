@@ -22,7 +22,7 @@ Your project should look like:
 ```
 my-data-dashboard/
 ├── config/
-│   └── endpoints.yaml        # Your endpoint definitions
+│   └── zf_view.yaml        # Your view definitions
 ├── schemas/
 │   └── my_schema.yaml        # Your data schema
 └── .env                       # Environment variables (create later)
@@ -123,13 +123,13 @@ root:
 
 **See zarr_fuse documentation for detailed schema format.**
 
-## Step 5: Create Dashboard Endpoints Config
+## Step 5: Create Dashboard Views Config
 
-Create `config/endpoints.yaml` pointing to your data:
+Create `config/zf_view.yaml` pointing to your data:
 
 ```yaml
-# config/endpoints.yaml
-my_data:
+# config/zf_view.yaml
+my_view:
   description: "My Data Source"
   version: "1.0.0"
   reload_interval: 300
@@ -185,11 +185,11 @@ Create `.env` file in your project directory:
 
 ```bash
 # .env
-# REQUIRED: Which endpoint to load
-HV_DASHBOARD_ENDPOINT=my_data
+# REQUIRED: Which view to load
+HV_DASHBOARD_VIEW=my_view
 
-# REQUIRED: Path to your endpoints.yaml
-ENDPOINTS_PATH=/path/to/my-data-dashboard/config/endpoints.yaml
+# REQUIRED: Path to your zf_view.yaml
+ZF_VIEW_PATH=/path/to/my-data-dashboard/config/zf_view.yaml
 
 # S3 Configuration (if using S3)
 ZF_S3_ACCESS_KEY=your_access_key_here
@@ -207,8 +207,8 @@ TILE_PREFIX=my_tiles/
 
 **For local Zarr files**, you don't need S3 env vars. Just set:
 ```bash
-HV_DASHBOARD_ENDPOINT=my_data
-ENDPOINTS_PATH=/path/to/my-data-dashboard/config/endpoints.yaml
+HV_DASHBOARD_VIEW=my_view
+ZF_VIEW_PATH=/path/to/my-data-dashboard/config/zf_view.yaml
 ```
 
 ## Step 7: Test Your Setup
@@ -231,8 +231,8 @@ zf-dashboard
 ### Option B: Using explicit env vars (for testing)
 
 ```bash
-export HV_DASHBOARD_ENDPOINT=my_data
-export ENDPOINTS_PATH=/path/to/my-data-dashboard/config/endpoints.yaml
+export HV_DASHBOARD_VIEW=my_view
+export ZF_VIEW_PATH=/path/to/my-data-dashboard/config/zf_view.yaml
 zf-dashboard
 ```
 
@@ -272,8 +272,8 @@ pip install gunicorn
 # Run with gunicorn
 gunicorn --worker-class gthread --workers 1 --threads 4 \
   --bind 0.0.0.0:5006 \
-  --env ENDPOINTS_PATH=/path/config/endpoints.yaml \
-  --env HV_DASHBOARD_ENDPOINT=my_data \
+  --env ZF_VIEW_PATH=/path/config/zf_view.yaml \
+  --env HV_DASHBOARD_VIEW=my_view \
   'dashboard.composed:build_dashboard'
 ```
 
@@ -292,8 +292,8 @@ COPY config/ /ui/config/
 COPY schemas/ /ui/schemas/
 
 # Set required env vars
-ENV HV_DASHBOARD_ENDPOINT=my_data
-ENV ENDPOINTS_PATH=/ui/config/endpoints.yaml
+ENV HV_DASHBOARD_VIEW=my_view
+ENV ZF_VIEW_PATH=/ui/config/zf_view.yaml
 
 # Run dashboard
 CMD ["zf-dashboard"]
@@ -314,26 +314,26 @@ docker run -p 5006:5006 my-dashboard
 pip install zarr-fuse
 ```
 
-### Error: "Endpoints file not found"
+### Error: "Views file not found"
 
-**Solution:** Set correct ENDPOINTS_PATH:
+**Solution:** Set correct ZF_VIEW_PATH:
 ```bash
-export ENDPOINTS_PATH=$(pwd)/config/endpoints.yaml
+export ZF_VIEW_PATH=$(pwd)/config/zf_view.yaml
 zf-dashboard
 ```
 
 ### Error: "Schema file not found: schemas/my_schema.yaml"
 
-**Solution:** Verify the path is relative to `config/endpoints.yaml`:
+**Solution:** Verify the path is relative to `config/zf_view.yaml`:
 ```bash
 # Your structure should be:
 config/
-├── endpoints.yaml
+├── zf_view.yaml
 └── ../schemas/
     └── my_schema.yaml
 ```
 
-Or use absolute path in endpoints.yaml:
+Or use absolute path in zf_view.yaml:
 ```yaml
 schema:
   file: "/absolute/path/to/schemas/my_schema.yaml"
@@ -357,23 +357,23 @@ print('S3 connection successful')
 "
 ```
 
-### Error: "HV_DASHBOARD_ENDPOINT is required"
+### Error: "HV_DASHBOARD_VIEW is required"
 
-**Solution:** Endpoint name in .env must match endpoints.yaml:
+**Solution:** View name in .env must match zf_view.yaml:
 ```yaml
-# endpoints.yaml - endpoint name is the key:
-my_data:           # <-- This must match HV_DASHBOARD_ENDPOINT
+# zf_view.yaml - view name is the key:
+my_view:           # <-- This must match HV_DASHBOARD_VIEW
   source: ...
 ```
 
 ```bash
-export HV_DASHBOARD_ENDPOINT=my_data  # Must match!
+export HV_DASHBOARD_VIEW=my_view  # Must match!
 ```
 
 ## Next Steps
 
 1. ✅ Install zarr-fuse and zarr_fuse.dashboard
-2. ✅ Create config/endpoints.yaml
+2. ✅ Create config/zf_view.yaml
 3. ✅ Create schemas/my_schema.yaml
 4. ✅ Set environment variables
 5. ✅ Run `zf-dashboard`

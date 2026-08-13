@@ -8,7 +8,7 @@ import boto3
 import yaml
 from tornado.web import RequestHandler, HTTPError
 
-from dashboard.config import find_endpoints_file, schema_endpoint_url
+from dashboard.config import find_view_file, schema_endpoint_url
 
 ACCESS_KEY = os.getenv("ZF_S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("ZF_S3_SECRET_KEY")
@@ -21,44 +21,47 @@ EXPIRY_BUFFER_SECONDS = 30
 
 
 try:
-    ENDPOINTS_PATH = find_endpoints_file()
+    VIEWS_PATH = find_view_file()
 except FileNotFoundError:
-    ENDPOINTS_PATH = None
+    VIEWS_PATH = None
 
 
 ENDPOINT_URL = (
-    schema_endpoint_url(ENDPOINTS_PATH, os.getenv("HV_DASHBOARD_ENDPOINT"))
-    if ENDPOINTS_PATH is not None
+    schema_endpoint_url(
+        VIEWS_PATH,
+        os.getenv("HV_DASHBOARD_VIEW") or os.getenv("HV_DASHBOARD_ENDPOINT"),
+    )
+    if VIEWS_PATH is not None
     else None
 )
 
 
-def _cache_dir_from_endpoints() -> str | None:
-    endpoint_name = os.getenv("HV_DASHBOARD_ENDPOINT")
-    if not endpoint_name or ENDPOINTS_PATH is None:
+def _cache_dir_from_view() -> str | None:
+    view_name = os.getenv("HV_DASHBOARD_VIEW") or os.getenv("HV_DASHBOARD_ENDPOINT")
+    if not view_name or VIEWS_PATH is None:
         return None
 
-    endpoints_path = ENDPOINTS_PATH
-    if not endpoints_path.exists():
+    views_path = VIEWS_PATH
+    if not views_path.exists():
         return None
 
     try:
-        with endpoints_path.open("r", encoding="utf-8") as f:
+        with views_path.open("r", encoding="utf-8") as f:
             config = yaml.safe_load(f) or {}
     except Exception:
         return None
 
-    endpoint = config.get(endpoint_name)
-    if not isinstance(endpoint, dict):
+    view = config.get(view_name)
+    if not isinstance(view, dict):
         return None
 
-    visualization = endpoint.get("visualization", {})
+    visualization = view.get("visualization", {})
     overlay = visualization.get("overlay", {}) if isinstance(visualization, dict) else {}
     cache_dir = overlay.get("cache_dir") if isinstance(overlay, dict) else None
 
-    # Backward compatibility for older endpoint configs.
+    # Backward compatibility for older view configs.
     if not isinstance(cache_dir, str) or not cache_dir.strip():
-        tile_build = endpoint.get("tile_build", {})
+        tile_build = view.get("tile_build", {})
         if isinstance(tile_build, dict):
             cache_dir = tile_build.get("cache_dir")
 
@@ -71,17 +74,17 @@ def _cache_dir_from_endpoints() -> str | None:
         return str(candidate)
 
     # Relative paths are resolved against the project base dir (parent of config dir).
-    base_dir = endpoints_path.parent.parent
+    base_dir = views_path.parent.parent
     return str(base_dir / candidate)
 
 
 # Cache location precedence:
 # 1) ZF_CACHE_DIR env var
-# 2) visualization.overlay.cache_dir in endpoints.yaml for selected endpoint
+# 2) visualization.overlay.cache_dir in zf_view.yaml for selected view
 # 3) OS temp directory
 CACHE_DIR = Path(
     os.getenv("ZF_CACHE_DIR")
-    or _cache_dir_from_endpoints()
+    or _cache_dir_from_view()
     or tempfile.gettempdir()
 )
 CACHE_DIR.mkdir(parents=True, exist_ok=True)

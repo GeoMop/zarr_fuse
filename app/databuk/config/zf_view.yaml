@@ -1,5 +1,5 @@
 _dashboard:
-  default_endpoint: "bukov_endpoint"
+  default_view: "bukov_endpoint"
   env_file: "../../dashboard/scripts/.env"
 
 _cluster_defaults: &cluster_defaults
@@ -9,7 +9,7 @@ _cluster_defaults: &cluster_defaults
   cluster_size_scale: 3.0
 
 bukov_endpoint:
-  description: "Bukov production endpoint"
+  description: "Bukov production view"
   version: "1.0.0"
   reload_interval: 300
 

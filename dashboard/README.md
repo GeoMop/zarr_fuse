@@ -1,6 +1,6 @@
 # HoloViz Dashboard
 
-Panel + HoloViews dashboard for Zarr Fuse endpoints configured via YAML and environment variables.
+Panel + HoloViews dashboard for Zarr Fuse views configured via YAML and environment variables.
 
 ## Installation
 
@@ -22,18 +22,18 @@ pip install zarr_fuse.dashboard
 ## Configuration
 
 The dashboard is configured via:
-1. **YAML endpoints file** (`endpoints.yaml`) - defines data sources
+1. **YAML views file** (`zf_view.yaml`) - defines data sources
 2. **Environment variables** - runtime config and S3 credentials
 
 ### Required Environment Variables
 
 ```bash
-# Required: Which endpoint to load from endpoints.yaml
-HV_DASHBOARD_ENDPOINT=bukov_endpoint
+# Required: Which view to load from zf_view.yaml
+HV_DASHBOARD_VIEW=bukov_endpoint
 
-# Optional: Path to your endpoints.yaml file
-# Default: packaged config/endpoints.yaml
-ENDPOINTS_PATH=/path/to/your/endpoints.yaml
+# Optional: Path to your zf_view.yaml file
+# Default: packaged config/zf_view.yaml
+ZF_VIEW_PATH=/path/to/your/zf_view.yaml
 
 # S3 credentials (if using S3 data sources)
 ZF_S3_ACCESS_KEY=your_access_key
@@ -58,8 +58,8 @@ From dashboard folder (monorepo):
 cp .env.example .env
 # Edit .env and set ZF_S3_* values
 
-# Set which endpoint to use
-export HV_DASHBOARD_ENDPOINT=bukov_endpoint
+# Set which view to use
+export HV_DASHBOARD_VIEW=bukov_endpoint
 
 # Start dashboard
 zf-dashboard
@@ -73,21 +73,21 @@ zf-dashboard
 
 ## Using Custom Data Sources
 
-For a new project with your own data, provide your own `endpoints.yaml`:
+For a new project with your own data, provide your own `zf_view.yaml`:
 
 ```bash
 # Point to your config
-export ENDPOINTS_PATH=/path/to/my_project/config/endpoints.yaml
-export HV_DASHBOARD_ENDPOINT=my_endpoint
+export ZF_VIEW_PATH=/path/to/my_project/config/zf_view.yaml
+export HV_DASHBOARD_VIEW=my_view
 
 # Start dashboard
 zf-dashboard
 ```
 
-Your `endpoints.yaml` should follow this structure:
+Your `zf_view.yaml` should follow this structure:
 
 ```yaml
-my_endpoint:
+my_view:
   description: "My data source"
   version: "1.0.0"
   
@@ -127,9 +127,9 @@ The dashboard uses [python-dotenv](https://pypi.org/project/python-dotenv/) to a
 
 ## Configuration Files
 
-- `config/endpoints.yaml` - Endpoint definitions (packaged default)
+- `config/zf_view.yaml` - View definitions (packaged default)
 - `config.py` - Config parsing and validation logic
-- `schemas/` - Zarr schema files referenced in endpoints.yaml
+- `schemas/` - Zarr schema files referenced in zf_view.yaml
 - `.env.example` - Template for environment variables
 
 ## Further Docs
@@ -181,11 +181,11 @@ See [docs/tile_pyramid_README.md](docs/tile_pyramid_README.md) for details.
 
 ## Troubleshooting
 
-### "ENDPOINTS_PATH not found"
-Set `ENDPOINTS_PATH` env var pointing to your `endpoints.yaml` file.
+### "ZF_VIEW_PATH not found"
+Set `ZF_VIEW_PATH` env var pointing to your `zf_view.yaml` file.
 
-### "HV_DASHBOARD_ENDPOINT is required"
-Set `HV_DASHBOARD_ENDPOINT` env var to match an endpoint name in your `endpoints.yaml`.
+### "HV_DASHBOARD_VIEW is required"
+Set `HV_DASHBOARD_VIEW` env var to match a view name in your `zf_view.yaml`.
 
 ### S3 connection fails
 Verify `ZF_S3_ACCESS_KEY`, `ZF_S3_SECRET_KEY`, and `ZF_S3_ENDPOINT_URL` are set correctly.

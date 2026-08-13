@@ -9,7 +9,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from dashboard.config import load_endpoints
+from dashboard.config import load_views
 from dashboard.data import LocalClient
 
 
@@ -26,8 +26,8 @@ def _collect_group_paths(structure: dict[str, Any]) -> list[str]:
     return paths
 
 
-def _resolve_endpoints_path() -> Path | None:
-    env_path = os.getenv("ENDPOINTS_PATH")
+def _resolve_views_path() -> Path | None:
+    env_path = os.getenv("ZF_VIEW_PATH")
     if env_path:
         path = Path(env_path).expanduser().resolve()
         if path.exists():
@@ -35,10 +35,10 @@ def _resolve_endpoints_path() -> Path | None:
 
     repo_root = Path(__file__).resolve().parents[2]
     candidates = [
-        repo_root / "dashboard" / "config" / "endpoints.yaml",
-        repo_root / "config" / "endpoints.yaml",
-        repo_root / "app" / "databuk" / "config" / "endpoints.yaml",
-        repo_root / "app" / "databuk" / "dashboard" / "backend" / "config" / "endpoints.yaml",
+        repo_root / "dashboard" / "config" / "zf_view.yaml",
+        repo_root / "config" / "zf_view.yaml",
+        repo_root / "app" / "databuk" / "config" / "zf_view.yaml",
+        repo_root / "app" / "databuk" / "dashboard" / "backend" / "config" / "zf_view.yaml",
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -106,13 +106,13 @@ def _infer_dependencies(data_array, dataset) -> dict[str, Any]:
     }
 
 
-def _build_variable_record(endpoint_name: str, group_path: str, variable_name: str, data_array, dataset) -> dict[str, Any]:
+def _build_variable_record(view_name: str, group_path: str, variable_name: str, data_array, dataset) -> dict[str, Any]:
     values = np.asarray(data_array.values)
     total_count = int(values.size)
     nan_count = _count_missing_values(values)
 
     record = {
-        "endpoint": endpoint_name,
+        "view": view_name,
         "group_path": group_path,
         "variable": variable_name,
         "dtype": str(data_array.dtype),
@@ -127,31 +127,31 @@ def _build_variable_record(endpoint_name: str, group_path: str, variable_name: s
     return record
 
 
-def _build_dataset_report(endpoints_path: Path) -> dict[str, Any]:
-    endpoints = load_endpoints(endpoints_path)
-    client = LocalClient(endpoints_path)
+def _build_dataset_report(views_path: Path) -> dict[str, Any]:
+    views = load_views(views_path)
+    client = LocalClient(views_path)
 
     report: dict[str, Any] = {
-        "endpoints_path": str(endpoints_path),
+        "views_path": str(views_path),
         "summary": {
-            "endpoints_total": len(endpoints),
+            "views_total": len(views),
             "groups_total": 0,
             "variables_total": 0,
         },
         "variables": [],
     }
 
-    for endpoint_name in endpoints:
-        structure = client.get_structure(endpoint_name)
+    for view_name in views:
+        structure = client.get_structure(view_name)
         group_paths = _collect_group_paths(structure)
         report["summary"]["groups_total"] += len(group_paths)
 
         for group_path in group_paths:
-            node = client._get_group(endpoint_name, group_path)
+            node = client._get_group(view_name, group_path)
             dataset = node.dataset
             for variable_name, data_array in dataset.data_vars.items():
                 report["variables"].append(
-                    _build_variable_record(endpoint_name, group_path, variable_name, data_array, dataset)
+                    _build_variable_record(view_name, group_path, variable_name, data_array, dataset)
                 )
 
     report["summary"]["variables_total"] = len(report["variables"])
@@ -159,11 +159,11 @@ def _build_dataset_report(endpoints_path: Path) -> dict[str, Any]:
 
 
 def test_dataset_variable_report() -> None:
-    endpoints_path = _resolve_endpoints_path()
-    if endpoints_path is None:
-        pytest.skip("No endpoints.yaml found. Set ENDPOINTS_PATH or add a known endpoints config.")
+    views_path = _resolve_views_path()
+    if views_path is None:
+        pytest.skip("No zf_view.yaml found. Set ZF_VIEW_PATH or add a known views config.")
 
-    report = _build_dataset_report(endpoints_path)
+    report = _build_dataset_report(views_path)
 
     output_path = os.getenv("DASHBOARD_VARIABLE_REPORT_OUT")
     if output_path:
@@ -172,4 +172,4 @@ def test_dataset_variable_report() -> None:
         target.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     print(json.dumps(report, indent=2))
-    assert report["summary"]["endpoints_total"] > 0
+    assert report["summary"]["views_total"] > 0

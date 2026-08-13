@@ -11,9 +11,9 @@ import xarray as xr
 import zarr_fuse as zf
 
 from dashboard.config import (
-    find_endpoints_file,
-    load_endpoint_config,
-    load_endpoints,
+    find_view_file,
+    load_view_config,
+    load_views,
     read_variable_metadata,
     resolve_schema_fields,
 )
@@ -25,23 +25,23 @@ def _timer_log(message: str, duration: float) -> None:
 
 @dataclass
 class DashboardData:
-    endpoint_name: str
+    view_name: str
     group_path: str
     display_variable: str
     client: "LocalClient"
 
 
 @dataclass
-class EndpointHandle:
+class ViewHandle:
     name: str
     schema_path: Path
     store_uri: str
 
 
 class LocalClient:
-    def __init__(self, endpoints_path: Path):
-        self.endpoints_path = Path(endpoints_path).expanduser().resolve()
-        self.base_dir = self.endpoints_path.parent.parent
+    def __init__(self, views_path: Path):
+        self.views_path = Path(views_path).expanduser().resolve()
+        self.base_dir = self.views_path.parent.parent
         self._nodes: Dict[str, Any] = {}
         self._map_data_cache: Dict[str, Any] = {}
         self._timeseries_cache: Dict[str, Any] = {}
@@ -52,33 +52,33 @@ class LocalClient:
         self._timeseries_cache.clear()
         print("[cache] Cleared all caches")
 
-    def get_endpoints(self) -> Dict[str, Any]:
-        endpoints = load_endpoints(self.endpoints_path)
-        return {name: asdict(endpoint) for name, endpoint in endpoints.items()}
+    def get_views(self) -> Dict[str, Any]:
+        views = load_views(self.views_path)
+        return {name: asdict(view) for name, view in views.items()}
 
-    def get_endpoint(self, endpoint_name: str) -> Dict[str, Any]:
-        endpoint = load_endpoint_config(self.endpoints_path, endpoint_name)
-        return asdict(endpoint)
+    def get_view(self, view_name: str) -> Dict[str, Any]:
+        view = load_view_config(self.views_path, view_name)
+        return asdict(view)
 
-    def _endpoint_config(self, endpoint_name: Optional[str]):
-        if endpoint_name is None:
-            raise ValueError("endpoint_name is required")
-        return load_endpoint_config(self.endpoints_path, endpoint_name)
+    def _view_config(self, view_name: Optional[str]):
+        if view_name is None:
+            raise ValueError("view_name is required")
+        return load_view_config(self.views_path, view_name)
 
-    def _endpoint_handle(self, endpoint_name: Optional[str]) -> EndpointHandle:
-        endpoint = self._endpoint_config(endpoint_name)
-        schema_path = Path(endpoint.schema.file)
+    def _view_handle(self, view_name: Optional[str]) -> ViewHandle:
+        view = self._view_config(view_name)
+        schema_path = Path(view.schema.file)
         if not schema_path.is_absolute():
             schema_path = self.base_dir / schema_path
 
-        return EndpointHandle(
-            name=endpoint.name,
+        return ViewHandle(
+            name=view.name,
             schema_path=schema_path,
-            store_uri=endpoint.source.uri,
+            store_uri=view.source.uri,
         )
 
-    def _open_node(self, endpoint_name: Optional[str]) -> Any:
-        handle = self._endpoint_handle(endpoint_name)
+    def _open_node(self, view_name: Optional[str]) -> Any:
+        handle = self._view_handle(view_name)
         if handle.name in self._nodes:
             return self._nodes[handle.name]
 
@@ -88,8 +88,8 @@ class LocalClient:
         self._nodes[handle.name] = node
         return node
 
-    def _get_group(self, endpoint_name: Optional[str], group_path: str):
-        node = self._open_node(endpoint_name)
+    def _get_group(self, view_name: Optional[str], group_path: str):
+        node = self._open_node(view_name)
         if not group_path or group_path == "/":
             return node
 
@@ -100,8 +100,8 @@ class LocalClient:
             node = node.children[part]
         return node
 
-    def get_structure(self, endpoint_name: Optional[str]) -> Dict[str, Any]:
-        node = self._open_node(endpoint_name)
+    def get_structure(self, view_name: Optional[str]) -> Dict[str, Any]:
+        node = self._open_node(view_name)
 
         def build(n):
             return {
@@ -112,8 +112,8 @@ class LocalClient:
 
         return build(node)
 
-    def get_variables(self, endpoint_name: Optional[str], group_path: str) -> Dict[str, str]:
-        node = self._get_group(endpoint_name, group_path)
+    def get_variables(self, view_name: Optional[str], group_path: str) -> Dict[str, str]:
+        node = self._get_group(view_name, group_path)
         ds = node.dataset
 
         # Exclude coordinate variables - only show actual data variables
@@ -141,12 +141,12 @@ class LocalClient:
 
     def get_variable_metadata(
         self,
-        endpoint_name: Optional[str],
+        view_name: Optional[str],
         group_path: str,
         variable_name: str,
     ) -> Optional[Dict[str, Any]]:
-        endpoint = self._endpoint_config(endpoint_name)
-        schema_path = Path(endpoint.schema.file)
+        view = self._view_config(view_name)
+        schema_path = Path(view.schema.file)
         if not schema_path.is_absolute():
             schema_path = self.base_dir / schema_path
 
@@ -158,7 +158,7 @@ class LocalClient:
 
     def get_map_data(
         self,
-        endpoint_name: Optional[str],
+        view_name: Optional[str],
         group_path: str,
         variable: Optional[str] = None,
         time_index: int = 0,
@@ -167,17 +167,17 @@ class LocalClient:
         start = time.perf_counter()
         
         # Check cache first
-        cache_key = f"{endpoint_name}:{group_path}:{variable}:{time_index}:{depth_index}"
+        cache_key = f"{view_name}:{group_path}:{variable}:{time_index}:{depth_index}"
         if hasattr(self, '_map_data_cache') and cache_key in getattr(self, '_map_data_cache', {}):
             cached = self._map_data_cache[cache_key]
             print(f"[cache] get_map_data: cache hit for {variable}")
             _timer_log("get_map_data (cached)", time.perf_counter() - start)
             return cached
             
-        endpoint = self._endpoint_config(endpoint_name)
-        fields = resolve_schema_fields(endpoint.schema, group_path)
+        view = self._view_config(view_name)
+        fields = resolve_schema_fields(view.schema, group_path)
 
-        variable = variable or endpoint.defaults.display_variable
+        variable = variable or view.defaults.display_variable
         lat_field = fields.lat
         lon_field = fields.lon
         time_field = fields.time
@@ -192,7 +192,7 @@ class LocalClient:
             _timer_log("get_map_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": "lat/lon mapping is not configured"}
 
-        node = self._get_group(endpoint_name, group_path)
+        node = self._get_group(view_name, group_path)
         ds = node.dataset
         if variable not in ds:
             _timer_log("get_map_data failed", time.perf_counter() - start)
@@ -425,7 +425,7 @@ class LocalClient:
 
     def get_timeseries_data(
         self,
-        endpoint_name: Optional[str],
+        view_name: Optional[str],
         group_path: str,
         lat: float,
         lon: float,
@@ -437,17 +437,17 @@ class LocalClient:
         # Check cache first - using location as part of key since timeseries is location-specific
         # Use higher precision here so nearby boreholes do not collapse
         # to the same cache entry when coordinates differ only slightly.
-        cache_key = f"{endpoint_name}:{group_path}:{variable}:{lat:.8f}:{lon:.8f}:{entity_index}"
+        cache_key = f"{view_name}:{group_path}:{variable}:{lat:.8f}:{lon:.8f}:{entity_index}"
         if cache_key in self._timeseries_cache:
             cached = self._timeseries_cache[cache_key]
             print(f"[cache] get_timeseries_data: cache hit for {variable}")
             _timer_log("get_timeseries_data (cached)", time.perf_counter() - start)
             return cached
             
-        endpoint = self._endpoint_config(endpoint_name)
-        fields = resolve_schema_fields(endpoint.schema, group_path)
+        view = self._view_config(view_name)
+        fields = resolve_schema_fields(view.schema, group_path)
 
-        variable = variable or endpoint.defaults.display_variable
+        variable = variable or view.defaults.display_variable
         lat_field = fields.lat
         lon_field = fields.lon
         time_field = fields.time
@@ -465,7 +465,7 @@ class LocalClient:
                 "reason": "lat/lon/time mapping is not fully configured for this group",
             }
 
-        node = self._get_group(endpoint_name, group_path)
+        node = self._get_group(view_name, group_path)
         ds = node.dataset
         if variable not in ds:
             _timer_log("get_timeseries_data failed", time.perf_counter() - start)
@@ -562,8 +562,8 @@ def _to_json_floats(values: Any) -> list:
 def load_data(
     source: str,
     *,
-    endpoint_name: str,
-    endpoints_path: Optional[Path] = None,
+    view_name: str,
+    views_path: Optional[Path] = None,
     group_path: Optional[str] = None,
     display_variable: Optional[str] = None,
     **kwargs,
@@ -575,29 +575,29 @@ def load_data(
         unexpected = ", ".join(sorted(kwargs.keys()))
         raise TypeError(f"Unexpected keyword argument(s): {unexpected}")
 
-    resolved_endpoints_path = (
-        Path(endpoints_path).expanduser().resolve()
-        if endpoints_path is not None
-        else find_endpoints_file()
+    resolved_views_path = (
+        Path(views_path).expanduser().resolve()
+        if views_path is not None
+        else find_view_file()
     )
 
-    if not resolved_endpoints_path.exists():
+    if not resolved_views_path.exists():
         raise FileNotFoundError(
-            f"Endpoints file not found: {resolved_endpoints_path}. "
-            "Set ENDPOINTS_PATH environment variable to point to your endpoints.yaml"
+            f"Views file not found: {resolved_views_path}. "
+            "Set ZF_VIEW_PATH environment variable to point to your zf_view.yaml"
         )
 
-    client = LocalClient(resolved_endpoints_path)
+    client = LocalClient(resolved_views_path)
 
-    endpoint = load_endpoint_config(resolved_endpoints_path, endpoint_name)
-    resolved_group_path = group_path or endpoint.defaults.group_path
+    view = load_view_config(resolved_views_path, view_name)
+    resolved_group_path = group_path or view.defaults.group_path
     if not resolved_group_path:
         raise ValueError("group_path is required (set defaults.group_path or pass group_path explicitly)")
 
-    resolved_display_variable = display_variable or endpoint.defaults.display_variable or ""
+    resolved_display_variable = display_variable or view.defaults.display_variable or ""
 
     return DashboardData(
-        endpoint_name=endpoint_name,
+        view_name=view_name,
         group_path=resolved_group_path,
         display_variable=resolved_display_variable,
         client=client,

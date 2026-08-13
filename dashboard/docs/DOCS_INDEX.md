@@ -11,7 +11,7 @@ Step-by-step walkthrough of:
 1. Installing zarr_fuse + dashboard
 2. Understanding your data
 3. Creating schema files
-4. Creating endpoints config
+4. Creating views config
 5. Running the dashboard
 
 ### 📋 **Want a template to copy/paste?**
@@ -19,7 +19,7 @@ Step-by-step walkthrough of:
 
 Ready-to-use files you can copy:
 - `.env` template
-- `config/endpoints.yaml` template
+- `config/zf_view.yaml` template
 - `schemas/my_schema.yaml` template
 - Copy-paste setup commands
 
@@ -100,7 +100,7 @@ Complete guide for using in a new project. Read this for:
 - Step-by-step setup (8 steps)
 - Understanding your data
 - Creating schema files
-- Creating endpoints config
+- Creating views config
 - Testing your setup
 - Deployment options
 - Troubleshooting by error
@@ -108,7 +108,7 @@ Complete guide for using in a new project. Read this for:
 ### TEMPLATE.md
 Copy-paste templates and checklist. Use this to:
 - Create .env file
-- Create config/endpoints.yaml
+- Create config/zf_view.yaml
 - Create schemas/my_schema.yaml
 - Verify everything works
 - Quick setup commands
@@ -128,7 +128,7 @@ Production deployment guide. Read this for:
 - Docker setup
 - Gunicorn configuration
 - Using custom data sources
-- Multiple endpoints
+- Multiple views
 - Performance tips
 
 ### CONFIG_PACKAGING.md
@@ -182,7 +182,7 @@ dashboard/
 ├── .env.example                ← Env var template
 ├── pyproject.toml              ← Package metadata
 ├── config/
-│   ├── endpoints.yaml          ← Default endpoints config
+│   ├── zf_view.yaml          ← Default views config
 │   └── [runtime config assets]
 ├── config.py                   ← Config parsing
 ├── schemas/
@@ -224,7 +224,7 @@ pip install zarr-fuse zarr_fuse.dashboard
 # 2. Create structure
 mkdir config schemas
 
-# 3. Create config/endpoints.yaml (customize for your data)
+# 3. Create config/zf_view.yaml (customize for your data)
 # See TEMPLATE.md
 
 # 4. Create schemas/my_schema.yaml (describe your Zarr structure)
@@ -234,7 +234,7 @@ mkdir config schemas
 # See TEMPLATE.md
 
 # 6. Run
-export ENDPOINTS_PATH=$(pwd)/config/endpoints.yaml
+export ZF_VIEW_PATH=$(pwd)/config/zf_view.yaml
 zf-dashboard
 ```
 

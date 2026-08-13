@@ -38,12 +38,12 @@ cd my-dashboard-project
 mkdir config schemas
 ```
 
-3. **Create your endpoints.yaml:**
+3. **Create your zf_view.yaml:**
 
-Create `config/endpoints.yaml` with your data source(s):
+Create `config/zf_view.yaml` with your data source(s):
 
 ```yaml
-my_data:
+my_view:
   description: "My scientific dataset"
   version: "1.0.0"
   
@@ -92,8 +92,8 @@ cp /path/to/dashboard/.env.example .env
 Edit `.env` with your configuration:
 
 ```bash
-HV_DASHBOARD_ENDPOINT=my_data
-ENDPOINTS_PATH=/path/to/my-dashboard-project/config/endpoints.yaml
+HV_DASHBOARD_VIEW=my_view
+ZF_VIEW_PATH=/path/to/my-dashboard-project/config/zf_view.yaml
 ZF_S3_ACCESS_KEY=your_key
 ZF_S3_SECRET_KEY=your_secret
 ZF_S3_ENDPOINT_URL=https://s3.example.com
@@ -111,8 +111,8 @@ The dashboard will open at `http://localhost:5006`.
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `HV_DASHBOARD_ENDPOINT` | ✓ | - | Endpoint name from endpoints.yaml to load |
-| `ENDPOINTS_PATH` | | config/endpoints.yaml | Path to your endpoints.yaml file |
+| `HV_DASHBOARD_VIEW` | ✓ | - | View name from zf_view.yaml to load |
+| `ZF_VIEW_PATH` | | config/zf_view.yaml | Path to your zf_view.yaml file |
 | `ZF_S3_ACCESS_KEY` | ✓ if S3 | - | AWS/S3 access key |
 | `ZF_S3_SECRET_KEY` | ✓ if S3 | - | AWS/S3 secret key |
 | `ZF_S3_ENDPOINT_URL` | | - | Custom S3 endpoint URL (e.g., MinIO) |
@@ -122,9 +122,9 @@ The dashboard will open at `http://localhost:5006`.
 | `TILE_PREFIX` | | test_tiles/ | S3 prefix for tiles |
 | `ZF_CACHE_DIR` | | system temp dir | Cache directory for tile URLs |
 
-## Using Multiple Endpoints
+## Using Multiple Views
 
-You can define multiple endpoints in `config/endpoints.yaml`:
+You can define multiple views in `config/zf_view.yaml`:
 
 ```yaml
 dataset_a:
@@ -145,30 +145,30 @@ dataset_b:
 Then choose which one to load:
 
 ```bash
-export HV_DASHBOARD_ENDPOINT=dataset_a
+export HV_DASHBOARD_VIEW=dataset_a
 zf-dashboard
 ```
 
-Or start with a different endpoint without restarting:
+Or start with a different view without restarting:
 - Use the "Node Select" dropdown in the dashboard sidebar
 
 ## Troubleshooting
 
-### Dashboard won't start: "Endpoints file not found"
+### Dashboard won't start: "Views file not found"
 
-**Solution:** Set `ENDPOINTS_PATH` to point to your config file:
+**Solution:** Set `ZF_VIEW_PATH` to point to your config file:
 
 ```bash
-export ENDPOINTS_PATH=/path/to/my-dashboard-project/config/endpoints.yaml
+export ZF_VIEW_PATH=/path/to/my-dashboard-project/config/zf_view.yaml
 zf-dashboard
 ```
 
-### "HV_DASHBOARD_ENDPOINT is required"
+### "HV_DASHBOARD_VIEW is required"
 
 **Solution:** Set the environment variable:
 
 ```bash
-export HV_DASHBOARD_ENDPOINT=my_data
+export HV_DASHBOARD_VIEW=my_view
 zf-dashboard
 ```
 
@@ -185,11 +185,11 @@ zf-dashboard  # Check console for S3 error messages
 
 ### "Schema file not found"
 
-**Solution:** Ensure schema references in `endpoints.yaml` are relative to the config directory:
+**Solution:** Ensure schema references in `zf_view.yaml` are relative to the config directory:
 
 ```yaml
 schema:
-  file: "schemas/my_schema.yaml"  # Relative to config/endpoints.yaml
+  file: "schemas/my_schema.yaml"  # Relative to config/zf_view.yaml
 ```
 
 Or use absolute paths:
@@ -219,7 +219,7 @@ Suggested setup:
 
 For issues:
 1. Check environment variables are correctly set
-2. Verify endpoints.yaml and schema files are in expected locations
+2. Verify zf_view.yaml and schema files are in expected locations
 3. Check S3 connectivity if using S3 datasources
 4. Review log output for detailed error messages
 

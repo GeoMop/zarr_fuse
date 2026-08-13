@@ -103,16 +103,16 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, ep
     return pd.DataFrame(clustered_rows)
 
 
-def _load_overlay(endpoint_config):
+def _load_overlay(view_config):
     if os.getenv("HV_OVERLAY_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
         logger.info("Overlay disabled via HV_OVERLAY_ENABLED.")
         return None
 
-    visualization_config = endpoint_config["visualization"]
+    visualization_config = view_config["visualization"]
     overlay_config = visualization_config["overlay"]
 
     if not overlay_config["enabled"]:
-        logger.info("Overlay disabled in endpoint config.")
+        logger.info("Overlay disabled in view config.")
         return None
 
     tile_url = overlay_config["tile_url"] or os.getenv("HV_OVERLAY_TILE_URL", "").strip()
@@ -128,19 +128,19 @@ def build_map_view(data, tap_stream):
     start = time.perf_counter()
     base_map = gvts.OSM()
 
-    endpoint_config = data.client.get_endpoint(data.endpoint_name)
-    defaults_config = endpoint_config["defaults"]
-    visualization_config = endpoint_config["visualization"]
+    view_config = data.client.get_view(data.view_name)
+    defaults_config = view_config["defaults"]
+    visualization_config = view_config["visualization"]
     map_config = visualization_config["map"]
-    schema_config = endpoint_config["schema"]
-    schema_display = endpoint_config["schema_display"]
+    schema_config = view_config["schema"]
+    schema_display = view_config["schema_display"]
 
     lat_field = "lat"
     lon_field = "lon"
     entity_field = schema_display.get("entity_name") or "entity"
 
     if data.group_path:
-        schema_dict = endpoint_config["schema"]
+        schema_dict = view_config["schema"]
         group_fields = schema_dict.get("group_fields", {})
         normalized = "/".join(part for part in (data.group_path or "").strip("/").split("/") if part)
         path = normalized
@@ -160,7 +160,7 @@ def build_map_view(data, tap_stream):
             if fields.get("lon"):
                 lon_field = fields.get("lon")
 
-    overlay_layer = _load_overlay(endpoint_config)
+    overlay_layer = _load_overlay(view_config)
 
     # Step 4: DynamicMap callback - defined early so it's available in all code paths
     def _make_points_callback(data_obj, config, lon_f, lat_f, ent_f, title):
@@ -227,7 +227,7 @@ def build_map_view(data, tap_stream):
         fig = {"status": "error", "reason": "No variable selected"}
     else:
         fig = data.client.get_map_data(
-            data.endpoint_name,
+            data.view_name,
             group_path=data.group_path,
             variable=default_display_variable,
             time_index=0,

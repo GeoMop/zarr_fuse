@@ -9,15 +9,15 @@
 
 ### 2. API Module (api/main.py)
 - ✅ Removed hardcoded monorepo path (`parents[2]` + nested app/databuk/...)
-- ✅ Added `ENDPOINTS_PATH` environment variable support
+- ✅ Added `ZF_VIEW_PATH` environment variable support
 - ✅ Commented out broken router imports (placeholder for future)
-- ✅ Added fallback to packaged default endpoints file
+- ✅ Added fallback to packaged default views file
 - **Impact:** API can now find config in any project layout
 
 ### 3. Data Loading (data.py)
 - ✅ Removed `sys.path.insert()` hack
 - ✅ Added `import os` for env var support
-- ✅ Updated `load_data()` to accept `ENDPOINTS_PATH` env var
+- ✅ Updated `load_data()` to accept `ZF_VIEW_PATH` env var
 - ✅ Added file existence validation with helpful error messages
 - **Impact:** Works in standard Python environments with proper package imports
 
@@ -65,7 +65,7 @@
 
 ### 11. Deployment Guide (DEPLOYMENT.md)
 - ✅ New file with step-by-step external project setup
-- ✅ Multiple endpoints example
+- ✅ Multiple views example
 - ✅ Troubleshooting section
 - ✅ Production deployment tips
 - **Impact:** Clear onboarding for new projects
@@ -91,7 +91,7 @@ dashboard/
 │   ├── __init__.py (NEW)
 │   └── main.py (UPDATED: env var config path)
 ├── config/
-│   └── endpoints.yaml (packaged config data)
+│   └── zf_view.yaml (packaged config data)
 ├── config.py (UPDATED: config parsing module)
 ├── .env.example (UPDATED: more complete options)
 ├── serve_dashboard.py (UPDATED: dotenv, configurable host/port)
@@ -109,7 +109,7 @@ dashboard/
 
 - [ ] Install in fresh venv: `pip install -e ./dashboard`
 - [ ] Verify no errors on `import dashboard` modules
-- [ ] Run with ENDPOINTS_PATH pointing to external config
+- [ ] Run with ZF_VIEW_PATH pointing to external config
 - [ ] Verify .env loading works
 - [ ] Test SERVE_PORT and SERVE_BIND override
 - [ ] Check tile cache writes to temp dir, not package dir
@@ -133,7 +133,7 @@ The dashboard package is now ready for:
 ✅ Container deployment  
 
 Users only need to provide:
-- Their own `endpoints.yaml`
+- Their own `zf_view.yaml`
 - Their own `schemas/` directory
 - Environment variables for their data source
 

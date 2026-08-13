@@ -5,7 +5,7 @@ import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
 from holoviews import streams
 
-from dashboard.config import find_endpoints_file, get_default_endpoint_name, load_endpoint_config, load_endpoints
+from dashboard.config import find_view_file, get_default_view_name, load_view_config, load_views
 from dashboard.data import load_data
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
@@ -35,26 +35,26 @@ hv.renderer("bokeh").theme = "dark_minimal"
 def build_dashboard():
     start_total = time.perf_counter()
 
-    endpoints_path = find_endpoints_file()
-    print(f"Using endpoints config: {endpoints_path}")
+    views_path = find_view_file()
+    print(f"Using views config: {views_path}")
 
-    configured_default = get_default_endpoint_name(endpoints_path)
-    endpoints = load_endpoints(endpoints_path)
-    if not endpoints:
-        raise ValueError(f"No endpoints configured in {endpoints_path}")
+    configured_default = get_default_view_name(views_path)
+    views = load_views(views_path)
+    if not views:
+        raise ValueError(f"No views configured in {views_path}")
 
-    endpoint_name = configured_default or next(iter(endpoints.keys()))
+    view_name = configured_default or next(iter(views.keys()))
 
     data = load_data(
         "local",
-        endpoint_name=endpoint_name,
-        endpoints_path=endpoints_path,
+        view_name=view_name,
+        views_path=views_path,
         display_variable="",
     )
 
-    endpoints = data.client.get_endpoints()
-    endpoint = endpoints.get(endpoint_name) or data.client.get_endpoint(endpoint_name)
-    structure = data.client.get_structure(endpoint_name)
+    views = data.client.get_views()
+    view = views.get(view_name) or data.client.get_view(view_name)
+    structure = data.client.get_structure(view_name)
 
     loading_indicator = pn.Row(
         pn.indicators.LoadingSpinner(value=True, color='light', bgcolor='dark', size=32),
@@ -82,7 +82,7 @@ def build_dashboard():
     )
     table_loading = pn.Row(visible=False)
     controller, store_selector, node_select, variable_selector, variable_metadata, node_hint, store_info = build_sidebar(
-        endpoint_name, endpoint, structure, endpoints=endpoints,
+        view_name, view, structure, views=views,
         loading_indicator=loading_indicator, timeseries_loading=timeseries_loading,
         render_spinner=render_spinner, rendering_status=rendering_status,
         table_loading=table_loading,
@@ -98,12 +98,12 @@ def build_dashboard():
     )
 
     # ── Table-style plot selection ──────────────────────────────────
-    endpoint_cfg = data.client.get_endpoint(endpoint_name)
-    schema_display_tbl = endpoint_cfg.get("schema_display", {})
+    view_cfg = data.client.get_view(view_name)
+    schema_display_tbl = view_cfg.get("schema_display", {})
 
     selection_state = None  # created by build_plot_selection_panel
     available_dims = resolve_available_dimensions(
-        endpoint_config=endpoint_cfg,
+        view_config=view_cfg,
         group_path=data.group_path,
         schema_display=schema_display_tbl,
     )
@@ -127,7 +127,7 @@ def build_dashboard():
     def _fetch_and_show_metadata(var_name: str):
         name_for_api = var_name
         meta = data.client.get_variable_metadata(
-            data.endpoint_name, data.group_path, name_for_api
+            data.view_name, data.group_path, name_for_api
         )
         if meta:
             coords_text = ", ".join(meta.get("coords", []))
@@ -147,12 +147,12 @@ def build_dashboard():
             )
             variable_metadata.visible = True
 
-    def _populate_variable_selector(endpoint_name: str, group_path: str):
+    def _populate_variable_selector(view_name: str, group_path: str):
         nonlocal _current_var_label
         try:
-            print(f"[variables] Loading for endpoint={endpoint_name}, group={group_path}")
+            print(f"[variables] Loading for view={view_name}, group={group_path}")
             t0 = time.perf_counter()
-            variables = data.client.get_variables(endpoint_name, group_path)
+            variables = data.client.get_variables(view_name, group_path)
             print(f"[timing] get_variables: {time.perf_counter() - t0:.3f}s")
             print(f"[variables] Found: {len(variables)} variables")
 
@@ -164,8 +164,8 @@ def build_dashboard():
 
                 variable_selector.options = var_options
 
-                endpoint_cfg = load_endpoint_config(endpoints_path, endpoint_name)
-                default_var = endpoint_cfg.defaults.display_variable if endpoint_cfg.defaults else None
+                view_cfg = load_view_config(views_path, view_name)
+                default_var = view_cfg.defaults.display_variable if view_cfg.defaults else None
 
                 if default_var and default_var in variables:
                     var_label = default_var + (f" ({variables[default_var]})" if variables[default_var] else "")
@@ -235,16 +235,16 @@ def build_dashboard():
 
     variable_selector.param.watch(on_variable_change, ["value"])
 
-    _populate_variable_selector(endpoint_name, data.group_path)
+    _populate_variable_selector(view_name, data.group_path)
 
-    def _refresh_sidebar_for_endpoint(selected_endpoint: str):
-        nonlocal endpoints, endpoint, structure
-        print(f"[timing] _refresh_sidebar: start for {selected_endpoint}")
+    def _refresh_sidebar_for_view(selected_view: str):
+        nonlocal views, view, structure
+        print(f"[timing] _refresh_sidebar: start for {selected_view}")
 
-        endpoints = data.client.get_endpoints()
-        print(f"[timing] _refresh_sidebar: get_endpoints done")
-        endpoint = endpoints.get(selected_endpoint) or data.client.get_endpoint(selected_endpoint)
-        structure = data.client.get_structure(selected_endpoint)
+        views = data.client.get_views()
+        print(f"[timing] _refresh_sidebar: get_views done")
+        view = views.get(selected_view) or data.client.get_view(selected_view)
+        structure = data.client.get_structure(selected_view)
         print(f"[timing] _refresh_sidebar: get_structure done")
 
         node_items = _flatten_nodes(structure)
@@ -257,32 +257,32 @@ def build_dashboard():
             " border-left: 3px solid #3b82f6;'>"
             "<div style='font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 600;'>"
             "STORE URI</div>"
-            f"<div style='font-size: 12px; color: #e2e8f0; font-family: monospace;'>{endpoint['source']['uri']}</div>"
+            f"<div style='font-size: 12px; color: #e2e8f0; font-family: monospace;'>{view['source']['uri']}</div>"
             "</div>"
         )
         print(f"[timing] _refresh_sidebar: about to populate variables")
 
-        _populate_variable_selector(selected_endpoint, data.group_path)
+        _populate_variable_selector(selected_view, data.group_path)
         print(f"[timing] _refresh_sidebar: done")
 
-    def _switch_endpoint(selected_endpoint: str):
-        nonlocal data, endpoint_name
+    def _switch_view(selected_view: str):
+        nonlocal data, view_name
 
-        endpoint_name = selected_endpoint
-        endpoint_obj = data.client.get_endpoint(selected_endpoint)
-        data.endpoint_name = selected_endpoint
+        view_name = selected_view
+        view_obj = data.client.get_view(selected_view)
+        data.view_name = selected_view
         data.group_path = "/"
         data.display_variable = ""
         
-        # Clear cache for new endpoint
+        # Clear cache for new view
         data.client.clear_cache()
         
         selection_state.clear()
-        print(f"[timing] _switch_endpoint: starting refresh for {selected_endpoint}")
-        _refresh_sidebar_for_endpoint(selected_endpoint)
-        print(f"[timing] _switch_endpoint: calling refresh_views")
+        print(f"[timing] _switch_view: starting refresh for {selected_view}")
+        _refresh_sidebar_for_view(selected_view)
+        print(f"[timing] _switch_view: calling refresh_views")
         refresh_views()
-        print(f"[timing] _switch_endpoint: done")
+        print(f"[timing] _switch_view: done")
 
     def update_data_warnings(state):
         reason = (state or {}).get("data_error_reason")
@@ -386,12 +386,12 @@ def build_dashboard():
         print(f"[timing] refresh_views: done")
 
     def on_store_change(event):
-        if event.new and event.new != endpoint_name:
+        if event.new and event.new != view_name:
             loading_indicator.visible = True
 
             def _run_switch():
                 try:
-                    _switch_endpoint(event.new)
+                    _switch_view(event.new)
                 finally:
                     loading_indicator.visible = False
 
@@ -409,7 +409,7 @@ def build_dashboard():
 
             def _run_refresh():
                 try:
-                    _populate_variable_selector(data.endpoint_name, data.group_path)
+                    _populate_variable_selector(data.view_name, data.group_path)
                     refresh_views()
                 finally:
                     loading_indicator.visible = False

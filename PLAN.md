@@ -352,3 +352,17 @@
   renamed to `schema_endpoint_url`. All callers updated (tile_service, serve_dashboard,
   composed, data, excluded s3_tile_resolver_test). Added brief lead-in docstrings to the
   config flow functions. Dashboard suite: 116 passed.
+- 2026-08-13: Full dashboard-config sweep "endpoint" -> "view" (approved by user;
+  concrete instance key `bukov_endpoint` kept). Renamed `config.py` API to
+  `ViewConfig`, `load_views`, `load_view_config`, `get_default_view_name`,
+  `find_view_file`, `_build_view_config`, `_collect_group_fields(view_name)`; env
+  vars `ZF_VIEW_PATH` + `HV_DASHBOARD_VIEW` with deprecated legacy fallbacks
+  (`ENDPOINTS_PATH`, `HV_DASHBOARD_ENDPOINT`, yaml `default_endpoint`).
+  `schema_endpoint_url()` kept (S3 concept), param/internals renamed to view.
+  `data.py` -> `ViewHandle`, `LocalClient(views_path)`, `get_views`/`get_view`,
+  `DashboardData.view_name`. All UI modules, `tile_service.py` (`VIEWS_PATH`,
+  `_cache_dir_from_view`), scripts (`check_view_stores.py` replaces
+  `check_endpoint_stores.py`), chart (`frontend.viewName`, `HV_DASHBOARD_VIEW`),
+  and workflows (`source-views-path`, `zf_view.yaml` configmap) updated.
+  Config file `app/databuk/config/zf_view.yaml` (old endpoints.yaml deleted).
+  Docs swept. Dashboard suite: 116 passed.

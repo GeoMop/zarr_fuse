@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zarr_fuse.dashboard"
 version = "0.1.0"
-description = "Reusable HoloViz dashboard for Zarr Fuse endpoints configured via YAML and environment variables."
+description = "Reusable HoloViz dashboard for Zarr Fuse views configured via YAML and environment variables."
 readme = "README.md"
 authors = [
   { name = "Mehmet Fatih Akbas", email = "fatihakbas733@gmail.com" },

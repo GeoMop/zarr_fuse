@@ -1,21 +1,21 @@
 """
-Check endpoint store reachability and dataset health.
+Check view store reachability and dataset health.
 
-This script is a developer utility to validate the endpoints declared in
-`endpoints.yaml` and to exercise the underlying data stores referenced by
-those endpoints (for example S3-backed Zarr stores). It helps answer questions
+This script is a developer utility to validate the views declared in
+`zf_view.yaml` and to exercise the underlying data stores referenced by
+those views (for example S3-backed Zarr stores). It helps answer questions
 like:
 
-- Are the configured endpoints reachable?
-- Which group paths exist for an endpoint?
+- Are the configured views reachable?
+- Which group paths exist for a view?
 - Do datasets expose the expected variables and coordinates?
 - Are numeric values present (finite) in sample slices of the variables?
 
 Usage examples:
 
-    python dashboard/scripts/check_endpoint_stores.py --endpoints <path/to/endpoints.yaml>
-    python dashboard/scripts/check_endpoint_stores.py --check-values-endpoint my_ep --check-values-group /my/group
-    python dashboard/scripts/check_endpoint_stores.py --check-values-all
+    python dashboard/scripts/check_view_stores.py --views <path/to/zf_view.yaml>
+    python dashboard/scripts/check_view_stores.py --check-values-view my_view --check-values-group /my/group
+    python dashboard/scripts/check_view_stores.py --check-values-all
 
 The script can optionally print credential status (S3 env vars), list groups,
 and perform lightweight value inspections for dataset variables. It is intended
@@ -32,14 +32,14 @@ from typing import Any
 
 import numpy as np
 
-# Allow running this file directly via "python dashboard/scripts/check_endpoint_stores.py".
+# Allow running this file directly via "python dashboard/scripts/check_view_stores.py".
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from dotenv import load_dotenv
 
-from dashboard.config import load_endpoints
+from dashboard.config import load_views
 from dashboard.data import LocalClient
 
 
@@ -100,12 +100,12 @@ def _format_sample(values: np.ndarray, limit: int = 6) -> str:
     return f"[{rendered}{suffix}]"
 
 
-def inspect_group_values(client: LocalClient, endpoint_name: str, group_path: str) -> None:
-    node = client._get_group(endpoint_name, group_path)
+def inspect_group_values(client: LocalClient, view_name: str, group_path: str) -> None:
+    node = client._get_group(view_name, group_path)
     ds = node.dataset
 
     print("\n" + "=" * 72)
-    print(f"Value check: endpoint='{endpoint_name}', group='{group_path}'")
+    print(f"Value check: view='{view_name}', group='{group_path}'")
     print(f"Dataset variables: {len(ds.data_vars)}")
     print(f"Dataset coords: {len(ds.coords)}")
 
@@ -150,9 +150,9 @@ def inspect_group_values(client: LocalClient, endpoint_name: str, group_path: st
             )
 
 
-def inspect_group_summary(client: LocalClient, endpoint_name: str, group_path: str) -> str:
+def inspect_group_summary(client: LocalClient, view_name: str, group_path: str) -> str:
     try:
-        node = client._get_group(endpoint_name, group_path)
+        node = client._get_group(view_name, group_path)
         ds = node.dataset
     except Exception as exc:  # noqa: BLE001
         return f"{group_path}: error={type(exc).__name__}: {exc}"
@@ -191,12 +191,12 @@ def inspect_group_summary(client: LocalClient, endpoint_name: str, group_path: s
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Check endpoint store reachability and print group structure."
+        description="Check view store reachability and print group structure."
     )
     parser.add_argument(
-        "--endpoints",
-        default="app/databuk/config/endpoints.yaml",
-        help="Path to endpoints.yaml",
+        "--views",
+        default="app/databuk/config/zf_view.yaml",
+        help="Path to zf_view.yaml",
     )
     parser.add_argument(
         "--env-file",
@@ -204,9 +204,9 @@ def main() -> int:
         help="Path to .env file with S3 credentials",
     )
     parser.add_argument(
-        "--check-values-endpoint",
+        "--check-values-view",
         default=None,
-        help="Endpoint name for value check.",
+        help="View name for value check.",
     )
     parser.add_argument(
         "--check-values-group",
@@ -216,12 +216,12 @@ def main() -> int:
     parser.add_argument(
         "--check-values-all",
         action="store_true",
-        help="Run value checks for every reachable endpoint/group automatically.",
+        help="Run value checks for every reachable view/group automatically.",
     )
     parser.add_argument(
         "--full-report",
         action="store_true",
-        help="Print credentials, endpoint reachability, groups, and per-group dataset summary.",
+        help="Print credentials, view reachability, groups, and per-group dataset summary.",
     )
     args = parser.parse_args()
 
@@ -229,19 +229,19 @@ def main() -> int:
     if args.full_report:
         print_credential_status()
 
-    endpoints_path = Path(args.endpoints)
-    endpoints = load_endpoints(endpoints_path)
-    client = LocalClient(endpoints_path)
+    views_path = Path(args.views)
+    views = load_views(views_path)
+    client = LocalClient(views_path)
 
-    print(f"Using endpoints file: {endpoints_path}")
-    print(f"Found endpoints: {', '.join(endpoints.keys())}")
+    print(f"Using views file: {views_path}")
+    print(f"Found views: {', '.join(views.keys())}")
 
-    for endpoint_name, endpoint_cfg in endpoints.items():
+    for view_name, view_cfg in views.items():
         print("\n" + "-" * 72)
-        print(f"Endpoint: {endpoint_name}")
-        print(f"URI: {endpoint_cfg.source.uri}")
+        print(f"View: {view_name}")
+        print(f"URI: {view_cfg.source.uri}")
         try:
-            structure = client.get_structure(endpoint_name)
+            structure = client.get_structure(view_name)
             print("Reachable: yes")
             print("Groups:")
             for line in list_group_paths(structure):
@@ -250,34 +250,34 @@ def main() -> int:
             if args.full_report:
                 print("Group dataset summary:")
                 for group_path in collect_group_paths(structure):
-                    print(f"  - {inspect_group_summary(client, endpoint_name, group_path)}")
+                    print(f"  - {inspect_group_summary(client, view_name, group_path)}")
         except Exception as exc:  # noqa: BLE001
             print("Reachable: no")
             print(f"Error: {type(exc).__name__}: {exc}")
 
     if args.check_values_all:
-        for endpoint_name in endpoints.keys():
+        for view_name in views.keys():
             try:
-                structure = client.get_structure(endpoint_name)
+                structure = client.get_structure(view_name)
             except Exception as exc:  # noqa: BLE001
-                print(f"\nSkipping value checks for endpoint '{endpoint_name}': {type(exc).__name__}: {exc}")
+                print(f"\nSkipping value checks for view '{view_name}': {type(exc).__name__}: {exc}")
                 continue
 
             for group_path in collect_group_paths(structure):
                 inspect_group_values(
                     client,
-                    endpoint_name=endpoint_name,
+                    view_name=view_name,
                     group_path=group_path,
                 )
-    elif args.check_values_endpoint and args.check_values_group:
+    elif args.check_values_view and args.check_values_group:
         inspect_group_values(
             client,
-            endpoint_name=args.check_values_endpoint,
+            view_name=args.check_values_view,
             group_path=args.check_values_group,
         )
-    elif args.check_values_endpoint or args.check_values_group:
+    elif args.check_values_view or args.check_values_group:
         print(
-            "\nValue check skipped: provide both --check-values-endpoint and --check-values-group, "
+            "\nValue check skipped: provide both --check-values-view and --check-values-group, "
             "or use --check-values-all."
         )
 

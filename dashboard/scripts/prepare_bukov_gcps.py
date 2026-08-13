@@ -22,17 +22,17 @@ def build_gcp_args(points):
 def main():
     if len(sys.argv) < 4:
         raise ValueError(
-            "Usage: python prepare_gcps.py <endpoint_dir> <georef_filename> <image_filename> [output_vrt_filename]"
+            "Usage: python prepare_gcps.py <view_dir> <georef_filename> <image_filename> [output_vrt_filename]"
         )
 
-    endpoint_dir = Path(sys.argv[1]).resolve()
-    georef_path = endpoint_dir / sys.argv[2]
-    image_path = endpoint_dir / sys.argv[3]
+    view_dir = Path(sys.argv[1]).resolve()
+    georef_path = view_dir / sys.argv[2]
+    image_path = view_dir / sys.argv[3]
     vrt_filename = sys.argv[4] if len(sys.argv) > 4 else "overlay_gcps.vrt"
-    vrt_path = endpoint_dir / vrt_filename
+    vrt_path = view_dir / vrt_filename
 
-    if not endpoint_dir.is_dir():
-        raise FileNotFoundError(f"Missing endpoint directory: {endpoint_dir}")
+    if not view_dir.is_dir():
+        raise FileNotFoundError(f"Missing view directory: {view_dir}")
     if not georef_path.is_file():
         raise FileNotFoundError(f"Missing georef file: {georef_path}")
     if not image_path.is_file():

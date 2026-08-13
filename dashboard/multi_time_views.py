@@ -13,13 +13,13 @@ _perf_plot_redraws = 0
 
 def build_timeseries_views(data, map_state, selection_state, render_spinner=None):
     start_total = time.perf_counter()
-    endpoint_config = data.client.get_endpoint(data.endpoint_name)
-    defaults_config = endpoint_config["defaults"]
-    schema_display = endpoint_config["schema_display"]
-    schema_config = endpoint_config["schema"]
+    view_config = data.client.get_view(data.view_name)
+    defaults_config = view_config["defaults"]
+    schema_display = view_config["schema_display"]
+    schema_config = view_config["schema"]
     fields_config = _resolve_fields_for_group_raw(schema_config, data.group_path)
     time_dim = fields_config.get("time") or "time"
-    visualization_config = endpoint_config["visualization"]
+    visualization_config = view_config["visualization"]
     timeseries_config = visualization_config["timeseries"]
 
     default_display_variable = data.display_variable
@@ -61,7 +61,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         if marker_entity_index is not None:
             print(f"[fetch_ts] Selected marker index={marker_entity_index}, site_id={marker_site_id}")
         fig = data.client.get_timeseries_data(
-            data.endpoint_name,
+            data.view_name,
             group_path=data.group_path,
             lat=lat,
             lon=lon,

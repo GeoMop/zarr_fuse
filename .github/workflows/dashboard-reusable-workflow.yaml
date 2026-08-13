@@ -21,7 +21,7 @@ on:
         default: true
 
       source_repo:
-        description: "Repository containing endpoints and schemas"
+        description: "Repository containing views and schemas"
         required: true
         type: string
 
@@ -30,8 +30,8 @@ on:
         required: true
         type: string
 
-      source-endpoints-path:
-        description: "Path to endpoints.yaml in the source repository"
+      source-views-path:
+        description: "Path to zf_view.yaml in the source repository"
         required: true
         type: string
 
@@ -62,7 +62,7 @@ on:
         type: string
 
       configmap_name:
-        description: "ConfigMap name for endpoints and schemas"
+        description: "ConfigMap name for views and schemas"
         required: false
         type: string
         default: "dashboard-config"
@@ -216,11 +216,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          ENDPOINTS_FILE="source-repo/${{ inputs['source-endpoints-path'] }}"
+          VIEW_FILE="source-repo/${{ inputs['source-views-path'] }}"
           SCHEMAS_DIR="source-repo/${{ inputs['source-schemas-path'] }}"
 
-          if [[ ! -f "$ENDPOINTS_FILE" ]]; then
-            echo "Missing endpoints file: $ENDPOINTS_FILE"
+          if [[ ! -f "$VIEW_FILE" ]]; then
+            echo "Missing views file: $VIEW_FILE"
             exit 1
           fi
 
@@ -234,16 +234,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          ENDPOINTS_FILE="source-repo/${{ inputs['source-endpoints-path'] }}"
+          VIEW_FILE="source-repo/${{ inputs['source-views-path'] }}"
           SCHEMAS_DIR="source-repo/${{ inputs['source-schemas-path'] }}"
 
           echo "Creating ConfigMap ${{ inputs.configmap_name }} in namespace '${{ inputs.namespace }}' from:"
-          echo " - endpoints: $ENDPOINTS_FILE"
+          echo " - views: $VIEW_FILE"
           echo " - schemas dir: $SCHEMAS_DIR"
 
           if kubectl create configmap "${{ inputs.configmap_name }}" \
             --namespace "${{ inputs.namespace }}" \
-            --from-file=endpoints.yaml="$ENDPOINTS_FILE" \
+            --from-file=zf_view.yaml="$VIEW_FILE" \
             --from-file="$SCHEMAS_DIR" \
             --dry-run=client -o yaml | kubectl apply -f -; then
             echo "ConfigMap applied successfully."
@@ -268,14 +268,14 @@ jobs:
             --set "frontend.image.tag=${{ needs.get-version-tag.outputs.version-tag }}" \
             --set "frontend.s3.secrets.accessKey=${{ secrets.s3_access_key }}" \
             --set "frontend.s3.secrets.secretKey=${{ secrets.s3_secret_key }}" \
-            --set "frontend.extraEnv[0].name=ENDPOINTS_PATH" \
-            --set "frontend.extraEnv[0].value=/opt/dashboard/config/endpoints.yaml" \
+            --set "frontend.extraEnv[0].name=ZF_VIEW_PATH" \
+            --set "frontend.extraEnv[0].value=/opt/dashboard/config/zf_view.yaml" \
             --set "frontend.extraEnv[1].name=SCHEMAS_PATH" \
             --set "frontend.extraEnv[1].value=/opt/dashboard/schemas" \
             --set "frontend.extraVolumes[0].name=${{ inputs['mount-volume-name'] }}" \
             --set "frontend.extraVolumes[0].configMap.name=${{ inputs.configmap_name }}" \
             --set "frontend.extraVolumeMounts[0].name=${{ inputs['mount-volume-name'] }}" \
-            --set "frontend.extraVolumeMounts[0].mountPath=/opt/dashboard/config/endpoints.yaml" \
-            --set "frontend.extraVolumeMounts[0].subPath=endpoints.yaml" \
+            --set "frontend.extraVolumeMounts[0].mountPath=/opt/dashboard/config/zf_view.yaml" \
+            --set "frontend.extraVolumeMounts[0].subPath=zf_view.yaml" \
             --set "frontend.extraVolumeMounts[1].name=${{ inputs['mount-volume-name'] }}" \
             --set "frontend.extraVolumeMounts[1].mountPath=/opt/dashboard/schemas"

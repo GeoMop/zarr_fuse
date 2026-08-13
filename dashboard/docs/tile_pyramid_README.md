@@ -98,7 +98,7 @@ Where:
 
 ### Source files
 
-For each overlay endpoint, the project expects:
+For each overlay view, the project expects:
 
 - a source image (for example `.png`)
 - a georeference file containing control points
@@ -340,7 +340,7 @@ Keep in version control:
 - source images
 - georeference files
 - preprocessing scripts
-- endpoint-specific configuration
+- view-specific configuration
 
 Usually ignore generated outputs such as:
 

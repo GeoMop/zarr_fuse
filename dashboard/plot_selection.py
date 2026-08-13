@@ -382,7 +382,7 @@ class SelectionState(param.Parameterized):
 
 
 def resolve_available_dimensions(
-    endpoint_config: dict | None = None,
+    view_config: dict | None = None,
     group_path: str | None = None,
     schema_display: dict | None = None,
 ) -> dict[str, str]:
@@ -393,8 +393,8 @@ def resolve_available_dimensions(
 
     Parameters
     ----------
-    endpoint_config : dict, optional
-        Raw endpoint config dict (from ``data.client.get_endpoint()``).
+    view_config : dict, optional
+        Raw view config dict (from ``data.client.get_view()``).
     group_path : str, optional
         Current group path for field resolution.
     schema_display : dict, optional
@@ -409,10 +409,10 @@ def resolve_available_dimensions(
 
     EXCLUDED = {"lat", "lon", "time", "x", "y", "z"}
 
-    if endpoint_config is None:
+    if view_config is None:
         return {"Site": "entity", "Depth": "vertical"}
 
-    schema_config = endpoint_config.get("schema", {})
+    schema_config = view_config.get("schema", {})
     resolved = _resolve_fields_for_group_raw(schema_config, group_path or "/")
 
     display = schema_display or {}
@@ -784,7 +784,7 @@ def build_plot_selection_panel(
     Parameters
     ----------
     state : SelectionState, optional
-        Reuse an existing state instance (e.g. when switching endpoints).
+        Reuse an existing state instance (e.g. when switching views).
         If omitted a fresh state is created.
     available_dims : dict, optional
         ``{display_label: dim_key}`` from ``resolve_available_dimensions()``.

@@ -6,29 +6,29 @@ from pathlib import Path
 
 import boto3
 
-from dashboard.config import load_endpoint_config
+from dashboard.config import load_view_config
 
 
 CONFIG_ROOT = Path(__file__).resolve().parent.parent
-ENDPOINTS_PATH = CONFIG_ROOT / "config" / "endpoints.yaml"
+VIEWS_PATH = CONFIG_ROOT / "config" / "zf_view.yaml"
 
 
 def _load_tile_runtime_config():
-    endpoint_name = os.getenv("HV_DASHBOARD_ENDPOINT")
-    if not endpoint_name:
-        raise ValueError("HV_DASHBOARD_ENDPOINT is required")
+    view_name = os.getenv("HV_DASHBOARD_VIEW")
+    if not view_name:
+        raise ValueError("HV_DASHBOARD_VIEW is required")
 
-    endpoint = load_endpoint_config(ENDPOINTS_PATH, endpoint_name)
+    view = load_view_config(VIEWS_PATH, view_name)
 
-    overlay_config = endpoint.visualization.overlay
+    overlay_config = view.visualization.overlay
     if not overlay_config.enabled:
-        raise ValueError(f"Overlay is disabled for endpoint '{endpoint_name}'")
+        raise ValueError(f"Overlay is disabled for view '{view_name}'")
 
     bucket_name = os.getenv("S3_TILE_BUCKET_NAME")
     prefix = os.getenv("S3_TILE_PREFIX", "")
     cache_file = os.getenv(
         "S3_TILE_CACHE_FILE",
-        str(Path(__file__).with_name(f"{endpoint_name}_tile_url_cache.json")),
+        str(Path(__file__).with_name(f"{view_name}_tile_url_cache.json")),
     )
 
     access_key = os.getenv("S3_ACCESS_KEY", "")

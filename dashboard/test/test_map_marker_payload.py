@@ -6,12 +6,12 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from dashboard.config import DefaultsConfig, EndpointConfig, SchemaConfig, SchemaFieldsConfig, SourceConfig
+from dashboard.config import DefaultsConfig, SchemaConfig, SchemaFieldsConfig, SourceConfig, ViewConfig
 from dashboard.data import LocalClient
 
 
-def _make_endpoint(display_variable: str = "temp") -> EndpointConfig:
-    return EndpointConfig(
+def _make_view(display_variable: str = "temp") -> ViewConfig:
+    return ViewConfig(
         name="demo",
         reload_interval=0,
         description="",
@@ -27,14 +27,14 @@ def _make_endpoint(display_variable: str = "temp") -> EndpointConfig:
 
 def _make_client(dataset: xr.Dataset, display_variable: str = "temp") -> LocalClient:
     client = LocalClient.__new__(LocalClient)
-    client.endpoints_path = None
+    client.views_path = None
     client.base_dir = None
     client._nodes = {}
     client._map_data_cache = {}
     client._timeseries_cache = {}
-    endpoint = _make_endpoint(display_variable=display_variable)
-    client._endpoint_config = lambda endpoint_name: endpoint
-    client._get_group = lambda endpoint_name, group_path: SimpleNamespace(dataset=dataset)
+    view = _make_view(display_variable=display_variable)
+    client._view_config = lambda view_name: view
+    client._get_group = lambda view_name, group_path: SimpleNamespace(dataset=dataset)
     return client
 
 

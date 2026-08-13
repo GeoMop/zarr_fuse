@@ -6,7 +6,7 @@
 Your New Project
     ↓
     ├─→ pip install zarr-fuse + zarr_fuse.dashboard
-    ├─→ Create config/endpoints.yaml
+    ├─→ Create config/zf_view.yaml
     ├─→ Create schemas/my_schema.yaml
     ├─→ Create .env file
     ├─→ zf-dashboard
@@ -59,10 +59,10 @@ pip install zarr-fuse zarr_fuse.dashboard
 
 ### Create configuration files
 
-**A. Create `config/endpoints.yaml`**
+**A. Create `config/zf_view.yaml`**
 ```bash
-cat > config/endpoints.yaml << 'EOF'
-my_data:
+cat > config/zf_view.yaml << 'EOF'
+my_view:
   source:
     type: s3
     store_type: zarr
@@ -96,8 +96,8 @@ EOF
 **C. Create `.env`**
 ```bash
 cat > .env << 'EOF'
-HV_DASHBOARD_ENDPOINT=my_data
-ENDPOINTS_PATH=$(pwd)/config/endpoints.yaml
+HV_DASHBOARD_VIEW=my_view
+ZF_VIEW_PATH=$(pwd)/config/zf_view.yaml
 ZF_S3_ACCESS_KEY=your_key
 ZF_S3_SECRET_KEY=your_secret
 ZF_S3_ENDPOINT_URL=https://s3.example.com
@@ -131,7 +131,7 @@ try:
 except Exception as e:
     print(f"✗ Data access error: {e}")
     print("  - Check S3 credentials")
-    print("  - Check data path in endpoints.yaml")
+    print("  - Check data path in zf_view.yaml")
     exit(1)
 
 # 3. Check variables exist
@@ -149,10 +149,10 @@ EOF
 ### Check file structure
 ```bash
 # Verify files exist
-ls -la config/endpoints.yaml     # Should exist
+ls -la config/zf_view.yaml     # Should exist
 ls -la schemas/my_schema.yaml    # Should exist
 ls -la .env                      # Should exist
-cat .env | grep ENDPOINTS_PATH   # Should show your path
+cat .env | grep ZF_VIEW_PATH   # Should show your path
 ```
 
 ## 4. Run Phase (Start the dashboard)
@@ -181,15 +181,15 @@ zf-dashboard
 
 ## 6. Troubleshooting Quick Reference
 
-### Problem: "ENDPOINTS_PATH not set"
+### Problem: "ZF_VIEW_PATH not set"
 
 **Solution:**
 ```bash
 # Check .env is loaded:
-cat .env | grep ENDPOINTS_PATH
+cat .env | grep ZF_VIEW_PATH
 
 # Or set directly:
-export ENDPOINTS_PATH=$(pwd)/config/endpoints.yaml
+export ZF_VIEW_PATH=$(pwd)/config/zf_view.yaml
 zf-dashboard
 ```
 
@@ -228,14 +228,14 @@ zf-dashboard
 
 **Solution:**
 ```bash
-# Check path is relative to endpoints.yaml:
-cat config/endpoints.yaml | grep "file:"    # Should show: file: schemas/my_schema.yaml
+# Check path is relative to zf_view.yaml:
+cat config/zf_view.yaml | grep "file:"    # Should show: file: schemas/my_schema.yaml
 ls schemas/my_schema.yaml                   # File should exist
 ```
 
 ### Problem: "Variable 'temperature' not found"
 
-**Solution:** Field names in endpoints.yaml must match your actual Zarr variables:
+**Solution:** Field names in zf_view.yaml must match your actual Zarr variables:
 ```bash
 # Check what variables exist:
 python << 'EOF'
@@ -245,7 +245,7 @@ print("Available variables:", list(ds.data_vars.keys()))
 print("Available coordinates:", list(ds.coords.keys()))
 EOF
 
-# Update endpoints.yaml with correct names
+# Update zf_view.yaml with correct names
 ```
 
 ### Problem: "Dashboard won't start or slow/freezing"
@@ -260,7 +260,7 @@ EOF
 
 ### Show different variable first
 ```yaml
-# In config/endpoints.yaml
+# In config/zf_view.yaml
 defaults:
   metric: humidity  # Change from "temperature"
 ```
@@ -304,7 +304,7 @@ Before running, you should have:
 ```
 my-dashboard/
 ├── config/
-│   └── endpoints.yaml           ✓ Points to YOUR data
+│   └── zf_view.yaml           ✓ Points to YOUR data
 ├── schemas/
 │   └── my_schema.yaml           ✓ Describes YOUR Zarr structure
 ├── .env                         ✓ YOUR S3 credentials
@@ -324,8 +324,8 @@ my-dashboard/
 
 ```bash
 # Required
-HV_DASHBOARD_ENDPOINT=my_data
-ENDPOINTS_PATH=/path/to/endpoints.yaml
+HV_DASHBOARD_VIEW=my_view
+ZF_VIEW_PATH=/path/to/zf_view.yaml
 
 # S3 (if using)
 ZF_S3_ACCESS_KEY=xxx
@@ -342,8 +342,8 @@ ZF_CACHE_DIR=/tmp/cache
 
 ## Next Steps After Getting It Working
 
-1. **Add more variables:** Add more data_vars to endpoints.yaml
-2. **Add multiple endpoints:** Define multiple datasets in endpoints.yaml
+1. **Add more variables:** Add more data_vars to zf_view.yaml
+2. **Add multiple views:** Define multiple datasets in zf_view.yaml
 3. **Deploy to production:** See DEPLOYMENT.md
 4. **Customize UI:** Adjust labels, colors, map settings
 5. **Monitor performance:** Log usage, track errors

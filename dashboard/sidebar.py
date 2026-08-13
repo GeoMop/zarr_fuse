@@ -32,7 +32,7 @@ def _flatten_nodes(structure, depth: int = 0, items=None, prefixes=None, is_last
     return items
 
 
-def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
+def build_sidebar(view_name, view_config, structure, views=None,
                   loading_indicator=None, timeseries_loading=None,
                   render_spinner=None, rendering_status=None,
                   table_loading=None):
@@ -52,11 +52,11 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
 </div>
 """, sizing_mode="stretch_width")
 
-    endpoint_options = list(endpoints.keys()) if endpoints else [endpoint_name]
+    view_options = list(views.keys()) if views else [view_name]
     store_selector = pn.widgets.Select(
         name="📦 Store Name",
-        value=endpoint_name,
-        options=endpoint_options,
+        value=view_name,
+        options=view_options,
         width=320,
         disabled=False,
         stylesheets=["""
@@ -76,8 +76,8 @@ def build_sidebar(endpoint_name, endpoint_config, structure, endpoints=None,
     )
 
     store_uri = ""
-    if isinstance(endpoint_config, dict):
-        source_config = endpoint_config.get("source", {}) or {}
+    if isinstance(view_config, dict):
+        source_config = view_config.get("source", {}) or {}
         store_uri = source_config.get("uri", "")
 
     store_info = pn.pane.HTML("""
