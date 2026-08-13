@@ -116,8 +116,9 @@ FIELD_NAMES = {"lat", "lon", "time", "vertical", "entity"}
 REQUIRED_FIELD_NAMES = {"lat", "lon", "time", "entity"}
 
 
-def resolve_endpoints_path() -> Path:
-    """
+def find_endpoints_file() -> Path:
+    """Locate the endpoints.yaml file and return its absolute path.
+
     Resolution order:
     1. ENDPOINTS_PATH env var
     2. Search upward from current working directory for:
@@ -130,7 +131,7 @@ def resolve_endpoints_path() -> Path:
     if env_path:
         path = Path(env_path).expanduser().resolve()
         print(
-            f"[config] resolve_endpoints_path: "
+            f"[config] find_endpoints_file: "
             f"from ENV {ENDPOINTS_ENV_VAR}={env_path} -> {path}"
         )
 
@@ -170,6 +171,7 @@ def _resolve_env_file_path(config_path: Path, env_file: str) -> Path:
 
 
 def load_environment_from_config(config_path: Path) -> Path | None:
+    """Load the .env file referenced by the _dashboard.env_file config section."""
     if not config_path.exists():
         return None
 
@@ -575,6 +577,7 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
 
 
 def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
+    """Load and validate all endpoints from endpoints.yaml into typed config objects."""
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
@@ -604,6 +607,7 @@ def load_endpoints(config_path: Path) -> Dict[str, EndpointConfig]:
 
 
 def get_default_endpoint_name(config_path: Path) -> Optional[str]:
+    """Return the default endpoint name from the _dashboard section, if configured."""
     if not config_path.exists():
         return None
 
@@ -628,22 +632,24 @@ def get_default_endpoint_name(config_path: Path) -> Optional[str]:
     return None
 
 
-def get_endpoint_config(config_path: Path, endpoint_name: Optional[str] = None) -> EndpointConfig:
+def load_endpoint_config(config_path: Path, endpoint_name: Optional[str] = None) -> EndpointConfig:
+    """Load ONE endpoint config; falls back to the configured default endpoint name."""
     endpoints = load_endpoints(config_path)
 
     if not endpoints:
-        raise ValueError("No endpoints configured")
+        raise ValueError(f"No endpoints configured in {config_path}")
 
-    if not endpoint_name:
-        raise ValueError("endpoint_name is required; implicit default endpoint is not allowed")
+    name = endpoint_name or get_default_endpoint_name(config_path)
+    if not name:
+        raise ValueError("endpoint_name required; no default endpoint configured")
 
-    if endpoint_name not in endpoints:
-        raise KeyError(f"Endpoint '{endpoint_name}' not found in {config_path}")
+    if name not in endpoints:
+        raise KeyError(f"Endpoint '{name}' not found in {config_path}")
 
-    return endpoints[endpoint_name]
+    return endpoints[name]
 
 
-def resolve_endpoint_url(config_path: Path, endpoint_name: Optional[str] = None) -> Optional[str]:
+def schema_endpoint_url(config_path: Path, endpoint_name: Optional[str] = None) -> Optional[str]:
     """Resolve the S3 endpoint URL strictly from the endpoint schema file.
 
     The endpoint URL is owned by the schema (ATTRS.S3_ENDPOINT_URL); no
@@ -653,14 +659,9 @@ def resolve_endpoint_url(config_path: Path, endpoint_name: Optional[str] = None)
     if not config_path.exists():
         return None
 
-    if not endpoint_name:
-        endpoint_name = get_default_endpoint_name(config_path)
-    if not endpoint_name:
-        return None
-
     try:
-        endpoint = get_endpoint_config(config_path, endpoint_name)
-    except Exception:
+        endpoint = load_endpoint_config(config_path, endpoint_name)
+    except (ValueError, KeyError):
         return None
 
     schema_path = Path(endpoint.schema.file)

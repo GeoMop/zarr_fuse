@@ -346,3 +346,9 @@
   to keep the fail-soft (never crash) behavior. Callers of
   `resolve_endpoint_url` / `_cache_dir_from_endpoints` guard on
   `ENDPOINTS_PATH is not None`. Dashboard suite: 116 passed.
+- 2026-08-13: Config flow simplification (S2 + S1 renames): `get_endpoint_config`
+  replaced by default-aware `load_endpoint_config(config_path, endpoint_name=None)`;
+  `resolve_endpoints_path` renamed to `find_endpoints_file`, `resolve_endpoint_url`
+  renamed to `schema_endpoint_url`. All callers updated (tile_service, serve_dashboard,
+  composed, data, excluded s3_tile_resolver_test). Added brief lead-in docstrings to the
+  config flow functions. Dashboard suite: 116 passed.

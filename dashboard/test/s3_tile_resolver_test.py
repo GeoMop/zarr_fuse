@@ -6,7 +6,7 @@ from pathlib import Path
 
 import boto3
 
-from dashboard.config import get_endpoint_config
+from dashboard.config import load_endpoint_config
 
 
 CONFIG_ROOT = Path(__file__).resolve().parent.parent
@@ -18,7 +18,7 @@ def _load_tile_runtime_config():
     if not endpoint_name:
         raise ValueError("HV_DASHBOARD_ENDPOINT is required")
 
-    endpoint = get_endpoint_config(ENDPOINTS_PATH, endpoint_name)
+    endpoint = load_endpoint_config(ENDPOINTS_PATH, endpoint_name)
 
     overlay_config = endpoint.visualization.overlay
     if not overlay_config.enabled:

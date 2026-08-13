@@ -1,9 +1,9 @@
 import os
 
-from dashboard.config import load_environment_from_config, resolve_endpoints_path
+from dashboard.config import find_endpoints_file, load_environment_from_config
 
 # Bootstrap env loading before importing dashboard modules that read env vars at import time.
-load_environment_from_config(resolve_endpoints_path())
+load_environment_from_config(find_endpoints_file())
 
 # Backward-compatible mapping: if legacy ZF_ vars are present but S3_ are not, set them
 os.environ.setdefault("S3_ACCESS_KEY", os.getenv("ZF_S3_ACCESS_KEY"))

@@ -5,7 +5,7 @@ import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
 from holoviews import streams
 
-from dashboard.config import get_default_endpoint_name, get_endpoint_config, load_endpoints, resolve_endpoints_path
+from dashboard.config import find_endpoints_file, get_default_endpoint_name, load_endpoint_config, load_endpoints
 from dashboard.data import load_data
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
@@ -35,7 +35,7 @@ hv.renderer("bokeh").theme = "dark_minimal"
 def build_dashboard():
     start_total = time.perf_counter()
 
-    endpoints_path = resolve_endpoints_path()
+    endpoints_path = find_endpoints_file()
     print(f"Using endpoints config: {endpoints_path}")
 
     configured_default = get_default_endpoint_name(endpoints_path)
@@ -164,7 +164,7 @@ def build_dashboard():
 
                 variable_selector.options = var_options
 
-                endpoint_cfg = get_endpoint_config(endpoints_path, endpoint_name)
+                endpoint_cfg = load_endpoint_config(endpoints_path, endpoint_name)
                 default_var = endpoint_cfg.defaults.display_variable if endpoint_cfg.defaults else None
 
                 if default_var and default_var in variables:

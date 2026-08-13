@@ -8,7 +8,7 @@ import boto3
 import yaml
 from tornado.web import RequestHandler, HTTPError
 
-from dashboard.config import resolve_endpoint_url, resolve_endpoints_path
+from dashboard.config import find_endpoints_file, schema_endpoint_url
 
 ACCESS_KEY = os.getenv("ZF_S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("ZF_S3_SECRET_KEY")
@@ -21,13 +21,13 @@ EXPIRY_BUFFER_SECONDS = 30
 
 
 try:
-    ENDPOINTS_PATH = resolve_endpoints_path()
+    ENDPOINTS_PATH = find_endpoints_file()
 except FileNotFoundError:
     ENDPOINTS_PATH = None
 
 
 ENDPOINT_URL = (
-    resolve_endpoint_url(ENDPOINTS_PATH, os.getenv("HV_DASHBOARD_ENDPOINT"))
+    schema_endpoint_url(ENDPOINTS_PATH, os.getenv("HV_DASHBOARD_ENDPOINT"))
     if ENDPOINTS_PATH is not None
     else None
 )

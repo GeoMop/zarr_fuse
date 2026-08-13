@@ -11,10 +11,10 @@ import xarray as xr
 import zarr_fuse as zf
 
 from dashboard.config import (
-    get_endpoint_config,
+    find_endpoints_file,
+    load_endpoint_config,
     load_endpoints,
     read_variable_metadata,
-    resolve_endpoints_path,
     resolve_schema_fields,
 )
 
@@ -57,13 +57,13 @@ class LocalClient:
         return {name: asdict(endpoint) for name, endpoint in endpoints.items()}
 
     def get_endpoint(self, endpoint_name: str) -> Dict[str, Any]:
-        endpoint = get_endpoint_config(self.endpoints_path, endpoint_name)
+        endpoint = load_endpoint_config(self.endpoints_path, endpoint_name)
         return asdict(endpoint)
 
     def _endpoint_config(self, endpoint_name: Optional[str]):
         if endpoint_name is None:
             raise ValueError("endpoint_name is required")
-        return get_endpoint_config(self.endpoints_path, endpoint_name)
+        return load_endpoint_config(self.endpoints_path, endpoint_name)
 
     def _endpoint_handle(self, endpoint_name: Optional[str]) -> EndpointHandle:
         endpoint = self._endpoint_config(endpoint_name)
@@ -578,7 +578,7 @@ def load_data(
     resolved_endpoints_path = (
         Path(endpoints_path).expanduser().resolve()
         if endpoints_path is not None
-        else resolve_endpoints_path()
+        else find_endpoints_file()
     )
 
     if not resolved_endpoints_path.exists():
@@ -589,7 +589,7 @@ def load_data(
 
     client = LocalClient(resolved_endpoints_path)
 
-    endpoint = get_endpoint_config(resolved_endpoints_path, endpoint_name)
+    endpoint = load_endpoint_config(resolved_endpoints_path, endpoint_name)
     resolved_group_path = group_path or endpoint.defaults.group_path
     if not resolved_group_path:
         raise ValueError("group_path is required (set defaults.group_path or pass group_path explicitly)")
