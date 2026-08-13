@@ -641,3 +641,43 @@ def get_endpoint_config(config_path: Path, endpoint_name: Optional[str] = None) 
         raise KeyError(f"Endpoint '{endpoint_name}' not found in {config_path}")
 
     return endpoints[endpoint_name]
+
+
+def resolve_endpoint_url(config_path: Path, endpoint_name: Optional[str] = None) -> Optional[str]:
+    """Resolve the S3 endpoint URL strictly from the endpoint schema file.
+
+    The endpoint URL is owned by the schema (ATTRS.S3_ENDPOINT_URL); no
+    environment fallback is applied here. When ``endpoint_name`` is omitted
+    the configured default endpoint is used.
+    """
+    if not config_path.exists():
+        return None
+
+    if not endpoint_name:
+        endpoint_name = get_default_endpoint_name(config_path)
+    if not endpoint_name:
+        return None
+
+    try:
+        endpoint = get_endpoint_config(config_path, endpoint_name)
+    except Exception:
+        return None
+
+    schema_path = Path(endpoint.schema.file)
+    if not schema_path.exists():
+        return None
+
+    try:
+        with schema_path.open("r", encoding="utf-8") as f:
+            schema = yaml.safe_load(f) or {}
+    except Exception:
+        return None
+
+    attrs = schema.get("ATTRS")
+    if not isinstance(attrs, dict):
+        return None
+
+    endpoint_url = attrs.get("S3_ENDPOINT_URL")
+    if not isinstance(endpoint_url, str) or not endpoint_url.strip():
+        return None
+    return endpoint_url.strip()

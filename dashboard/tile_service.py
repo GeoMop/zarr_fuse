@@ -8,9 +8,10 @@ import boto3
 import yaml
 from tornado.web import RequestHandler, HTTPError
 
+from dashboard.config import resolve_endpoint_url
+
 ACCESS_KEY = os.getenv("ZF_S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("ZF_S3_SECRET_KEY")
-ENDPOINT_URL = os.getenv("ZF_S3_ENDPOINT_URL")
 
 # Externalize bucket/prefix from environment or defaults
 BUCKET_NAME = os.getenv("TILE_BUCKET", "app-databuk-test-service")
@@ -30,6 +31,11 @@ def _resolve_endpoints_path() -> Path:
         / "config"
         / "endpoints.yaml"
     )
+
+
+ENDPOINT_URL = resolve_endpoint_url(
+    _resolve_endpoints_path(), os.getenv("HV_DASHBOARD_ENDPOINT")
+)
 
 
 def _cache_dir_from_endpoints() -> str | None:

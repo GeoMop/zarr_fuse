@@ -320,3 +320,22 @@
 - 2026-07-08: Simplified `interpolate_ds()` to reindex with all coordinates
   returned from `interpolate_coord()` and tightened `merge_ds()` so empty
   multidimensional extension subsets remain no-op writes.
+- 2026-08-13: Made the dashboard tile endpoint URL strict schema-only. Added
+  `dashboard/tile_service.py::_endpoint_url_from_schema()` which resolves
+  `ATTRS.S3_ENDPOINT_URL` from the endpoint schema file (endpoints.yaml ->
+  `source.schema_path`, resolved against `endpoints_path.parent.parent`);
+  removed the `ZF_S3_ENDPOINT_URL` env read and the now-dead
+  `S3_ENDPOINT_URL` mapping line in `dashboard/serve_dashboard.py`; dropped
+  `ZF_S3_ENDPOINT_URL` from `dashboard/scripts/.env`. Dashboard suite: 116
+  passed.
+- 2026-08-13: DRY cleanup of `_endpoint_url_from_schema()`: replaced the
+  hand-rolled endpoints.yaml/schema-path walking with the existing config
+  resolvers (`get_default_endpoint_name` + `get_endpoint_config` from
+  `dashboard/config.py`), which also restores `SCHEMAS_PATH` support that the
+  first version silently dropped. Dashboard suite: 116 passed.
+- 2026-08-13: Moved the endpoint URL resolution into `dashboard/config.py` as
+  `resolve_endpoint_url(config_path, endpoint_name=None)` (reads
+  `ATTRS.S3_ENDPOINT_URL` from the endpoint schema, defaulting to the
+  configured default endpoint). `dashboard/tile_service.py` now calls it with
+  its own endpoints-path resolution and optional `HV_DASHBOARD_ENDPOINT`.
+  Dashboard suite: 116 passed.
