@@ -89,7 +89,7 @@ def load_app_config(config_path: str | Path) -> "AppConfig":
     base = _parse_base_config(cfg_block.get("base", {}))
     smtp = _parse_smtp_config(cfg_block.get("smtp", {}))
 
-    queue = QueueStorage.from_url(base.queue_dir_path)
+    queue = QueueStorage(base.queue_dir_path)
 
     app_config = AppConfig(
         queue=queue,

@@ -10,6 +10,7 @@ from zarr_fuse.units import DateTimeUnit
 
 from ..data_types import DataObject
 from ..models import MetadataModel
+from ..queue_storage import FileRef
 
 LOG = logging.getLogger(__name__)
 
@@ -18,11 +19,11 @@ LOG = logging.getLogger(__name__)
 class ExtractedItem:
     """An extracted payload waiting to be written to the zarr store.
 
-    `key` is the queue item key ("accepted/<endpoint>/<name>") or a local
-    file path for items processed outside the queue.
+    `ref` is the queue item ref ("accepted/<name>"), or a local file path for
+    items processed outside the queue (deprecated, see `worker._extract_one`).
     """
 
-    key: str
+    ref: FileRef
     metadata: MetadataModel
     schema_path: Path
     obj: DataObject
@@ -86,14 +87,14 @@ def _min_time_value(obj: DataObject, coord) -> Any:
 
 
 def make_extracted_item(
-    key: str,
+    ref: FileRef,
     metadata: MetadataModel,
     schema_path: Path,
     obj: DataObject,
     schema_cache: dict | None = None,
 ) -> ExtractedItem:
     item = ExtractedItem(
-        key=key,
+        ref=ref,
         metadata=metadata,
         schema_path=schema_path,
         obj=obj,
@@ -107,7 +108,7 @@ def make_extracted_item(
     except Exception:
         LOG.warning(
             "Failed to determine data time for %s, it will be stored in receipt order",
-            key,
+            ref,
             exc_info=True,
         )
 

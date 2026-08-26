@@ -1,5 +1,6 @@
 import signal
 import logging
+import warnings
 
 import zarr_fuse as zf
 import xarray as xr
@@ -9,16 +10,16 @@ from .app_config import AppConfig
 from .io import read_df_from_bytes
 from .io.time_filter import ExtractedItem, make_extracted_item, sort_by_data_time
 from .models import MetadataModel
-from .queue_storage import FAILED, SUCCESS, QueueStorage
+from .queue_storage import FAILED, SUCCESS, FileRef
 
 LOG = logging.getLogger(__name__)
 
 
-def _load_metadata(app_config: AppConfig, key: str) -> MetadataModel:
+def _load_metadata(app_config: AppConfig, ref: FileRef) -> MetadataModel:
     try:
-        return MetadataModel.model_validate_json(app_config.queue.read_meta_text(key))
+        return MetadataModel.model_validate_json(app_config.queue.read_meta_text(ref))
     except Exception:
-        LOG.exception("Failed to load metadata for %s", key)
+        LOG.exception("Failed to load metadata for %s", ref)
         raise
 
 
@@ -50,10 +51,21 @@ def _read_local_file(data_path: Path) -> tuple[MetadataModel, bytes]:
 
 def _extract_one(
     app_config: AppConfig,
-    ref: str | Path,
+    ref: FileRef | Path,
     schema_cache: dict | None = None,
 ) -> ExtractedItem:
+    """
+    Read a payload with its metadata and extract the data object out of it.
+
+    Passing a local `Path` instead of a queue `FileRef` is deprecated; put the
+    payload into the queue instead.
+    """
     if isinstance(ref, Path):
+        warnings.warn(
+            "Extracting a payload from a local path is deprecated, use a queue FileRef.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         metadata, payload = _read_local_file(ref)
     else:
         metadata = _load_metadata(app_config, ref)
@@ -69,7 +81,7 @@ def _extract_one(
         config_dir=app_config.config_dir,
     )
 
-    return make_extracted_item(str(ref), metadata, schema_path, obj, schema_cache)
+    return make_extracted_item(FileRef(str(ref)), metadata, schema_path, obj, schema_cache)
 
 
 def _store_one(item: ExtractedItem) -> None:
@@ -99,14 +111,15 @@ def _store_one(item: ExtractedItem) -> None:
 
 
 def _process_one(app_config: AppConfig, data_path: Path) -> None:
+    """Process a single local file. Deprecated, see `_extract_one`."""
     _store_one(_extract_one(app_config, data_path))
 
 
-def _move_to_failed(app_config: AppConfig, key: str) -> None:
+def _move_to_failed(app_config: AppConfig, ref: FileRef) -> None:
     try:
-        app_config.queue.move(key, FAILED)
+        app_config.queue.move(ref, FAILED)
     except Exception:
-        LOG.exception("Failed to move %s to failed queue", key)
+        LOG.exception("Failed to move %s to failed queue", ref)
 
 
 def _process_available_files(app_config: AppConfig) -> bool:
@@ -116,7 +129,7 @@ def _process_available_files(app_config: AppConfig) -> bool:
 
     # Phase 1: extract all accepted files; nothing is written to the store yet,
     # so an interrupted batch is safely re-extracted on the next pass.
-    for key in app_config.queue.list_accepted():
+    for ref in app_config.queue.list_accepted():
 
         # Check for stop signal at the beginning of each loop iteration to allow graceful shutdown.
         if app_config.stop_event.is_set():
@@ -125,25 +138,22 @@ def _process_available_files(app_config: AppConfig) -> bool:
         progressed = True
 
         try:
-            LOG.info("Extracting data %s", key)
-            batch.append(_extract_one(app_config, key, schema_cache))
+            LOG.info("Extracting data %s", ref)
+            batch.append(_extract_one(app_config, ref, schema_cache))
 
         except ValueError as exc:
-            LOG.warning("Processing rejected for %s: %s", key, exc)
-            _move_to_failed(app_config, key)
+            LOG.warning("Processing rejected for %s: %s", ref, exc)
+            _move_to_failed(app_config, ref)
 
         except Exception:
-            LOG.exception("Extraction failed for %s", key)
-            _move_to_failed(app_config, key)
+            LOG.exception("Extraction failed for %s", ref)
+            _move_to_failed(app_config, ref)
 
     # Phase 2: filter — order the batch by the time of the data instead of
     # the time of the payload receipt.
     sorted_batch = sort_by_data_time(batch)
-    if [item.key for item in sorted_batch] != [item.key for item in batch]:
-        LOG.info(
-            "Batch reordered by data time: %s",
-            [QueueStorage.basename(item.key) for item in sorted_batch],
-        )
+    if [item.ref for item in sorted_batch] != [item.ref for item in batch]:
+        LOG.info("Batch reordered by data time: %s", [item.ref for item in sorted_batch])
 
     # Phase 3: write to the zarr store in data-time order.
     for item in sorted_batch:
@@ -152,18 +162,18 @@ def _process_available_files(app_config: AppConfig) -> bool:
             break
 
         try:
-            LOG.info("Storing data %s", item.key)
+            LOG.info("Storing data %s", item.ref)
             _store_one(item)
-            app_config.queue.move(item.key, SUCCESS)
-            LOG.info("Processing succeeded for %s", item.key)
+            app_config.queue.move(item.ref, SUCCESS)
+            LOG.info("Processing succeeded for %s", item.ref)
 
         except ValueError as exc:
-            LOG.warning("Processing rejected for %s: %s", item.key, exc)
-            _move_to_failed(app_config, item.key)
+            LOG.warning("Processing rejected for %s: %s", item.ref, exc)
+            _move_to_failed(app_config, item.ref)
 
         except Exception:
-            LOG.exception("Processing failed for %s", item.key)
-            _move_to_failed(app_config, item.key)
+            LOG.exception("Processing failed for %s", item.ref)
+            _move_to_failed(app_config, item.ref)
 
     return progressed
 

@@ -1,12 +1,20 @@
+import time
+import uuid
 import logging
 
 from ..models import MetadataModel
 from ..app_config import AppConfig
-from ..queue_storage import new_msg_name
 from .content_type import classify_content_type, get_content_type_suffix
 from .validate import sanitize_node_path
 
 LOG = logging.getLogger(__name__)
+
+
+def new_item_name(endpoint_name: str, suffix: str) -> str:
+    """Flat name of a new queue item: ``<endpoint>_<UTC timestamp>_<uid><suffix>``."""
+    ts = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+    uid = uuid.uuid4().hex[:12]
+    return f"{endpoint_name}_{ts}_{uid}{suffix}"
 
 
 def save_data(
@@ -27,8 +35,7 @@ def save_data(
         raise ValueError(f"Unsupported content type: {updated_md.content_type}")
 
     app_config.queue.put_item(
-        endpoint_name=updated_md.endpoint_name,
-        name=new_msg_name(get_content_type_suffix(content_type)),
+        name=new_item_name(updated_md.endpoint_name, get_content_type_suffix(content_type)),
         payload=payload,
         meta=updated_md.model_dump_json().encode("utf-8"),
     )

@@ -1,85 +1,102 @@
 import pytest
 
-from ingress_server.queue_storage import LocalQueueStorage, QueueStorage
+from ingress_server.queue_storage import QueueStorage
 
 
 def _storage(tmp_path) -> QueueStorage:
-    storage = QueueStorage.from_url(str(tmp_path / "queue"))
+    storage = QueueStorage(str(tmp_path / "queue"))
     storage.ensure_layout()
     return storage
 
 
-def test_from_url_local(tmp_path):
+def test_local_layout(tmp_path):
     storage = _storage(tmp_path)
-    assert isinstance(storage, LocalQueueStorage)
+    assert storage.url == f"file://{tmp_path / 'queue'}"
     for queue_name in ("accepted", "success", "failed"):
         assert (tmp_path / "queue" / queue_name).is_dir()
 
 
-def test_dest_key_requires_accepted_prefix():
-    assert QueueStorage.dest_key("accepted/ep/x.json", "success") == "success/ep/x.json"
+def test_dest_ref_requires_accepted_prefix():
+    assert QueueStorage.dest_ref("accepted/ep_x.json", "success") == "success/ep_x.json"
     with pytest.raises(ValueError):
-        QueueStorage.dest_key("success/ep/x.json", "failed")
+        QueueStorage.dest_ref("success/ep_x.json", "failed")
     with pytest.raises(ValueError):
-        QueueStorage.dest_key("accepted", "failed")
+        QueueStorage.dest_ref("accepted", "failed")
 
 
 def test_put_list_read_roundtrip(tmp_path):
     storage = _storage(tmp_path)
 
-    key = storage.put_item("bukov", "20250919T111523_aaa.json", b"payload", b'{"m": 1}')
-    assert key == "accepted/bukov/20250919T111523_aaa.json"
-    assert storage.list_accepted() == [key]
-    assert storage.read_bytes(key) == b"payload"
-    assert storage.read_meta_text(key) == '{"m": 1}'
+    ref = storage.put_item("bukov_20250919T111523_aaa.json", b"payload", b'{"m": 1}')
+    assert ref == "accepted/bukov_20250919T111523_aaa.json"
+    assert storage.list_accepted() == [ref]
+    assert storage.read_bytes(ref) == b"payload"
+    assert storage.read_meta_text(ref) == '{"m": 1}'
 
 
-def test_list_skips_sidecars_and_orders_by_basename(tmp_path):
+def test_list_skips_sidecars_markers_and_orders_by_name(tmp_path):
     storage = _storage(tmp_path)
 
-    late = storage.put_item("ep_b", "20250919T2_bbb.json", b"2", b"{}")
-    early = storage.put_item("ep_a", "20250919T1_aaa.json", b"1", b"{}")
-    (tmp_path / "queue" / "accepted" / "ep_a" / "inflight.json.tmp").write_bytes(b"x")
+    late = storage.put_item("ep_b_20250919T2_bbb.json", b"2", b"{}")
+    early = storage.put_item("ep_a_20250919T1_aaa.json", b"1", b"{}")
+    # Leftover of the previous, non fsspec local backend.
+    (tmp_path / "queue" / "accepted" / "inflight.json.tmp").write_bytes(b"x")
 
-    # Sorted by basename across endpoint subtrees; .meta.json and .tmp excluded.
+    # The layout marker, the .meta.json sidecars and the .tmp file are excluded.
     assert storage.list_accepted() == [early, late]
 
 
-def test_move_preserves_subtree_and_meta(tmp_path):
+def test_list_handles_legacy_endpoint_subdirs(tmp_path):
+    """Items written by the previous per-endpoint directory layout stay processable."""
     storage = _storage(tmp_path)
-    key = storage.put_item("bukov", "20250919T111523_aaa.json", b"payload", b"{}")
 
-    storage.move(key, "success")
+    legacy_dir = tmp_path / "queue" / "accepted" / "bukov"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "20250919T111523_aaa.json").write_bytes(b"payload")
+    (legacy_dir / "20250919T111523_aaa.json.meta.json").write_bytes(b"{}")
 
+    ref = "accepted/bukov/20250919T111523_aaa.json"
+    assert storage.list_accepted() == [ref]
+    assert storage.read_bytes(ref) == b"payload"
+
+    storage.move(ref, "success")
+    assert (tmp_path / "queue" / "success" / "bukov" / "20250919T111523_aaa.json").exists()
+
+
+def test_move_carries_the_meta_sidecar(tmp_path):
+    storage = _storage(tmp_path)
+    ref = storage.put_item("bukov_20250919T111523_aaa.json", b"payload", b"{}")
+
+    dest = storage.move(ref, "success")
+
+    assert dest == "success/bukov_20250919T111523_aaa.json"
     assert storage.list_accepted() == []
-    success_dir = tmp_path / "queue" / "success" / "bukov"
-    assert (success_dir / "20250919T111523_aaa.json").read_bytes() == b"payload"
-    assert (success_dir / "20250919T111523_aaa.json.meta.json").exists()
+    success_dir = tmp_path / "queue" / "success"
+    assert (success_dir / "bukov_20250919T111523_aaa.json").read_bytes() == b"payload"
+    assert (success_dir / "bukov_20250919T111523_aaa.json.meta.json").exists()
 
 
 def test_move_tolerates_missing_meta(tmp_path):
     storage = _storage(tmp_path)
-    key = "accepted/bukov/orphan.json"
-    payload_path = tmp_path / "queue" / key
-    payload_path.parent.mkdir(parents=True)
-    payload_path.write_bytes(b"x")
+    ref = "accepted/orphan.json"
+    (tmp_path / "queue" / ref).write_bytes(b"x")
 
-    storage.move(key, "failed")
+    storage.move(ref, "failed")
 
-    assert (tmp_path / "queue" / "failed" / "bukov" / "orphan.json").exists()
+    assert (tmp_path / "queue" / "failed" / "orphan.json").exists()
 
 
-def test_recover_failed_restores_subtree(tmp_path):
+def test_recover_failed(tmp_path):
     storage = _storage(tmp_path)
-    key_a = storage.put_item("ep_a", "a.json", b"a", b"{}")
-    key_b = storage.put_item("ep_b", "b.json", b"b", b"{}")
-    storage.move(key_a, "failed")
-    storage.move(key_b, "failed")
+    ref_a = storage.put_item("ep_a_a.json", b"a", b"{}")
+    ref_b = storage.put_item("ep_b_b.json", b"b", b"{}")
+    storage.move(ref_a, "failed")
+    storage.move(ref_b, "failed")
+    assert storage.list_accepted() == []
 
     storage.recover_failed()
 
-    assert storage.list_accepted() == [key_a, key_b]
-    for key in (key_a, key_b):
-        assert storage.read_meta_text(key) == "{}"
-    # failed/ subtree is pruned to (at most) the bare queue directory.
+    assert storage.list_accepted() == [ref_a, ref_b]
+    for ref in (ref_a, ref_b):
+        assert storage.read_meta_text(ref) == "{}"
     assert not any((tmp_path / "queue" / "failed").rglob("*.json"))

@@ -194,6 +194,11 @@ volume (the default, backed by the chart's PVC) or in S3. To switch to S3, set
 --set deployment.queue.path=s3://my-bucket/ingress-queue --set persistence.enabled=false
 ```
 
+Both modes share one fsspec-backed implementation, so the layout is the same:
+each queue holds flat item files named `<endpoint>_<UTC timestamp>_<uid>` with
+a `.meta.json` sidecar. Items left over from the previous per-endpoint
+directory layout are still listed and processed.
+
 The worker is a single consumer in both modes (no locking); keep
 `deployment.replicaCount: 1`.
 
