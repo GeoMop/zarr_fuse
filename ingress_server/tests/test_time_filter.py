@@ -79,6 +79,7 @@ def _stage_bukov_queue(queue_dir: Path) -> list[str]:
         meta_name = payload.name + ".meta.json"
         meta = json.loads((BUKOV_DATA_DIR / meta_name).read_text(encoding="utf-8"))
         meta["schema_path"] = BUKOV_SCHEMA
+        meta["time_like_coord"] = "date_time"
         (accepted / meta_name).write_text(json.dumps(meta), encoding="utf-8")
         names.append(payload.name)
 
@@ -99,7 +100,9 @@ def test_worker_stores_batch_in_data_time_order(tmp_path, monkeypatch, caplog):
         queue_dir=queue_dir,
         config_path=TESTS_DIR / "inputs" / "endpoints_config.yaml",
         config={},
-        base=BaseConfig(),
+        # retention_time=0 disables holding: this test verifies data-time
+        # ordering, not the (separately tested) retention mechanism.
+        base=BaseConfig(retention_time=0.0),
         smtp=SmtpConfig(),
     )
     monkeypatch.setenv("ZF_STORE_URL", str(tmp_path / "bukov_store.zarr"))

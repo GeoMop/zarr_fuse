@@ -10,7 +10,7 @@ from collections.abc import Iterator
 
 from .app_config import AppConfig
 from .io import read_df_from_bytes
-from .io.time_filter import ExtractedItem, make_extracted_item, sort_by_data_time
+from .io.time_filter import ExtractedItem, make_extracted_item, sort_by_data_time, partition_by_retention
 from .models import MetadataModel
 
 LOG = logging.getLogger(__name__)
@@ -96,11 +96,7 @@ def _resolve_target(root: zf.Node, metadata: MetadataModel) -> zf.Node:
     return target
 
 
-def _extract_one(
-    app_config: AppConfig,
-    data_path: Path,
-    schema_cache: dict | None = None,
-) -> ExtractedItem:
+def _extract_one(app_config: AppConfig, data_path: Path) -> ExtractedItem:
     metadata = _load_metadata(data_path)
 
     schema_path = metadata.resolve_schema_path(app_config.config_dir)
@@ -114,7 +110,7 @@ def _extract_one(
         config_dir=app_config.config_dir,
     )
 
-    return make_extracted_item(data_path, metadata, schema_path, obj, schema_cache)
+    return make_extracted_item(data_path, metadata, schema_path, obj)
 
 
 def _store_one(item: ExtractedItem) -> None:
@@ -166,7 +162,6 @@ def _move_to_failed(app_config: AppConfig, data_path: Path) -> None:
 
 def _process_available_files(app_config: AppConfig) -> bool:
     progressed = False
-    schema_cache: dict = {}
     batch: list[ExtractedItem] = []
 
     # Phase 1: extract all accepted files; nothing is written to the store yet,
@@ -177,19 +172,19 @@ def _process_available_files(app_config: AppConfig) -> bool:
         if app_config.stop_event.is_set():
             break
 
-        progressed = True
-
         try:
             LOG.info("Extracting data %s", data_path)
-            batch.append(_extract_one(app_config, data_path, schema_cache))
+            batch.append(_extract_one(app_config, data_path))
 
         except ValueError as exc:
             LOG.warning("Processing rejected for %s: %s", data_path, exc)
             _move_to_failed(app_config, data_path)
+            progressed = True
 
         except Exception:
             LOG.exception("Extraction failed for %s", data_path)
             _move_to_failed(app_config, data_path)
+            progressed = True
 
     # Phase 2: filter — order the batch by the time of the data instead of
     # the time of the payload receipt.
@@ -200,8 +195,22 @@ def _process_available_files(app_config: AppConfig) -> bool:
             [item.data_path.name for item in sorted_batch],
         )
 
-    # Phase 3: write to the zarr store in data-time order.
-    for item in sorted_batch:
+    # Phase 3a: hold back items that are not yet older than retention_time
+    # relative to the newest data seen in this batch — they stay in
+    # accepted/ and are re-checked on the next pass, once newer data has
+    # actually arrived to age them out.
+    ready_items, held_items = partition_by_retention(sorted_batch, app_config.base.retention_time)
+
+    if held_items:
+        LOG.info(
+            "Holding %d item(s) until %s hour(s) newer data has arrived",
+            len(held_items),
+            app_config.base.retention_time,
+        )
+        LOG.debug("Held items: %s", [item.data_path.name for item in held_items])
+
+    # Phase 3b: write the ready items to the zarr store in data-time order.
+    for item in ready_items:
 
         if app_config.stop_event.is_set():
             break
@@ -213,14 +222,17 @@ def _process_available_files(app_config: AppConfig) -> bool:
             _store_one(item)
             _save_to_queue(item.data_path, success_dir)
             LOG.info("Processing succeeded for %s", item.data_path)
+            progressed = True
 
         except ValueError as exc:
             LOG.warning("Processing rejected for %s: %s", item.data_path, exc)
             _move_to_failed(app_config, item.data_path)
+            progressed = True
 
         except Exception:
             LOG.exception("Processing failed for %s", item.data_path)
             _move_to_failed(app_config, item.data_path)
+            progressed = True
 
     return progressed
 
