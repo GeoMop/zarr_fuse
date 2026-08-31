@@ -1,6 +1,4 @@
-import json
 import logging
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,7 +7,9 @@ import polars as pl
 import pytest
 import zarr_fuse as zf
 
-from ingress_server.app_config import AppConfig, BaseConfig, SmtpConfig
+import bukov_fixtures as bukov
+
+from ingress_server.app_config import BaseConfig
 from ingress_server.io.time_filter import (
     ExtractedItem,
     TimeKeyError,
@@ -22,18 +22,10 @@ from ingress_server.io.time_filter import (
 )
 from ingress_server.models import MetadataModel
 from ingress_server import worker
+from ingress_server.queue_storage import FileRef, QueueStorage
 from ingress_server.worker import _process_available_files
 
 LOG = logging.getLogger(__name__)
-
-TESTS_DIR = Path(__file__).parent
-BUKOV_DATA_DIR = TESTS_DIR / "data" / "bukov"
-BUKOV_SCHEMA = "schemas/bukov_test_schema.yaml"
-
-# Receipt order (sorted file names) is exactly opposite to the data time order:
-NEWEST = "20250919T111523_177cbe0317bd.json"   # 2025-09-18T19:30 -> 2025-09-19T11:00
-MIDDLE = "20250919T111523_d9a465df946d.json"   # 2025-09-18T11:30 -> 2025-09-18T19:00
-OLDEST = "20250919T115137_7b2b4dfe5bf6.json"   # 2025-09-17T11:30 -> 2025-09-17T19:00
 
 
 def _item(name: str, target_node: str, time_key) -> ExtractedItem:
@@ -42,16 +34,16 @@ def _item(name: str, target_node: str, time_key) -> ExtractedItem:
         endpoint_name="bukov",
         node_path=None,
         username="test",
-        schema_path=BUKOV_SCHEMA,
+        schema_path=bukov.SCHEMA,
         extract_fn=None,
         fn_module=None,
         dataframe_row=None,
         target_node=target_node,
     )
     return ExtractedItem(
-        data_path=Path(name),
+        ref=FileRef(name),
         metadata=metadata,
-        schema_path=Path(BUKOV_SCHEMA),
+        schema_path=Path(bukov.SCHEMA),
         obj=pl.DataFrame(),
         time_key=time_key,
     )
@@ -73,9 +65,9 @@ def test_sort_by_data_time():
 
     ordered = sort_by_data_time(items)
 
-    assert {item.data_path.name for item in ordered} == {"a", "b", "c", "d", "e"}
+    assert {item.ref for item in ordered} == {"a", "b", "c", "d", "e"}
     n1_order = [
-        item.data_path.name for item in ordered
+        item.ref for item in ordered
         if item.metadata.target_node == "n1"
     ]
     # Items without a time key keep receipt order and precede the time-ordered ones.
@@ -119,8 +111,8 @@ def test_mixed_time_key_types_are_reported_and_filtered_per_type():
 
     ready, held = partition_by_retention(sort_by_data_time(items), retention_time=24.0)
 
-    assert {item.data_path.name for item in ready} == {"dt_old", "num_old"}
-    assert {item.data_path.name for item in held} == {"dt_new", "num_new"}
+    assert {item.ref for item in ready} == {"dt_old", "num_old"}
+    assert {item.ref for item in held} == {"dt_new", "num_new"}
 
 
 def test_unreadable_time_coord_is_recorded_on_the_item():
@@ -131,7 +123,7 @@ def test_unreadable_time_coord_is_recorded_on_the_item():
         endpoint_name="bukov",
         node_path=None,
         username="test",
-        schema_path=BUKOV_SCHEMA,
+        schema_path=bukov.SCHEMA,
         extract_fn=None,
         fn_module=None,
         time_like_coord="date_time",
@@ -140,9 +132,9 @@ def test_unreadable_time_coord_is_recorded_on_the_item():
     )
 
     item = make_extracted_item(
-        Path("no_time.json"),
+        FileRef("no_time.json"),
         metadata,
-        Path(BUKOV_SCHEMA),
+        Path(bukov.SCHEMA),
         pl.DataFrame({"temp": [1.0]}),
     )
 
@@ -154,13 +146,7 @@ def test_unreadable_time_coord_is_recorded_on_the_item():
 def test_anomaly_is_emailed_only_once(tmp_path, monkeypatch):
     """The worker re-examines held items on every poll, so a persisting anomaly
     must notify once instead of mailing the same report every cycle."""
-    app_config = AppConfig(
-        queue_dir=tmp_path / "queue",
-        config_path=tmp_path / "unused_config.yaml",
-        config={},
-        base=BaseConfig(),
-        smtp=SmtpConfig(),
-    )
+    app_config = bukov.app_config(QueueStorage(str(tmp_path / "queue")))
     sent: list[list[dict]] = []
     monkeypatch.setattr(
         worker,
@@ -178,27 +164,6 @@ def test_anomaly_is_emailed_only_once(tmp_path, monkeypatch):
     assert sent == [[anomaly], [other]]
 
 
-def _stage_bukov_queue(queue_dir: Path) -> list[str]:
-    """Copy bukov payloads into the accepted queue, pointing at the test schema."""
-    accepted = queue_dir / "accepted" / "bukov"
-    accepted.mkdir(parents=True)
-
-    names = []
-    for payload in sorted(BUKOV_DATA_DIR.glob("*.json")):
-        if payload.name.endswith(".meta.json"):
-            continue
-
-        shutil.copy2(payload, accepted / payload.name)
-        meta_name = payload.name + ".meta.json"
-        meta = json.loads((BUKOV_DATA_DIR / meta_name).read_text(encoding="utf-8"))
-        meta["schema_path"] = BUKOV_SCHEMA
-        meta["time_like_coord"] = "date_time"
-        (accepted / meta_name).write_text(json.dumps(meta), encoding="utf-8")
-        names.append(payload.name)
-
-    return names
-
-
 def test_worker_stores_batch_in_data_time_order(tmp_path, monkeypatch, caplog):
     """
     Payloads whose receipt order is opposite to their data time order must be
@@ -206,46 +171,38 @@ def test_worker_stores_batch_in_data_time_order(tmp_path, monkeypatch, caplog):
     below the store minimum and gets dropped.
     """
     queue_dir = tmp_path / "queue"
-    names = _stage_bukov_queue(queue_dir)
-    assert set(names) == {NEWEST, MIDDLE, OLDEST}
+    storage = QueueStorage(str(queue_dir))
+    storage.ensure_layout()
 
-    app_config = AppConfig(
-        queue_dir=queue_dir,
-        config_path=TESTS_DIR / "inputs" / "endpoints_config.yaml",
-        config={},
-        # retention_time=0 disables holding: this test verifies data-time
-        # ordering, not the (separately tested) retention mechanism.
-        base=BaseConfig(retention_time=0.0),
-        smtp=SmtpConfig(),
-    )
+    names = bukov.stage_items(storage)
+    assert set(names) == {bukov.NEWEST, bukov.MIDDLE, bukov.OLDEST}
+
+    # retention_time=0 disables holding: this test verifies data-time
+    # ordering, not the (separately tested) retention mechanism.
+    app_config = bukov.app_config(storage, base=BaseConfig(retention_time=0.0))
     monkeypatch.setenv("ZF_STORE_URL", str(tmp_path / "bukov_store.zarr"))
 
     with caplog.at_level(logging.INFO, logger="ingress_server.worker"):
         progressed = _process_available_files(app_config)
 
     assert progressed
-
-    stored_order = [
-        Path(record.args[0]).name
-        for record in caplog.records
-        if record.msg == "Storing data %s"
+    assert bukov.stored_refs(caplog) == [
+        bukov.item_ref(bukov.OLDEST),
+        bukov.item_ref(bukov.MIDDLE),
+        bukov.item_ref(bukov.NEWEST),
     ]
-    assert stored_order == [OLDEST, MIDDLE, NEWEST]
 
-    success_files = {
-        p.name for p in (queue_dir / "success").rglob("*.json")
-        if not p.name.endswith(".meta.json")
+    success_names = {
+        path.name for path in (queue_dir / "success").rglob("*.json")
+        if not path.name.endswith(".meta.json")
     }
-    assert success_files == set(names)
-    assert not list((queue_dir / "failed").rglob("*"))
+    assert success_names == {f"{bukov.ENDPOINT}_{name}" for name in names}
+    assert not list((queue_dir / "failed").rglob("*.json"))
 
-    ds = zf.open_store(TESTS_DIR / "inputs" / BUKOV_SCHEMA)["bukov"].dataset
-    date_time = ds["date_time"].values.astype("datetime64[s]")
-    assert np.all(date_time[:-1] <= date_time[1:])
-    assert date_time.min() == np.datetime64("2025-09-17T11:30:00")
-    assert date_time.max() == np.datetime64("2025-09-19T11:00:00")
+    bukov.assert_store_content()
 
     # The backdated payload's data must be present with real values; without
     # data-time ordering it would fall below the store minimum and be dropped.
+    ds = zf.open_store(bukov.TESTS_DIR / "inputs" / bukov.SCHEMA)[bukov.ENDPOINT].dataset
     day_17 = ds["rock_temp"].sel(date_time=slice("2025-09-17", "2025-09-18"))
     assert np.isfinite(day_17.values).any()

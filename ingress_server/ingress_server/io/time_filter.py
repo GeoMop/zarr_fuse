@@ -10,6 +10,7 @@ import xarray as xr
 
 from ..data_types import DataObject
 from ..models import MetadataModel
+from ..queue_storage import FileRef
 
 LOG = logging.getLogger(__name__)
 
@@ -20,9 +21,13 @@ class TimeKeyError(ValueError):
 
 @dataclass(eq=False)
 class ExtractedItem:
-    """An extracted payload waiting to be written to the zarr store."""
+    """An extracted payload waiting to be written to the zarr store.
 
-    data_path: Path
+    `ref` is the queue item ref ("accepted/<name>"), or a local file path for
+    items processed outside the queue (deprecated, see `worker._extract_one`).
+    """
+
+    ref: FileRef
     metadata: MetadataModel
     schema_path: Path
     obj: DataObject
@@ -104,13 +109,13 @@ def _time_value(obj: DataObject, column: str) -> Any:
 
 
 def make_extracted_item(
-    data_path: Path,
+    ref: FileRef,
     metadata: MetadataModel,
     schema_path: Path,
     obj: DataObject,
 ) -> ExtractedItem:
     item = ExtractedItem(
-        data_path=data_path,
+        ref=ref,
         metadata=metadata,
         schema_path=schema_path,
         obj=obj,
@@ -124,7 +129,7 @@ def make_extracted_item(
             LOG.error(
                 "Failed to read time_like_coord=%r for %s, it will be stored in receipt order",
                 metadata.time_like_coord,
-                data_path,
+                ref,
                 exc_info=True,
             )
 
@@ -162,7 +167,7 @@ def time_key_type_conflict(items: list[ExtractedItem]) -> str | None:
     kinds: dict[str, list[str]] = {}
     for item in items:
         if item.time_key is not None:
-            kinds.setdefault(_time_kind(item.time_key), []).append(item.data_path.name)
+            kinds.setdefault(_time_kind(item.time_key), []).append(item.ref)
 
     if len(kinds) < 2:
         return None
