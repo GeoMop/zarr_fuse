@@ -9,8 +9,14 @@ from pathlib import Path
 from collections.abc import Iterator
 
 from .app_config import AppConfig
-from .io import read_df_from_bytes
-from .io.time_filter import ExtractedItem, make_extracted_item, sort_by_data_time, partition_by_retention
+from .io import read_df_from_bytes, send_anomaly_email
+from .io.time_filter import (
+    ExtractedItem,
+    make_extracted_item,
+    partition_by_retention,
+    sort_by_data_time,
+    time_key_type_conflict,
+)
 from .models import MetadataModel
 
 LOG = logging.getLogger(__name__)
@@ -160,9 +166,28 @@ def _move_to_failed(app_config: AppConfig, data_path: Path) -> None:
         LOG.exception("Failed to move %s to failed queue", data_path)
 
 
+def _notify_anomalies(app_config: AppConfig, anomalies: list[dict]) -> None:
+    """Email the anomalies this process has not reported yet. A held batch is
+    re-examined on every poll, so the same anomaly must not be re-sent."""
+    def key(anomaly: dict) -> str:
+        return f"{anomaly['type']}|{anomaly['error']}|{anomaly['context']}"
+
+    unreported = [a for a in anomalies if key(a) not in app_config.notified_anomalies]
+    if not unreported:
+        return
+
+    app_config.notified_anomalies.update(key(a) for a in unreported)
+
+    try:
+        send_anomaly_email(smtp_config=app_config.smtp, anomalies=unreported)
+    except Exception:
+        LOG.exception("Failed to send data anomaly notification")
+
+
 def _process_available_files(app_config: AppConfig) -> bool:
     progressed = False
     batch: list[ExtractedItem] = []
+    anomalies: list[dict] = []
 
     # Phase 1: extract all accepted files; nothing is written to the store yet,
     # so an interrupted batch is safely re-extracted on the next pass.
@@ -174,7 +199,18 @@ def _process_available_files(app_config: AppConfig) -> bool:
 
         try:
             LOG.info("Extracting data %s", data_path)
-            batch.append(_extract_one(app_config, data_path))
+            item = _extract_one(app_config, data_path)
+            batch.append(item)
+
+            if item.time_error:
+                anomalies.append({
+                    "type": "time_key",
+                    "error": item.time_error,
+                    "context": {
+                        "file": item.data_path.name,
+                        "endpoint": item.metadata.endpoint_name,
+                    },
+                })
 
         except ValueError as exc:
             LOG.warning("Processing rejected for %s: %s", data_path, exc)
@@ -194,6 +230,17 @@ def _process_available_files(app_config: AppConfig) -> bool:
             "Batch reordered by data time: %s",
             [item.data_path.name for item in sorted_batch],
         )
+
+    type_conflict = time_key_type_conflict(sorted_batch)
+    if type_conflict:
+        LOG.error("Time key type conflict: %s", type_conflict)
+        anomalies.append({
+            "type": "time_key_type_conflict",
+            "error": type_conflict,
+            "context": {"batch_size": len(sorted_batch)},
+        })
+
+    _notify_anomalies(app_config, anomalies)
 
     # Phase 3a: hold back items that are not yet older than retention_time
     # relative to the newest data seen in this batch — they stay in

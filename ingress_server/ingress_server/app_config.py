@@ -44,6 +44,9 @@ class AppConfig:
     base: BaseConfig
     smtp: SmtpConfig
     stop_event: Event = field(default_factory=Event, compare=False)
+    # Anomalies already emailed, so a batch that keeps being re-examined on
+    # every worker poll does not re-send the same notification.
+    notified_anomalies: set[str] = field(default_factory=set, compare=False)
 
     @property
     def config_dir(self) -> Path:

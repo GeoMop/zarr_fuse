@@ -163,6 +163,13 @@ configuration:
     username: "zarr.fuse.support@gmail.com"
 ```
 
+Notification emails are sent for failed active scrapper runs and for data
+anomalies found by the time filter: a `time_like_coord` value that cannot be
+read or interpreted, and a batch whose sources disagree on the time key type
+(datetime vs. numeric). Anomalies are processed, not rejected — the affected
+item is written in receipt order — so the email is the only signal. Each
+distinct anomaly is mailed once per worker process, not once per poll cycle.
+
 The rest of the file defines passive endpoints and active scrappers (see sections below).
 
 ---
