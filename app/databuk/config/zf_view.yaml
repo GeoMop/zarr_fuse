@@ -55,13 +55,11 @@ bukov_endpoint:
     warped_tif: "config/bukov_endpoint/overlay_3857.tif"
     rgba_vrt: "config/bukov_endpoint/overlay_3857_rgba.vrt"
     tiles_dir: "config/bukov_endpoint/tiles"
-    tile_scheme: "xyz"
     min_zoom: 0
     max_zoom: 20
     target_srs: "EPSG:3857"
     gcp_srs: "EPSG:4326"
     resampling: "near"
-    add_alpha: true
     s3:
       bucket: "app-databuk-test-service"
       prefix: "test_tiles/"

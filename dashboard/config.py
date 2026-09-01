@@ -103,13 +103,11 @@ class TileBuildConfig:
     warped_tif: Optional[str] = None
     rgba_vrt: Optional[str] = None
     tiles_dir: Optional[str] = None
-    tile_scheme: Optional[str] = None
     min_zoom: int = 0
     max_zoom: int = 20
     target_srs: str = "EPSG:3857"
     gcp_srs: str = "EPSG:4326"
     resampling: str = "near"
-    add_alpha: Optional[bool] = None
     s3: TileS3Config = field(default_factory=TileS3Config)
 
 
@@ -590,13 +588,11 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
             warped_tif=tile_build_data.get("warped_tif"),
             rgba_vrt=tile_build_data.get("rgba_vrt"),
             tiles_dir=tile_build_data.get("tiles_dir"),
-            tile_scheme=tile_build_data.get("tile_scheme"),
             min_zoom=tile_build_data.get("min_zoom", 0),
             max_zoom=tile_build_data.get("max_zoom", 20),
             target_srs=tile_build_data.get("target_srs", "EPSG:3857"),
             gcp_srs=tile_build_data.get("gcp_srs", "EPSG:4326"),
             resampling=tile_build_data.get("resampling", "near"),
-            add_alpha=tile_build_data.get("add_alpha"),
             s3=_build_tile_s3_config(tile_build_data.get("s3")),
         ),
     )

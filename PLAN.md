@@ -255,9 +255,9 @@ do nothing; if not, build locally and upload in the same run.
 
 ### Approved semantics
 
-- Single master gate: `visualization.overlay.enabled` (+ `HV_OVERLAY_ENABLED`
-  env), consumed via the existing `overlay_enabled()` helper - the same
-  switch the dashboard uses. Gate off -> nothing runs at all.
+- Script is standalone/operator-triggered only (local terminal); not a
+  workflow stage, so no coupling to dashboard runtime state. The
+  `overlay_enabled()` gate was removed in the review pass below.
 - Existence criterion: any object under `s3://bucket/prefix`
   (`list_objects_v2` MaxKeys=1). Non-empty prefix = tile system present =
   run ends immediately, GDAL never touched.
@@ -266,10 +266,19 @@ do nothing; if not, build locally and upload in the same run.
   still avoids re-transferring byte-identical tiles.
 - Local per-step output skips stay (without `--force`) so an interrupted
   run can resume.
-- Credentials and S3 target are required as soon as the gate passes
-  (the existence check itself needs them); `--dry-run` stays fully offline.
+- Credentials and S3 target are required for a real run; `--dry-run` stays
+  fully offline.
 - Removed: `tile_build.enabled`, `tile_build.upload_enabled`,
   `--skip-upload`.
+- 2026-08-24 review pass (script destined to leave the dashboard project as
+  a standalone local tool): removed the `overlay_enabled()` gate - an
+  operator running the script has already decided they want tiles, and the
+  dashboard gates its own tile serving independently (tile_service,
+  serve_dashboard routes, map_views). Also removed the parsed-but-unused
+  `tile_scheme` and `add_alpha` fields (script hardcodes `--xyz` and
+  `-dstalpha`) and fixed a stray `[1/5]` label in the GCP VRT skip path
+  (now `[2/6]`). Old scripts `prepare_bukov_gcps.py` and
+  `test/upload_s3.py` stay until the script is actually moved out.
 
 ### Implementation
 
@@ -654,6 +663,16 @@ the generic re-fetch loop from `refresh_views`.
   upload runs. Dashboard suite with `s3_tile_resolver_test.py` ignored:
   115 passed, 1 skipped (= baseline). Real-GDAL end-to-end run pending user
   execution in the conda gdal environment.
+- 2026-08-24 (review pass, ensure-model): removed the `overlay_enabled()`
+  gate from build_overlay_tiles.py - it is a standalone local tool, not a
+  workflow stage, so it no longer reads the dashboard display toggle.
+  Removed parsed-but-unused `tile_scheme`/`add_alpha` from
+  `TileBuildConfig` (config.py) and their yaml lines; fixed the GCP VRT
+  skip label `[1/5]` -> `[2/6]`. Old scripts
+  `prepare_bukov_gcps.py` / `test/upload_s3.py` kept until the script is
+  moved out of the repo. Dashboard suite with `s3_tile_resolver_test.py`
+  ignored: 127 passed, 1 skipped (baseline grew from 115 by 12 tests via
+  external commit e32cfa2 adding test_validation_phase2.py, unrelated).
 - 2026-08-24: Default cleanup in the tile pipeline (user decision "move
   generics to config.py"): removed all script-side `DEFAULT_*` constants
   from build_overlay_tiles.py except `DEFAULT_VIEWS_PATH` (bootstrap only).

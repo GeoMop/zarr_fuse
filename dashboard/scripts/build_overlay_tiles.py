@@ -1,6 +1,7 @@
 """Ensure overlay map tiles exist on S3, building them first if needed.
 
-Merged replacement for ``prepare_bukov_gcps.py`` plus the manual GDAL commands
+Standalone, operator-triggered script (local terminal use). Merged
+replacement for ``prepare_bukov_gcps.py`` plus the manual GDAL commands
 documented in ``dashboard/docs/tile_pyramid_README.md`` plus
 ``dashboard/test/upload_s3.py``.
 
@@ -10,16 +11,13 @@ nothing happens, or it is built locally and uploaded in the same run.
 
 Flow:
 
-1. Gate: ``visualization.overlay.enabled`` (or ``HV_OVERLAY_ENABLED`` env,
-   via ``overlay_enabled()`` - the same switch the dashboard uses). When
-   disabled, nothing runs at all.
-2. Existence check on ``s3://bucket/prefix``: if any object exists under the
+1. Existence check on ``s3://bucket/prefix``: if any object exists under the
    prefix, the tile system counts as present and the run ends immediately.
    GDAL is never touched. There is no staleness detection; use ``--force``
    to rebuild deliberately. ``--force`` bypasses both the S3 short-circuit
    and local output skips (full redo; unchanged tiles are still not
    re-transferred thanks to size comparison).
-3. Local build when missing, then upload of all tiles in the same run.
+2. Local build when missing, then upload of all tiles in the same run.
 
 All parameters are wired to the project configuration:
 
@@ -87,7 +85,6 @@ try:
         get_default_endpoint_name,
         load_environment_from_config,
         load_view_config,
-        overlay_enabled,
         schema_endpoint_url,
     )
 except ModuleNotFoundError as exc:
@@ -239,7 +236,7 @@ def step_build_gcps_vrt(image_path: Path, georef_path: Path, vrt_path: Path,
                         gcp_srs: str, force: bool, dry_run: bool) -> bool:
     """Step 1: attach GCPs to the source image, producing a VRT. Returns True if run."""
     if vrt_path.exists() and not force:
-        print(f"[1/5] skip GCP VRT (exists): {vrt_path}")
+        print(f"[2/6] skip GCP VRT (exists): {vrt_path}")
         return False
     points = load_georef_points(georef_path)
     cmd = [
@@ -435,11 +432,6 @@ def main(argv: Optional[list[str]] = None) -> None:
             "or configure _dashboard.default_endpoint in zf_view.yaml."
         )
 
-    if not overlay_enabled(views_path, view_name):
-        print(f"Overlay/tile feature is disabled for view '{view_name}' "
-              "(visualization.overlay.enabled / HV_OVERLAY_ENABLED). Nothing to do.")
-        return
-
     view = load_view_config(views_path, view_name)
     tile_build = view.tile_build
     base_dir = views_path.parent.parent
@@ -499,8 +491,8 @@ def main(argv: Optional[list[str]] = None) -> None:
     print(f"endpoint       : {endpoint_url or '(AWS default)'}")
     print()
 
-    # S3 target and credentials are required whenever the run gets past the
-    # overlay gate; --dry-run stays fully offline.
+    # S3 target and credentials are required for a real run; --dry-run
+    # stays fully offline.
     offline = args.dry_run
     s3 = None
     normalized_prefix = (prefix or "").strip("/")
