@@ -653,12 +653,12 @@ class TestTrailingDebounce:
         _time.sleep(_WAIT)
         assert state.version == v_before + 1
 
-    def test_add_site_force_cancels_pending_bump(self):
-        """add_site(force=True) must cancel any pending debounce timer."""
+    def test_add_site_cancels_pending_bump(self):
+        """add_site must cancel any pending debounce timer."""
         _, state, _ = _make_panel()
         state._panel_schedule_bump()
         gen_before = state._panel_bump_generation()
-        state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"], force=True)
+        state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"])
         gen_after = state._panel_bump_generation()
         _time.sleep(_WAIT)
         assert state.version >= 2

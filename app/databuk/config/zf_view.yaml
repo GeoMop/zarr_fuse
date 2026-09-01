@@ -1,5 +1,5 @@
 _dashboard:
-  default_view: "bukov_endpoint"
+  default_endpoint: "bukov_endpoint"
   env_file: "../../dashboard/scripts/.env"
 
 _cluster_defaults: &cluster_defaults
@@ -49,7 +49,6 @@ bukov_endpoint:
       cache_dir: "."
 
   tile_build:
-    enabled: true
     source_image: "config/bukov_endpoint/overlay.png"
     georef_file: "config/bukov_endpoint/bukov_georef.json"
     vrt_file: "config/bukov_endpoint/overlay_gcps.vrt"
@@ -63,3 +62,6 @@ bukov_endpoint:
     gcp_srs: "EPSG:4326"
     resampling: "near"
     add_alpha: true
+    s3:
+      bucket: "app-databuk-test-service"
+      prefix: "test_tiles/"

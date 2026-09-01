@@ -10,6 +10,14 @@ from holoviews.streams import RangeXY
 import numpy as np
 import pandas as pd
 
+from dashboard.config import overlay_enabled, find_view_file
+from geoviews import tile_sources as gvts
+
+try:
+    _vpath = find_view_file()
+except FileNotFoundError:
+    _vpath = None
+
 from geoviews import tile_sources as gvts
 
 logger = logging.getLogger(__name__)
@@ -104,16 +112,12 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, ep
 
 
 def _load_overlay(view_config):
-    if os.getenv("HV_OVERLAY_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
-        logger.info("Overlay disabled via HV_OVERLAY_ENABLED.")
+    if not overlay_enabled(_vpath, view_config.get("name")):
+        logger.info("Overlay disabled via config or HV_OVERLAY_ENABLED=0.")
         return None
 
     visualization_config = view_config["visualization"]
     overlay_config = visualization_config["overlay"]
-
-    if not overlay_config["enabled"]:
-        logger.info("Overlay disabled in view config.")
-        return None
 
     tile_url = overlay_config["tile_url"] or os.getenv("HV_OVERLAY_TILE_URL", "").strip()
     if not tile_url:

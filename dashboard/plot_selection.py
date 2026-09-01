@@ -185,27 +185,17 @@ class SelectionState(param.Parameterized):
 
     # ── mutations ────────────────────────────────────────────────────
 
-    def add_site(self, entity_index, site_id, depths, series, times, force=False):
-        """Register a new site (or replace data if *force* is True and site exists).
+    def add_site(self, entity_index, site_id, depths, series, times):
+        """Register a new site and auto-check its finite depths.
 
-        When *force* is True and the entity_index already exists, the series/times
-        data is replaced (e.g. after a variable change).  Depth auto-selection is
-        **not** re-applied — existing checked states are preserved.
+        If an entity with the same *entity_index* already exists, the new
+        registration is ignored (a site is added once and refreshed only via
+        ``clear()`` + re-add, e.g. after a variable change).
         Triggers a table rebuild (**layout_version*).
         """
         for site in self._sites:
             if site["entity_index"] == entity_index:
-                if not force:
-                    print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
-                    return
-                # Replace data for a re-fetch (e.g. after variable change)
-                self._cancel_panel_bump()
-                site["depths"] = np.asarray(depths, dtype=float).ravel()
-                site["series"] = series
-                site["times"] = times
-                self.layout_version += 1
-                self._bump_version()
-                print(f"[SelectionState] Updated data for site {site_id} (idx={entity_index})")
+                print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
                 return
 
         depths_arr = np.asarray(depths, dtype=float).ravel()
@@ -259,6 +249,75 @@ class SelectionState(param.Parameterized):
             self._bump_version()
         print(f"[SelectionState] Removed site {site_id} (idx={entity_index})")
 
+    def update_site_data(self, entity_index, series, times, depths=None) -> bool:
+        """Replace an existing site's series/times in place.
+
+        Used on a variable change to refresh data without clearing and
+        re-adding (which would rebuild the table).  The site's identity,
+        checked depths and row/column position are preserved.  Only the
+        *version* is bumped (redraw plots) unless the depth set changed, in
+        which case *layout_version* is also bumped (rebuild table).
+
+        Returns ``True`` if the site was updated, ``False`` if no site with
+        *entity_index* exists (the caller should ``add_site`` instead).
+        """
+        site = None
+        for s in self._sites:
+            if s["entity_index"] == entity_index:
+                site = s
+                break
+        if site is None:
+            return False
+
+        site["times"] = times
+        site["series"] = series
+
+        depth_changed = False
+        if depths is not None:
+            new_depths = np.asarray(depths, dtype=float).ravel()
+            old_depths = np.asarray(site["depths"]).ravel()
+            if not np.array_equal(old_depths, new_depths, equal_nan=True):
+                old_depth_count = self._depth_count_for(site["site_id"])
+                site["depths"] = new_depths
+                self._reconcile_checked(site, old_depth_count)
+                depth_changed = True
+
+        if depth_changed:
+            self.layout_version += 1
+            print(f"[SelectionState] Updated site idx={entity_index} (depths changed)")
+        else:
+            print(f"[SelectionState] Updated site idx={entity_index}")
+        self._bump_version()
+        return True
+
+    def _reconcile_checked(self, site, old_depth_count: int):
+        """Prune checked keys that no longer map to valid depths on *site*.
+
+        ``old_depth_count`` is the number of finite depth cells the site held
+        before its depth set changed (must be captured before overwriting
+        ``site["depths"]``).  Recomputes ``_valid_count`` for the site after
+        the change, mirroring ``add_site``/``remove_site`` bookkeeping.
+        """
+        site_id = site["site_id"]
+        finite_depths = {
+            float(d) for d in np.asarray(site["depths"]).ravel() if np.isfinite(float(d))
+        }
+        for k in list(self._checked):
+            if k[0] == site_id and k[1] not in finite_depths:
+                self._checked.discard(k)
+                self._checked_count -= 1
+
+        self._valid_count += len(finite_depths) - old_depth_count
+
+    def _depth_count_for(self, site_id: str) -> int:
+        """Count of finite depth cells currently stored for *site_id*."""
+        for s in self._sites:
+            if s["site_id"] == site_id:
+                return sum(
+                    1 for d in np.asarray(s["depths"]).ravel() if np.isfinite(float(d))
+                )
+        return 0
+
     def clear(self):
         """Remove all sites and reset selection."""
         self._cancel_panel_bump(clear_loading=True)
@@ -269,6 +328,22 @@ class SelectionState(param.Parameterized):
         self.layout_version += 1
         self._bump_version(clear_loading=True)
         print("[SelectionState] Cleared all sites")
+
+    def restore_checked(self, saved: set[tuple[str, float]], *, bump_version: bool = True):
+        """Prune the checked set to the *saved* ``(site_id, depth)`` keys.
+
+        Called after a ``clear()`` + re-add cycle (e.g. a variable change) to
+        keep only the combinations that were checked before clearing.
+        Newly auto-checked depths that were not previously checked are
+        unchecked.  Saved combinations with no matching site/depth are
+        ignored.  Bumps *version* once if anything changed.
+        """
+        removals = list(self._checked - saved)
+        for key in removals:
+            self._checked.discard(key)
+            self._checked_count -= 1
+        if removals and bump_version:
+            self._bump_version()
 
     def select_all(self, bump_version: bool = True, bump_layout: bool = True):
         """Check every valid (site, depth) cell."""
@@ -370,6 +445,14 @@ class SelectionState(param.Parameterized):
                 if (str(site["site_id"]), float(depth_val)) in self._checked:
                     combos.append((site["entity_index"], int(depth_idx)))
         return combos
+
+    def checked_combinations(self) -> set[tuple[str, float]]:
+        """Return a copy of the currently checked ``(site_id, depth)`` keys.
+
+        Used to capture the selection before a ``clear()`` + re-add cycle
+        (e.g. a variable change) so it can be restored afterwards.
+        """
+        return set(self._checked)
 
     @property
     def all_depths(self) -> list[float]:

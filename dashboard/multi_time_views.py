@@ -22,10 +22,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
     visualization_config = view_config["visualization"]
     timeseries_config = visualization_config["timeseries"]
 
-    default_display_variable = data.display_variable
-
     metric_label = (
-        default_display_variable
+        data.display_variable
         or schema_display.get("display_variable")
         or "value"
     )
@@ -50,9 +48,15 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         return float(lats[0]), float(lons[0])
 
     def _fetch_timeseries(lat, lon, marker_meta=None):
+        """Fetch the current variable's timeseries and register a site.
+
+        Returns the resolved ``entity_index`` on success, or ``None`` when no
+        variable is selected or the fetch failed (callers can use this to
+        report per-site failures without leaving stale data behind).
+        """
         start = time.perf_counter()
         print(f"[fetch_ts] Called with lat={lat:.4f}, lon={lon:.4f}, marker_meta={marker_meta}")
-        if not default_display_variable:
+        if not data.display_variable:
             print(f"[fetch_ts] No variable selected — skipping fetch")
             return None
         marker_entity_index = marker_meta.get("entity_index") if isinstance(marker_meta, dict) else None
@@ -65,7 +69,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             group_path=data.group_path,
             lat=lat,
             lon=lon,
-            variable=default_display_variable,
+            variable=data.display_variable,
             entity_index=selected_entity_index,
         )
         if fig.get("status") == "error":
@@ -81,15 +85,38 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         borehole_name = fig.get("borehole_name")
 
         site_id = borehole_name if borehole_name else f"{entity_label}_{entity_index}"
-        selection_state.add_site(
-            entity_index=entity_index,
-            site_id=site_id,
-            depths=depths,
-            series=series,
-            times=times,
-            force=True,
-        )
-        print(f"[plot_selection] Site added/updated: {site_id}")
+        exists = any(s["entity_index"] == entity_index for s in selection_state.sites)
+        if exists:
+            # In-place refresh on a variable change: preserve identity, checked
+            # depths and table position.  If the new variable yields no series,
+            # blank the site (empty depths) so no stale old-variable data is
+            # drawn, and report it as no-data via the None return.
+            if not series:
+                selection_state.update_site_data(
+                    entity_index,
+                    series=[],
+                    times=pd.to_datetime([]),
+                    depths=np.array([]),
+                )
+                print(f"[plot_selection] Site blanked (no data for variable): {site_id}")
+                print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
+                return None
+            selection_state.update_site_data(
+                entity_index,
+                series=series,
+                times=times,
+                depths=depths,
+            )
+            print(f"[plot_selection] Site updated: {site_id}")
+        else:
+            selection_state.add_site(
+                entity_index=entity_index,
+                site_id=site_id,
+                depths=depths,
+                series=series,
+                times=times,
+            )
+            print(f"[plot_selection] Site added: {site_id}")
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
 
@@ -490,5 +517,15 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             borehole_stream.event(borehole_index=entity_index)
         return entity_index
 
+    def fetch_site_entity(entity_index):
+        """Fetch the current variable's timeseries for a specific entity index.
+
+        Bypasses map nearest-marker resolution (and its coordinate/threshold
+        sensitivity) by passing ``marker_meta`` carrying the entity index, which
+        ``get_timeseries_data`` uses directly.  Returns the resolved
+        ``entity_index`` on success or ``None`` on failure.
+        """
+        return _fetch_timeseries(0.0, 0.0, {"entity_index": int(entity_index)})
+
     print(f"[timing] build_timeseries_views: {time.perf_counter() - start_total:.3f}s")
-    return line_left, line_mid, line_right, on_map_tap
+    return line_left, line_mid, line_right, on_map_tap, fetch_site_entity

@@ -163,6 +163,9 @@ def test_dataset_variable_report() -> None:
     if views_path is None:
         pytest.skip("No zf_view.yaml found. Set ZF_VIEW_PATH or add a known views config.")
 
+    if not os.getenv("S3_ACCESS_KEY") and not os.getenv("ZF_S3_ACCESS_KEY"):
+        pytest.skip("No S3 credentials available (S3_ACCESS_KEY / ZF_S3_ACCESS_KEY).")
+
     report = _build_dataset_report(views_path)
 
     output_path = os.getenv("DASHBOARD_VARIABLE_REPORT_OUT")

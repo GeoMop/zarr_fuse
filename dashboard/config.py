@@ -10,6 +10,21 @@ VIEWS_ENV_VAR = "ZF_VIEW_PATH"
 LEGACY_ENDPOINTS_ENV_VAR = "ENDPOINTS_PATH"
 SCHEMAS_ENV_VAR = "SCHEMAS_PATH"
 
+# ---------------------------------------------------------------------------
+# Single-parse cache for zf_view.yaml
+# ---------------------------------------------------------------------------
+_view_config_cache: dict[Path, dict] = {}
+
+
+def _parse_view_config(config_path: Path) -> dict:
+    """Parse zf_view.yaml once and cache the result for the process lifetime."""
+    key = config_path.resolve()
+    if key not in _view_config_cache:
+        with key.open("r", encoding="utf-8") as f:
+            _view_config_cache[key] = yaml.safe_load(f) or {}
+    return _view_config_cache[key]
+
+
 @dataclass
 class SourceConfig:
     type: str
@@ -75,8 +90,13 @@ class OverlayConfig:
 
 
 @dataclass
+class TileS3Config:
+    bucket: Optional[str] = None
+    prefix: Optional[str] = None
+
+
+@dataclass
 class TileBuildConfig:
-    enabled: bool = False
     source_image: Optional[str] = None
     georef_file: Optional[str] = None
     vrt_file: Optional[str] = None
@@ -84,12 +104,13 @@ class TileBuildConfig:
     rgba_vrt: Optional[str] = None
     tiles_dir: Optional[str] = None
     tile_scheme: Optional[str] = None
-    min_zoom: Optional[int] = None
-    max_zoom: Optional[int] = None
-    target_srs: Optional[str] = None
-    gcp_srs: Optional[str] = None
-    resampling: Optional[str] = None
+    min_zoom: int = 0
+    max_zoom: int = 20
+    target_srs: str = "EPSG:3857"
+    gcp_srs: str = "EPSG:4326"
+    resampling: str = "near"
     add_alpha: Optional[bool] = None
+    s3: TileS3Config = field(default_factory=TileS3Config)
 
 
 @dataclass
@@ -184,11 +205,7 @@ def load_environment_from_config(config_path: Path) -> Path | None:
     if not config_path.exists():
         return None
 
-    with config_path.open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
-
-    if not isinstance(config, dict):
-        return None
+    config = _parse_view_config(config_path)
 
     dashboard_meta = config.get("_dashboard")
     if not isinstance(dashboard_meta, dict):
@@ -567,7 +584,6 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
             ),
         ),
         tile_build=TileBuildConfig(
-            enabled=tile_build_data["enabled"],
             source_image=tile_build_data.get("source_image"),
             georef_file=tile_build_data.get("georef_file"),
             vrt_file=tile_build_data.get("vrt_file"),
@@ -575,13 +591,24 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
             rgba_vrt=tile_build_data.get("rgba_vrt"),
             tiles_dir=tile_build_data.get("tiles_dir"),
             tile_scheme=tile_build_data.get("tile_scheme"),
-            min_zoom=tile_build_data.get("min_zoom"),
-            max_zoom=tile_build_data.get("max_zoom"),
-            target_srs=tile_build_data.get("target_srs"),
-            gcp_srs=tile_build_data.get("gcp_srs"),
-            resampling=tile_build_data.get("resampling"),
+            min_zoom=tile_build_data.get("min_zoom", 0),
+            max_zoom=tile_build_data.get("max_zoom", 20),
+            target_srs=tile_build_data.get("target_srs", "EPSG:3857"),
+            gcp_srs=tile_build_data.get("gcp_srs", "EPSG:4326"),
+            resampling=tile_build_data.get("resampling", "near"),
             add_alpha=tile_build_data.get("add_alpha"),
+            s3=_build_tile_s3_config(tile_build_data.get("s3")),
         ),
+    )
+
+
+def _build_tile_s3_config(s3_data: Any) -> TileS3Config:
+    """Build the nested tile_build.s3 publish-target config (bucket, prefix)."""
+    if not isinstance(s3_data, dict):
+        return TileS3Config()
+    return TileS3Config(
+        bucket=s3_data.get("bucket"),
+        prefix=s3_data.get("prefix"),
     )
 
 
@@ -590,16 +617,13 @@ def load_views(config_path: Path) -> Dict[str, ViewConfig]:
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-    with config_path.open("r", encoding="utf-8") as file:
-        config = yaml.full_load(file)
+    config = _parse_view_config(config_path)
 
     if not isinstance(config, dict):
         raise ValueError(f"Invalid view configuration format in {config_path}")
 
     base_dir = config_path.parent.parent
     print(f"[config] load_views: config_path={config_path} config_path.parent={config_path.parent} base_dir={base_dir}")
-
-    load_environment_from_config(config_path)
 
     views: Dict[str, ViewConfig] = {}
     for view_name, view_data in config.items():
@@ -615,30 +639,24 @@ def load_views(config_path: Path) -> Dict[str, ViewConfig]:
     return views
 
 
-def get_default_view_name(config_path: Path) -> Optional[str]:
-    """Return the default view name from the _dashboard section, if configured."""
+def get_default_endpoint_name(config_path: Path) -> Optional[str]:
+    """Return the default endpoint name from the _dashboard section, if configured."""
     if not config_path.exists():
         return None
 
-    with config_path.open("r", encoding="utf-8") as file:
-        config = yaml.safe_load(file)
-
-    if not isinstance(config, dict):
-        return None
+    config = _parse_view_config(config_path)
 
     meta = config.get("_dashboard")
     if not isinstance(meta, dict):
         return None
 
-    default_view = meta.get("default_view")
-    if not isinstance(default_view, str):
-        default_view = meta.get("default_endpoint")
-    if not isinstance(default_view, str):
+    default_endpoint = meta.get("default_endpoint")
+    if not isinstance(default_endpoint, str):
         return None
 
-    view_config = config.get(default_view)
+    view_config = config.get(default_endpoint)
     if isinstance(view_config, dict):
-        return default_view
+        return default_endpoint
 
     return None
 
@@ -650,7 +668,7 @@ def load_view_config(config_path: Path, view_name: Optional[str] = None) -> View
     if not views:
         raise ValueError(f"No views configured in {config_path}")
 
-    name = view_name or get_default_view_name(config_path)
+    name = view_name or get_default_endpoint_name(config_path)
     if not name:
         raise ValueError("view_name required; no default view configured")
 
@@ -693,3 +711,43 @@ def schema_endpoint_url(config_path: Path, view_name: Optional[str] = None) -> O
     if not isinstance(endpoint_url, str) or not endpoint_url.strip():
         return None
     return endpoint_url.strip()
+
+
+def overlay_enabled(config_path: Path, view_name: Optional[str] = None) -> bool:
+    """Check whether the overlay/tile feature is enabled for the given view.
+
+    Resolution order (mirrors the original map_views logic):
+    1. ``HV_OVERLAY_ENABLED`` env var — if set to a false-y value (``0``,
+       ``false``, ``no``), overlay is disabled regardless of the view config.
+    2. ``visualization.overlay.enabled`` in the view config.
+    3. Returns ``False`` on any missing/invalid config or file error.
+    """
+    raw = os.getenv("HV_OVERLAY_ENABLED", "1")
+    if raw.strip().lower() in {"0", "false", "no"}:
+        return False
+
+    if not config_path.exists():
+        return False
+
+    try:
+        config = _parse_view_config(config_path)
+    except Exception:
+        return False
+
+    if view_name is None:
+        view_name = get_default_endpoint_name(config_path)
+
+    view_data = config.get(view_name) if view_name else None
+    if not isinstance(view_data, dict):
+        return False
+
+    visualization = view_data.get("visualization")
+    if not isinstance(visualization, dict):
+        return False
+
+    overlay = visualization.get("overlay")
+    if not isinstance(overlay, dict):
+        return False
+
+    enabled = overlay.get("enabled")
+    return bool(enabled)

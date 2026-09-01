@@ -5,7 +5,7 @@ import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
 from holoviews import streams
 
-from dashboard.config import find_view_file, get_default_view_name, load_view_config, load_views
+from dashboard.config import find_view_file, get_default_endpoint_name, load_view_config, load_views
 from dashboard.data import load_data
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
@@ -38,7 +38,7 @@ def build_dashboard():
     views_path = find_view_file()
     print(f"Using views config: {views_path}")
 
-    configured_default = get_default_view_name(views_path)
+    configured_default = get_default_endpoint_name(views_path)
     views = load_views(views_path)
     if not views:
         raise ValueError(f"No views configured in {views_path}")
@@ -204,11 +204,19 @@ def build_dashboard():
             data.display_variable = var_name
             loading_indicator.visible = True
             display_label = label or var_name
+            # Keep the single-option dropdown in sync with the selected variable
+            plot_var_selector.options = [display_label]
             plot_var_selector.value = display_label
 
             def _run_refresh():
                 try:
-                    refresh_views()
+                    # Refresh each site's data with the current variable first,
+                    # then rebuild the plot closures so the freshly-built
+                    # dynamic plots render already-updated data on their first
+                    # render.  The map and plot-selection table are not
+                    # rerendered (their content is variable-independent).
+                    _refetch_sites()
+                    refresh_views(rebuild_map=False)
                     plot_var_selector.value = display_label
                     _fetch_and_show_metadata(var_name)
                 except Exception as e:
@@ -226,6 +234,42 @@ def build_dashboard():
                 doc.add_next_tick_callback(_run_refresh)
             else:
                 _run_refresh()
+
+    def _refetch_sites():
+        """Re-fetch every registered site with the current variable, in place.
+
+        Each site's data is replaced via ``fetch_site`` (by stable
+        ``entity_index``) so every selected site moves to the new variable
+        regardless of coordinate filtering or map CRS units.  Sites are never
+        cleared, so checked depths and table position are preserved.  Reports
+        per-site no-data/failure in the service status.
+        """
+        if not selection_state.sites:
+            return
+        failed: list[str] = []
+        timeseries_loading.visible = True
+        try:
+            for site in list(selection_state.sites):
+                idx = site["entity_index"]
+                result = map_handlers["fetch_site"](idx)
+                if result is None:
+                    failed.append(str(idx))
+                    print(f"[refresh_views] Failed to refresh site idx={idx}")
+                else:
+                    print(f"[refresh_views] Refreshed site idx={idx}")
+        finally:
+            timeseries_loading.visible = False
+        if failed:
+            _show_refresh_error(failed)
+
+    def _show_refresh_error(failed: list[str]):
+        label = plot_var_selector.value or data.display_variable
+        rendering_status.object = (
+            f"⚠️ {label}: data not available at {len(failed)} site(s) "
+            f"({', '.join(failed)})"
+        )
+        rendering_status.visible = True
+        pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
 
     def on_variable_change(event):
         selected_label = event.new
@@ -302,13 +346,14 @@ def build_dashboard():
 
     update_data_warnings(map_state)
 
-    line_left, line_mid, line_right, on_map_tap = build_timeseries_views(
+    line_left, line_mid, line_right, on_map_tap, fetch_site_entity = build_timeseries_views(
         data,
         map_state,
         selection_state=selection_state,
         render_spinner=render_spinner,
     )
     map_handlers["on_map_tap"] = on_map_tap
+    map_handlers["fetch_site"] = fetch_site_entity
 
     def on_tap_event(*_):
         if timeseries_loading.visible:
@@ -345,17 +390,21 @@ def build_dashboard():
     bottom_mid = pn.pane.HoloViews(line_mid, sizing_mode="stretch_both", linked_axes=False)
     bottom_right = pn.pane.HoloViews(line_right, sizing_mode="stretch_both", linked_axes=False)
 
-    def refresh_views():
-        # Save existing site indices *before* rebuilding (they will get stale data
-        # replaced via force=True in _fetch_timeseries after the variable change)
-        saved_indices = [s["entity_index"] for s in selection_state.sites]
-
+    def refresh_views(rebuild_map: bool = True):
         print(f"[timing] refresh_views: start building map_view")
-        new_map_view, new_map_state = build_map_view(data, tap_stream)
-        print(f"[timing] refresh_views: map_view done, building timeseries")
-        update_data_warnings(new_map_state)
+        if rebuild_map:
+            new_map_view, new_map_state = build_map_view(data, tap_stream)
+            print(f"[timing] refresh_views: map_view done, building timeseries")
+            update_data_warnings(new_map_state)
+            map_state.clear()
+            map_state.update(new_map_state)
+        else:
+            # Reuse the existing map: its overlay tiles and point positions are
+            # variable-independent, so a variable change does not require a map
+            # rebuild (only the timeseries plots need to redraw).
+            new_map_state = map_state
 
-        new_line_left, new_line_mid, new_line_right, new_on_map_tap = build_timeseries_views(
+        new_line_left, new_line_mid, new_line_right, new_on_map_tap, new_fetch_site = build_timeseries_views(
             data,
             new_map_state,
             selection_state=selection_state,
@@ -364,24 +413,12 @@ def build_dashboard():
         print(f"[timing] refresh_views: timeseries done, updating panes")
 
         map_handlers["on_map_tap"] = new_on_map_tap
-        top_left.object = new_map_view
+        map_handlers["fetch_site"] = new_fetch_site
+        if rebuild_map:
+            top_left.object = new_map_view
         bottom_left.object = new_line_left
         bottom_mid.object = new_line_mid
         bottom_right.object = new_line_right
-
-        # ── Re-fetch existing sites with the current (possibly changed) variable ──
-        lats = new_map_state.get("lats", [])
-        lons = new_map_state.get("lons", [])
-        if saved_indices:
-            timeseries_loading.visible = True
-        for idx in saved_indices:
-            if idx < len(lats) and idx < len(lons):
-                lat = float(lats[idx])
-                lon = float(lons[idx])
-                new_on_map_tap(lon, lat)  # x=lon, y=lat
-                print(f"[refresh_views] Re-fetched site idx={idx} at ({lat:.4f}, {lon:.4f})")
-        if saved_indices:
-            timeseries_loading.visible = False
 
         print(f"[timing] refresh_views: done")
 

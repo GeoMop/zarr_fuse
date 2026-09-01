@@ -5,10 +5,9 @@ import tempfile
 from pathlib import Path
 
 import boto3
-import yaml
 from tornado.web import RequestHandler, HTTPError
 
-from dashboard.config import find_view_file, schema_endpoint_url
+from dashboard.config import find_view_file, get_default_endpoint_name, overlay_enabled, schema_endpoint_url
 
 ACCESS_KEY = os.getenv("ZF_S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("ZF_S3_SECRET_KEY")
@@ -25,81 +24,86 @@ try:
 except FileNotFoundError:
     VIEWS_PATH = None
 
+_VIEW_NAME = os.getenv("HV_DASHBOARD_VIEW") or os.getenv("HV_DASHBOARD_ENDPOINT")
+if _VIEW_NAME is None and VIEWS_PATH is not None:
+    _VIEW_NAME = get_default_endpoint_name(VIEWS_PATH)
 
-ENDPOINT_URL = (
-    schema_endpoint_url(
-        VIEWS_PATH,
-        os.getenv("HV_DASHBOARD_VIEW") or os.getenv("HV_DASHBOARD_ENDPOINT"),
-    )
+OVERLAY_ENABLED = (
+    overlay_enabled(VIEWS_PATH, _VIEW_NAME)
     if VIEWS_PATH is not None
-    else None
+    else False
 )
 
+if OVERLAY_ENABLED:
+    ENDPOINT_URL = schema_endpoint_url(VIEWS_PATH, _VIEW_NAME)
 
-def _cache_dir_from_view() -> str | None:
-    view_name = os.getenv("HV_DASHBOARD_VIEW") or os.getenv("HV_DASHBOARD_ENDPOINT")
-    if not view_name or VIEWS_PATH is None:
-        return None
+    def _cache_dir_from_view() -> str | None:
+        if not _VIEW_NAME or VIEWS_PATH is None:
+            return None
 
-    views_path = VIEWS_PATH
-    if not views_path.exists():
-        return None
+        views_path = VIEWS_PATH
+        if not views_path.exists():
+            return None
 
-    try:
-        with views_path.open("r", encoding="utf-8") as f:
-            config = yaml.safe_load(f) or {}
-    except Exception:
-        return None
+        try:
+            from dashboard.config import _parse_view_config
+            config = _parse_view_config(views_path)
+        except Exception:
+            return None
 
-    view = config.get(view_name)
-    if not isinstance(view, dict):
-        return None
+        view = config.get(_VIEW_NAME)
+        if not isinstance(view, dict):
+            return None
 
-    visualization = view.get("visualization", {})
-    overlay = visualization.get("overlay", {}) if isinstance(visualization, dict) else {}
-    cache_dir = overlay.get("cache_dir") if isinstance(overlay, dict) else None
+        visualization = view.get("visualization", {})
+        overlay = visualization.get("overlay", {}) if isinstance(visualization, dict) else {}
+        cache_dir = overlay.get("cache_dir") if isinstance(overlay, dict) else None
 
-    # Backward compatibility for older view configs.
-    if not isinstance(cache_dir, str) or not cache_dir.strip():
-        tile_build = view.get("tile_build", {})
-        if isinstance(tile_build, dict):
-            cache_dir = tile_build.get("cache_dir")
+        # Backward compatibility for older view configs.
+        if not isinstance(cache_dir, str) or not cache_dir.strip():
+            tile_build = view.get("tile_build", {})
+            if isinstance(tile_build, dict):
+                cache_dir = tile_build.get("cache_dir")
 
-    if not isinstance(cache_dir, str) or not cache_dir.strip():
-        return None
+        if not isinstance(cache_dir, str) or not cache_dir.strip():
+            return None
 
-    expanded = os.path.expandvars(os.path.expanduser(cache_dir.strip()))
-    candidate = Path(expanded)
-    if candidate.is_absolute():
-        return str(candidate)
+        expanded = os.path.expandvars(os.path.expanduser(cache_dir.strip()))
+        candidate = Path(expanded)
+        if candidate.is_absolute():
+            return str(candidate)
 
-    # Relative paths are resolved against the project base dir (parent of config dir).
-    base_dir = views_path.parent.parent
-    return str(base_dir / candidate)
+        # Relative paths are resolved against the project base dir (parent of config dir).
+        base_dir = views_path.parent.parent
+        return str(base_dir / candidate)
 
+    # Cache location precedence:
+    # 1) ZF_CACHE_DIR env var
+    # 2) visualization.overlay.cache_dir in zf_view.yaml for selected view
+    # 3) OS temp directory
+    CACHE_DIR = Path(
+        os.getenv("ZF_CACHE_DIR")
+        or _cache_dir_from_view()
+        or tempfile.gettempdir()
+    )
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    CACHE_FILE = CACHE_DIR / "tile_url_cache.json"
 
-# Cache location precedence:
-# 1) ZF_CACHE_DIR env var
-# 2) visualization.overlay.cache_dir in zf_view.yaml for selected view
-# 3) OS temp directory
-CACHE_DIR = Path(
-    os.getenv("ZF_CACHE_DIR")
-    or _cache_dir_from_view()
-    or tempfile.gettempdir()
-)
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-CACHE_FILE = CACHE_DIR / "tile_url_cache.json"
-
-s3 = boto3.client(
-    "s3",
-    aws_access_key_id=ACCESS_KEY,
-    aws_secret_access_key=SECRET_KEY,
-    endpoint_url=ENDPOINT_URL,
-)
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=ACCESS_KEY,
+        aws_secret_access_key=SECRET_KEY,
+        endpoint_url=ENDPOINT_URL,
+    )
+else:
+    ENDPOINT_URL = None
+    CACHE_DIR = None
+    CACHE_FILE = None
+    s3 = None
 
 
 def load_cache() -> dict:
-    if not CACHE_FILE.exists():
+    if CACHE_FILE is None or not CACHE_FILE.exists():
         return {}
 
     try:
@@ -116,6 +120,8 @@ def load_cache() -> dict:
 
 
 def save_cache(data: dict) -> None:
+    if CACHE_FILE is None:
+        return
     tmp = CACHE_FILE.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
@@ -134,6 +140,9 @@ def tile_key(z: int, x: int, y: int) -> str:
 
 
 def get_tile_url(z: int, x: int, y: int, expires_in: int = DEFAULT_EXPIRES_IN) -> str:
+    if not OVERLAY_ENABLED or s3 is None:
+        raise HTTPError(404, "Overlay is disabled")
+
     tid = tile_id(z, x, y)
     now = time.time()
 
@@ -159,9 +168,14 @@ def get_tile_url(z: int, x: int, y: int, expires_in: int = DEFAULT_EXPIRES_IN) -
 
 class S3TileHandler(RequestHandler):
     def get(self, z: str, x: str, y: str):
+        if not OVERLAY_ENABLED or s3 is None:
+            raise HTTPError(404, "Overlay is disabled")
+
         try:
             z_i, x_i, y_i = int(z), int(x), int(y)
             url = get_tile_url(z_i, x_i, y_i)
+        except HTTPError:
+            raise
         except Exception as e:
             raise HTTPError(404, f"Could not resolve tile {z}/{x}/{y}: {e}")
 

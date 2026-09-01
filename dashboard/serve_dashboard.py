@@ -11,13 +11,13 @@ os.environ.setdefault("S3_SECRET_KEY", os.getenv("ZF_S3_SECRET_KEY"))
 
 import panel as pn
 from dashboard.composed import build_dashboard
-from dashboard.tile_service import S3TileHandler
+from dashboard.tile_service import S3TileHandler, OVERLAY_ENABLED
 
 pn.extension()
 
 ROUTES = [
     (r"/tiles/([0-9]+)/([0-9]+)/([0-9]+)\.png", S3TileHandler),
-]
+] if OVERLAY_ENABLED else []
 
 
 def main() -> None:

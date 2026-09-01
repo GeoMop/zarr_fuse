@@ -145,6 +145,152 @@
 
   
   
+## Planned Work: Merged Overlay Tile Build + Upload Script
+
+### Goal
+
+Merge the overlay preprocessing chain (GCP VRT, warp, RGBA expansion,
+gdal2tiles) and the S3 tile upload into one new standalone script that runs
+the whole flow automatically. No zf_view.yaml or config.py changes in this
+task; the script is CLI-driven with Bukov defaults.
+
+### Approved decisions (2026-08-24)
+
+- Single new file `dashboard/scripts/build_overlay_tiles.py`; old
+  `prepare_bukov_gcps.py` and `test/upload_s3.py` stay until the merged
+  script is proven.
+- Parameters via CLI args with current Bukov defaults (zooms 0-20,
+  EPSG:4326/3857, near resampling, xyz scheme).
+- Upload credentials from `dashboard/scripts/.env` (`ZF_S3_ACCESS_KEY`,
+  `ZF_S3_SECRET_KEY`) plus `--endpoint-url` / `ZF_S3_ENDPOINT_URL`;
+  validated only when upload will run.
+- Basic skip logic: steps skipped when their output exists unless
+  `--force`; upload skips keys whose S3 object size matches local file.
+- `--dry-run` prints the planned commands without executing (also skips
+  GDAL tool checks so it works on machines without GDAL).
+
+### Pipeline
+
+1. gdal_translate -of VRT -a_srs <gcp_srs> -gcp ... image -> vrt
+2. gdalwarp -t_srs <target_srs> -r <resampling> -dstalpha -> tif
+3. gdal_translate -of VRT -expand rgba tif -> rgba vrt
+4. gdal2tiles --xyz -z <min>-<max> rgba vrt -> tiles/
+5. upload changed tiles/<z/x/y>.png -> s3://<bucket>/<prefix><relpath>
+
+### Verification
+
+- py_compile, argparse --help.
+- --dry-run against fixture assets in temp dir (no GDAL needed).
+- Negative test: real run without GDAL tools exits with clean error.
+- Full pipeline run needs the conda GDAL env and real assets; handed to
+  the user as a manual command.
+
+## Planned Work: Config Wiring For build_overlay_tiles.py
+
+### Goal
+
+Wire the merged tile script parameters to zf_view.yaml (the `tile_build`
+section) and credentials to the general environment / `.env`; no behavior
+change for dry-run, skip logic, or upload payload handling.
+
+### Approved decisions (2026-08-24)
+
+- Import `dashboard.config` after sys.path bootstrap; on missing deps exit
+  with a `pip install pyyaml python-dotenv` hint.
+- View selection: `--view` flag > `HV_DASHBOARD_VIEW` env >
+  `_dashboard.default_endpoint`.
+- Views file: `--view-path` flag > `ZF_VIEW_PATH`/upward search > repo
+  default path.
+- Parameter precedence: CLI flag > config value; generic processing defaults
+  (zoom range, CRS values, resampling) are owned by the config layer
+  (`TileBuildConfig`), and the S3 bucket/prefix target must be configured
+  explicitly (`tile_build.s3`) or passed per-run via `--bucket`/`--prefix`.
+  The startup summary prints where each value came from.
+- S3 endpoint URL stays schema-owned (`ATTRS.S3_ENDPOINT_URL`);
+  `--endpoint-url` remains as manual override.
+- Upload gate: `--skip-upload` flag > `tile_build.enabled` >
+  `tile_build.upload_enabled`; credentials validated early only when an
+  upload run will actually happen (dry-run and local builds stay
+  credential-free).
+- Relative config paths resolve against `base_dir`
+  (views_path.parent.parent = `app/databuk`).
+- `cache_dir` formalization deferred to a later step.
+
+### Implementation
+
+- `app/databuk/config/zf_view.yaml`: added `upload_enabled` plus nested
+  `s3: {bucket, prefix}` under `bukov_endpoint.tile_build`; no secrets in
+  YAML.
+- `dashboard/config.py`: new `TileS3Config(bucket, prefix)` dataclass;
+  `TileBuildConfig.upload_enabled` and `.s3` fields; parsed in
+  `_build_view_config()` via new `_build_tile_s3_config()` helper.
+- `dashboard/scripts/build_overlay_tiles.py`: full rewire to the view config
+  via `find_view_file` / `get_default_endpoint_name` /
+  `load_environment_from_config` / `load_view_config` / `schema_endpoint_url`;
+  removed `--view-dir` and script-local `.env` loading (env file now comes
+  from `_dashboard.env_file`).
+
+### Verification
+
+- Sandbox dry-run through a temporary `ZF_VIEW_PATH`: every parameter
+  resolved from config with source labels, schema endpoint picked up,
+  graceful message when the configured env_file is absent, upload count
+  computed from fixture tiles.
+- Negatives: fail-fast missing-credentials error when upload is enabled;
+  credential-free dry-run; `upload_enabled: false` variant skips upload
+  without requiring credentials; missing GDAL tool exits with clean error.
+- CLI flag overrides show `(flag)` sources in the startup summary.
+- Suite baseline with `s3_tile_resolver_test.py` ignored: 115 passed,
+  1 skipped.
+- Full real-GDAL pipeline run requires the conda GDAL env and real assets;
+  handed to the user as a manual command.
+
+## Planned Work: Ensure-Tiles-On-S3 Model
+
+### Goal (2026-08-24, user decision)
+
+Tile creation and upload are one nested operation ("either both work or
+none"): check whether the tile system already exists on S3; if it does,
+do nothing; if not, build locally and upload in the same run.
+
+### Approved semantics
+
+- Single master gate: `visualization.overlay.enabled` (+ `HV_OVERLAY_ENABLED`
+  env), consumed via the existing `overlay_enabled()` helper - the same
+  switch the dashboard uses. Gate off -> nothing runs at all.
+- Existence criterion: any object under `s3://bucket/prefix`
+  (`list_objects_v2` MaxKeys=1). Non-empty prefix = tile system present =
+  run ends immediately, GDAL never touched.
+- No staleness detection. `--force` is the manual rebuild lever: bypasses
+  the S3 short-circuit AND local output skips (full redo); size-compare
+  still avoids re-transferring byte-identical tiles.
+- Local per-step output skips stay (without `--force`) so an interrupted
+  run can resume.
+- Credentials and S3 target are required as soon as the gate passes
+  (the existence check itself needs them); `--dry-run` stays fully offline.
+- Removed: `tile_build.enabled`, `tile_build.upload_enabled`,
+  `--skip-upload`.
+
+### Implementation
+
+- `app/databuk/config/zf_view.yaml`: `tile_build` reduced to a pure work
+  order (paths, params, s3 target); gates removed.
+- `dashboard/config.py`: `TileBuildConfig` lost `enabled`/`upload_enabled`
+  fields and their parsing.
+- `dashboard/scripts/build_overlay_tiles.py`: flow is now gate ->
+  existence check ([1/6]) -> local build ([2/6]-[5/6]) -> upload ([6/6]);
+  shared `_s3_client()` factory used by check and upload;
+  `tiles_exist_on_s3()` wraps `ClientError` with bucket/endpoint context.
+
+### Verification
+
+- Sandbox matrix: gate off exits silently; dry-run prints offline check +
+  full plan; `--dry-run --force` reports the bypass; real run without creds
+  fails fast; missing s3 target errors naming the yaml keys; parse of the
+  slimmed yaml OK.
+- Suite baseline with resolver ignored: 115 passed, 1 skipped.
+- Real end-to-end (conda GDAL env + real credentials) remains a manual step.
+
 ## Working Rules For This Plan
 
 - Prefer small, focused fixes over wide refactors while test failures are still
@@ -174,8 +320,83 @@
      into the generated grid instead of appending unsorted values.
    - For both modes, keep the final sorted-coordinate assertion.
 
+## Planned Work: Variable-Switch Consistency + Dashboard Plot Cleanup
+
+### Goal
+
+Fix the reported dashboard bug: switching the left-panel variable (e.g.
+`rock_temp` -> `air_temp`) leaves the "Plot selection" dropdown on the old
+variable and can plot old-variable data under new-variable titles/labels.
+Simplify the leftover complexity from the previous "replace stale data in
+place" approach.
+
+### Cause
+
+Two distinct defects triggered by the same action:
+
+- Defect A (dropdown): `plot_var_selector.options` is set once to a single
+  item (`composed.py:180`) and never updated; only `value` is changed on
+  variable switch (`composed.py:207`), which a dropdown cannot display when
+  the value is not in `options`.
+- Defect B (labels vs. data): titles/Y-axis read `data.display_variable`
+  immediately (`multi_time_views.py:25-33,403`), while plotted series live in
+  `selection_state` and only refresh via a best-effort re-fetch loop
+  (`composed.py:372-384`) that can silently skip (out-of-range index) or error,
+  leaving stale data.
+
+### Design
+
+Single root variable `data.display_variable` drives every indicator; no new
+or inherited indicator variable is introduced. On variable change, use a
+centralised save -> clear -> refetch -> restore flow so labels and data
+always agree. Remove the now-unneeded `add_site(force=True)` replace path and
+the generic re-fetch loop from `refresh_views`.
+
+### Steps
+
+1. `composed.py`: rewrite `_select_variable` to save entity indices + exact
+   checked `(site_id, depth)` set, `selection_state.clear()`, refetch saved
+   sites (stable entity index resolved from shared lat/lon coords), restore
+   the checked subset, report per-site failures in the service status, and
+   sync `plot_var_selector.options` with `value`.
+2. `composed.py`: simplify `refresh_views` — drop the `saved_indices` capture
+   and the `lats`/`lons` re-fetch loop. Safe because the other callers
+   (`_switch_view`, `on_node_change`) already `clear()` first.
+3. `plot_selection.py`: remove the `force` parameter and in-place replace
+   branch from `add_site`; keep a single plain add that auto-checks finite
+   depths.
+4. `multi_time_views.py`: call plain `add_site`; surface fetch errors so
+   callers can report per-site failures.
+5. Update and extend tests in `dashboard/test/`.
+
 ## AGENT Questions And Remarks
 
+- The reported variable-switch bug is actually two independent defects with a
+  shared trigger: Defect A (stale `plot_var_selector.options`) is a display
+  widget sync issue; Defect B (labels update before/without the refetched
+  data) is a data/label decoupling via `selection_state`. Both were fixed
+  with the clear-then-refetch design; the root-variable simplification
+  removes the in-place replace machinery (`add_site(force=True)`, the
+  `refresh_views` re-fetch loop).
+- The variable-switch "only default site moves" symptom was traced to
+  `_refetch_sites` re-fetching via `map_state` positional indexing + `on_map_tap`
+  nearest-marker resolution. Refetch is now by stored `entity_index` directly
+  via a new `fetch_site_entity` wrapper. Open follow-up (not in scope): the
+  live map-click path feeds `tap_stream.x/y` (likely Web-Mercator meters) into
+  `on_map_tap`, whose nearest math treats them as degrees - a separate,
+  pre-existing site-selection unit/CRS concern worth checking later. User
+  confirmed entities load to the map whenever coordinates exist (values are
+  not filtered by `get_map_data`).
+- The earlier "save -> clear -> refetch -> restore" design in "Planned Work"
+  was superseded by an in-place refresh (2026-08-31): `_select_variable` no
+  longer `clear()`s - `SelectionState.update_site_data` swaps each site's
+  series/times in place (bumping `version` only, so the plot-selection table
+  and map do not rerender on a pure variable change). The map's overlay tiles
+  and point positions are variable-independent, so `refresh_views` reuses
+  `map_state` on variable change instead of rebuilding the map. Sites for
+  which the new variable has no data are blanked (empty series/depths) and
+  reported in the status. Bug-3 "has_value" value-coloring on the map remains
+  out of scope/deferred.
 - Some existing tests already skip when S3 credentials are absent, but the repo
   still mixes local and remote assumptions. That boundary should be made more
   explicit during test-fix work.
@@ -221,7 +442,25 @@
 - AGENT: Should the sorted `any_new` schema warning be emitted only for the
   implicit default, or also for an explicit `step_limits: "any_new"` or
   equivalent schema spelling?
-  
+
+- 2026-08-24 (overlay automation): the overlay source assets are not in the
+  repo anymore (`dashboard/config/bukov_endpoint/` deleted). Resolved
+  2026-08-24: the build script no longer uses a `--view-dir` default; all
+  paths now come from the selected view in zf_view.yaml, resolved relative
+  to `app/databuk`. Remaining open question: where should overlay
+  inputs/outputs live in the long term, and should generated tiles stay
+  gitignored build artifacts?
+
+- 2026-08-24: Running `pytest dashboard/test` from the repo root fails at
+  collection: pytest selects `dashboard/pyproject.toml` as inifile (closer
+  to the args than the root `pytest.ini`), whose default `python_files`
+  matches `*_test.py`, so the module-level code in
+  `s3_tile_resolver_test.py` executes on import and raises
+  (`HV_DASHBOARD_VIEW is required`). Unrelated to the new build script;
+  rewriting that resolver to be import-safe is already planned as a later
+  step of the overlay automation work. Until then use
+  `--ignore=dashboard/test/s3_tile_resolver_test.py`.
+
 ## AGENT log
 
 - 2026-06-20: Reviewed `AGENTS.md`, `README.md`, `python_coding.md`, and
@@ -366,3 +605,148 @@
   and workflows (`source-views-path`, `zf_view.yaml` configmap) updated.
   Config file `app/databuk/config/zf_view.yaml` (old endpoints.yaml deleted).
   Docs swept. Dashboard suite: 116 passed.
+- 2026-08-14: Added YAML single-parse caching for zf_view.yaml. New
+  `_parse_view_config(path)` in `config.py` with process-lifetime dict cache;
+  replaced all direct `yaml.safe_load(f)` calls for the view config
+  (`load_environment_from_config`, `load_views`, `get_default_view_name`,
+  `tile_service._cache_dir_from_view`). Also removed redundant
+  `load_environment_from_config` call inside `load_views`. Dashboard suite:
+  115 passed, 1 skipped (test_dataset_variable_report — S3 secret-gated, now
+  properly skips).
+- 2026-08-14: Overlay gating (zero tile cost when disabled). New
+  `overlay_enabled(config_path, view_name)` in `config.py` centralizes env var
+  check (`HV_OVERLAY_ENABLED`) + config check. `tile_service.py` gated at
+  import: boto3 client, CACHE_DIR, ENDPOINT_URL all `None` when disabled.
+  `serve_dashboard.py` ROUTES conditional on `OVERLAY_ENABLED`.
+  `map_views._load_overlay` refactored to use shared `overlay_enabled` helper
+  (was missing env var check before). Dashboard suite: 115 passed, 1 skipped.
+- 2026-08-14: Fixed overlay gating regression: `overlay_enabled()` and
+  `tile_service.py` now resolve `_VIEW_NAME` from `_dashboard.default_view`
+  when no env var (`HV_DASHBOARD_VIEW`/`HV_DASHBOARD_ENDPOINT`) is set.
+  `overlay_enabled(VIEWS_PATH, None)` was returning False because
+  `config.get(None)` → None. Routes were never registered, causing 404s on
+  all `/tiles/` requests. Dashboard suite: 115 passed, 1 skipped.
+- 2026-08-14: Reverted YAML key `default_view` back to `default_endpoint` in
+  `zf_view.yaml`. `get_default_view_name()` now reads `default_endpoint` first,
+  `default_view` as compat fallback. User decision: the YAML key stays as
+  `default_endpoint`. Dashboard suite: 115 passed, 1 skipped.
+- 2026-08-14: Renamed `get_default_view_name` → `get_default_endpoint_name`,
+  removed `default_view` compat fallback. YAML key stays `default_endpoint`.
+  Dashboard suite: 115 passed, 1 skipped.
+- 2026-08-24: Planned and implemented the merged overlay tile build + upload
+  script `dashboard/scripts/build_overlay_tiles.py` (CLI-driven, Bukov
+  defaults, skip logic, dry-run); config files intentionally untouched.
+- 2026-08-24: Verified the new script: py_compile OK, --help OK, --dry-run
+  against fixture assets prints the full command plan (disabled GCP filtered,
+  existing-output skip works, upload count computed) without GDAL installed;
+  negative paths exit cleanly (missing GDAL tool, missing georef file, fewer
+  than 3 enabled control points, missing S3 credentials). Dashboard suite
+  with `s3_tile_resolver_test.py` ignored: 115 passed, 1 skipped (= baseline).
+- 2026-08-24: Wired build_overlay_tiles.py to project configuration. Added
+  `TileS3Config` plus `upload_enabled`/`s3` parsing to `dashboard/config.py`,
+  extended `bukov_endpoint.tile_build` in zf_view.yaml (`upload_enabled`,
+  nested `s3.bucket`/`s3.prefix`), and rewrote the script to resolve the
+  view, paths, and build params from zf_view.yaml via dashboard.config
+  helpers (flag > config > default precedence, per-value source summary).
+  Endpoint stays schema-owned; credentials come from the general env filled
+  by `_dashboard.env_file`. Fixed views-file precedence so `ZF_VIEW_PATH`
+  beats the repo default, and restored early credential validation for real
+  upload runs. Dashboard suite with `s3_tile_resolver_test.py` ignored:
+  115 passed, 1 skipped (= baseline). Real-GDAL end-to-end run pending user
+  execution in the conda gdal environment.
+- 2026-08-24: Default cleanup in the tile pipeline (user decision "move
+  generics to config.py"): removed all script-side `DEFAULT_*` constants
+  from build_overlay_tiles.py except `DEFAULT_VIEWS_PATH` (bootstrap only).
+  Generic processing defaults (zoom 0-20, EPSG:4326/3857, near resampling)
+  moved into `TileBuildConfig` field defaults and `_build_view_config()`
+  parsing. `tile_build.s3.bucket`/`prefix` are now required for real upload
+  runs (fail-fast error naming the yaml keys; `--skip-upload`/disabled views
+  and dry-run stay requirement-free, dry-run prints an `(unset)`
+  placeholder). Removed the silent Bukov test-bucket fallback. Dashboard
+  suite with `s3_tile_resolver_test.py` ignored: 115 passed, 1 skipped
+  (= baseline); sandbox scenarios verified (normal dry-run sources,
+  missing-s3 error path, skip-upload path, unset placeholder).
+- 2026-08-24: Removed the hardcoded `DEFAULT_VIEWS_PATH` from
+  build_overlay_tiles.py (user decision: use the shared finder as in
+  composed.py). `_resolve_views_path()` is now flag > `find_view_file()`
+  (`ZF_VIEW_PATH` env, then upward cwd search), with a clean error hint when
+  nothing resolves. Consequence: running the script by absolute path from
+  outside the repo now requires `ZF_VIEW_PATH`, `--view-path`, or a cwd
+  inside the repository - same semantics as other dashboard entry points.
+  Fixed latent dry-run crash found during verification:
+  `importlib.util.find_spec("osgeo.utils")` raises `ModuleNotFoundError`
+  for the missing parent package `osgeo`; new `_has_module()` helper treats
+  that as "not installed". Dashboard suite with `s3_tile_resolver_test.py`
+  ignored: 115 passed, 1 skipped (= baseline). Resolution paths verified:
+  repo-cwd search, env override, flag precedence, foreign-cwd error and
+  foreign-cwd-with-env success.
+- 2026-08-24: Switched the tile pipeline to ensure-tiles-on-S3 semantics
+  (user decision after Q&A). Single gate is now `overlay.enabled` /
+  `HV_OVERLAY_ENABLED` via `config.overlay_enabled()`; removed
+  `tile_build.enabled`, `tile_build.upload_enabled`, and `--skip-upload`.
+  New stage [1/6] checks for any object under `s3://bucket/prefix`
+  (`tiles_exist_on_s3()`) and short-circuits when present; build ([2/6]
+  -[5/6]) and upload ([6/6]) run atomically when missing; `--force` = full
+  redo bypassing short-circuit and local skips; no staleness detection;
+  dry-run stays offline. Shared `_s3_client()` factory now serves both check
+  and upload. zf_view.yaml `tile_build` reduced to paths/params/s3 target;
+  `TileBuildConfig` lost its gate fields. Dashboard suite with
+  `s3_tile_resolver_test.py` ignored: 115 passed, 1 skipped (= baseline).
+  Real end-to-end run pending user execution in the conda GDAL environment.
+- 2026-08-31: Implemented the variable-switch consistency fix + dashboard
+  plot cleanup (see "Planned Work: Variable-Switch Consistency + Dashboard
+  Plot Cleanup"). Key items: `_select_variable` now saves -> clears ->
+  refetches (stable entity index) -> restores the checked depth subset and
+  syncs `plot_var_selector.options` with `value`; `refresh_views` no longer
+  runs the `saved_indices`/`lats`/`lons` re-fetch loop; `add_site` lost its
+  `force` replace path; `_fetch_timeseries` surfaces errors for per-site
+  status reporting.
+- 2026-08-31: Fixed the variable-switch "only default site moves" bug. The
+  root cause: `_refetch_sites` re-fetched each site via `map_state` positional
+  indexing + `on_map_tap` nearest-marker/threshold resolution, which is fragile
+  (coordinate filtering / CRS units) and could drop or mis-target non-default
+  sites. Fix: `build_timeseries_views` now returns a `fetch_site_entity`
+  wrapper that re-fetches deterministically by the stored `entity_index`
+  (via `get_timeseries_data`'s native entity_index path); `_refetch_sites` loops
+  saved entity indices directly and reports per-site failures. Wired
+  `map_handlers["fetch_site"]` in `build_dashboard` + `refresh_views`. Added
+  `dashboard/test/test_variable_switch.py` (3 tests). Suite: 121 passed,
+  1 skipped (S3 secret-gated).
+- 2026-08-31: Replaced the variable-switch clear->re-add flow with an in-place
+  refresh so the plot-selection table and map view no longer rerender on a pure
+  variable change (timeseries plots only redraw). Added
+  `SelectionState.update_site_data` + `_reconcile_checked` (bump `version` only
+  when depths unchanged; also `layout_version` + prune checks on depth change).
+  `_fetch_timeseries` now updates an existing site in place and blanks a site
+  (empty series/depths) when the new variable has no data. `composed.py`
+  `_select_variable`/`_run_refresh` drops the save/`clear()`/`restore_checked`
+  snapshot; `_refetch_sites()` iterates live sites; `refresh_views(rebuild_map=)`
+  skips `build_map_view` on variable change (reuses `map_state`). Rewrote
+  `test_variable_switch.py`   to the in-place model and added
+  `test_update_site_data.py`. Suite: 126 passed, 1 skipped (S3 secret-gated).
+- 2026-08-31: Fixed variable-switch plots not updating when the selected
+  variable's data is all NaN (title changed, no error toast, but curve stayed
+  on old data). Root cause: `_run_refresh` rebuilt the plot closures before
+  refetching, so freshly-built DynamicMaps first rendered pre-refetch (old)
+  state and relied on the `version` stream to re-render; combined with a stale
+  `default_display_variable` capture in `build_timeseries_views`. Fix:
+  `_fetch_timeseries` now reads the live `data.display_variable` at call time
+  (removed the `default_display_variable` capture and `metric_label` derives
+  from `data.display_variable` directly), and `_run_refresh` now refetches
+  sites in place before `refresh_views(rebuild_map=False)` so the rebuilt plots
+  render already-updated data. Added all-NaN regression test. Suite: 127
+  passed, 1 skipped (S3 secret-gated).
+- 2026-09-01: Generalized the store-health scan script. Renamed
+  `dashboard/scripts/scan_coordinate_health.py` to
+  `dashboard/scripts/scan_store_health.py` and removed all bukov / lat-lon
+  specifics. The script now behaves like `df.info()` for any zarr-fuse store:
+  it takes a schema YAML (via the `--schema` CLI arg or the `SCHEMA_PATH`
+  top-of-file constant, plus the `GROUP_PATH` constant) and reports coordinates
+  + data variables (dtype, dims, shape, size, missing count, and per-coordinate
+  value samples under `--verbose` / `--only-missing`). The bukov-specific
+  lat/lon-per-borehole CSV diagnostic (`--latlon`), the hardcoded location-CSV
+  paths, the `STORE_URL` constant, and the hardcoded `children["bukov"]` group
+  navigation were removed. Credentials stay env-driven (`ZF_S3_*` / `S3_*`).
+  Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
+  (exit 2), and end-to-end scans against a synthetic local store at root and
+  with `--group` navigation.
