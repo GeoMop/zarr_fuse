@@ -198,6 +198,12 @@
 - Repo-local pytest secret loading also needed env-name bridging:
   some code paths consume `ZF_S3_*`, while others still read `S3_*`.
 
+- The ingress queue still moves a payload and its metadata sidecar as two
+  independent object operations; the ordering only guarantees that an
+  interruption leaves an orphaned sidecar rather than a payload without
+  metadata. Storing the item state in a zarr-fuse manifest (plan change ->
+  do change -> finish change) would remove the cross-object move entirely.
+
 - Warning triage should keep apart:
   - warnings that document deliberate Zarr v3 compatibility limits
   - warnings that expose project behavior we may want to make explicit
@@ -330,6 +336,12 @@
 - 2026-07-08: Simplified `interpolate_ds()` to reindex with all coordinates
   returned from `interpolate_coord()` and tightened `merge_ds()` so empty
   multidimensional extension subsets remain no-op writes.
+- 2026-08-26: Collapsed the ingress queue backends into a single
+  `QueueStorage` over an fsspec filesystem; only the filesystem construction
+  differs between a local directory and an `s3://` queue. Item naming moved to
+  `io.files` and is now flat (`<endpoint>_<timestamp>_<uid>`), queue items are
+  addressed by `FileRef`, and passing a local `Path` to `worker._extract_one`
+  is deprecated.
 - 2026-08-31: Made the ingress time-filter normalization report instead of
   swallow: `_normalize_time_value` raises `TimeKeyError` rather than returning
   `None`, `_time_diff` rejects mixed datetime/numeric keys, and the failure is
@@ -342,3 +354,9 @@
   type conflicts notify by email once instead of once per poll cycle.
 - 2026-08-31: Made `tests/test_notifier.py` skip when the gitignored
   `ingress_server/inputs/endpoints_config.yaml` is absent instead of erroring.
+- 2026-08-31: Merged the S3 queue-storage branch (`QueueStorage`/`FileRef`)
+  with the time-filter branch: the explicit `time_like_coord` config field
+  replaced schema-based time-coord auto-detection (and its `schema_cache`)
+  before the queue-storage branch forked, so that approach was dropped rather
+  than reconciled; the retention/hold and anomaly-email logic was ported onto
+  `QueueStorage` (`ref`-based, no local `Path`s).

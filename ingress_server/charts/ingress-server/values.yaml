@@ -25,7 +25,9 @@ deployment:
   # -- Queue configuration
   # @default -- ~
   queue:
-    # -- Path to the queue directory
+    # -- Queue location: a local directory backed by the PVC (default), or an
+    # -- "s3://bucket/prefix" URL to keep the queue in S3 (uses the ZF_S3_*
+    # -- credentials). With an s3:// URL set persistence.enabled to false.
     path: /var/zarr_fuse
   # -- Deployment secrets
   # @default -- ~
