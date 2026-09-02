@@ -148,6 +148,12 @@ configuration:
     log_level: INFO
     port: 8000
     worker_poll_interval: 30          # seconds between worker cycles
+    retention_time: 96                # hours; the time filter holds an item
+                                       # until it is more than this much older
+                                       # than the newest time_like_coord value
+                                       # seen in the same batch (see the
+                                       # per-endpoint time_like_coord option
+                                       # below). 0 disables holding.
 
   smtp:
     notify_to: ["ops@example.com"]
@@ -156,6 +162,13 @@ configuration:
     from_email: "zarr.fuse.support@gmail.com"
     username: "zarr.fuse.support@gmail.com"
 ```
+
+Notification emails are sent for failed active scrapper runs and for data
+anomalies found by the time filter: a `time_like_coord` value that cannot be
+read or interpreted, and a batch whose sources disagree on the time key type
+(datetime vs. numeric). Anomalies are processed, not rejected — the affected
+item is written in receipt order — so the email is the only signal. Each
+distinct anomaly is mailed once per worker process, not once per poll cycle.
 
 The rest of the file defines passive endpoints and active scrappers (see sections below).
 
@@ -177,6 +190,9 @@ endpoints:
     target_node: chmi_aladin_10m                # Target node in the Zarr store
     extract_fn: extract_function_name           # Extractor function applied to the incoming payload
     fn_module: inputs.extractor.bukov_extractor # Python module containing the extractor function
+    time_like_coord: date_time                  # Optional: dataframe column the time filter sorts
+                                                 # and holds data on (see retention_time above).
+                                                 # Omit to skip time-based filtering for this source.
 ```
 
 This creates two API routes:

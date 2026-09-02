@@ -25,6 +25,9 @@ class DataSourceConfig(BaseModel):
     target_node: str | None = None
     extract_fn: str | None = None
     fn_module: str | None = None
+    # Explicit dataframe column the time filter sorts by and holds data on
+    # (see io/time_filter.py). Leave unset to skip time-based filtering.
+    time_like_coord: str | None = None
 
     def resolve_schema_path(self, config_dir: Path) -> Path:
         return resolve_path(self.schema_path, config_dir)
@@ -50,6 +53,7 @@ class EndpointConfig(BaseModel):
                 "schema_path": data.get("schema_path"),
                 "extract_fn": data.get("extract_fn"),
                 "fn_module": data.get("fn_module"),
+                "time_like_coord": data.get("time_like_coord"),
             },
         }
 
@@ -77,6 +81,7 @@ class MetadataModel(BaseModel):
     schema_path: str
     extract_fn: str | None
     fn_module: str | None
+    time_like_coord: str | None = None
     received_at: str = Field(
         default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         frozen=True,
@@ -106,6 +111,7 @@ class MetadataModel(BaseModel):
             schema_path=data_source.schema_path,
             extract_fn=data_source.extract_fn,
             fn_module=data_source.fn_module,
+            time_like_coord=data_source.time_like_coord,
             dataframe_row=dataframe_row,
             target_node=data_source.target_node
         )

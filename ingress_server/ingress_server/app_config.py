@@ -20,6 +20,10 @@ class BaseConfig:
     log_level: str = "INFO"
     port: int = 8000
     worker_poll_interval: int = 30
+    # Retention window (in hours) for the time filter (see io/time_filter.py):
+    # an item is held until it is more than this much older than the newest
+    # time_like_coord value seen in the same batch. 0 disables holding.
+    retention_time: float = 96.0
 
 
 @dataclass(frozen=True)
@@ -40,6 +44,9 @@ class AppConfig:
     base: BaseConfig
     smtp: SmtpConfig
     stop_event: Event = field(default_factory=Event, compare=False)
+    # Anomalies already emailed, so a batch that keeps being re-examined on
+    # every worker poll does not re-send the same notification.
+    notified_anomalies: set[str] = field(default_factory=set, compare=False)
 
     @property
     def config_dir(self) -> Path:
@@ -64,6 +71,7 @@ def _parse_base_config(raw: dict) -> BaseConfig:
         log_level=raw.get("log_level", BaseConfig.log_level),
         port=int(os.getenv("PORT", raw.get("port", BaseConfig.port))),
         worker_poll_interval=int(raw.get("worker_poll_interval", BaseConfig.worker_poll_interval)),
+        retention_time=float(raw.get("retention_time", BaseConfig.retention_time)),
     )
 
 
