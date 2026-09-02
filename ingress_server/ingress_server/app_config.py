@@ -9,6 +9,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from .queue_storage import QueueStorage
+
 load_dotenv()
 
 LOG = logging.getLogger(__name__)
@@ -34,7 +36,7 @@ class SmtpConfig:
 
 @dataclass(frozen=True)
 class AppConfig:
-    queue_dir: Path
+    queue: QueueStorage
     config_path: Path
     config: dict[str, Any]
     base: BaseConfig
@@ -44,18 +46,6 @@ class AppConfig:
     @property
     def config_dir(self) -> Path:
         return self.config_path.parent
-
-    @property
-    def accepted_dir(self) -> Path:
-        return self.queue_dir / "accepted"
-
-    @property
-    def success_dir(self) -> Path:
-        return self.queue_dir / "success"
-
-    @property
-    def failed_dir(self) -> Path:
-        return self.queue_dir / "failed"
 
 
 def _parse_base_config(raw: dict) -> BaseConfig:
@@ -99,26 +89,18 @@ def load_app_config(config_path: str | Path) -> "AppConfig":
     base = _parse_base_config(cfg_block.get("base", {}))
     smtp = _parse_smtp_config(cfg_block.get("smtp", {}))
 
-    queue_dir = Path(base.queue_dir_path).resolve()
+    queue = QueueStorage(base.queue_dir_path)
 
     app_config = AppConfig(
-        queue_dir=queue_dir,
+        queue=queue,
         config_path=config_path,
         config=config,
         base=base,
         smtp=smtp,
     )
 
-    app_config.accepted_dir.mkdir(parents=True, exist_ok=True)
-    app_config.success_dir.mkdir(parents=True, exist_ok=True)
-    app_config.failed_dir.mkdir(parents=True, exist_ok=True)
+    queue.ensure_layout()
 
-    LOG.info(
-        "Application config loaded. queue_dir=%s accepted=%s success=%s failed=%s",
-        queue_dir,
-        app_config.accepted_dir,
-        app_config.success_dir,
-        app_config.failed_dir,
-    )
+    LOG.info("Application config loaded. queue=%s", queue.url)
 
     return app_config
