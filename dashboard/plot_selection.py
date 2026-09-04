@@ -970,8 +970,7 @@ def build_plot_selection_panel(
         frozen_columns=["_actions", "_row_label"],
         selectable=False,
         show_index=False,
-        max_height=400,
-        sizing_mode="stretch_width",
+        sizing_mode="stretch_both",
         layout="fit_data_table",
         theme="midnight",
         sortable=False,
@@ -1201,7 +1200,7 @@ def build_plot_selection_panel(
     panel = pn.Column(
         control_bar,
         table,
-        sizing_mode="stretch_width",
+        sizing_mode="stretch_both",
     )
 
     state._panel_schedule_bump = _schedule_bump
