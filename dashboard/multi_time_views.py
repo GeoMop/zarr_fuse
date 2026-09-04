@@ -28,7 +28,10 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         or schema_display.get("display_variable")
         or "value"
     )
-    display_unit = schema_display.get("display_unit")
+    var_meta = data.client.get_variable_metadata(
+        data.view_name, data.group_path, metric_label
+    )
+    display_unit = var_meta.get("unit") if var_meta else None
     y_axis_label = f"{metric_label} ({display_unit})" if display_unit else metric_label
     entity_label = (
         schema_display.get("entity_name")
