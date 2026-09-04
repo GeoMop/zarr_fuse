@@ -61,6 +61,7 @@ class SchemaDisplayConfig:
 class DefaultsConfig:
     display_variable: Optional[str] = None
     group_path: Optional[str] = None
+    default_site: Optional[str] = None
 
 
 @dataclass
@@ -558,6 +559,7 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
         defaults=DefaultsConfig(
             display_variable=defaults_data["display_variable"],
             group_path=defaults_data["group_path"],
+            default_site=defaults_data.get("default_site"),
         ),
             visualization=VisualizationConfig(
             map=MapConfig(

@@ -15,6 +15,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
     start_total = time.perf_counter()
     view_config = data.client.get_view(data.view_name)
     defaults_config = view_config["defaults"]
+    default_site_name = defaults_config.get("default_site")
     schema_display = view_config["schema_display"]
     schema_config = view_config["schema"]
     fields_config = _resolve_fields_for_group_raw(schema_config, data.group_path)
@@ -44,8 +45,14 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             lats = np.array([])
             lons = np.array([])
         if len(lats) == 0 or len(lons) == 0:
-            return 0.0, 0.0
-        return float(lats[0]), float(lons[0])
+            return 0.0, 0.0, None
+        if default_site_name:
+            all_meta = map_state.get("marker_meta") or []
+            for meta in all_meta:
+                if meta.get("site_id") == default_site_name:
+                    idx = all_meta.index(meta)
+                    return float(lats[idx]), float(lons[idx]), meta
+        return float(lats[0]), float(lons[0]), None
 
     def _fetch_timeseries(lat, lon, marker_meta=None):
         """Fetch the current variable's timeseries and register a site.
@@ -476,11 +483,9 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
 
     def on_map_tap(x, y):
         if x is None or y is None:
-            y, x = _default_coords()
+            y, x, matched_meta = _default_coords()
             print(f"[tap] Initial load: using default coords y={y:.4f}, x={x:.4f}")
-            print(f"[tap] marker_meta will be None (not computed for initial load)")
-            print(f"[tap] Calling _fetch_timeseries with marker_meta=None")
-            entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=None)
+            entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=matched_meta)
             if entity_index is not None:
                 borehole_stream.event(borehole_index=entity_index)
             return entity_index
