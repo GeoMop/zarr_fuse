@@ -295,6 +295,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         def _hook(plot, element):
             plot.state.x_range.start = xlim[0]
             plot.state.x_range.end = xlim[1]
+            plot.state.x_range.reset_start = xlim[0]
+            plot.state.x_range.reset_end = xlim[1]
             if bounds is not None:
                 plot.state.x_range.bounds = bounds
             if max_interval_ms is not None:
