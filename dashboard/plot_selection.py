@@ -150,6 +150,21 @@ class SelectionState(param.Parameterized):
         site_id, depth_value = self._resolve_canonical(row_key, col_key)
         return self._site_has_depth(site_id, depth_value)
 
+    def site_depth_all_nan(self, site_id: str, depth_value: float) -> bool:
+        """Return ``True`` if *site_id*'s series at *depth_value* is all NaN."""
+        for site in self._sites:
+            if site["site_id"] == site_id:
+                depths_arr = np.asarray(site["depths"]).ravel()
+                for i, d in enumerate(depths_arr):
+                    if float(d) == float(depth_value):
+                        series = site.get("series", [])
+                        if i < len(series):
+                            arr = np.asarray(series[i]).ravel()
+                            return len(arr) > 0 and np.all(np.isnan(arr))
+                        return True
+                return False
+        return False
+
     def is_checked(self, row_key, col_key) -> bool | None:
         """Return checked state for *(row_key, col_key)*.
 
@@ -549,6 +564,7 @@ function(cell, formatterParams, onRendered) {
                 if (
                     rowData._row_key !== "All" &&
                     rowData["__valid_" + field] === true &&
+                    rowData["__nan_" + field] !== true &&
                     rowData[field] !== true
                 ) {
                     targetValue = true;
@@ -562,7 +578,8 @@ function(cell, formatterParams, onRendered) {
 
                 if (
                     rowData._row_key === "All" ||
-                    rowData["__valid_" + field] !== true
+                    rowData["__valid_" + field] !== true ||
+                    rowData["__nan_" + field] === true
                 ) {
                     continue;
                 }
@@ -582,6 +599,21 @@ function(cell, formatterParams, onRendered) {
     }
 
     const value = cell.getValue();
+
+    // All-NaN cells: gray background, no interaction.
+    if (value === "__nan_true" || value === "__nan_false") {
+        const element = document.createElement("span");
+        element.innerHTML = value === "__nan_true" ? "&#10003;" : "&#10007;";
+        element.style.color = "#64748b";
+        element.style.opacity = "0.5";
+        element.style.display = "flex";
+        element.style.alignItems = "center";
+        element.style.justifyContent = "center";
+        element.style.width = "100%";
+        element.style.height = "100%";
+        cell.getElement().style.background = "#374151";
+        return element;
+    }
 
     // Invalid cells remain empty and non-clickable.
     if (value !== true && value !== false) {
@@ -667,6 +699,7 @@ function(cell, formatterParams, onRendered) {
                 for (const field of selectionFields) {
                     if (
                         rowData["__valid_" + field] === true &&
+                        rowData["__nan_" + field] !== true &&
                         rowData[field] !== true
                     ) {
                         targetValue = true;
@@ -683,7 +716,7 @@ function(cell, formatterParams, onRendered) {
                 }
 
                 for (const field of selectionFields) {
-                    if (rowData["__valid_" + field] !== true) {
+                    if (rowData["__valid_" + field] !== true || rowData["__nan_" + field] === true) {
                         continue;
                     }
 
@@ -707,6 +740,7 @@ function(cell, formatterParams, onRendered) {
         for (const field of selectionFields) {
             if (
                 clickedData["__valid_" + field] === true &&
+                clickedData["__nan_" + field] !== true &&
                 clickedData[field] !== true
             ) {
                 targetValue = true;
@@ -715,7 +749,7 @@ function(cell, formatterParams, onRendered) {
         }
 
         for (const field of selectionFields) {
-            if (clickedData["__valid_" + field] !== true) {
+            if (clickedData["__valid_" + field] !== true || clickedData["__nan_" + field] === true) {
                 continue;
             }
 
@@ -740,7 +774,7 @@ def _hidden_columns(df: pd.DataFrame, row_dim: str) -> list[str]:
     hidden = [
         c
         for c in df.columns
-        if c.startswith("__valid_") or c in ("entity_index", "_row_key")
+        if c.startswith("__valid_") or c.startswith("__nan_") or c in ("entity_index", "_row_key")
     ]
     if row_dim != "entity":
         hidden.append("_actions")
@@ -810,6 +844,7 @@ def build_assignment_matrix(
             col_s = str(col_key)
             header_row[col_s] = None
             header_row[f"__valid_{col_s}"] = False
+            header_row[f"__nan_{col_s}"] = False
         rows.append(header_row)
 
         for row_key in row_keys:
@@ -826,11 +861,20 @@ def build_assignment_matrix(
                 valid = selection_state.is_valid(row_key, col_key)
                 if valid:
                     checked = selection_state.is_checked(row_key, col_key)
-                    row[col_s] = bool(checked)
+                    if row_dim == "entity":
+                        is_nan = selection_state.site_depth_all_nan(str(row_key), col_key)
+                    else:
+                        is_nan = selection_state.site_depth_all_nan(str(col_key), row_key)
+                    if is_nan:
+                        row[col_s] = "__nan_true" if checked else "__nan_false"
+                    else:
+                        row[col_s] = bool(checked)
                     row[f"__valid_{col_s}"] = True
+                    row[f"__nan_{col_s}"] = is_nan
                 else:
                     row[col_s] = None
                     row[f"__valid_{col_s}"] = False
+                    row[f"__nan_{col_s}"] = False
             rows.append(row)
 
         df = pd.DataFrame(rows)
@@ -840,7 +884,7 @@ def build_assignment_matrix(
         editors: dict = {
             "_row_label": None,
             "_actions": None,
-            **{col: {"type": "tickCross"} for col in selection_cols},
+            **{col: {"type": "tickCross", "showList": False} for col in selection_cols},
         }
 
         formatters: dict = {

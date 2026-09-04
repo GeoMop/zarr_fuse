@@ -27,15 +27,15 @@ class TestMatrixShape:
             state, "entity", "vertical"
         )
         assert len(df) == 3  # header row + 2 sites
-        # 1 label col (_row_label) + 1 raw key (_row_key) + 2 internal + 3 depth + 3 hidden valid = 10
-        assert df.shape[1] == 10
+        # 1 label col (_row_label) + 1 raw key (_row_key) + 2 internal + 3 depth + 3 hidden valid + 3 hidden nan = 13
+        assert df.shape[1] == 13
 
     def test_vertical_rows_entity_cols(self):
         state = _two_site_state()
         df, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
         assert len(df) == 4  # header row + 3 unique depths
-        # 1 label col (_row_label) + 1 raw key (_row_key) + 2 internal + 2 site + 2 hidden valid = 8
-        assert df.shape[1] == 8
+        # 1 label col (_row_label) + 1 raw key (_row_key) + 2 internal + 2 site + 2 hidden valid + 2 hidden nan = 10
+        assert df.shape[1] == 10
 
 
 class TestDataFrameContent:
@@ -89,7 +89,7 @@ class TestEditors:
         state = _two_site_state()
         _, editors, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         for col in ["0.0", "1.0", "2.0"]:
-            assert editors[col] == {"type": "tickCross"}
+            assert editors[col] == {"type": "tickCross", "showList": False}
 
 
 class TestFormatters:
