@@ -263,7 +263,7 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
         if dim not in nearest_coords
     }
 
-    ds_interpolated = ds_sorted.interp(
+    ds_nearest = ds_sorted.interp(
             nearest_coords,
             method='nearest',
             assume_sorted=True
@@ -272,16 +272,16 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
-            ds_linear = ds_interpolated.interp(
+            ds_interpolated = ds_nearest.interp(
                 linear_coords,
                 method='linear',
                 assume_sorted=True
             )
-    except RuntimeWarning as exc:
+    except RuntimeWarning:
         log.warning(
             InterpolationFallbackWarning(linear_coords)
         )
-        ds_interpolated = ds_sorted.interp(
+        ds_interpolated = ds_nearest.interp(
             linear_coords,
             method='nearest',
             assume_sorted=True

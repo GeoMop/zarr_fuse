@@ -329,6 +329,7 @@ def test_update_sorted_merge_step(smart_tmp_path):
 
 
 def test_merge_ds_unsorted(smart_tmp_path):
+    """Sparse updates must not replace an omitted existing value with NaN."""
     store_path = smart_tmp_path / "sparse_borehole_region.zarr"
     shutil.rmtree(store_path, ignore_errors=True)
     schema_dict = {
@@ -379,6 +380,12 @@ def test_merge_ds_unsorted(smart_tmp_path):
         "borehole": ["A", "C"],
         "temp": [20.0, 22.0],
     }))
+
+    reopened = zf.open_store(schema_dict).dataset
+    np.testing.assert_array_equal(
+        reopened["temperature"].sel(date_time="1970-01-01").values,
+        np.array([20.0, 11.0, 22.0]),
+    )
 
 
 def test_merge_ds_skips_empty_cartesian_extension(smart_tmp_path):
