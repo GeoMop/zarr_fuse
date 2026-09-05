@@ -1,7 +1,18 @@
 # Zarr-Fuse motivation and concepts
 
+Zarr-fuse aims to be an open platform to collect, manage, store and publish multidimansional data under FAIR principles.
+
+Based on the icechunk + xarray + dask + zarr/hdf5/CFD.net + S3 combo, zarr-fuse provides a ready to use 
+platform for multidimensional data store providing:
+
+- YAML based schema by both machines and humans
+- data updates verified against the schema
+- easy to deploy dashboard for reviewing the data collection and 
+- an ingress server for continuous data collection and transformation  
+
 ## Rationale
-Goal is to collect various physical quantities data for stochastic modelling
+
+Goal is to collect variou physical quantities data for stochastic modelling
 and training neural network models.
 
 

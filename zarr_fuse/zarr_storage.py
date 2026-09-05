@@ -919,9 +919,6 @@ class Node:
         if ds_existing.attrs.get('__empty__', False):
             ds_update.attrs.pop('__empty__', None)
             return self.write_ds(ds_update, mode="a"), {}
-        if ds_existing.attrs.get('__empty__', False):
-            ds_update.attrs.pop('__empty__', None)
-            return self.write_ds(ds_update, mode="a"), {}
 
         ds_update, split_indices = interpolate_ds(
             ds_update,
