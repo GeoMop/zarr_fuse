@@ -477,6 +477,7 @@ def test_update_from_ds_schema():
 
     class DummyNode:
         _validate_ds_against_schema = zf.Node._validate_ds_against_schema
+        _merge_and_check_coords = zf.Node._merge_and_check_coords
         update_from_ds = zf.Node.update_from_ds
 
         def __init__(self, ds_schema):

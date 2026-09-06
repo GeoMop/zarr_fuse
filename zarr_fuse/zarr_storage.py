@@ -649,6 +649,14 @@ class Node:
         """
         pass
 
+    def _merge_and_check_coords(self, ds: xr.Dataset) -> xr.Dataset:
+        """Merge an update and report duplicate coordinates in the stored dataset."""
+        written_ds, _ = self.merge_ds(ds)
+        duplicate_coords = check_unique_coords(written_ds, self.logger)
+        if duplicate_coords:
+            self.logger.error(duplicate_coords)
+        return written_ds
+
     def update(self, polars_df):
         """
         Atomically update this node's dataset using a Polars DataFrame.
@@ -671,12 +679,7 @@ class Node:
             if (ds[k] != ds[k]).any():
                 raise ValueError(f"Coordinate '{k}' contains NaN/NaT values, which are not allowed.")
 
-        written_ds, merged_coords = self.merge_ds(ds)
-        # check unique coordsregion="auto",
-        dup_dict = check_unique_coords(written_ds, self.logger)
-        if  dup_dict:
-            self.logger.error(dup_dict)
-        #return written_ds
+        self._merge_and_check_coords(ds)
 
     def update_dense(self, vars):
         # TODO:
@@ -689,12 +692,7 @@ class Node:
         #         vars[coord_name] = self.dataset[coord_name].values()
 
         ds = dataset_from_np(self.schema, vars)
-        written_ds, merged_coords = self.merge_ds(ds)
-        # check unique coordsregion="auto",
-        dup_dict = check_unique_coords(written_ds, self.logger)
-        if dup_dict:
-            self.logger.error(dup_dict)
-        #return written_ds
+        self._merge_and_check_coords(ds)
 
     def _validate_ds_against_schema(self, ds: xr.Dataset):
         """
@@ -782,15 +780,7 @@ class Node:
         # Validate compatibility with the current node schema
         self._validate_ds_against_schema(ds)
 
-        # Merge/write to the store using existing logic
-        written_ds, merged_coords = self.merge_ds(ds)
-
-        # Optional: still check for duplicated coordinates and log them
-        dup_dict = check_unique_coords(written_ds, self.logger)
-        if dup_dict:
-            self.logger.error(dup_dict)
-
-        return written_ds
+        return self._merge_and_check_coords(ds)
 
 
     def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode

@@ -222,7 +222,6 @@ class IntervalRange(Interval):
 
     def decode(self, codes: np.ndarray) -> np.ndarray:
         # codes_to_labels has NaN at index 0; shift codes by +1 and index
-        c = np.asarray(codes, dtype=np.int64)
         return codes
 
 
