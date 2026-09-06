@@ -465,6 +465,34 @@ def test_interpolate_ds_unsorted_singleton_dim():
     assert ds_int["data"].shape == (2, 1)
 
 
+def test_interpolate_ds_returns_linear_interpolation_result():
+    """The successful linear pass must provide the returned data values."""
+    existing_ds = xr.Dataset(
+        {"data": ("x", np.array([10.0, 11.0, 12.0]))},
+        coords={"x": np.array([0.0, 1.0, 2.0])},
+    )
+    update_ds = xr.Dataset(
+        {"data": ("x", np.array([20.0, 24.0]))},
+        coords={"x": np.array([0.0, 2.0])},
+    )
+    schema = {
+        "x": zf_schema.Coord(_ctx({
+            "name": "x",
+            "unit": "h",
+            "sorted": True,
+            "step_limits": [],
+        })),
+    }
+
+    interpolated, splits = interpolate_ds(update_ds, existing_ds, schema)
+
+    assert dict(splits) == {"x": 3}
+    np.testing.assert_array_equal(
+        interpolated["data"].values,
+        np.array([20.0, 22.0, 24.0]),
+    )
+
+
 def test_interpolate_ds_preserves_empty_target_coord():
     existing_ds = xr.Dataset(
         {"data": (("x", "p"), np.array([[10.0, 11.0], [20.0, 21.0]]))},

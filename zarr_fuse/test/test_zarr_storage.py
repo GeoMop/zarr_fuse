@@ -329,6 +329,7 @@ def test_update_sorted_merge_step(smart_tmp_path):
 
 
 def test_merge_ds_unsorted(smart_tmp_path):
+    """Sparse updates must not replace an omitted existing value with NaN."""
     store_path = smart_tmp_path / "sparse_borehole_region.zarr"
     shutil.rmtree(store_path, ignore_errors=True)
     schema_dict = {
@@ -379,6 +380,50 @@ def test_merge_ds_unsorted(smart_tmp_path):
         "borehole": ["A", "C"],
         "temp": [20.0, 22.0],
     }))
+
+    reopened = zf.open_store(schema_dict).dataset
+    np.testing.assert_array_equal(
+        reopened["temperature"].sel(date_time="1970-01-01").values,
+        np.array([20.0, 11.0, 22.0]),
+    )
+
+
+def test_write_ds_partial_chunk_update(smart_tmp_path):
+    """Node.write_ds must overwrite a region smaller than its Zarr chunk."""
+    store_path = smart_tmp_path / "partial_chunk_update.zarr"
+    shutil.rmtree(store_path, ignore_errors=True)
+    schema_dict = {
+        "VARS": {
+            "data": {
+                "unit": "degC",
+                "coords": ["x"],
+            },
+        },
+        "COORDS": {
+            "x": {
+                "unit": "h",
+                "chunk_size": 2,
+            },
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
+
+    node = zf.open_store(schema_dict)
+    node.write_ds(xr.Dataset(
+        {"data": ("x", np.array([10.0, 11.0]))},
+        coords={"x": np.array([0.0, 1.0])},
+    ), mode="a")
+
+    node = zf.open_store(schema_dict)
+    node.write_ds(xr.Dataset(
+        {"data": ("x", np.array([12.0]))},
+        coords={"x": np.array([1.0])},
+    ), mode="r+", region="auto")
+
+    reopened = zf.open_store(schema_dict).dataset
+    np.testing.assert_array_equal(reopened["data"].values, np.array([10.0, 12.0]))
 
 
 def test_merge_ds_skips_empty_cartesian_extension(smart_tmp_path):

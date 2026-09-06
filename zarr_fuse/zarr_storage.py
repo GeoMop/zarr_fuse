@@ -919,9 +919,6 @@ class Node:
         if ds_existing.attrs.get('__empty__', False):
             ds_update.attrs.pop('__empty__', None)
             return self.write_ds(ds_update, mode="a"), {}
-        if ds_existing.attrs.get('__empty__', False):
-            ds_update.attrs.pop('__empty__', None)
-            return self.write_ds(ds_update, mode="a"), {}
 
         ds_update, split_indices = interpolate_ds(
             ds_update,
@@ -939,6 +936,7 @@ class Node:
         # in every dimension in dims_order. Write these (overlapping) data using region="auto".
         update_overlap_size = np.prod(list(ds_overlap.sizes.values()))
         if update_overlap_size > 0:
+            ds_overlap = ds_overlap.fillna(ds_existing).compute()
             last_written_ds = self.write_ds(ds_overlap, mode="r+", region="auto")
 
         # --- Phase 2: Upward (process extension subsets in reverse order) ---
