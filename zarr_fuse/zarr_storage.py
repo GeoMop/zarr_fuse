@@ -1289,60 +1289,6 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
 
     TODO: Review and simplify for clearly separated vars and coords.
     """
-    # # 1. DF -> dict of 1d arrays,
-    # data_vars = {
-    #     k: get_df_col(df, var, logger)
-    #     for k, var in schema.VARS.items()
-    # }
-    # # 2. apply hash of tuple coords, input Dict: ds_name : [df_cols]
-    # for k, c in schema.COORDS.items():
-    #
-    #     if (c.composed is not None) and (len(c.composed) > 1):
-    #         # hash tuple coords
-    #         tuple_list = zip( *(data_vars[c] for c in c.composed) )
-    #         hash_list = [hash(tuple(t)) for t in tuple_list]
-    #         data_vars[k] = np.array(hash_list, dtype=np.int64)
-    #         #print("Composed coord:", k)
-    #         #print(data_vars[k])
-    #
-    #     else:
-    #         # mix vars and coord to be backward compatible with remaining code
-    #         col = get_df_col(df, c, logger)
-    #         data_vars[k] = col
-    #         #print("1D coord:", k)
-    #         #print(data_vars[k])
-    #
-    # # 3. Extract coords
-    # idx_list = []
-    # coords_dict = {}
-    # dims = list(schema.COORDS.keys())
-    # # Loop over each dimension in the original dataset.
-    # valid_rows = np.ones_like(len(df), dtype=bool)
-    # for d in dims:
-    #     # Get the name(s) of the column(s) in df corresponding to this dimension.
-    #     df_coord_array = data_vars[d]
-    #     # Get the coordinate values from the dataset (assumed to be in desired order).
-    #     #print(d)
-    #     #print(df_coord_array)
-    #     coords = np.unique(df_coord_array)
-    #     coords = coords[schema.COORDS[d].valid_mask(coords)]
-    #     coords = np.sort(coords)
-    #     # TODO: filter rows with NA coords first; follow with refactoring pivot_nd into distinguished steps
-    #     # preparation to separation into tasks
-    #     # In order to avoid special hash returning NA for composed coords with on NA value
-    #
-    #     coords_dict[d] = coords  # will be used as the coordinate values for this dim.
-    #     #coord_sizes[d].append(len(coords))
-    #     # Map each row’s coordinate (from df) to its index in the common_coords.
-    #     # (This works as long as common_coords is sorted. In many cases ds coordinates are already sorted.)
-    #     final_idx = np.searchsorted(coords, df_coord_array)
-    #     valid_rows = valid_rows & (coords[final_idx] == df_coord_array)
-    #     idx_list.append(final_idx)
-    # coord_sizes = [len(coords_dict[d]) for d in dims]
-    # # multiindex for each df row, but flattend, so it actually index result_nd_array.flat[..]
-    # df_multi_idx = np.ravel_multi_index([idx[valid_rows] for idx in idx_list], dims=coord_sizes)  #
-    # coords_dict = Node._create_coords(schema.COORDS, coords_dict)
-
     df_multi_idx, coords_dict, var_data = coerce_df(schema, df, logger)
     coord_sizes = {c: len(v) for c, v in coords_dict.items()}
 
@@ -1385,47 +1331,3 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     attrs['__structure__'] = zarr_schema.serialize(schema)
     ds_out = xr.Dataset(data_vars=data_vars, coords=coords_dict, attrs=attrs)
     return ds_out
-
-#
-#
-# def read(zarr_path: Path, time_stamp_slice, locations):
-#     """
-#     Read a subset of the data for a given time slice and a list of locations.
-#
-#     - time_stamp_slice: a tuple (start, end)
-#     - locations: list of location codes.
-#
-#     Returns a Polars DataFrame with columns: time_stamp, location, and each data variable.
-#     For each (time_stamp, location) pair in the slice, the stored value is returned.
-#     """
-#     ds = xr.open_zarr(str(zarr_path), chunks=None)
-#     time_col = "time_stamp"
-#     loc_col = "location"
-#
-#     time_coords = ds.coords[time_col].values
-#     start, end = time_stamp_slice
-#     mask = (time_coords >= start) & (time_coords <= end)
-#     sel_time_idx = np.where(mask)[0]
-#     sel_times = time_coords[sel_time_idx]
-#
-#     # Get the location map and select the slots corresponding to requested locations.
-#     loc_map = json.loads(ds.attrs.get("location_map", "{}"))
-#     selected_locs = {loc: loc_map[str(loc)] for loc in locations if str(loc) in loc_map}
-#
-#     data_cols = [col for col in ds.data_vars if col not in [time_col, loc_col]]
-#     out_time = []
-#     out_loc = []
-#     out_data = {col: [] for col in data_cols}
-#
-#     for t_idx in sel_time_idx:
-#         for loc, slot in selected_locs.items():
-#             out_time.append(time_coords[t_idx])
-#             out_loc.append(loc)
-#             for col in data_cols:
-#                 val = ds[col].values[t_idx, slot]
-#                 out_data[col].append(val)
-#     ds.close()
-#
-#     data_dict = {time_col: out_time, loc_col: out_loc}
-#     data_dict.update(out_data)
-#     return pl.DataFrame(data_dict)
