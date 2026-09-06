@@ -388,6 +388,44 @@ def test_merge_ds_unsorted(smart_tmp_path):
     )
 
 
+def test_write_ds_partial_chunk_update(smart_tmp_path):
+    """Node.write_ds must overwrite a region smaller than its Zarr chunk."""
+    store_path = smart_tmp_path / "partial_chunk_update.zarr"
+    shutil.rmtree(store_path, ignore_errors=True)
+    schema_dict = {
+        "VARS": {
+            "data": {
+                "unit": "degC",
+                "coords": ["x"],
+            },
+        },
+        "COORDS": {
+            "x": {
+                "unit": "h",
+                "chunk_size": 2,
+            },
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
+
+    node = zf.open_store(schema_dict)
+    node.write_ds(xr.Dataset(
+        {"data": ("x", np.array([10.0, 11.0]))},
+        coords={"x": np.array([0.0, 1.0])},
+    ), mode="a")
+
+    node = zf.open_store(schema_dict)
+    node.write_ds(xr.Dataset(
+        {"data": ("x", np.array([12.0]))},
+        coords={"x": np.array([1.0])},
+    ), mode="r+", region="auto")
+
+    reopened = zf.open_store(schema_dict).dataset
+    np.testing.assert_array_equal(reopened["data"].values, np.array([10.0, 12.0]))
+
+
 def test_merge_ds_skips_empty_cartesian_extension(smart_tmp_path):
     store_path = smart_tmp_path / "empty_cartesian_extension.zarr"
     shutil.rmtree(store_path, ignore_errors=True)
