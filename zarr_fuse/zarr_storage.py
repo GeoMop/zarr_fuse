@@ -917,7 +917,9 @@ class Node:
 
         ds_extend_dict = {}
         ds_overlap = ds_update.copy()
-        dims_order = tuple(ds_update.coords.keys())
+        # Reconstruct the partition in the same order used to create it. Xarray
+        # may reorder dataset coordinates during interpolation.
+        dims_order = tuple(dim for dim, _ in split_indices)
         for dim, idx in split_indices:
             ds_extend_dict[dim] = ds_overlap.isel({dim: slice(idx, None)})
             ds_overlap = ds_overlap.isel({dim: slice(0, idx)})
@@ -950,6 +952,7 @@ class Node:
             indexers = {d: merged_coords[d] for d in dim_coord.dims if d != dim}
             na_value = ds_update.attrs.get('na_value', np.nan)
             ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=na_value)
+            ds_ext_reindexed = ds_ext_reindexed.fillna(ds_existing).compute()
 
             # Append the extension subset along the current dimension.
             last_written_ds = self.write_ds(ds_ext_reindexed, mode="a", append_dim=dim)
