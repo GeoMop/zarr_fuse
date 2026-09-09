@@ -1,9 +1,9 @@
-FROM docker.io/library/python:3.11-slim-bullseye
+FROM docker.io/library/python:3.11-slim-bookworm
 
 ARG APP_VERSION="devel"
 
 ARG zarr_fuse_branch="main"
-ARG git_version="1:2.30.2-1+deb11u5"
+ARG git_version="1:2.39.*"
 ARG waitress_version="3.0.2"
 
 LABEL org.opencontainers.image.title="ZarrFuse Ingress (Backend-only)"
