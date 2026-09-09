@@ -28,12 +28,24 @@ pn.extension(
     theme="dark",
     sizing_mode="stretch_width",
 )
+pn.config.reconnect = True
+pn.config.notifications = True
 hv.extension("bokeh")
 hv.renderer("bokeh").theme = "dark_minimal"
 
 
 def build_dashboard():
     start_total = time.perf_counter()
+
+    session_ctx = pn.state.curdoc.session_context if pn.state.curdoc and pn.state.curdoc.session_context else None
+    session_id = session_ctx.id if session_ctx else "no-session"
+    print(f"[session] build_dashboard started session_id={session_id}")
+
+    def _on_session_destroyed(session_context):
+        sid = session_context.id if session_context is not None else session_id
+        print(f"[session] session destroyed session_id={sid}")
+
+    pn.state.on_session_destroyed(_on_session_destroyed)
 
     views_path = find_view_file()
     print(f"Using views config: {views_path}")
