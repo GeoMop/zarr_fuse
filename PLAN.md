@@ -905,3 +905,58 @@ Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
   absent XYZ tile. The overlay still renders only up to z10 and the dashboard
   cache previously requested z11-15 - raising max_zoom is still an open user
   decision if the overlay must show at normal dashboard zoom.
+- 2026-09-10 (overlay quality): Resampling was only applied to the gdalwarp
+  step; `step_generate_tiles` passed no `-r`, so gdal2tiles used its hardcoded
+  `near` on every pyramid level. Quality plan (user approved) implemented:
+  (1) `step_generate_tiles` now takes the resolved `resampling` and passes
+  `-r <resampling>` to gdal2tiles; main() threads it through. (2) Test config
+  `app/databuk/config/zf_view.yaml`: `resampling: "cubic"` and `max_zoom: 15`
+  (source 360x360 over ~1.4x2.2 km -> native ~1:1 around z14-15 at lat
+  50.08, covering the dashboard's z14-15 request range). (3) Production default
+  `max_zoom: 20` in `dashboard/config.py` is intentionally unchanged for non-
+  test uploads. Verification limited to tests by user request (no S3/real run):
+  py_compile OK, dashboard suite 129 passed / 1 skipped, lines <=120.
+  NEXT (user takes over): from dashboard/scripts in gdal-test env run
+  `python build_overlay_tiles.py --delete --yes` then `python
+  build_overlay_tiles.py` to rebuild/upload the z2-15 cubic pyramid, then check
+  the overlay at z14-15 in the dashboard.
+- 2026-09-10 (real overlay): Switched the test view from the synthetic
+  360x360 source to the real delivery: `12p_final.png` (7085x13938, 300 DPI,
+  P-mode scan, ~99 Mpx) georeferenced with 3 QGIS control points
+  (`bukov_georef.json`, WGS84/EPSG:4326; duplicate copies `bukov_georef2.json`
+  GeoJSON + `12p_final.png.points` carry the same points). Footprint across
+  the 3 GCPs: ~16.220-16.229E / 49.458-49.481N (Brno region, matching the real
+  bukov site data - the earlier Prague placement was just the test source).
+  `build_gcp_args` already flips the QGIS negative-sourceY convention via
+  `abs()` (pixel_y -> 11806.9/8412.7/299.1, all inside the 13938 rows), so no
+  script change was needed; only config. Deployed edits in `zf_view.yaml`:
+  `source_image`/`georef_file` -> the real files, `max_zoom: 20` (user's
+  non-test rule; native detail is ~z19 so z20 oversamples 2x),
+  `resampling: "cubic"` (unchanged), S3 `prefix: "overlays/bukov/"` (same test
+  bucket/endpoint), and `overlay.source_uri` updated to match. Expected volume
+  flagged to user: ~5-7k tiles at full res. Georef residuals are large
+  (341-760 px ~ 75-170 m) so some alignment error is possible - flagged.
+  Verified (tests only, no S3/build per user boundary): config parse prints
+  real source/20/cubic/overlays-bukov, loader produces 3 in-range GCPs,
+  py_compile OK, suite 129 passed / 1 skipped, lines <=120. Real build/upload
+  left to the user: `python build_overlay_tiles.py` in dashboard/scripts.
+- 2026-09-10 (real overlay, line-art readability): User reports numbers/small
+  notes on the zoomed-in overlay lose pixels ("missing pixels"). Cause: single
+  `resampling` knob fed `cubic` into both gdalwarp and gdal2tiles; cubic (and
+  lanczos) smear thin strokes over semi-transparent background - right for
+  photos, wrong for scanned line art. Implemented separate resampling knobs
+  (Option 2, user approved): new `TileBuildConfig.tile_resampling`
+  (`dashboard/config.py`, parsed from `tile_build.tile_resampling`);
+  `build_overlay_tiles.py` resolves `tile_resampling = tile_build.
+  tile_resampling or resampling` (no CLI flag), passes it to
+  `step_generate_tiles`, header prints both values. `zf_view.yaml`: warp
+  `resampling: "near"` (preserves every stroke through the geometric warp) +
+  `tile_resampling: "average"` (downsampling merges ink density). Kept
+  `max_zoom: 20` - E-W native detail is ~z19.6-z20 (7085 px / 0.63 km ->
+  0.089 m/px) while N-S is z19 (13938 px / 2.6 km -> 0.187 m/px), so dropping
+  to 19 would halve horizontal detail; z20 with near now carries real pixels
+  (cubic previously made the extra zoom meaningless). Verified tests only:
+  py_compile, config parse (near/average), suite 129/1, lines <=120.
+  NEXT: user rebuilds (`python build_overlay_tiles.py`), A/B zoom on numbers;
+  fallback ladder: tiles->near; if the source lacks pixels at 100% add a
+  stroke-contrast/alpha-threshold post-step.

@@ -329,7 +329,8 @@ def step_expand_rgba(tif_path: Path, rgba_vrt_path: Path,
 
 
 def step_generate_tiles(rgba_vrt_path: Path, tiles_dir: Path,
-                        min_zoom: int, max_zoom: int, force: bool, dry_run: bool) -> bool:
+                        min_zoom: int, max_zoom: int, resampling: str,
+                        force: bool, dry_run: bool) -> bool:
     """Step 4: generate the XYZ tile pyramid. Returns True if run."""
     if tiles_dir.exists() and not force:
         print(f"[5/6] skip tile generation (exists): {tiles_dir}")
@@ -337,11 +338,12 @@ def step_generate_tiles(rgba_vrt_path: Path, tiles_dir: Path,
     cmd = [
         *_resolve_gdal2tiles_cmd(dry_run),
         "--xyz",
+        "-r", resampling,
         "-z", f"{min_zoom}-{max_zoom}",
         str(rgba_vrt_path),
         str(tiles_dir),
     ]
-    print(f"[5/6] XYZ tiles zoom {min_zoom}-{max_zoom}")
+    print(f"[5/6] XYZ tiles zoom {min_zoom}-{max_zoom} ({resampling})")
     _run(cmd, dry_run)
     return True
 
@@ -654,6 +656,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     gcp_srs, gcp_srs_src = _resolve_param(args.gcp_srs, tile_build.gcp_srs, None)
     target_srs, target_srs_src = _resolve_param(args.target_srs, tile_build.target_srs, None)
     resampling, resampling_src = _resolve_param(args.resampling, tile_build.resampling, None)
+    tile_resampling = tile_build.tile_resampling or resampling
 
     assert image_path is not None and georef_path is not None
     if not image_path.is_file():
@@ -671,6 +674,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     print(f"gcp_srs        : {gcp_srs} ({gcp_srs_src})")
     print(f"target_srs     : {target_srs} ({target_srs_src})")
     print(f"resampling     : {resampling} ({resampling_src})")
+    print(f"tile resampl.  : {tile_resampling} (config or warp resampling)")
     if bucket is not None or prefix is not None:
         s3_desc = f"{bucket or '(unset)'}/{(prefix or '').strip('/')}"
         s3_src = "flag" if args.bucket is not None or args.prefix is not None else bucket_src
@@ -726,7 +730,7 @@ def main(argv: Optional[list[str]] = None) -> None:
     if step_expand_rgba(tif_path, rgba_vrt_path, args.force, args.dry_run):
         executed.append("rgba")
     if step_generate_tiles(rgba_vrt_path, tiles_dir, int(min_zoom), int(max_zoom),
-                           args.force, args.dry_run):
+                           tile_resampling, args.force, args.dry_run):
         executed.append("tiles")
 
     assert tiles_dir is not None

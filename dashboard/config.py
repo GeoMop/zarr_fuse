@@ -110,6 +110,7 @@ class TileBuildConfig:
     target_srs: str = "EPSG:3857"
     gcp_srs: str = "EPSG:4326"
     resampling: str = "near"
+    tile_resampling: Optional[str] = None
     s3: TileS3Config = field(default_factory=TileS3Config)
 
 
@@ -597,6 +598,7 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
             target_srs=tile_build_data.get("target_srs", "EPSG:3857"),
             gcp_srs=tile_build_data.get("gcp_srs", "EPSG:4326"),
             resampling=tile_build_data.get("resampling", "near"),
+            tile_resampling=tile_build_data.get("tile_resampling"),
             s3=_build_tile_s3_config(tile_build_data.get("s3")),
         ),
     )
