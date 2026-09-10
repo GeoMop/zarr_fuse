@@ -3,6 +3,7 @@ import time
 import json
 import tempfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import boto3
 from tornado.web import RequestHandler, HTTPError
@@ -28,6 +29,42 @@ _VIEW_NAME = os.getenv("HV_DASHBOARD_VIEW") or os.getenv("HV_DASHBOARD_ENDPOINT"
 if _VIEW_NAME is None and VIEWS_PATH is not None:
     _VIEW_NAME = get_default_endpoint_name(VIEWS_PATH)
 
+
+def _overlay_source_from_view() -> tuple[str, str] | None:
+    """Resolve (bucket, prefix) from the view's overlay source_uri.
+
+    Returns ``None`` when the uri is missing, malformed, or not an ``s3://``
+    URI. When present it takes full precedence over TILE_BUCKET/TILE_PREFIX.
+    """
+    if not _VIEW_NAME or VIEWS_PATH is None:
+        return None
+    if not VIEWS_PATH.exists():
+        return None
+
+    try:
+        from dashboard.config import _parse_view_config
+        config = _parse_view_config(VIEWS_PATH)
+        view = config.get(_VIEW_NAME)
+    except Exception:
+        return None
+
+    if not isinstance(view, dict):
+        return None
+
+    visualization = view.get("visualization", {})
+    overlay = visualization.get("overlay", {}) if isinstance(visualization, dict) else {}
+    uri = overlay.get("source_uri") if isinstance(overlay, dict) else None
+    if not isinstance(uri, str) or not uri.strip():
+        return None
+
+    parsed = urlparse(uri.strip())
+    if parsed.scheme != "s3" or not parsed.netloc:
+        return None
+
+    bucket = parsed.netloc
+    prefix = parsed.path.strip("/")
+    return bucket, (prefix + "/" if prefix else "")
+
 OVERLAY_ENABLED = (
     overlay_enabled(VIEWS_PATH, _VIEW_NAME)
     if VIEWS_PATH is not None
@@ -36,6 +73,12 @@ OVERLAY_ENABLED = (
 
 if OVERLAY_ENABLED:
     ENDPOINT_URL = schema_endpoint_url(VIEWS_PATH, _VIEW_NAME)
+
+    # visualization.overlay.source_uri governs the tile location when set;
+    # otherwise fall back to TILE_BUCKET/TILE_PREFIX or the defaults above.
+    source = _overlay_source_from_view()
+    if source:
+        BUCKET_NAME, PREFIX = source
 
     def _cache_dir_from_view() -> str | None:
         if not _VIEW_NAME or VIEWS_PATH is None:

@@ -88,6 +88,7 @@ class TimeSeriesConfig:
 class OverlayConfig:
     enabled: bool = False
     tile_url: Optional[str] = None
+    source_uri: Optional[str] = None
 
 
 @dataclass
@@ -581,6 +582,7 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
             overlay=OverlayConfig(
                 enabled=overlay_data["enabled"],
                 tile_url=overlay_data.get("tile_url"),
+                source_uri=overlay_data.get("source_uri"),
             ),
         ),
         tile_build=TileBuildConfig(

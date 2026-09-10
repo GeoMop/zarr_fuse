@@ -52,13 +52,30 @@ Local pipeline:
 
 Steps whose outputs already exist locally are skipped unless ``--force`` is
 given, so an interrupted run can resume. Upload compares object sizes and
-transfers only changed files.
+transfers only changed files. After a successful upload the locally generated
+intermediates (VRTs, the warped GeoTIFF, and the tile tree) are removed so the
+workspace stays clean; the source inputs are never deleted. ``--no-cleanup``
+keeps the generated files for inspection.
 
 The preprocessing requires GDAL command line tools on PATH (gdal_translate,
 gdalwarp) and a working gdal2tiles (preferred: python module ``osgeo_utils``
 in the current interpreter, fallback: ``gdal2tiles`` executable on PATH).
 Use ``--dry-run`` to preview the planned flow without contacting S3 or
 needing any tool installed.
+
+Delete mode:
+
+``--delete`` removes every object under the same resolved
+``s3://bucket/prefix`` target instead of building/uploading; it reuses the
+same config and credential resolution. ``--delete`` prints the resolved
+target and aborts unless also given ``--yes`` (the only moment neither is
+given is ``--delete --dry-run``, which performs a read-only listing and
+reports how many objects would be removed). Real deletion runs
+``delete_objects`` in batches of 1000 and verifies that no objects remain.
+An empty effective prefix is refused (deleting a bucket root is never
+allowed). ``--force`` and ``--no-cleanup`` are invalid with ``--delete``;
+``--yes`` is invalid without it. Note: ``--delete --dry-run`` is the one
+place the dry-run touches S3, and it is strictly read-only.
 """
 
 from __future__ import annotations
@@ -122,10 +139,20 @@ def _require_tool(tool: str, dry_run: bool = False) -> str:
         return tool
     resolved = shutil.which(tool)
     if resolved is None:
+        scripts_dir = Path(__file__).resolve().parent
+        setup_ps1 = scripts_dir / "setup_gdal_env.ps1"
+        setup_sh = scripts_dir / "setup_gdal_env.sh"
+        build_script = Path(__file__).resolve()
         raise SystemExit(
             f"ERROR: required GDAL tool '{tool}' not found on PATH.\n"
-            "Run this script from an environment with GDAL installed, e.g.:\n"
-            "  conda activate gdal-test"
+            "Run the setup script to install GDAL, then re-run this script:\n"
+            "\n"
+            f"  Windows:  powershell -ExecutionPolicy Bypass -File {setup_ps1}\n"
+            f"  Linux:    bash {setup_sh}\n"
+            "\n"
+            "After setup, close and reopen your terminal, then:\n"
+            "  conda activate gdal-test\n"
+            f"  python {build_script}\n"
         )
     return resolved
 
@@ -194,6 +221,14 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true",
                         help="print the planned flow without contacting S3 or "
                              "executing any command")
+    parser.add_argument("--no-cleanup", action="store_true",
+                        help="keep locally generated intermediates after a "
+                             "successful upload (default: remove them)")
+    parser.add_argument("--delete", action="store_true",
+                        help="delete every object under the configured "
+                             "tile_build.s3 prefix instead of building/uploading")
+    parser.add_argument("--yes", action="store_true",
+                        help="confirm destructive operations; required with --delete")
     return parser.parse_args(argv)
 
 
@@ -417,9 +452,150 @@ def upload_tiles(tiles_dir: Path, s3, bucket: str, prefix: str) -> tuple[int, in
     return uploaded, skipped
 
 
+def _cleanup_local_tiles(vrt_path: Path, tif_path: Path, rgba_vrt_path: Path,
+                         tiles_dir: Path) -> None:
+    """Remove locally generated intermediates after a successful upload.
+
+    The source inputs (image and georef points) are intentionally kept;
+    everything the pipeline produced locally can be regenerated from them.
+    """
+    removed: list[Path] = []
+    for path in (vrt_path, tif_path, rgba_vrt_path):
+        if path.is_file():
+            path.unlink(missing_ok=True)
+            removed.append(path)
+    if tiles_dir.is_dir():
+        shutil.rmtree(tiles_dir)
+        removed.append(tiles_dir)
+    if removed:
+        print("Removed local intermediates: " + ", ".join(str(p) for p in removed))
+    else:
+        print("Removed local intermediates: (none present)")
+
+
+def run_delete(s3, bucket: str, prefix: str, dry_run: bool, yes: bool) -> int:
+    """Delete every object under prefix, or preview the deletion under dry_run.
+
+    Returns the number of objects found (and, unless dry_run, deleted).
+    """
+    from botocore.exceptions import ClientError
+
+    normalized_prefix = prefix.strip("/")
+    keys: list[str] = []
+    try:
+        paginator = s3.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket, Prefix=normalized_prefix):
+            keys.extend(obj["Key"] for obj in page.get("Contents", []))
+    except ClientError as exc:
+        raise SystemExit(
+            f"ERROR: failed to list objects under s3://{bucket}/{normalized_prefix} "
+            f"({exc}). Check credentials and endpoint."
+        )
+
+    if not keys:
+        print(f"No objects found under s3://{bucket}/{normalized_prefix}; nothing to delete.")
+        return 0
+
+    if dry_run:
+        print(f"{len(keys)} objects would be deleted under s3://{bucket}/{normalized_prefix} "
+              "(dry-run, nothing deleted).")
+        return len(keys)
+
+    if not yes:
+        raise SystemExit(
+            f"{len(keys)} objects would be deleted under s3://{bucket}/{normalized_prefix}.\n"
+            "Refusing to delete: pass --yes to confirm."
+        )
+
+    print(f"Deleting {len(keys)} objects under s3://{bucket}/{normalized_prefix} "
+          "in batches of 1000...")
+    deleted = 0
+    for start in range(0, len(keys), 1000):
+        batch = keys[start:start + 1000]
+        response = s3.delete_objects(
+            Bucket=bucket,
+            Delete={"Objects": [{"Key": key} for key in batch], "Quiet": True},
+        )
+        errors = (response or {}).get("Errors", [])
+        if errors:
+            for err in errors:
+                print(f"  ERROR deleting {err.get('Key')}: {err.get('Message')}")
+            raise SystemExit(
+                f"{len(errors)} objects failed to delete under "
+                f"s3://{bucket}/{normalized_prefix}"
+            )
+        deleted += len(batch)
+        print(f"  deleted {deleted}/{len(keys)}")
+
+    left = 0
+    for page in s3.get_paginator("list_objects_v2").paginate(
+        Bucket=bucket, Prefix=normalized_prefix
+    ):
+        left += len(page.get("Contents", []))
+    if left:
+        raise SystemExit(
+            f"ERROR: {left} objects still remain under s3://{bucket}/{normalized_prefix}."
+        )
+    print(f"Verified: 0 objects remain under s3://{bucket}/{normalized_prefix}.")
+    return deleted
+
+
+def _validate_args(args: argparse.Namespace) -> None:
+    """Reject meaningless flag combinations before any resolution happens."""
+    if args.delete and args.force:
+        raise SystemExit("ERROR: --force does not apply to --delete "
+                         "(no build steps run).")
+    if args.delete and args.no_cleanup:
+        raise SystemExit("ERROR: --no-cleanup does not apply to --delete "
+                         "(nothing is built locally).")
+    if args.yes and not args.delete:
+        raise SystemExit("ERROR: --yes only applies with --delete.")
+
+
+def _run_delete(args: argparse.Namespace, views_path: Path, views_src: str,
+                view_name: str, bucket: Optional[str], bucket_src: str,
+                prefix: Optional[str], prefix_src: str,
+                endpoint_url: Optional[str]) -> None:
+    """Delete flow: print the target, guard the prefix, then delete."""
+    normalized_prefix = (prefix or "").strip("/")
+    target_desc = f"s3://{bucket or '(unset)'}/{normalized_prefix}"
+    s3_src = "flag" if args.bucket is not None or args.prefix is not None else bucket_src
+    print(f"Views file     : {views_path} ({views_src})")
+    print(f"View           : {view_name}")
+    print(f"s3 target      : {target_desc} ({s3_src})")
+    print(f"endpoint       : {endpoint_url or '(AWS default)'}")
+    print()
+
+    missing_s3 = [
+        name for name, val in (("tile_build.s3.bucket", bucket),
+                               ("tile_build.s3.prefix", prefix)) if not val
+    ]
+    if missing_s3:
+        raise SystemExit(
+            "ERROR: S3 target not configured: set " + " and ".join(missing_s3)
+            + " in zf_view.yaml, or pass --bucket/--prefix."
+        )
+    if not normalized_prefix:
+        raise SystemExit(
+            "ERROR: refusing to delete with an empty prefix: this would target "
+            "the whole bucket. Configure tile_build.s3.prefix or pass --prefix."
+        )
+
+    assert bucket is not None
+    upload_config = resolve_upload_config(endpoint_url)
+    s3 = _s3_client(upload_config)
+    count = run_delete(s3, bucket, normalized_prefix, args.dry_run, args.yes)
+    if args.dry_run:
+        print(f"\nDone. Dry-run: {count} object(s) would be deleted "
+              f"under {target_desc}.")
+    else:
+        print(f"\nDone. Deleted {count} object(s) under {target_desc}.")
+
+
 def main(argv: Optional[list[str]] = None) -> None:
     """Entry point: ensure tiles exist on S3, building and uploading if missing."""
     args = _parse_args(argv)
+    _validate_args(args)
 
     views_path, views_src = _resolve_views_path(args.view_path)
     load_environment_from_config(views_path)
@@ -436,6 +612,15 @@ def main(argv: Optional[list[str]] = None) -> None:
     tile_build = view.tile_build
     base_dir = views_path.parent.parent
 
+    bucket, bucket_src = _resolve_param(args.bucket, tile_build.s3.bucket, None)
+    prefix, prefix_src = _resolve_param(args.prefix, tile_build.s3.prefix, None)
+    endpoint_url = args.endpoint_url or schema_endpoint_url(views_path, view_name)
+
+    if args.delete:
+        _run_delete(args, views_path, views_src, view_name, bucket, bucket_src,
+                    prefix, prefix_src, endpoint_url)
+        return
+
     def _cfg_path(raw: Any) -> Optional[Path]:
         if raw is None:
             return None
@@ -444,8 +629,12 @@ def main(argv: Optional[list[str]] = None) -> None:
             path = base_dir / path
         return path.resolve()
 
-    image_path, image_src = _resolve_param(args.image, _cfg_path(tile_build.source_image), None)
-    georef_path, georef_src = _resolve_param(args.georef, _cfg_path(tile_build.georef_file), None)
+    image_path, image_src = _resolve_param(
+        Path(args.image).expanduser().resolve() if args.image else None,
+        _cfg_path(tile_build.source_image), None)
+    georef_path, georef_src = _resolve_param(
+        Path(args.georef).expanduser().resolve() if args.georef else None,
+        _cfg_path(tile_build.georef_file), None)
     vrt_path = _cfg_path(tile_build.vrt_file)
     tif_path = _cfg_path(tile_build.warped_tif)
     rgba_vrt_path = _cfg_path(tile_build.rgba_vrt)
@@ -456,13 +645,15 @@ def main(argv: Optional[list[str]] = None) -> None:
             "(source_image, georef_file, vrt_file, warped_tif, rgba_vrt, tiles_dir)."
         )
 
+    if not args.dry_run:
+        for out in (vrt_path, tif_path, rgba_vrt_path, tiles_dir):
+            out.parent.mkdir(parents=True, exist_ok=True)
+
     min_zoom, min_zoom_src = _resolve_param(args.min_zoom, tile_build.min_zoom, None)
     max_zoom, max_zoom_src = _resolve_param(args.max_zoom, tile_build.max_zoom, None)
     gcp_srs, gcp_srs_src = _resolve_param(args.gcp_srs, tile_build.gcp_srs, None)
     target_srs, target_srs_src = _resolve_param(args.target_srs, tile_build.target_srs, None)
     resampling, resampling_src = _resolve_param(args.resampling, tile_build.resampling, None)
-    bucket, bucket_src = _resolve_param(args.bucket, tile_build.s3.bucket, None)
-    prefix, prefix_src = _resolve_param(args.prefix, tile_build.s3.prefix, None)
 
     assert image_path is not None and georef_path is not None
     if not image_path.is_file():
@@ -470,8 +661,6 @@ def main(argv: Optional[list[str]] = None) -> None:
     if not georef_path.is_file():
         raise SystemExit(f"ERROR: georef file does not exist: {georef_path}")
     load_georef_points(georef_path)
-
-    endpoint_url = args.endpoint_url or schema_endpoint_url(views_path, view_name)
 
     print(f"Views file     : {views_path} ({views_src})")
     print(f"View           : {view_name}")
@@ -541,6 +730,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         executed.append("tiles")
 
     assert tiles_dir is not None
+    assert vrt_path is not None and tif_path is not None and rgba_vrt_path is not None
 
     if offline:
         tile_count = len(collect_tile_files(tiles_dir)) if tiles_dir.is_dir() else 0
@@ -550,6 +740,10 @@ def main(argv: Optional[list[str]] = None) -> None:
         assert bucket is not None
         uploaded, unchanged = upload_tiles(tiles_dir, s3, str(bucket), normalized_prefix)
         print(f"Tiles uploaded: {uploaded}, unchanged/skipped: {unchanged}")
+        if args.no_cleanup:
+            print("--no-cleanup: keeping locally generated tiles as-is")
+        else:
+            _cleanup_local_tiles(vrt_path, tif_path, rgba_vrt_path, tiles_dir)
 
     print(f"\nDone. Steps run: {executed or 'none (all up to date)'}")
 

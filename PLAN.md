@@ -766,6 +766,142 @@ the generic re-fetch loop from `refresh_views`.
   lat/lon-per-borehole CSV diagnostic (`--latlon`), the hardcoded location-CSV
   paths, the `STORE_URL` constant, and the hardcoded `children["bukov"]` group
   navigation were removed. Credentials stay env-driven (`ZF_S3_*` / `S3_*`).
-  Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
-  (exit 2), and end-to-end scans against a synthetic local store at root and
-  with `--group` navigation.
+Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
+   (exit 2), and end-to-end scans against a synthetic local store at root and
+   with `--group` navigation.
+- 2026-09-09 (overlay builder, user test): Completed a fresh-user test of
+  `build_overlay_tiles.py` end to end: installed Miniconda, created `gdal-test`
+  conda env, installed GDAL (conda-forge) + `pyyaml`/`python-dotenv`/`boto3` via
+  pip, and processed `test_overlay/source.png` (360x360) into 7326 XYZ tiles
+  uploaded to `s3://app-databuk-test-service/test_tiles/_test/`. Re-run
+  confirms the idempotent short-circuit ("already present"). The test found 3
+  setup bugs, all fixed:
+  (1) `setup_gdal_env.ps1` relied on `$ErrorActionPreference="Stop"` which does
+  NOT catch nonzero exits from native commands (`conda`/`pip`), so it printed
+  false "created"/"installed" after real failures; rewrote with `$LASTEXITCODE`
+  checks aborting at the failing step (and `-PassThru` exit-code check after the
+  Miniconda installer).
+  (2) Anaconda 2026 enforces Terms of Service for its `defaults` channels,
+  blocking non-interactive `conda create`/`install`; both setup scripts now
+  reconfigure conda to conda-forge-only channels
+  (`config --remove channels defaults`, `--add channels conda-forge`, `--set
+  channel_priority strict`) before creating the env, so the ToS wall is gone
+  and GDAL is only ever pulled from conda-forge.
+  (3) The missing-GDAL hint referenced `dashboard/scripts/setup_gdal_env.ps1`
+  relative to the repo root, failing when run from inside `dashboard/scripts`;
+  it now prints absolute paths derived from `Path(__file__)` for both setup
+  scripts, plus the absolute path of the build script itself.
+  Verified: `py_compile`, PowerShell parse of the rewritten ps1, dry-run
+  unchanged, missing-GDAL message correct from the repo root and the scripts
+  folder, dashboard suite 129 passed / 1 skipped (`s3_tile_resolver_test.py`
+  ignored).
+  OPEN / REMARKS: (a) the probe reported "Miniconda not found" even though
+  `C:\Users\fatih\miniconda3` existed earlier, and installed a fresh Miniconda
+  there - the exact `Scripts\conda.exe` existence check needs re-confirmation
+  on a machine with a pre-existing conda. (b) The user now has two conda
+  installs (`miniconda3` freshly installed, `miniconda3-new` original with the
+  old `gdal-test` env); a cleanup/consolidation decision is pending. (c) The
+  rewritten `setup_gdal_env.sh` could not be executed on this Windows-only
+  machine (no bash); only syntax-reviewed.
+- 2026-09-09 (overlay builder, follow-up): Per user request, the builder now
+  removes locally generated intermediates automatically after a successful S3
+  upload (`--no-cleanup` keeps them). Added `_cleanup_local_tiles()`; source
+  inputs (image, georef points) are never deleted, only the generated VRTs, the
+  warped GeoTIFF, and the local tile tree.
+- 2026-09-09 (overlay builder, channel fix finished): Verifying the rewritten
+  setup script exposed that the effective conda channel pool still contained
+  `defaults`: conda merges the user `.condarc` with a conda-root `.condarc`
+  (`<condaRoot>\.condarc`, here written by the earlier manual ToS-accept
+  experiment), and the root file kept `[defaults]`. Step [2/6] now patches
+  BOTH files (remove `defaults`, add `conda-forge`, `channel_priority strict`);
+  verified `conda config --show channels` now reports only `- conda-forge`.
+  Also fixed two Windows PowerShell 5.1 traps found while rerunning the script:
+  (a) redirecting a native command's stderr (`2>$null`) under
+  `$ErrorActionPreference="Stop"` turns benign messages into terminating
+  `NativeCommandError`s; the tolerant `--remove` call now toggles the
+  preference around itself, and no other native call redirects stderr -
+  exit-code checking via `Assert-Command` is the real safety net. (b) Running
+  the whole script under a harness `2>&1` reproduces the same terminating
+  behavior even for unredirected child stderr; a plain terminal run is
+  unaffected (the interrupted run output was a harness artifact).
+  Verified: script completes all 6 steps on the real install, steps
+  idempotent, effective channels conda-forge only, dashboard suite 129 passed /
+  1 skipped, `py_compile` OK, line lengths <=120.
+  OPEN / REMARKS: the truly fresh-install path (no existing conda at all) has
+  still not been exercised by the final script; the user machine already had a
+  conda with ToS accepted, so the TOS-wall claim relies on the conda-forge-only
+  channel pool and has not been proven on a virgin machine.
+- 2026-09-10 (overlay builder, S3 test-tile cleanup): Added a ``--delete`` mode
+  to ``build_overlay_tiles.py``: deletes every object under the resolved
+  ``tile_build.s3`` prefix instead of building/uploading, reusing the same
+  config/credential/endpoint resolution. ``--delete`` requires ``--yes``
+  (prints the resolved target and aborts otherwise); ``--delete --dry-run`` is
+  read-only and reports the object count; an empty effective prefix is refused
+  (no bucket-root deletion); ``--force``/``--no-cleanup`` are invalid with
+  ``--delete`` and ``--yes`` without ``--delete`` is an error. Deletion runs
+  ``delete_objects`` in batches of 1000 and re-lists to verify 0 objects
+  remain. Executed the real cleanup of the test pyramid: 7326 objects under
+  ``test_tiles/_test/`` in ``app-databuk-test-service`` were deleted and
+  independently verified (count 0). The next build run will rebuild/re-upload
+  because the S3 short-circuit is now free. Verified: py_compile, --help,
+  flag-combination errors, dry-run preview (7326), real delete (7326/7326),
+  suite 129 passed / 1 skipped, line lengths <=120. README tile section not
+  updated (optional follow-up).
+  OPEN / REMARKS: `test_overlay/` and the tile intermediates in
+  `app/databuk/test_overlay/` were kept for the cleanup feature demo; both were
+  uploaded successfully, so the workspace can be cleaned at git-cola review.
+- 2026-09-10 (overlay builder): Zoom-cap decision - test view limited to
+  `max_zoom: 10` (user: "this is only for the test"); production default
+  `max_zoom: 20` in `dashboard/config.py` unchanged, per-run raises possible
+  via `--max-zoom`. Note: coverage data showed the dashboard tile cache only
+  requested zoom 14-15, so an overlay capped at z10 renders only while zoomed
+  out (expected, documented).
+- 2026-09-10 (overlay builder, missing output dir): User's first clean-slate
+  run failed at step [2/6] with `ERROR 4: Failed to open
+  .../app/databuk/test_overlay/source_gcps.vrt to write` - gdal_translate/
+  gdalwarp/gdal2tiles do not create parent directories, and the new auto-
+  cleanup had removed `app/databuk/test_overlay/`. Fixed in
+  `build_overlay_tiles.py`: after tile_build path validation,
+  `if not args.dry_run: for out in (vrt_path, tif_path, rgba_vrt_path,
+  tiles_dir): out.parent.mkdir(parents=True, exist_ok=True)`. Only parents are
+  created (never `tiles_dir` itself) so the [5/6] skip-if-exists logic is
+  preserved and gdal2tiles still makes the tile dir. Dry-run stays pure:
+  verified it creates nothing.
+- 2026-09-10 (overlay builder, sources under config): Moved the test sources
+  `source.png` + `georef.json` from (top-level) `test_overlay/` into a new
+  `app/databuk/config/source_overlay/` per user request ("gather these sources
+  under this directory"), and updated `zf_view.yaml`:
+  `source_image: "config/source_overlay/source.png"`,
+  `georef_file: "config/source_overlay/georef.json"` (resolved relative to
+  app/databuk base dir). Intermediates stay under `app/databuk/test_overlay/`.
+  Verified end-to-end in the `gdal-test` env: build + upload + auto-clean in
+  7.3 s; only **10 tiles** at z0-10 (7326 before the zoom cap); re-run
+  short-circuits ("Tile system already present"); S3 count verified = 10;
+  dry-run prints the new source paths and creates nothing; suite 129 passed /
+  1 skipped; py_compile OK; line lengths <=120.
+  OPEN / REMARKS: `app/databuk/config/test.png` (6185 B, a stale duplicate of
+  `source.png`) is still untracked and unused by the config - candidate for
+  removal at git-cola review. Empty root-level `test_overlay/` dir left in
+  place (untracked, invisible to git).
+- 2026-09-10 (overlay serving pixel-aligned with builder): Added
+  `visualization.overlay.source_uri` to `zf_view.yaml`
+  (`s3://app-databuk-test-service/test_tiles/_test/`, single URI form, user
+  choice) and wired it into the dashboard tile service so it serves tiles from
+  exactly the location `build_overlay_tiles.py` writes, fixing a prefix
+  mismatch (S3TileHandler used `PREFIX = TILE_PREFIX or "test_tiles/"` while
+  the builder uploads to `test_tiles/_test/`). Precedence (user choice: full):
+  `source_uri` wins outright when present; `TILE_BUCKET`/`TILE_PREFIX` env and
+  the `test_tiles/` default remain only as fallback. Changes:
+  `dashboard/config.py` `OverlayConfig.source_uri` + parser; new
+  `_overlay_source_from_view()` in `dashboard/tile_service.py` (parses `s3://
+  bucket/prefix` via urlparse, reuses `_parse_view_config` like
+  `_cache_dir_from_view`), applied at module init when OVERLAY_ENABLED.
+  Verified: resolution overrides bogus TILE_BUCKET/TILE_PREFIX env; presigned
+  URL for request `(10,552,346)` targets `test_tiles/_test/10/552/346.png`
+  which exists in S3 (HEAD 954 B); config parse exposes `source_uri`;
+  py_compile OK; suite 129 passed / 1 skipped; lines <=120.
+  REMARKS: gdal2tiles skipped z0-1 (no tiles for levels the image does not
+  fill), so the pyramid starts at z2; missing z0/z1 requests just 404 like any
+  absent XYZ tile. The overlay still renders only up to z10 and the dashboard
+  cache previously requested z11-15 - raising max_zoom is still an open user
+  decision if the overlay must show at normal dashboard zoom.
