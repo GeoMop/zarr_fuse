@@ -256,6 +256,11 @@ def working_loop(app_config: AppConfig, poll_sleep: float = 30.0) -> None:
 
 
 def startup_recover(app_config: AppConfig) -> None:
+    # Re-assert the layout instead of trusting the one load_app_config checked:
+    # the queue may have been emptied or re-created since, and on S3 this is
+    # also where a credential or permission problem surfaces before polling.
+    app_config.queue.ensure_layout()
+
     LOG.info("Recovering: moving failed -> accepted")
     app_config.queue.recover_failed()
 

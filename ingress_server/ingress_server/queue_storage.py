@@ -138,7 +138,13 @@ class QueueStorage:
 
         The marker object also verifies the credentials and the write
         permissions; S3 has no real directories to create.
+
+        Cached directory listings are dropped first: this instance lives for
+        the whole process, so another process may have changed the layout
+        under it since the last call.
         """
+        self.fs.invalidate_cache()
+
         for queue_name in QUEUE_NAMES:
             self._write(f"{queue_name}/{LAYOUT_MARKER}", b"")
 

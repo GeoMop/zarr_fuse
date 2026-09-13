@@ -354,6 +354,12 @@
   type conflicts notify by email once instead of once per poll cycle.
 - 2026-08-31: Made `tests/test_notifier.py` skip when the gitignored
   `ingress_server/inputs/endpoints_config.yaml` is absent instead of erroring.
+- 2026-08-31: Merged the S3 queue-storage branch (`QueueStorage`/`FileRef`)
+  with the time-filter branch: the explicit `time_like_coord` config field
+  replaced schema-based time-coord auto-detection (and its `schema_cache`)
+  before the queue-storage branch forked, so that approach was dropped rather
+  than reconciled; the retention/hold and anomaly-email logic was ported onto
+  `QueueStorage` (`ref`-based, no local `Path`s).
 - 2026-09-13: Merged `main` into the S3 queue branch. The time filter keeps
   main's design: the coordinate stays explicit (`time_like_coord` in the
   metadata), and retention holding, mixed-kind detection and the anomaly
