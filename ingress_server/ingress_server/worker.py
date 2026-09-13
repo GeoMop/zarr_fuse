@@ -7,8 +7,14 @@ import xarray as xr
 from pathlib import Path
 
 from .app_config import AppConfig
-from .io import read_df_from_bytes
-from .io.time_filter import ExtractedItem, make_extracted_item, sort_by_data_time
+from .io import read_df_from_bytes, send_anomaly_email
+from .io.time_filter import (
+    ExtractedItem,
+    make_extracted_item,
+    partition_by_retention,
+    sort_by_data_time,
+    time_key_type_conflict,
+)
 from .models import MetadataModel
 from .queue_storage import FAILED, SUCCESS, FileRef
 
@@ -49,11 +55,7 @@ def _read_local_file(data_path: Path) -> tuple[MetadataModel, bytes]:
     return metadata, data_path.read_bytes()
 
 
-def _extract_one(
-    app_config: AppConfig,
-    ref: FileRef | Path,
-    schema_cache: dict | None = None,
-) -> ExtractedItem:
+def _extract_one(app_config: AppConfig, ref: FileRef | Path) -> ExtractedItem:
     """
     Read a payload with its metadata and extract the data object out of it.
 
@@ -81,7 +83,7 @@ def _extract_one(
         config_dir=app_config.config_dir,
     )
 
-    return make_extracted_item(FileRef(str(ref)), metadata, schema_path, obj, schema_cache)
+    return make_extracted_item(FileRef(str(ref)), metadata, schema_path, obj)
 
 
 def _store_one(item: ExtractedItem) -> None:
@@ -125,16 +127,35 @@ def _move_to_failed(app_config: AppConfig, ref: FileRef) -> bool:
         return False
 
 
+def _notify_anomalies(app_config: AppConfig, anomalies: list[dict]) -> None:
+    """Email the anomalies this process has not reported yet. A held batch is
+    re-examined on every poll, so the same anomaly must not be re-sent."""
+    def key(anomaly: dict) -> str:
+        return f"{anomaly['type']}|{anomaly['error']}|{anomaly['context']}"
+
+    unreported = [a for a in anomalies if key(a) not in app_config.notified_anomalies]
+    if not unreported:
+        return
+
+    app_config.notified_anomalies.update(key(a) for a in unreported)
+
+    try:
+        send_anomaly_email(smtp_config=app_config.smtp, anomalies=unreported)
+    except Exception:
+        LOG.exception("Failed to send data anomaly notification")
+
+
 def _process_available_files(app_config: AppConfig) -> bool:
     """
     Run one pass over the accepted queue and report whether at least one item
     left it. An item that can be neither stored nor moved to failed/ is not
     progress: counting it as such would make `working_loop` skip its sleep and
-    re-list the whole queue forever.
+    re-list the whole queue forever. Items held back by the retention window
+    are not progress either — they are waiting for newer data, not for the CPU.
     """
     progressed = False
-    schema_cache: dict = {}
     batch: list[ExtractedItem] = []
+    anomalies: list[dict] = []
 
     # Phase 1: extract all accepted files; nothing is written to the store yet,
     # so an interrupted batch is safely re-extracted on the next pass.
@@ -146,7 +167,18 @@ def _process_available_files(app_config: AppConfig) -> bool:
 
         try:
             LOG.info("Extracting data %s", ref)
-            batch.append(_extract_one(app_config, ref, schema_cache))
+            item = _extract_one(app_config, ref)
+            batch.append(item)
+
+            if item.time_error:
+                anomalies.append({
+                    "type": "time_key",
+                    "error": item.time_error,
+                    "context": {
+                        "file": item.ref,
+                        "endpoint": item.metadata.endpoint_name,
+                    },
+                })
 
         except ValueError as exc:
             LOG.warning("Processing rejected for %s: %s", ref, exc)
@@ -162,8 +194,33 @@ def _process_available_files(app_config: AppConfig) -> bool:
     if [item.ref for item in sorted_batch] != [item.ref for item in batch]:
         LOG.info("Batch reordered by data time: %s", [item.ref for item in sorted_batch])
 
-    # Phase 3: write to the zarr store in data-time order.
-    for item in sorted_batch:
+    type_conflict = time_key_type_conflict(sorted_batch)
+    if type_conflict:
+        LOG.error("Time key type conflict: %s", type_conflict)
+        anomalies.append({
+            "type": "time_key_type_conflict",
+            "error": type_conflict,
+            "context": {"batch_size": len(sorted_batch)},
+        })
+
+    _notify_anomalies(app_config, anomalies)
+
+    # Phase 3a: hold back items that are not yet older than retention_time
+    # relative to the newest data seen in this batch — they stay in
+    # accepted/ and are re-checked on the next pass, once newer data has
+    # actually arrived to age them out.
+    ready_items, held_items = partition_by_retention(sorted_batch, app_config.base.retention_time)
+
+    if held_items:
+        LOG.info(
+            "Holding %d item(s) until %s hour(s) newer data has arrived",
+            len(held_items),
+            app_config.base.retention_time,
+        )
+        LOG.debug("Held items: %s", [item.ref for item in held_items])
+
+    # Phase 3b: write the ready items to the zarr store in data-time order.
+    for item in ready_items:
 
         if app_config.stop_event.is_set():
             break

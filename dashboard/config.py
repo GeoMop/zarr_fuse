@@ -6,6 +6,8 @@ from typing import Any, Dict, Optional
 import yaml
 from dotenv import load_dotenv
 
+ENDPOINTS_ENV_VAR = "ENDPOINTS_PATH"
+SCHEMAS_ENV_VAR = "SCHEMAS_PATH"
 
 @dataclass
 class SourceConfig:
@@ -123,12 +125,20 @@ def resolve_endpoints_path() -> Path:
        - config/endpoints.yaml
        - app/databuk/config/endpoints.yaml
     """
-    env_path = os.getenv("ENDPOINTS_PATH")
+    env_path = os.getenv(ENDPOINTS_ENV_VAR)
+
     if env_path:
         path = Path(env_path).expanduser().resolve()
-        print(f"[config] resolve_endpoints_path: from ENV ENDPOINTS_PATH={env_path} -> {path}")
+        print(
+            f"[config] resolve_endpoints_path: "
+            f"from ENV {ENDPOINTS_ENV_VAR}={env_path} -> {path}"
+        )
+
         if not path.exists():
-            raise FileNotFoundError(f"ENDPOINTS_PATH does not exist: {path}")
+            raise FileNotFoundError(
+                f"{ENDPOINTS_ENV_VAR} does not exist: {path}"
+            )
+
         return path
 
     cwd = Path.cwd().resolve()
@@ -238,6 +248,27 @@ def _collect_group_fields(variable_map: Dict[str, Any], endpoint_name: str) -> D
     return group_fields
 
 
+def _resolve_fields_for_group_raw(schema_config: dict, group_path: str | None) -> dict:
+    """Resolve the effective fields dict for a group path by walking upward.
+
+    This is the raw-dict version (used at runtime with untyped endpoint config).
+    The typed counterpart is :func:`resolve_schema_fields`.
+    """
+    fields = schema_config.get("fields", {})
+    group_fields = schema_config.get("group_fields", {})
+    normalized = "/".join(part for part in (group_path or "").strip("/").split("/") if part)
+
+    path = normalized
+    while True:
+        if path in group_fields:
+            return group_fields[path]
+        if not path:
+            break
+        path = path.rsplit("/", 1)[0] if "/" in path else ""
+
+    return fields
+
+
 def resolve_schema_fields(schema: SchemaConfig, group_path: Optional[str]) -> SchemaFieldsConfig:
     normalized = _normalize_group_path(group_path)
     path = normalized
@@ -343,6 +374,63 @@ def _read_schema_display(
     )
 
 
+def read_variable_metadata(
+    schema_path: Path,
+    variable_name: str,
+    group_path: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    with schema_path.open("r", encoding="utf-8") as file:
+        schema = yaml.safe_load(file)
+
+    def _find_data_node(node: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(node, dict):
+            return None
+        if "VARS" in node and "COORDS" in node:
+            return node
+        for key, value in node.items():
+            if key == "ATTRS":
+                continue
+            found = _find_data_node(value)
+            if found is not None:
+                return found
+        return None
+
+    group_data: Optional[Dict[str, Any]] = None
+    path_parts = [p for p in (group_path or "").strip("/").split("/") if p]
+    if path_parts:
+        current: Any = schema
+        for part in path_parts:
+            if isinstance(current, dict) and part in current:
+                current = current[part]
+            else:
+                current = None
+                break
+        group_data = _find_data_node(current)
+
+    if group_data is None:
+        group_data = _find_data_node(schema)
+
+    if group_data is None:
+        return None
+
+    vars_data = group_data.get("VARS", {})
+    variable_data = vars_data.get(variable_name)
+    if not variable_data:
+        return None
+
+    coords = variable_data.get("coords", [])
+    if isinstance(coords, str):
+        coords = [coords]
+
+    return {
+        "name": variable_name,
+        "description": variable_data.get("description", ""),
+        "unit": variable_data.get("unit", ""),
+        "coords": coords,
+        "df_col": variable_data.get("df_col", ""),
+    }
+
+
 def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], base_dir: Path) -> EndpointConfig:
     source_data = endpoint_data["source"]
     schema_data = endpoint_data["variable_map"]
@@ -372,15 +460,42 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
             raise ValueError(f"Endpoint '{endpoint_name}' is missing source.{field_name}")
 
     schema_file = source_data["schema_path"]
+    schemas_path = os.getenv(SCHEMAS_ENV_VAR)
 
-    schema_file_path = Path(schema_file)
-    if not schema_file_path.is_absolute():
-        schema_file_path = base_dir / schema_file_path
+    if schemas_path:
+        schemas_directory = Path(
+            schemas_path
+        ).expanduser().resolve()
 
-    print(f"[config] endpoint={endpoint_name} schema_path(raw)={schema_file} base_dir={base_dir} resolved={schema_file_path}")
+        if not schemas_directory.is_dir():
+            raise FileNotFoundError(
+                f"{SCHEMAS_ENV_VAR} is not a directory: "
+                f"{schemas_directory}"
+            )
+
+        schema_file_path = (
+            schemas_directory / Path(schema_file).name
+        )
+    else:
+        schema_file_path = Path(schema_file)
+
+        if not schema_file_path.is_absolute():
+            schema_file_path = base_dir / schema_file_path
+
+    if not schema_file_path.is_file():
+        raise FileNotFoundError(
+            f"Schema file does not exist: {schema_file_path}"
+        )
+
+    print(
+        f"[config] endpoint={endpoint_name} "
+        f"schema_path(raw)={schema_file} "
+        f"base_dir={base_dir} "
+        f"resolved={schema_file_path}"
+    )
 
     schema_for_display = SchemaConfig(
-        file=schema_file,
+        file=str(schema_file_path),
         fields=root_fields or SchemaFieldsConfig(),
         group_fields=group_fields,
     )
@@ -411,7 +526,7 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
             schema_path=schema_file,
         ),
         schema=SchemaConfig(
-            file=schema_file,
+            file=str(schema_file_path),
             fields=root_fields or SchemaFieldsConfig(),
             group_fields=group_fields,
         ),
@@ -422,9 +537,9 @@ def _build_endpoint_config(endpoint_name: str, endpoint_data: Dict[str, Any], ba
         ),
             visualization=VisualizationConfig(
             map=MapConfig(
-                center_lat=map_data["center_lat"],
-                center_lon=map_data["center_lon"],
-                zoom=map_data["zoom"],
+                center_lat=map_data.get("center_lat"),
+                center_lon=map_data.get("center_lon"),
+                zoom=map_data.get("zoom"),
                 title=map_data["title"],
                 point_size=map_data["point_size"],
                 alpha=map_data["alpha"],

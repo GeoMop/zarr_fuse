@@ -227,7 +227,17 @@
 - AGENT: Should the sorted `any_new` schema warning be emitted only for the
   implicit default, or also for an explicit `step_limits: "any_new"` or
   equivalent schema spelling?
-  
+
+- AGENT: A batch mixing datetime and numeric `time_like_coord` keys is now
+  reported as an anomaly but still processed, each type held against its own
+  newest item. Should such a mix instead reject the offending payloads to
+  `failed/`, given that it means two sources disagree on the time contract?
+
+- AGENT: Data anomaly emails are de-duplicated per worker process (in-memory
+  set on `AppConfig`), so a restart re-notifies about a persisting anomaly and
+  a long-running process never re-reminds. If either behavior is wrong, the
+  de-duplication needs a time window or on-disk state.
+
 ## AGENT log
 
 - 2026-06-20: Reviewed `AGENTS.md`, `README.md`, `python_coding.md`, and
@@ -332,3 +342,21 @@
   `io.files` and is now flat (`<endpoint>_<timestamp>_<uid>`), queue items are
   addressed by `FileRef`, and passing a local `Path` to `worker._extract_one`
   is deprecated.
+- 2026-08-31: Made the ingress time-filter normalization report instead of
+  swallow: `_normalize_time_value` raises `TimeKeyError` rather than returning
+  `None`, `_time_diff` rejects mixed datetime/numeric keys, and the failure is
+  recorded on `ExtractedItem.time_error`.
+- 2026-08-31: Made the time filter kind-safe so a batch mixing datetime and
+  numeric time keys sorts and is held per type instead of raising `TypeError`
+  in the worker loop.
+- 2026-08-31: Added `send_anomaly_email()` and worker-side anomaly collection
+  with per-process de-duplication, so unreadable time coordinates and time key
+  type conflicts notify by email once instead of once per poll cycle.
+- 2026-08-31: Made `tests/test_notifier.py` skip when the gitignored
+  `ingress_server/inputs/endpoints_config.yaml` is absent instead of erroring.
+- 2026-09-13: Merged `main` into the S3 queue branch. The time filter keeps
+  main's design: the coordinate stays explicit (`time_like_coord` in the
+  metadata), and retention holding, mixed-kind detection and the anomaly
+  emails are preserved. The branch's schema-based auto-detection of the time
+  coordinate and its `store_key` grouping were dropped in the resolution;
+  `ExtractedItem` is addressed by `FileRef` throughout.

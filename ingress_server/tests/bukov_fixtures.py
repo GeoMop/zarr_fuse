@@ -41,6 +41,7 @@ def stage_items(storage: QueueStorage) -> list[str]:
             (DATA_DIR / (payload.name + ".meta.json")).read_text(encoding="utf-8")
         )
         meta["schema_path"] = SCHEMA
+        meta["time_like_coord"] = "date_time"
         storage.put_item(
             name=f"{ENDPOINT}_{payload.name}",
             payload=payload.read_bytes(),
@@ -51,12 +52,17 @@ def stage_items(storage: QueueStorage) -> list[str]:
     return names
 
 
-def app_config(storage: QueueStorage) -> AppConfig:
+def app_config(storage: QueueStorage, retention_time: float = 0.0) -> AppConfig:
+    """
+    Worker config for the staged queue. Holding is disabled by default: the
+    fixture payloads span less than the default retention window, so every
+    item would be held back and nothing would reach the store.
+    """
     return AppConfig(
         queue=storage,
         config_path=CONFIG_PATH,
         config={},
-        base=BaseConfig(),
+        base=BaseConfig(retention_time=retention_time),
         smtp=SmtpConfig(),
     )
 
