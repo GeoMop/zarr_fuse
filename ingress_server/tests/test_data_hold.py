@@ -7,6 +7,7 @@ import zarr_fuse as zf
 
 from ingress_server.app_config import AppConfig, BaseConfig, SmtpConfig
 from ingress_server.models import MetadataModel
+from ingress_server.queue_storage import QueueStorage
 from ingress_server.worker import _process_available_files
 
 LOG = logging.getLogger(__name__)
@@ -52,12 +53,10 @@ def _write_schema(tmp_path: Path, monkeypatch) -> Path:
     return schema_path
 
 
-def _stage_item(queue_dir: Path, schema_path: Path, name: str, date_time: str, temp: float) -> None:
-    accepted = queue_dir / "accepted" / ENDPOINT
-    accepted.mkdir(parents=True, exist_ok=True)
-
+def _stage_item(
+    storage: QueueStorage, schema_path: Path, name: str, date_time: str, temp: float
+) -> None:
     payload = json.dumps([{"date_time": date_time, "temp": temp}]).encode("utf-8")
-    (accepted / name).write_bytes(payload)
 
     metadata = MetadataModel(
         content_type="application/json",
@@ -71,33 +70,38 @@ def _stage_item(queue_dir: Path, schema_path: Path, name: str, date_time: str, t
         dataframe_row=None,
         target_node=ENDPOINT,
     )
-    (accepted / f"{name}.meta.json").write_text(metadata.model_dump_json(), encoding="utf-8")
+    storage.put_item(
+        name=name,
+        payload=payload,
+        meta=metadata.model_dump_json().encode("utf-8"),
+    )
 
 
 def _app_config(tmp_path: Path) -> AppConfig:
-    app_config = AppConfig(
-        queue_dir=tmp_path / "queue",
+    storage = QueueStorage(str(tmp_path / "queue"))
+    storage.ensure_layout()
+    return AppConfig(
+        queue=storage,
         config_path=tmp_path / "unused_config.yaml",
         config={},
         base=BaseConfig(retention_time=RETENTION_HOURS),
         smtp=SmtpConfig(),
     )
-    app_config.accepted_dir.mkdir(parents=True)
-    return app_config
+
+
+def _payload_names(app_config: AppConfig, queue_name: str) -> set[str]:
+    return {
+        name for name in app_config.queue._item_names(queue_name)
+        if not name.endswith(".meta.json")
+    }
 
 
 def _accepted_names(app_config: AppConfig) -> set[str]:
-    return {
-        p.name for p in app_config.accepted_dir.rglob("*")
-        if p.is_file() and not p.name.endswith(".meta.json")
-    }
+    return _payload_names(app_config, "accepted")
 
 
 def _success_names(app_config: AppConfig) -> set[str]:
-    return {
-        p.name for p in app_config.success_dir.rglob("*")
-        if p.is_file() and not p.name.endswith(".meta.json")
-    }
+    return _payload_names(app_config, "success")
 
 
 def test_batch_relative_retention_splits_ready_and_held(tmp_path, monkeypatch):
@@ -109,8 +113,8 @@ def test_batch_relative_retention_splits_ready_and_held(tmp_path, monkeypatch):
     """
     schema_path = _write_schema(tmp_path, monkeypatch)
     app_config = _app_config(tmp_path)
-    _stage_item(app_config.queue_dir, schema_path, OLD_NAME, OLD_DATE_TIME, temp=1.0)
-    _stage_item(app_config.queue_dir, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
+    _stage_item(app_config.queue, schema_path, OLD_NAME, OLD_DATE_TIME, temp=1.0)
+    _stage_item(app_config.queue, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
 
     progressed = _process_available_files(app_config)
 
@@ -128,7 +132,7 @@ def test_held_item_alone_does_not_report_progress(tmp_path, monkeypatch):
     """
     schema_path = _write_schema(tmp_path, monkeypatch)
     app_config = _app_config(tmp_path)
-    _stage_item(app_config.queue_dir, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
+    _stage_item(app_config.queue, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
 
     progressed = _process_available_files(app_config)
 
@@ -144,8 +148,8 @@ def test_held_item_is_released_once_newer_data_arrives(tmp_path, monkeypatch):
     """
     schema_path = _write_schema(tmp_path, monkeypatch)
     app_config = _app_config(tmp_path)
-    _stage_item(app_config.queue_dir, schema_path, OLD_NAME, OLD_DATE_TIME, temp=1.0)
-    _stage_item(app_config.queue_dir, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
+    _stage_item(app_config.queue, schema_path, OLD_NAME, OLD_DATE_TIME, temp=1.0)
+    _stage_item(app_config.queue, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
 
     _process_available_files(app_config)
     assert _accepted_names(app_config) == {FRESH_NAME}
@@ -156,7 +160,7 @@ def test_held_item_is_released_once_newer_data_arrives(tmp_path, monkeypatch):
     assert _accepted_names(app_config) == {FRESH_NAME}
 
     # A newer item arrives, pushing the batch maximum forward.
-    _stage_item(app_config.queue_dir, schema_path, NEWER_NAME, NEWER_DATE_TIME, temp=3.0)
+    _stage_item(app_config.queue, schema_path, NEWER_NAME, NEWER_DATE_TIME, temp=3.0)
     progressed = _process_available_files(app_config)
 
     assert progressed
