@@ -21,11 +21,7 @@ class TimeKeyError(ValueError):
 
 @dataclass(eq=False)
 class ExtractedItem:
-    """An extracted payload waiting to be written to the zarr store.
-
-    `ref` is the queue item ref ("accepted/<name>"), or a local file path for
-    items processed outside the queue (deprecated, see `worker._extract_one`).
-    """
+    """An extracted payload waiting to be written to the zarr store."""
 
     ref: FileRef
     metadata: MetadataModel

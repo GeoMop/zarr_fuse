@@ -328,28 +328,45 @@ def test_update_sorted_merge_step(smart_tmp_path):
     _assert_date_time_sorted(reopened)
 
 
-def test_merge_ds_unsorted(smart_tmp_path):
-    store_path = smart_tmp_path / "sparse_borehole_region.zarr"
+def test_merge_ds_preserves_values_across_overlap_and_extensions(tmp_path):
+    """
+    Preserve omitted values through sparse overlap and multidimensional extensions.
+
+    The variables span one, two, and three dimensions. Updates cover a sparse
+    overlap, a pure time extension, and a combined time/depth extension.
+    """
+    store_path = tmp_path / "multidimensional_nan_preservation.zarr"
     shutil.rmtree(store_path, ignore_errors=True)
+    variable_dims = {
+        "measurement": ("date_time", "borehole", "depth"),
+        "time_borehole_value": ("date_time", "borehole"),
+        "time_depth_value": ("date_time", "depth"),
+        "profile_value": ("borehole", "depth"),
+        "time_value": ("date_time",),
+        "borehole_value": ("borehole",),
+        "depth_value": ("depth",),
+    }
     schema_dict = {
         "VARS": {
-            "temperature": {
-                "unit": "degC",
-                "df_col": "temp",
-                "coords": ["date_time", "borehole"],
-            },
+            name: {"unit": "", "coords": list(dims)}
+            for name, dims in variable_dims.items()
         },
         "COORDS": {
-            "date_time": {
-                "unit": {"tick": "s", "tz": "UTC"},
-                "source_unit": {"tick": "s", "tz": "UTC"},
-                "df_col": "timestamp",
-                "chunk_size": 2,
-            },
             "borehole": {
                 "unit": "",
-                "type": "str[8]",
-                "df_col": "borehole",
+                "type": "int64",
+                "sorted": False,
+                "chunk_size": 2,
+            },
+            "date_time": {
+                "unit": "",
+                "type": "int64",
+                "sorted": True,
+                "chunk_size": 2,
+            },
+            "depth": {
+                "unit": "",
+                "type": "int64",
                 "sorted": False,
                 "chunk_size": 2,
             },
@@ -359,26 +376,258 @@ def test_merge_ds_unsorted(smart_tmp_path):
         },
     }
 
-    node = zf.open_store(schema_dict)
-    node.update(pl.DataFrame({
-        "timestamp": [
-            "1970-01-01T00:00:00+00:00",
-            "1970-01-01T00:00:00+00:00",
-            "1970-01-01T00:00:00+00:00",
+    def update(date_time, borehole, depth, **values):
+        """Open the store afresh and merge one concrete dataset update."""
+        assert values.keys() == variable_dims.keys()
+        node = zf.open_store(schema_dict)
+        node.update_from_ds(xr.Dataset(
+            {
+                name: (dims, np.asarray(values[name], dtype=float))
+                for name, dims in variable_dims.items()
+            },
+            coords={
+                "borehole": np.asarray(borehole),
+                "date_time": np.asarray(date_time),
+                "depth": np.asarray(depth),
+            },
+        ))
+
+    update(
+        date_time=[0],
+        borehole=[1, 2, 3],
+        depth=[10, 20, 30],
+        measurement=[[
+            [111, 112, 113],
+            [121, 122, 123],
+            [131, 132, 133],
+        ]],
+        time_borehole_value=[[41, 42, 43]],
+        time_depth_value=[[51, 52, 53]],
+        borehole_value=[1, 2, 3],
+        profile_value=[
+            [11, 12, 13],
+            [21, 22, 23],
+            [31, 32, 33],
         ],
-        "borehole": ["A", "B", "C"],
-        "temp": [10.0, 11.0, 12.0],
-    }))
+        time_value=[10],
+        depth_value=[61, 62, 63],
+    )
+
+    update(
+        date_time=[0],
+        borehole=[1, 3],
+        depth=[10, 30],
+        measurement=[[
+            [211, 213],
+            [231, 233],
+        ]],
+        time_borehole_value=[[141, 143]],
+        time_depth_value=[[151, 153]],
+        borehole_value=[101, 303],
+        profile_value=[
+            [111, 113],
+            [331, 333],
+        ],
+        time_value=[20],
+        depth_value=[161, 163],
+    )
+
+    overlap = zf.open_store(schema_dict).dataset
+    # Sparse overlap values overwrite matching cells, while omitted borehole 2
+    # and depth 20 retain their initial values instead of becoming NaN.
+    npt.assert_allclose(overlap["measurement"].sel(date_time=0), [
+        [211, 112, 213],
+        [121, 122, 123],
+        [231, 132, 233],
+    ])
+    # Each two-dimensional pair preserves values omitted along either axis.
+    npt.assert_allclose(overlap["time_borehole_value"], [[141, 42, 143]])
+    npt.assert_allclose(overlap["time_depth_value"], [[151, 52, 153]])
+    npt.assert_allclose(overlap["borehole_value"], [101, 2, 303])
+    npt.assert_allclose(overlap["profile_value"], [
+        [111, 12, 113],
+        [21, 22, 23],
+        [331, 32, 333],
+    ])
+    npt.assert_allclose(overlap["time_value"], [20])
+    # All three single-dimension variables preserve omitted coordinates.
+    npt.assert_allclose(overlap["depth_value"], [161, 62, 163])
+
+    update(
+        date_time=[1],
+        borehole=[1, 3],
+        depth=[10, 30],
+        measurement=[[
+            [311, 313],
+            [331, 333],
+        ]],
+        time_borehole_value=[[241, 243]],
+        time_depth_value=[[251, 253]],
+        borehole_value=[1001, 3003],
+        profile_value=[
+            [211, 213],
+            [431, 433],
+        ],
+        time_value=[30],
+        depth_value=[261, 263],
+    )
+
+    time_extension = zf.open_store(schema_dict).dataset
+    # A pure time extension preserves lower-dimensional variables at omitted
+    # borehole/depth positions, even though the full dataset overlap is empty.
+    npt.assert_allclose(time_extension["borehole_value"], [1001, 2, 3003])
+    npt.assert_allclose(time_extension["profile_value"], [
+        [211, 12, 213],
+        [21, 22, 23],
+        [431, 32, 433],
+    ])
+    # Pair variables containing the new time keep NaN at omitted coordinates,
+    # since no value exists there at that new time.
+    npt.assert_allclose(
+        time_extension["time_borehole_value"].sel(date_time=1),
+        [241, np.nan, 243],
+        equal_nan=True,
+    )
+    npt.assert_allclose(
+        time_extension["time_depth_value"].sel(date_time=1),
+        [251, np.nan, 253],
+        equal_nan=True,
+    )
+    # The depth-only variable is independent of the time extension and retains
+    # the omitted existing depth value.
+    npt.assert_allclose(time_extension["depth_value"], [261, 62, 263])
+    # The three-dimensional variable has no old value at the new time, so its
+    # omitted borehole/depth combinations must remain NaN rather than be filled.
+    npt.assert_allclose(time_extension["measurement"].sel(date_time=1), [
+        [311, np.nan, 313],
+        [np.nan, np.nan, np.nan],
+        [331, np.nan, 333],
+    ], equal_nan=True)
+    # The preceding overlap slice is unaffected by appending the new time.
+    npt.assert_allclose(time_extension["measurement"].sel(date_time=0), [
+        [211, 112, 213],
+        [121, 122, 123],
+        [231, 132, 233],
+    ])
+
+    update(
+        date_time=[1, 2],
+        borehole=[1, 3],
+        depth=[30, 40],
+        measurement=[
+            [[413, 414], [433, 434]],
+            [[513, 514], [533, 534]],
+        ],
+        time_borehole_value=[
+            [341, 343],
+            [441, 443],
+        ],
+        time_depth_value=[
+            [353, 354],
+            [453, 454],
+        ],
+        borehole_value=[2001, 4003],
+        profile_value=[
+            [313, 314],
+            [533, 534],
+        ],
+        time_value=[40, 50],
+        depth_value=[363, 364],
+    )
+
+    result = zf.open_store(schema_dict).dataset
+    # This update overlaps time 1 and depth 30 while extending both time and
+    # depth. Coordinate assertions prove both extension passes were applied.
+    npt.assert_array_equal(result.coords["borehole"], [1, 2, 3])
+    npt.assert_array_equal(result.coords["date_time"], [0, 1, 2])
+    npt.assert_array_equal(result.coords["depth"], [10, 20, 30, 40])
+    # The borehole-only variable is rewritten in both extension passes. Its
+    # omitted existing value must survive both passes.
+    npt.assert_allclose(result["borehole_value"], [2001, 2, 4003])
+    # The depth-only variable overlaps at depth 30 and extends at depth 40;
+    # omitted depths retain their values from the preceding update.
+    npt.assert_allclose(result["depth_value"], [261, 62, 363, 364])
+    # The profile spans the extended depth but not time. Existing cells survive,
+    # supplied cells overwrite, and the new depth has no value for borehole 2.
+    npt.assert_allclose(result["profile_value"], [
+        [211, 12, 313, 314],
+        [21, 22, 23, np.nan],
+        [431, 32, 533, 534],
+    ], equal_nan=True)
+    # The time/borehole pair verifies sparse overwrite on the overlapping time
+    # and sparse population on the new time, independently of depth extension.
+    npt.assert_allclose(result["time_borehole_value"], [
+        [141, 42, 143],
+        [341, np.nan, 343],
+        [441, np.nan, 443],
+    ], equal_nan=True)
+    # The time/depth pair verifies all old/overlap/new combinations for the two
+    # dimensions extended together.
+    npt.assert_allclose(result["time_depth_value"], [
+        [151, 52, 153, np.nan],
+        [251, np.nan, 353, 354],
+        [np.nan, np.nan, 453, 454],
+    ], equal_nan=True)
+    # Time-only values verify that an update can overlap and extend its own axis
+    # while remaining independent of the simultaneously extended depth.
+    npt.assert_allclose(result["time_value"], [20, 40, 50])
+    # The old time slice keeps prior values and gains only an empty new depth.
+    npt.assert_allclose(result["measurement"].sel(date_time=0), [
+        [211, 112, 213, np.nan],
+        [121, 122, 123, np.nan],
+        [231, 132, 233, np.nan],
+    ], equal_nan=True)
+    # The overlapping time receives supplied depth values but preserves earlier
+    # values at coordinates omitted by this update.
+    npt.assert_allclose(result["measurement"].sel(date_time=1), [
+        [311, np.nan, 413, 414],
+        [np.nan, np.nan, np.nan, np.nan],
+        [331, np.nan, 433, 434],
+    ], equal_nan=True)
+    # The new time has values only at explicitly supplied borehole/depth pairs.
+    npt.assert_allclose(result["measurement"].sel(date_time=2), [
+        [np.nan, np.nan, 513, 514],
+        [np.nan, np.nan, np.nan, np.nan],
+        [np.nan, np.nan, 533, 534],
+    ], equal_nan=True)
+
+
+def test_write_ds_partial_chunk_update(smart_tmp_path):
+    """Node.write_ds must overwrite a region smaller than its Zarr chunk."""
+    store_path = smart_tmp_path / "partial_chunk_update.zarr"
+    shutil.rmtree(store_path, ignore_errors=True)
+    schema_dict = {
+        "VARS": {
+            "data": {
+                "unit": "degC",
+                "coords": ["x"],
+            },
+        },
+        "COORDS": {
+            "x": {
+                "unit": "h",
+                "chunk_size": 2,
+            },
+        },
+        "ATTRS": {
+            "STORE_URL": str(store_path),
+        },
+    }
 
     node = zf.open_store(schema_dict)
-    node.update(pl.DataFrame({
-        "timestamp": [
-            "1970-01-01T00:00:00+00:00",
-            "1970-01-01T00:00:00+00:00",
-        ],
-        "borehole": ["A", "C"],
-        "temp": [20.0, 22.0],
-    }))
+    node.write_ds(xr.Dataset(
+        {"data": ("x", np.array([10.0, 11.0]))},
+        coords={"x": np.array([0.0, 1.0])},
+    ), mode="a")
+
+    node = zf.open_store(schema_dict)
+    node.write_ds(xr.Dataset(
+        {"data": ("x", np.array([12.0]))},
+        coords={"x": np.array([1.0])},
+    ), mode="r+", region="auto")
+
+    reopened = zf.open_store(schema_dict).dataset
+    np.testing.assert_array_equal(reopened["data"].values, np.array([10.0, 12.0]))
 
 
 def test_merge_ds_skips_empty_cartesian_extension(smart_tmp_path):
@@ -432,6 +681,7 @@ def test_update_from_ds_schema():
 
     class DummyNode:
         _validate_ds_against_schema = zf.Node._validate_ds_against_schema
+        _merge_and_check_coords = zf.Node._merge_and_check_coords
         update_from_ds = zf.Node.update_from_ds
 
         def __init__(self, ds_schema):

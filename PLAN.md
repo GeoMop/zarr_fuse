@@ -360,3 +360,9 @@
   before the queue-storage branch forked, so that approach was dropped rather
   than reconciled; the retention/hold and anomaly-email logic was ported onto
   `QueueStorage` (`ref`-based, no local `Path`s).
+- 2026-09-13: Merged `main` into the S3 queue branch. The time filter keeps
+  main's design: the coordinate stays explicit (`time_like_coord` in the
+  metadata), and retention holding, mixed-kind detection and the anomaly
+  emails are preserved. The branch's schema-based auto-detection of the time
+  coordinate and its `store_key` grouping were dropped in the resolution;
+  `ExtractedItem` is addressed by `FileRef` throughout.

@@ -60,6 +60,7 @@ FAILED = "failed"
 QUEUE_NAMES = (ACCEPTED, SUCCESS, FAILED)
 
 S3_SCHEME = "s3://"
+FILE_SCHEME = "file://"
 S3_ENV_VARS = ("ZF_S3_ENDPOINT_URL", "ZF_S3_ACCESS_KEY", "ZF_S3_SECRET_KEY")
 
 
@@ -67,9 +68,20 @@ def _make_filesystem(url: str) -> tuple[fsspec.AbstractFileSystem, str]:
     """Create the filesystem for a queue URL; return it together with the queue root path."""
     # The scheme check must happen on the raw string: Path("s3://b/p") would mangle the URL.
     if not url.startswith(S3_SCHEME):
+        # A local queue is given either as a plain path or as the file:// URL
+        # that `QueueStorage.url` reports, so that a url round-trip keeps the
+        # backend. Any other scheme is a misconfiguration, not a local path.
+        path = url[len(FILE_SCHEME):] if url.startswith(FILE_SCHEME) else url
+        scheme, separator, _ = path.partition("://")
+        if separator:
+            raise ValueError(
+                f"Unsupported queue storage scheme '{scheme}://', expected "
+                f"'{S3_SCHEME}', '{FILE_SCHEME}' or a local path: {url}"
+            )
+
         # auto_mkdir lets pipe_file and mv create the queue directories on
         # demand, the way an object store does implicitly.
-        return fsspec.filesystem("file", auto_mkdir=True), str(Path(url).resolve())
+        return fsspec.filesystem("file", auto_mkdir=True), str(Path(path).resolve())
 
     missing = [name for name in S3_ENV_VARS if not os.getenv(name)]
     if missing:
@@ -165,14 +177,16 @@ class QueueStorage:
         # Payload first, see the module docstring.
         self.fs.mv(self._abs(ref), self._abs(dest))
 
-        meta_src = self._abs(self.meta_ref(ref))
-        if self.fs.exists(meta_src):
-            try:
-                self.fs.mv(meta_src, self._abs(self.meta_ref(dest)))
-            except Exception:
-                # The payload has moved already, so the item is accounted for;
-                # only an orphaned sidecar stays behind in the source queue.
-                LOG.exception("Failed to move metadata of %s, sidecar left behind", ref)
+        try:
+            self.fs.mv(self._abs(self.meta_ref(ref)), self._abs(self.meta_ref(dest)))
+        except FileNotFoundError:
+            # Not every payload has a sidecar (see `test_move_tolerates_missing_meta`);
+            # attempting the move is one S3 round-trip cheaper than probing first.
+            LOG.debug("No metadata sidecar for %s", ref)
+        except Exception:
+            # The payload has moved already, so the item is accounted for;
+            # only an orphaned sidecar stays behind in the source queue.
+            LOG.exception("Failed to move metadata of %s, sidecar left behind", ref)
 
         return dest
 
@@ -182,7 +196,12 @@ class QueueStorage:
         names = sorted(self._item_names(FAILED), key=lambda name: not name.endswith(META_SUFFIX))
 
         for name in names:
-            self.fs.mv(self._abs(f"{FAILED}/{name}"), self._abs(f"{ACCEPTED}/{name}"))
+            try:
+                self.fs.mv(self._abs(f"{FAILED}/{name}"), self._abs(f"{ACCEPTED}/{name}"))
+            except Exception:
+                # Recovery runs inside the ASGI startup, before /health is served:
+                # a single unmovable item must not keep the server from coming up.
+                LOG.exception("Failed to recover %s, it stays in the failed queue", name)
 
     def _abs(self, ref: str) -> str:
         return f"{self.root}/{ref}"

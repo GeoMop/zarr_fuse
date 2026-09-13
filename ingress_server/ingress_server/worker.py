@@ -117,11 +117,14 @@ def _process_one(app_config: AppConfig, data_path: Path) -> None:
     _store_one(_extract_one(app_config, data_path))
 
 
-def _move_to_failed(app_config: AppConfig, ref: FileRef) -> None:
+def _move_to_failed(app_config: AppConfig, ref: FileRef) -> bool:
+    """Park a rejected item in failed/; return whether it left the accepted queue."""
     try:
         app_config.queue.move(ref, FAILED)
+        return True
     except Exception:
         LOG.exception("Failed to move %s to failed queue", ref)
+        return False
 
 
 def _notify_anomalies(app_config: AppConfig, anomalies: list[dict]) -> None:
@@ -143,6 +146,13 @@ def _notify_anomalies(app_config: AppConfig, anomalies: list[dict]) -> None:
 
 
 def _process_available_files(app_config: AppConfig) -> bool:
+    """
+    Run one pass over the accepted queue and report whether at least one item
+    left it. An item that can be neither stored nor moved to failed/ is not
+    progress: counting it as such would make `working_loop` skip its sleep and
+    re-list the whole queue forever. Items held back by the retention window
+    are not progress either — they are waiting for newer data, not for the CPU.
+    """
     progressed = False
     batch: list[ExtractedItem] = []
     anomalies: list[dict] = []
@@ -172,13 +182,11 @@ def _process_available_files(app_config: AppConfig) -> bool:
 
         except ValueError as exc:
             LOG.warning("Processing rejected for %s: %s", ref, exc)
-            _move_to_failed(app_config, ref)
-            progressed = True
+            progressed |= _move_to_failed(app_config, ref)
 
         except Exception:
             LOG.exception("Extraction failed for %s", ref)
-            _move_to_failed(app_config, ref)
-            progressed = True
+            progressed |= _move_to_failed(app_config, ref)
 
     # Phase 2: filter — order the batch by the time of the data instead of
     # the time of the payload receipt.
@@ -221,18 +229,16 @@ def _process_available_files(app_config: AppConfig) -> bool:
             LOG.info("Storing data %s", item.ref)
             _store_one(item)
             app_config.queue.move(item.ref, SUCCESS)
-            LOG.info("Processing succeeded for %s", item.ref)
             progressed = True
+            LOG.info("Processing succeeded for %s", item.ref)
 
         except ValueError as exc:
             LOG.warning("Processing rejected for %s: %s", item.ref, exc)
-            _move_to_failed(app_config, item.ref)
-            progressed = True
+            progressed |= _move_to_failed(app_config, item.ref)
 
         except Exception:
             LOG.exception("Processing failed for %s", item.ref)
-            _move_to_failed(app_config, item.ref)
-            progressed = True
+            progressed |= _move_to_failed(app_config, item.ref)
 
     return progressed
 

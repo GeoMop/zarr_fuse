@@ -5,11 +5,10 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 import pytest
-import zarr_fuse as zf
 
 import bukov_fixtures as bukov
 
-from ingress_server.app_config import BaseConfig
+from ingress_server.app_config import AppConfig, BaseConfig, SmtpConfig
 from ingress_server.io.time_filter import (
     ExtractedItem,
     TimeKeyError,
@@ -21,11 +20,15 @@ from ingress_server.io.time_filter import (
     time_key_type_conflict,
 )
 from ingress_server.models import MetadataModel
+from ingress_server.queue_storage import QueueStorage
 from ingress_server import worker
-from ingress_server.queue_storage import FileRef, QueueStorage
 from ingress_server.worker import _process_available_files
 
 LOG = logging.getLogger(__name__)
+
+TESTS_DIR = Path(__file__).parent
+BUKOV_SCHEMA = bukov.SCHEMA
+NEWEST, MIDDLE, OLDEST = bukov.NEWEST, bukov.MIDDLE, bukov.OLDEST
 
 
 def _item(name: str, target_node: str, time_key) -> ExtractedItem:
@@ -34,16 +37,16 @@ def _item(name: str, target_node: str, time_key) -> ExtractedItem:
         endpoint_name="bukov",
         node_path=None,
         username="test",
-        schema_path=bukov.SCHEMA,
+        schema_path=BUKOV_SCHEMA,
         extract_fn=None,
         fn_module=None,
         dataframe_row=None,
         target_node=target_node,
     )
     return ExtractedItem(
-        ref=FileRef(name),
+        ref=name,
         metadata=metadata,
-        schema_path=Path(bukov.SCHEMA),
+        schema_path=Path(BUKOV_SCHEMA),
         obj=pl.DataFrame(),
         time_key=time_key,
     )
@@ -123,7 +126,7 @@ def test_unreadable_time_coord_is_recorded_on_the_item():
         endpoint_name="bukov",
         node_path=None,
         username="test",
-        schema_path=bukov.SCHEMA,
+        schema_path=BUKOV_SCHEMA,
         extract_fn=None,
         fn_module=None,
         time_like_coord="date_time",
@@ -132,9 +135,9 @@ def test_unreadable_time_coord_is_recorded_on_the_item():
     )
 
     item = make_extracted_item(
-        FileRef("no_time.json"),
+        Path("no_time.json"),
         metadata,
-        Path(bukov.SCHEMA),
+        Path(BUKOV_SCHEMA),
         pl.DataFrame({"temp": [1.0]}),
     )
 
@@ -146,7 +149,13 @@ def test_unreadable_time_coord_is_recorded_on_the_item():
 def test_anomaly_is_emailed_only_once(tmp_path, monkeypatch):
     """The worker re-examines held items on every poll, so a persisting anomaly
     must notify once instead of mailing the same report every cycle."""
-    app_config = bukov.app_config(QueueStorage(str(tmp_path / "queue")))
+    app_config = AppConfig(
+        queue=QueueStorage(str(tmp_path / "queue")),
+        config_path=tmp_path / "unused_config.yaml",
+        config={},
+        base=BaseConfig(),
+        smtp=SmtpConfig(),
+    )
     sent: list[list[dict]] = []
     monkeypatch.setattr(
         worker,
@@ -170,16 +179,14 @@ def test_worker_stores_batch_in_data_time_order(tmp_path, monkeypatch, caplog):
     written to the store oldest-data-first, so no backdated payload falls
     below the store minimum and gets dropped.
     """
-    queue_dir = tmp_path / "queue"
-    storage = QueueStorage(str(queue_dir))
+    storage = QueueStorage(str(tmp_path / "queue"))
     storage.ensure_layout()
-
     names = bukov.stage_items(storage)
-    assert set(names) == {bukov.NEWEST, bukov.MIDDLE, bukov.OLDEST}
+    assert set(names) == {NEWEST, MIDDLE, OLDEST}
 
     # retention_time=0 disables holding: this test verifies data-time
     # ordering, not the (separately tested) retention mechanism.
-    app_config = bukov.app_config(storage, base=BaseConfig(retention_time=0.0))
+    app_config = bukov.app_config(storage, retention_time=0.0)
     monkeypatch.setenv("ZF_STORE_URL", str(tmp_path / "bukov_store.zarr"))
 
     with caplog.at_level(logging.INFO, logger="ingress_server.worker"):
@@ -187,22 +194,18 @@ def test_worker_stores_batch_in_data_time_order(tmp_path, monkeypatch, caplog):
 
     assert progressed
     assert bukov.stored_refs(caplog) == [
-        bukov.item_ref(bukov.OLDEST),
-        bukov.item_ref(bukov.MIDDLE),
-        bukov.item_ref(bukov.NEWEST),
+        bukov.item_ref(OLDEST),
+        bukov.item_ref(MIDDLE),
+        bukov.item_ref(NEWEST),
     ]
 
+    assert storage.list_accepted() == []
     success_names = {
-        path.name for path in (queue_dir / "success").rglob("*.json")
-        if not path.name.endswith(".meta.json")
+        name for name in storage._item_names("success")
+        if not name.endswith(".meta.json")
     }
     assert success_names == {f"{bukov.ENDPOINT}_{name}" for name in names}
-    assert not list((queue_dir / "failed").rglob("*.json"))
+    # Not narrowed to *.json: a non-JSON payload parked in failed/ must fail too.
+    assert storage._item_names("failed") == []
 
     bukov.assert_store_content()
-
-    # The backdated payload's data must be present with real values; without
-    # data-time ordering it would fall below the store minimum and be dropped.
-    ds = zf.open_store(bukov.TESTS_DIR / "inputs" / bukov.SCHEMA)[bukov.ENDPOINT].dataset
-    day_17 = ds["rock_temp"].sel(date_time=slice("2025-09-17", "2025-09-18"))
-    assert np.isfinite(day_17.values).any()

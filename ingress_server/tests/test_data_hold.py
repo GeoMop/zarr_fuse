@@ -53,7 +53,9 @@ def _write_schema(tmp_path: Path, monkeypatch) -> Path:
     return schema_path
 
 
-def _stage_item(storage: QueueStorage, schema_path: Path, name: str, date_time: str, temp: float) -> None:
+def _stage_item(
+    storage: QueueStorage, schema_path: Path, name: str, date_time: str, temp: float
+) -> None:
     payload = json.dumps([{"date_time": date_time, "temp": temp}]).encode("utf-8")
 
     metadata = MetadataModel(
@@ -68,10 +70,16 @@ def _stage_item(storage: QueueStorage, schema_path: Path, name: str, date_time: 
         dataframe_row=None,
         target_node=ENDPOINT,
     )
-    storage.put_item(name=name, payload=payload, meta=metadata.model_dump_json().encode("utf-8"))
+    storage.put_item(
+        name=name,
+        payload=payload,
+        meta=metadata.model_dump_json().encode("utf-8"),
+    )
 
 
-def _app_config(tmp_path: Path, storage: QueueStorage) -> AppConfig:
+def _app_config(tmp_path: Path) -> AppConfig:
+    storage = QueueStorage(str(tmp_path / "queue"))
+    storage.ensure_layout()
     return AppConfig(
         queue=storage,
         config_path=tmp_path / "unused_config.yaml",
@@ -81,18 +89,19 @@ def _app_config(tmp_path: Path, storage: QueueStorage) -> AppConfig:
     )
 
 
-def _accepted_names(queue_dir: Path) -> set[str]:
+def _payload_names(app_config: AppConfig, queue_name: str) -> set[str]:
     return {
-        p.name for p in (queue_dir / "accepted").rglob("*.json")
-        if not p.name.endswith(".meta.json")
+        name for name in app_config.queue._item_names(queue_name)
+        if not name.endswith(".meta.json")
     }
 
 
-def _success_names(queue_dir: Path) -> set[str]:
-    return {
-        p.name for p in (queue_dir / "success").rglob("*.json")
-        if not p.name.endswith(".meta.json")
-    }
+def _accepted_names(app_config: AppConfig) -> set[str]:
+    return _payload_names(app_config, "accepted")
+
+
+def _success_names(app_config: AppConfig) -> set[str]:
+    return _payload_names(app_config, "success")
 
 
 def test_batch_relative_retention_splits_ready_and_held(tmp_path, monkeypatch):
@@ -103,18 +112,15 @@ def test_batch_relative_retention_splits_ready_and_held(tmp_path, monkeypatch):
     IS the batch maximum (0h diff) so it is always held.
     """
     schema_path = _write_schema(tmp_path, monkeypatch)
-    queue_dir = tmp_path / "queue"
-    storage = QueueStorage(str(queue_dir))
-    storage.ensure_layout()
-    app_config = _app_config(tmp_path, storage)
-    _stage_item(storage, schema_path, OLD_NAME, OLD_DATE_TIME, temp=1.0)
-    _stage_item(storage, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
+    app_config = _app_config(tmp_path)
+    _stage_item(app_config.queue, schema_path, OLD_NAME, OLD_DATE_TIME, temp=1.0)
+    _stage_item(app_config.queue, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
 
     progressed = _process_available_files(app_config)
 
     assert progressed
-    assert _accepted_names(queue_dir) == {FRESH_NAME}
-    assert _success_names(queue_dir) == {OLD_NAME}
+    assert _accepted_names(app_config) == {FRESH_NAME}
+    assert _success_names(app_config) == {OLD_NAME}
 
 
 def test_held_item_alone_does_not_report_progress(tmp_path, monkeypatch):
@@ -125,16 +131,13 @@ def test_held_item_alone_does_not_report_progress(tmp_path, monkeypatch):
     between checks.
     """
     schema_path = _write_schema(tmp_path, monkeypatch)
-    queue_dir = tmp_path / "queue"
-    storage = QueueStorage(str(queue_dir))
-    storage.ensure_layout()
-    app_config = _app_config(tmp_path, storage)
-    _stage_item(storage, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
+    app_config = _app_config(tmp_path)
+    _stage_item(app_config.queue, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
 
     progressed = _process_available_files(app_config)
 
     assert not progressed
-    assert _accepted_names(queue_dir) == {FRESH_NAME}
+    assert _accepted_names(app_config) == {FRESH_NAME}
 
 
 def test_held_item_is_released_once_newer_data_arrives(tmp_path, monkeypatch):
@@ -144,28 +147,25 @@ def test_held_item_is_released_once_newer_data_arrives(tmp_path, monkeypatch):
     raises the batch maximum far enough past it.
     """
     schema_path = _write_schema(tmp_path, monkeypatch)
-    queue_dir = tmp_path / "queue"
-    storage = QueueStorage(str(queue_dir))
-    storage.ensure_layout()
-    app_config = _app_config(tmp_path, storage)
-    _stage_item(storage, schema_path, OLD_NAME, OLD_DATE_TIME, temp=1.0)
-    _stage_item(storage, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
+    app_config = _app_config(tmp_path)
+    _stage_item(app_config.queue, schema_path, OLD_NAME, OLD_DATE_TIME, temp=1.0)
+    _stage_item(app_config.queue, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
 
     _process_available_files(app_config)
-    assert _accepted_names(queue_dir) == {FRESH_NAME}
+    assert _accepted_names(app_config) == {FRESH_NAME}
 
     # Re-poll with no new data: nothing changes, no progress.
     progressed = _process_available_files(app_config)
     assert not progressed
-    assert _accepted_names(queue_dir) == {FRESH_NAME}
+    assert _accepted_names(app_config) == {FRESH_NAME}
 
     # A newer item arrives, pushing the batch maximum forward.
-    _stage_item(storage, schema_path, NEWER_NAME, NEWER_DATE_TIME, temp=3.0)
+    _stage_item(app_config.queue, schema_path, NEWER_NAME, NEWER_DATE_TIME, temp=3.0)
     progressed = _process_available_files(app_config)
 
     assert progressed
-    assert _accepted_names(queue_dir) == {NEWER_NAME}
-    assert _success_names(queue_dir) == {OLD_NAME, FRESH_NAME}
+    assert _accepted_names(app_config) == {NEWER_NAME}
+    assert _success_names(app_config) == {OLD_NAME, FRESH_NAME}
 
     ds = zf.open_store(schema_path)[ENDPOINT].dataset
     date_time = ds["date_time"].values.astype("datetime64[s]")
