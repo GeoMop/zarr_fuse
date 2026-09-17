@@ -333,8 +333,8 @@ def test_merge_ds_preserves_values_across_overlap_and_extensions(tmp_path):
     Preserve omitted values through sparse overlap and multidimensional extensions.
 
     The variables span one, two, and three dimensions. Updates cover a sparse
-    overlap, a pure time extension, combined time/depth extension, and wholly
-    new time/borehole coordinates.
+    overlap, a pure time extension, combined time/depth extension, simultaneous
+    zero-overlap extensions, and mixed overlap/extensions on all three axes.
     """
     store_path = tmp_path / "multidimensional_nan_preservation.zarr"
     shutil.rmtree(store_path, ignore_errors=True)
@@ -592,8 +592,8 @@ def test_merge_ds_preserves_values_across_overlap_and_extensions(tmp_path):
         [np.nan, np.nan, 533, 534],
     ], equal_nan=True)
 
-    # Both extending coordinates have split index zero. Neither extension may
-    # be discarded when the first dimension reduces the overlap to empty.
+    # Time and borehole have no overlap, while depth overlaps at 20 and extends
+    # at 50. Empty disjoint slabs must still extend their own coordinate axes.
     update(
         date_time=[3],
         borehole=[4, 5],
@@ -634,6 +634,8 @@ def test_merge_ds_preserves_values_across_overlap_and_extensions(tmp_path):
         non_overlapping_extension["measurement"].sel(date_time=3, borehole=1, depth=50)
     )
 
+    # Every dimension now contains one overlapping and one extending value.
+    # This checks merged-coordinate maintenance through all reverse-order passes.
     update(
         date_time=[3, 4],
         borehole=[5, 6],
@@ -718,6 +720,7 @@ def test_write_ds_partial_chunk_update(smart_tmp_path):
 
 
 def test_merge_ds_expands_empty_cartesian_extension(smart_tmp_path):
+    """Extend one coordinate when another update coordinate is rejected."""
     store_path = smart_tmp_path / "empty_cartesian_extension.zarr"
     shutil.rmtree(store_path, ignore_errors=True)
     schema_dict = {
