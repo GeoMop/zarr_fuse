@@ -42,6 +42,17 @@
   groups.
 - Add regression coverage for empty-to-first-write transitions.
 
+### P1. Correct multidimensional coordinate extension application
+
+- Keep `merge_ds` extension slabs disjoint while checking the extending
+  dimension independently from the slabs' Cartesian data sizes.
+- Reindex every non-appended dimension to the coordinates currently present
+  in the store before applying each extension in reverse dimension order.
+- Extend storage tests with zero-overlap and mixed-overlap updates across three
+  coordinates, including structural extensions whose dependent values are NaN.
+- Generalize missing-value filling to use each schema variable's `na_value`,
+  including integer and string variables without native NaN representations.
+
 ### P2. Tighten schema and read-path consistency
 
 - Reconcile the `composed` attribute contract across write and read code paths.
@@ -176,6 +187,11 @@
 
 ## AGENT Questions And Remarks
 
+- A sorted-coordinate variant of the schema-NA merge regression propagated a
+  floating NaN through interpolation and lost otherwise valid extension
+  values. The merge regression uses unsorted coordinates to isolate merge
+  behavior; sorted interpolation with missing values needs separate review.
+
 - Some existing tests already skip when S3 credentials are absent, but the repo
   still mixes local and remote assumptions. That boundary should be made more
   explicit during test-fix work.
@@ -240,6 +256,14 @@
 
 ## AGENT log
 
+- 2026-09-17: Added schema-aware missing-value filling for merge overlap and
+  extension paths, covered by float, integer, and string merge regressions.
+- 2026-09-17: Verified pure xarray/Dask lazy read, transform, and local Zarr
+  write compatibility without an explicit compute in a standalone test.
+- 2026-09-17: Reworked `merge_ds` to recognize an extension from its extending
+  dimension rather than the Cartesian size of its disjoint data slab.
+- 2026-09-17: Extended storage coverage for rejected coordinates, structural
+  NaN expansion, and mixed overlap/extensions across three dimensions.
 - 2026-06-20: Reviewed `AGENTS.md`, `README.md`, `python_coding.md`, and
   `_PLAN.md`.
 - 2026-06-20: Created a structured `PLAN.md` aligned with the current user

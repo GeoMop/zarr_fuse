@@ -333,7 +333,8 @@ def test_merge_ds_preserves_values_across_overlap_and_extensions(tmp_path):
     Preserve omitted values through sparse overlap and multidimensional extensions.
 
     The variables span one, two, and three dimensions. Updates cover a sparse
-    overlap, a pure time extension, and a combined time/depth extension.
+    overlap, a pure time extension, combined time/depth extension, simultaneous
+    zero-overlap extensions, and mixed overlap/extensions on all three axes.
     """
     store_path = tmp_path / "multidimensional_nan_preservation.zarr"
     shutil.rmtree(store_path, ignore_errors=True)
@@ -591,6 +592,143 @@ def test_merge_ds_preserves_values_across_overlap_and_extensions(tmp_path):
         [np.nan, np.nan, 533, 534],
     ], equal_nan=True)
 
+    # Time and borehole have no overlap, while depth overlaps at 20 and extends
+    # at 50. Empty disjoint slabs must still extend their own coordinate axes.
+    update(
+        date_time=[3],
+        borehole=[4, 5],
+        depth=[20, 50],
+        measurement=[[
+            [614, 615],
+            [624, 625],
+        ]],
+        time_borehole_value=[[64, 65]],
+        time_depth_value=[[610, 620]],
+        borehole_value=[4, 5],
+        profile_value=[
+            [410, 420],
+            [510, 520],
+        ],
+        time_value=[60],
+        depth_value=[710, 720],
+    )
+
+    non_overlapping_extension = zf.open_store(schema_dict).dataset
+    npt.assert_array_equal(non_overlapping_extension.coords["date_time"], [0, 1, 2, 3])
+    npt.assert_array_equal(non_overlapping_extension.coords["borehole"], [1, 2, 3, 4, 5])
+    npt.assert_array_equal(non_overlapping_extension.coords["depth"], [10, 20, 30, 40, 50])
+    npt.assert_allclose(
+        non_overlapping_extension["measurement"].sel(
+            date_time=3,
+            borehole=[4, 5],
+            depth=[20, 50],
+        ),
+        [[614, 615], [624, 625]],
+    )
+    npt.assert_allclose(non_overlapping_extension["borehole_value"].sel(borehole=[4, 5]), [4, 5])
+    npt.assert_allclose(non_overlapping_extension["depth_value"].sel(depth=50), 720)
+    assert np.isnan(
+        non_overlapping_extension["measurement"].sel(date_time=0, borehole=4, depth=50)
+    )
+    assert np.isnan(
+        non_overlapping_extension["measurement"].sel(date_time=3, borehole=1, depth=50)
+    )
+
+    # Every dimension now contains one overlapping and one extending value.
+    # This checks merged-coordinate maintenance through all reverse-order passes.
+    update(
+        date_time=[3, 4],
+        borehole=[5, 6],
+        depth=[50, 60],
+        measurement=[
+            [[801, 802], [803, 804]],
+            [[811, 812], [813, 814]],
+        ],
+        time_borehole_value=[
+            [805, 806],
+            [815, 816],
+        ],
+        time_depth_value=[
+            [807, 808],
+            [817, 818],
+        ],
+        borehole_value=[825, 826],
+        profile_value=[
+            [827, 828],
+            [837, 838],
+        ],
+        time_value=[809, 819],
+        depth_value=[829, 830],
+    )
+
+    mixed_extensions = zf.open_store(schema_dict).dataset
+    npt.assert_array_equal(mixed_extensions.coords["date_time"], [0, 1, 2, 3, 4])
+    npt.assert_array_equal(mixed_extensions.coords["borehole"], [1, 2, 3, 4, 5, 6])
+    npt.assert_array_equal(mixed_extensions.coords["depth"], [10, 20, 30, 40, 50, 60])
+    npt.assert_allclose(
+        mixed_extensions["measurement"].sel(
+            date_time=[3, 4],
+            borehole=[5, 6],
+            depth=[50, 60],
+        ),
+        [
+            [[801, 802], [803, 804]],
+            [[811, 812], [813, 814]],
+        ],
+    )
+    npt.assert_allclose(mixed_extensions["time_value"].sel(date_time=4), 819)
+    npt.assert_allclose(mixed_extensions["borehole_value"].sel(borehole=6), 826)
+    npt.assert_allclose(mixed_extensions["depth_value"].sel(depth=60), 830)
+
+
+@pytest.mark.parametrize(
+    ("var_type", "na_value", "dtype"),
+    [
+        pytest.param("float64", "nan", np.float64, id="float"),
+        pytest.param("int64", -1, np.int64, id="integer"),
+        pytest.param("str[8]", "<NA>", "U8", id="string"),
+    ],
+)
+def test_merge_ds_respects_schema_na_value(tmp_path, var_type, na_value, dtype):
+    """Use the variable sentinel for overlap preservation and extension fill."""
+    schema_dict = {
+        "VARS": {
+            "data": {
+                "unit": "",
+                "type": var_type,
+                "na_value": na_value,
+                "coords": ["time", "depth"],
+            },
+        },
+        "COORDS": {
+            "time": {"unit": "", "type": "int64", "sorted": False},
+            "depth": {"unit": "", "type": "int64", "sorted": False},
+        },
+        "ATTRS": {"STORE_URL": str(tmp_path / "schema_na_value.zarr")},
+    }
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {"data": (("time", "depth"), np.array([[10, 20]], dtype=dtype))},
+        coords={"time": [0], "depth": [1, 2]},
+    ))
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {
+            "data": (
+                ("time", "depth"),
+                np.array([[na_value, 30], [40, na_value]], dtype=dtype),
+            ),
+        },
+        coords={"time": [0, 1], "depth": [2, 3]},
+    ))
+
+    result = zf.open_store(schema_dict).dataset["data"]
+    expected = np.array([[10, 20, 30], [na_value, 40, na_value]], dtype=dtype)
+    assert result.dtype == expected.dtype
+    npt.assert_array_equal(result, expected)
+
 
 def test_write_ds_partial_chunk_update(smart_tmp_path):
     """Node.write_ds must overwrite a region smaller than its Zarr chunk."""
@@ -630,7 +768,8 @@ def test_write_ds_partial_chunk_update(smart_tmp_path):
     np.testing.assert_array_equal(reopened["data"].values, np.array([10.0, 12.0]))
 
 
-def test_merge_ds_skips_empty_cartesian_extension(smart_tmp_path):
+def test_merge_ds_expands_empty_cartesian_extension(smart_tmp_path):
+    """Extend one coordinate when another update coordinate is rejected."""
     store_path = smart_tmp_path / "empty_cartesian_extension.zarr"
     shutil.rmtree(store_path, ignore_errors=True)
     schema_dict = {
@@ -661,19 +800,23 @@ def test_merge_ds_skips_empty_cartesian_extension(smart_tmp_path):
     node = zf.open_store(schema_dict)
     node.update_from_ds(xr.Dataset(
         {"data": (("x", "p"), np.array([[10.0, 11.0], [20.0, 21.0]]))},
-        coords={"x": np.array([1.0, 2.0]), "p": np.array(["A", "B"])},
+        coords={"x": np.array([1.0, 2.0]), "p": np.array(["A", "B"], dtype="U8")},
     ))
 
     node = zf.open_store(schema_dict)
     node.update_from_ds(xr.Dataset(
         {"data": (("x", "p"), np.array([[30.0], [40.0]]))},
-        coords={"x": np.array([3.0, 10.0]), "p": np.array(["C"])},
+        coords={"x": np.array([3.0, 10.0]), "p": np.array(["C"], dtype="U8")},
     ))
 
     reopened = zf.open_store(schema_dict).dataset
     np.testing.assert_array_equal(reopened.coords["x"].values, np.array([1.0, 2.0]))
-    np.testing.assert_array_equal(reopened.coords["p"].values, np.array(["A", "B"]))
-    assert reopened["data"].shape == (2, 2)
+    np.testing.assert_array_equal(reopened.coords["p"].values, np.array(["A", "B", "C"]))
+    npt.assert_allclose(
+        reopened["data"],
+        [[10.0, 11.0, np.nan], [20.0, 21.0, np.nan]],
+        equal_nan=True,
+    )
 
 
 def test_update_from_ds_schema():
