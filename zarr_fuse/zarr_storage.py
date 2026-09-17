@@ -942,8 +942,7 @@ class Node:
             dim_coord = ds_extend_dict[dim]
             if dim_coord is None:
                 continue  # No new coordinates along this dimension.
-            extension_size = int(np.prod(list(dim_coord.sizes.values())))
-            if extension_size == 0:
+            if dim_coord.sizes[dim] == 0:
                 continue
 
             # For all dimensions other than dim, reindex ds_ext so that the coordinate arrays
