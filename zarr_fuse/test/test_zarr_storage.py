@@ -333,7 +333,8 @@ def test_merge_ds_preserves_values_across_overlap_and_extensions(tmp_path):
     Preserve omitted values through sparse overlap and multidimensional extensions.
 
     The variables span one, two, and three dimensions. Updates cover a sparse
-    overlap, a pure time extension, and a combined time/depth extension.
+    overlap, a pure time extension, combined time/depth extension, and wholly
+    new time/borehole coordinates.
     """
     store_path = tmp_path / "multidimensional_nan_preservation.zarr"
     shutil.rmtree(store_path, ignore_errors=True)
@@ -590,6 +591,35 @@ def test_merge_ds_preserves_values_across_overlap_and_extensions(tmp_path):
         [np.nan, np.nan, np.nan, np.nan],
         [np.nan, np.nan, 533, 534],
     ], equal_nan=True)
+
+    # Both extending coordinates have split index zero. Neither extension may
+    # be discarded when the first dimension reduces the overlap to empty.
+    update(
+        date_time=[3],
+        borehole=[4, 5],
+        depth=[10, 20],
+        measurement=[[
+            [614, 615],
+            [624, 625],
+        ]],
+        time_borehole_value=[[64, 65]],
+        time_depth_value=[[610, 620]],
+        borehole_value=[4, 5],
+        profile_value=[
+            [410, 420],
+            [510, 520],
+        ],
+        time_value=[60],
+        depth_value=[710, 720],
+    )
+
+    non_overlapping_extension = zf.open_store(schema_dict).dataset
+    npt.assert_array_equal(non_overlapping_extension.coords["date_time"], [0, 1, 2, 3])
+    npt.assert_array_equal(non_overlapping_extension.coords["borehole"], [1, 2, 3, 4, 5])
+    npt.assert_allclose(
+        non_overlapping_extension["measurement"].sel(date_time=3, borehole=[4, 5]),
+        [[614, 615], [624, 625]],
+    )
 
 
 def test_write_ds_partial_chunk_update(smart_tmp_path):
