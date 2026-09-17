@@ -681,6 +681,55 @@ def test_merge_ds_preserves_values_across_overlap_and_extensions(tmp_path):
     npt.assert_allclose(mixed_extensions["depth_value"].sel(depth=60), 830)
 
 
+@pytest.mark.parametrize(
+    ("var_type", "na_value", "dtype"),
+    [
+        pytest.param("float64", "nan", np.float64, id="float"),
+        pytest.param("int64", -1, np.int64, id="integer"),
+        pytest.param("str[8]", "<NA>", "U8", id="string"),
+    ],
+)
+def test_merge_ds_respects_schema_na_value(tmp_path, var_type, na_value, dtype):
+    """Use the variable sentinel for overlap preservation and extension fill."""
+    schema_dict = {
+        "VARS": {
+            "data": {
+                "unit": "",
+                "type": var_type,
+                "na_value": na_value,
+                "coords": ["time", "depth"],
+            },
+        },
+        "COORDS": {
+            "time": {"unit": "", "type": "int64", "sorted": False},
+            "depth": {"unit": "", "type": "int64", "sorted": False},
+        },
+        "ATTRS": {"STORE_URL": str(tmp_path / "schema_na_value.zarr")},
+    }
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {"data": (("time", "depth"), np.array([[10, 20]], dtype=dtype))},
+        coords={"time": [0], "depth": [1, 2]},
+    ))
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {
+            "data": (
+                ("time", "depth"),
+                np.array([[na_value, 30], [40, na_value]], dtype=dtype),
+            ),
+        },
+        coords={"time": [0, 1], "depth": [2, 3]},
+    ))
+
+    result = zf.open_store(schema_dict).dataset["data"]
+    expected = np.array([[10, 20, 30], [na_value, 40, na_value]], dtype=dtype)
+    assert result.dtype == expected.dtype
+    npt.assert_array_equal(result, expected)
+
+
 def test_write_ds_partial_chunk_update(smart_tmp_path):
     """Node.write_ds must overwrite a region smaller than its Zarr chunk."""
     store_path = smart_tmp_path / "partial_chunk_update.zarr"

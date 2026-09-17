@@ -904,7 +904,7 @@ class Node:
         # dimension. Write this intersection into the existing region.
         update_overlap_size = np.prod(list(ds_overlap.sizes.values()))
         if update_overlap_size > 0:
-            ds_overlap = ds_overlap.fillna(ds_existing).compute()
+            ds_overlap = self.schema.fill_missing(ds_overlap, ds_existing).compute()
             last_written_ds = self.write_ds(ds_overlap, mode="r+", region="auto")
 
         # --- Phase 2: Upward (process extension subsets in reverse order) ---
@@ -926,9 +926,9 @@ class Node:
             # Expand all other dimensions to their currently materialized
             # coordinate ranges, inserting missing values where the slab is empty.
             indexers = {d: merged_coords[d] for d in dim_coord.dims if d != dim}
-            na_value = ds_update.attrs.get('na_value', np.nan)
-            ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=na_value)
-            ds_ext_reindexed = ds_ext_reindexed.fillna(ds_existing).compute()
+            na_values = self.schema.na_values(dim_coord.data_vars)
+            ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=na_values)
+            ds_ext_reindexed = self.schema.fill_missing(ds_ext_reindexed, ds_existing).compute()
 
             # Append the extension subset along the current dimension.
             last_written_ds = self.write_ds(ds_ext_reindexed, mode="a", append_dim=dim)
