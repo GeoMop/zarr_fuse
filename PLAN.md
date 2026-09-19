@@ -31,7 +31,12 @@ it makes lot of NaNs.
 - Next fid fix for this
 
 
-### P0. NaN interpolation
+### P0. NaN interpolation [RESOLVED 2026-09-19]
+
+The pure xarray reproduction confirmed that a source NaN contaminated
+neighboring linear interpolation results. Interpolation now fills NaNs only
+for the calculation and restores NaNs at their original source coordinates.
+Both pure interpolation and `node.update_from_ds` regression tests pass.
 Probable bug: Interpolate uses NaN values as well compromising the surrounding values.
 - must be carefully tested first on small data and out of the node.update
 - if confirmed a work around must be also teste out of update
@@ -408,3 +413,5 @@ preserved as source coordinates, mapped to a constrained grid, or rejected.
   delayed-date_time merge goal.
 - 2026-09-19: Resolved the constrained step-limit interpolation boundary bug;
   targeted interpolation regressions pass.
+- 2026-09-19: Resolved NaN contamination during interpolation with pure and
+  `node.update_from_ds` regressions covering source and neighboring values.

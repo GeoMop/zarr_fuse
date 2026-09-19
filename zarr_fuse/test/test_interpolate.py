@@ -525,6 +525,34 @@ def test_interpolate_ds_returns_linear_interpolation_result():
     )
 
 
+def test_interpolate_ds_does_not_spread_nan_values():
+    """Interpolate around missing source values without contaminating neighbors."""
+    existing_ds = xr.Dataset(
+        {"data": ("x", np.array([0.0, 5.0, 10.0, 15.0, 20.0]))},
+        coords={"x": np.array([0.0, 0.5, 1.0, 1.5, 2.0])},
+    )
+    update_ds = xr.Dataset(
+        {"data": ("x", np.array([10.0, np.nan, 30.0, 40.0]))},
+        coords={"x": np.array([0.0, 1.0, 2.0, 3.0])},
+    )
+    schema = {
+        "x": zf_schema.Coord(_ctx({
+            "name": "x",
+            "unit": "",
+            "sorted": True,
+            "step_limits": [],
+        })),
+    }
+
+    interpolated, _ = interpolate_ds(update_ds, existing_ds, schema)
+
+    np.testing.assert_allclose(
+        interpolated["data"].values,
+        np.array([10.0, 15.0, np.nan, 25.0, 30.0, 40.0]),
+        equal_nan=True,
+    )
+
+
 def test_interpolate_ds_preserves_empty_target_coord():
     existing_ds = xr.Dataset(
         {"data": (("x", "p"), np.array([[10.0, 11.0], [20.0, 21.0]]))},

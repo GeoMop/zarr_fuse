@@ -264,28 +264,49 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
     }
 
     ds_nearest = ds_sorted.interp(
-            nearest_coords,
-            method='nearest',
-            assume_sorted=True
-        )
+        nearest_coords,
+        method='nearest',
+        assume_sorted=True,
+    )
+
+    # Fill NaNs only for the interpolation calculation. Restore their source
+    # positions below so sparse data does not contaminate neighboring values.
+    ds_for_interp = ds_nearest.copy()
+    for var_name, data_array in ds_nearest.data_vars.items():
+        for dim in linear_coords:
+            if dim in data_array.dims:
+                data_array = data_array.interpolate_na(
+                    dim=dim,
+                    method='linear',
+                    use_coordinate=True,
+                )
+        ds_for_interp[var_name] = data_array
 
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
-            ds_interpolated = ds_nearest.interp(
+            ds_interpolated = ds_for_interp.interp(
                 linear_coords,
                 method='linear',
-                assume_sorted=True
+                assume_sorted=True,
             )
     except RuntimeWarning:
         log.warning(
             InterpolationFallbackWarning(linear_coords)
         )
-        ds_interpolated = ds_nearest.interp(
+        ds_interpolated = ds_for_interp.interp(
             linear_coords,
             method='nearest',
-            assume_sorted=True
+            assume_sorted=True,
         )
+
+    for var_name, data_array in ds_sorted.data_vars.items():
+        source_nan = data_array.isnull()
+        output_nan = source_nan.reindex(
+            {dim: ds_interpolated[dim] for dim in source_nan.dims},
+            fill_value=False,
+        )
+        ds_interpolated[var_name] = ds_interpolated[var_name].where(~output_nan)
     all_coords = {d: c for d, (c, idx) in coords_new}
     ds_interpolated = ds_interpolated.reindex(all_coords, fill_value=np.nan)
 
