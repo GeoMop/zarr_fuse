@@ -222,6 +222,38 @@ def test_interpolate_coord_unsorted():
     np.allclose(merged, [1, 2,  10, 3])
 
 
+@pytest.mark.parametrize(
+    "step_limits",
+    [
+        [30, 30, "minute"],
+        [30, 40, "minute"],
+        [15, 45, "minute"],
+    ],
+)
+def test_interpolate_coord_does_not_create_subminimum_datetime_steps(step_limits):
+    """Keep datetime extension steps within the configured lower and upper bounds."""
+    schema = zf_schema.Coord(_ctx({
+        "name": "date_time",
+        "unit": {"tick": "s", "tz": "UTC"},
+        "sorted": True,
+        "step_limits": step_limits,
+    }))
+    old = np.array(["2024-05-22T09:30:00"], dtype="datetime64[s]")
+    new = np.array(
+        ["2024-05-22T10:00:01", "2024-05-22T10:30:01"],
+        dtype="datetime64[s]",
+    )
+
+    idx_sorter = sort_by_coord(new, old, schema, dflt_logger)
+    merged, _ = interpolate_coord(new, old, idx_sorter, schema, dflt_logger)
+
+    steps = np.diff(merged).astype("timedelta64[s]")
+    lower = np.timedelta64(step_limits[0], "m")
+    upper = np.timedelta64(step_limits[1], "m")
+    assert np.all(steps >= lower)
+    assert np.all(steps <= upper)
+
+
 
 
 def check_preserve_old(existing_ds, update_ds, ds_int, splits):

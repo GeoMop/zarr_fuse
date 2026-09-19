@@ -25,6 +25,13 @@ def adjust_grid(x:np.ndarray, step_range:np.array) -> np.ndarray:
         if d > max_step:
             n = int(np.ceil(d / max_step))
             step = d / n
+            if step < min_step:
+                # There is no integer number of steps that satisfies both
+                # limits while retaining xi. Advance by one valid step and
+                # discard the incompatible off-grid endpoint.
+                out.append(last + min_step)
+                last = out[-1]
+                continue
             for k in range(1, n):
                 out.append(last + k * step)
         out.append(xi)
