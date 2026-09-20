@@ -26,7 +26,11 @@ from . import zarr_schema, units
 from .schema_ctx import RaisingLogger
 from .dtype_converter import to_typed_array, TrimmedArrayWarning
 from .logger import get_logger
-from .interpolate import interpolate_ds, check_sorted_coord_values
+from .interpolate import (
+    check_sorted_coord_values,
+    interpolate_ds,
+    normalize_update_coords,
+)
 from .zarr_schema import DatasetSchema, NodeSchema
 from .tools import recursive_update
 """
@@ -877,6 +881,7 @@ class Node:
             Last written slab and the coordinates materialized for each
             dimension after the merge.
         """
+        ds_update = normalize_update_coords(ds_update, self.schema.COORDS)
         ds_existing = self.dataset
         last_written_ds = ds_existing
 

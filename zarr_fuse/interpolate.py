@@ -6,6 +6,7 @@ import xarray as xr
 import attrs
 import warnings
 
+from . import units
 from .zarr_schema import Coord
 from .tools import adjust_grid
 
@@ -31,6 +32,54 @@ class InterpolationFallbackWarning(UserWarning):
             f"Falling back from linear interpolation to nearest/P0 interpolation "
             f"for coordinates {self.coord_names}."
         )
+
+
+def round_coord_to_step_unit(values: np.ndarray, schema: Coord) -> np.ndarray:
+    """Round datetime coordinates down to the unit configured for coordinate steps."""
+    if not isinstance(schema.unit, units.DateTimeUnit):
+        return values
+
+    tick = units.PINT_UNIT_TO_DATETIME_TICK[str(schema.step_limits.unit)]
+    rounded = values.astype(f"datetime64[{tick}]")
+    return rounded.astype(values.dtype)
+
+
+def normalize_update_coords(
+        ds_update: xr.Dataset,
+        schema: Dict[str, Coord],
+) -> xr.Dataset:
+    """Round datetime update coordinates and discard duplicate rounded labels."""
+    normalized = ds_update
+    for dim, coord_schema in schema.items():
+        values = normalized[dim].values
+        coord_attrs = normalized[dim].attrs.copy()
+        rounded = round_coord_to_step_unit(values, coord_schema)
+        _, first_indices = np.unique(rounded, return_index=True)
+        first_indices = np.sort(first_indices)
+        normalized = normalized.assign_coords({dim: rounded})
+        if len(first_indices) < len(rounded):
+            dependent_names = [
+                name
+                for name, data_array in normalized.data_vars.items()
+                if dim in data_array.dims
+            ]
+            if dependent_names:
+                dependent = normalized[dependent_names].groupby(dim).first(skipna=True)
+                static = normalized.drop_vars(dependent_names)
+                if dim in static.coords:
+                    static = static.drop_vars(dim)
+                dataset_attrs = normalized.attrs.copy()
+                normalized = xr.merge(
+                    [dependent, static],
+                    compat="override",
+                    join="outer",
+                )
+                normalized.attrs = dataset_attrs
+            else:
+                normalized = normalized.isel({dim: first_indices})
+            normalized = normalized.sel({dim: rounded[first_indices]})
+        normalized[dim].attrs = coord_attrs
+    return normalized
 
 
 def check_sorted_coord_values(

@@ -15,7 +15,14 @@ except ImportError:
     plt = None
 
 # ---- adjust this import to match your module path! ----
-from zarr_fuse.interpolate import interpolate_ds, sort_by_coord, interpolate_coord, dflt_logger
+from zarr_fuse.interpolate import (
+    dflt_logger,
+    interpolate_coord,
+    interpolate_ds,
+    normalize_update_coords,
+    round_coord_to_step_unit,
+    sort_by_coord,
+)
 #from ds_interpolate import sort_by_coord, interpolate_coord, interpolate_ds
 
 def _ctx(data: dict):
@@ -159,6 +166,101 @@ def test_interpolate_coord_sorted():
                     step_limits=dict(start=150, end=150, unit='minute')) # 2.5 h
     assert split == 2
     np.testing.assert_allclose(merged, [1, 2, 4.5, 7, 9.5])
+
+
+def test_round_datetime_coord_to_step_limit_unit():
+    """Round incoming seconds to the minute unit specified by step limits."""
+    schema = zf_schema.Coord(_ctx({
+        "name": "date_time",
+        "unit": {"tick": "s", "tz": "UTC"},
+        "sorted": True,
+        "step_limits": [30, 30, "minute"],
+    }))
+    values = np.array(
+        ["2024-05-22T10:00:01", "2024-05-22T10:01:00"],
+        dtype="datetime64[s]",
+    )
+
+    rounded = round_coord_to_step_unit(values, schema)
+
+    np.testing.assert_array_equal(
+        rounded,
+        np.array(["2024-05-22T10:00:00", "2024-05-22T10:01:00"], dtype="datetime64[s]"),
+    )
+
+
+def test_normalize_update_coords_discards_rounded_duplicates():
+    """Keep one value when rounding two incoming timestamps to the same coordinate."""
+    schema = zf_schema.Coord(_ctx({
+        "name": "date_time",
+        "unit": {"tick": "s", "tz": "UTC"},
+        "sorted": True,
+        "step_limits": [30, 30, "minute"],
+    }))
+    update = xr.Dataset(
+        {"data": ("date_time", np.array([100.0, 101.0]))},
+        coords={
+            "date_time": np.array(
+                ["2024-05-22T10:00:00", "2024-05-22T10:00:01"],
+                dtype="datetime64[s]",
+            ),
+        },
+    )
+
+    normalized = normalize_update_coords(update, {"date_time": schema})
+
+    np.testing.assert_array_equal(
+        normalized["date_time"].values,
+        np.array(["2024-05-22T10:00:00"], dtype="datetime64[s]"),
+    )
+    np.testing.assert_array_equal(normalized["data"].values, np.array([100.0]))
+
+
+def test_normalize_update_coords_merges_sparse_rounded_duplicates():
+    """Merge non-NaN values from sparse slices sharing one rounded timestamp."""
+    schema = {
+        "date_time": zf_schema.Coord(_ctx({
+            "name": "date_time",
+            "unit": {"tick": "s", "tz": "UTC"},
+            "sorted": True,
+            "step_limits": [30, 30, "minute"],
+        })),
+        "depth": zf_schema.Coord(_ctx({
+            "name": "depth",
+            "unit": "",
+            "sorted": True,
+            "step_limits": [],
+        })),
+    }
+    update = xr.Dataset(
+        {
+            "data": (
+                ("date_time", "depth"),
+                np.array([[10.0, np.nan], [np.nan, 20.0]]),
+            ),
+            "borehole_project_id": ((), "project-1"),
+        },
+        coords={
+            "date_time": np.array(
+                ["2024-05-22T10:00:00", "2024-05-22T10:00:01"],
+                dtype="datetime64[s]",
+            ),
+            "depth": np.array([0.0, 1.0]),
+        },
+    )
+
+    normalized = normalize_update_coords(update, schema)
+
+    np.testing.assert_array_equal(
+        normalized["date_time"].values,
+        np.array(["2024-05-22T10:00:00"], dtype="datetime64[s]"),
+    )
+    np.testing.assert_allclose(
+        normalized["data"].values,
+        np.array([[10.0, 20.0]]),
+        equal_nan=False,
+    )
+    assert normalized["borehole_project_id"].item() == "project-1"
 
 
 def test_interpolate_coord_sorted_no_new_logs_only_extension_values(caplog):
