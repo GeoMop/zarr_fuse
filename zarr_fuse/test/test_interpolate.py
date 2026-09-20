@@ -158,7 +158,7 @@ def test_interpolate_coord_sorted():
                     unit='h',
                     step_limits=dict(start=150, end=150, unit='minute')) # 2.5 h
     assert split == 2
-    np.allclose(merged, [1, 2, 3.5 + 1/3.0, 5 + 2/3.0, 7.5,  10])
+    np.testing.assert_allclose(merged, [1, 2, 4.5, 7, 9.5])
 
 
 def test_interpolate_coord_sorted_no_new_logs_only_extension_values(caplog):
