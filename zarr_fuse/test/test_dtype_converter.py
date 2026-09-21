@@ -231,11 +231,24 @@ def test_to_typed_array():
     assert ctx.has_warning_instance(ta.TrimmedArrayWarning)
 
 
-# --- to_typed_array raises on unconvertible input ----------------------------
+# --- to_typed_array on unconvertible input -----------------------------------
 def test_to_typed_array_raises_on_bad_string():
     ctx = DummyCtx()
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as exc_info:
         ta.to_typed_array(np.array(["hello", "1.0"]), np.float64, ctx)
+    msg = str(exc_info.value)
+    assert "'hello'" in msg
+    assert "'1.0'" not in msg
+    assert "float64" in msg
+
+
+def test_to_typed_array_na_value_coerces():
+    ctx = DummyCtx()
+    out = ta.to_typed_array(np.array(["1.5", "bad"]), np.float64, ctx, na_value=np.nan)
+    assert out.dtype == np.float64
+    assert out[0] == pytest.approx(1.5)
+    assert np.isnan(out[1])
+    assert ctx.has_warning_instance(ta.ConversionFailedWarning)
 
 
 # --- _coerce_with_na (ConversionFailedWarning) --------------------------------

@@ -44,19 +44,35 @@ class TrimmedArrayWarning(Warning):
         return f"Trimmed values detected: [{self.preview}]"
 
 
+def _preview(values: np.ndarray, limit: int = 10) -> str:
+    return ", ".join(repr(v) for v in values[:limit])
+
+
 @attrs.define
 class ConversionFailedWarning(Warning):
     failed_values: np.ndarray
 
     @property
     def preview(self) -> str:
-        return ", ".join(repr(v) for v in self.failed_values[:10])
+        return _preview(self.failed_values)
 
     def __str__(self):
         size = len(self.failed_values)
         if size > 10:
             return f"Conversion failed for values: [{self.preview}, ... ({size} total)]"
         return f"Conversion failed for values: [{self.preview}]"
+
+
+def _unconvertible_values(arr: np.ndarray, target_dtype: np.dtype) -> np.ndarray:
+    """Elements of arr that numpy refuses to cast to target_dtype."""
+    flat = arr.ravel()
+    mask = np.zeros(flat.shape, dtype=bool)
+    for i, v in enumerate(flat):
+        try:
+            np.asarray([v], dtype=target_dtype)
+        except (ValueError, TypeError):
+            mask[i] = True
+    return flat[mask]
 
 
 def _coerce_with_na(arr: np.ndarray, target_dtype: np.dtype, na_value, ctx: 'SchemaCtx') -> np.ndarray:
@@ -281,16 +297,27 @@ def make_na(na_cfg: ContextCfg, dt: np.dtype):
 
 
 # ---- Main API ----
-def to_typed_array(x: Any, target_dtype: Optional[np.dtype], ctx:'SchemaCtx') -> np.ndarray:
+def to_typed_array(x: Any, target_dtype: Optional[np.dtype], ctx:'SchemaCtx', na_value=None) -> np.ndarray:
     """
     1) Convert without checks.
     2) If cast could trim, compare original vs converted using np.array_equal(equal_nan=False).
     3) If different, log once with ORIGINAL values that changed, and return the converted array.
+    If the cast fails on unconvertible elements:
+    - na_value given: those elements are replaced by na_value, ConversionFailedWarning is logged.
+    - na_value None: ValueError listing the unconvertible elements is raised.
     """
     if target_dtype is None:
         return np.asarray(x)
     arr = np.asarray(x)
-    out = np.asarray(arr, dtype=target_dtype)
+    try:
+        out = np.asarray(arr, dtype=target_dtype)
+    except (ValueError, TypeError) as e:
+        if na_value is None:
+            failed = _unconvertible_values(arr, target_dtype)
+            raise ValueError(
+                f"Can not convert input vector at '{ctx}' to type {target_dtype} with na_value None. "
+                f"Input values: [{_preview(failed)}]") from e
+        return _coerce_with_na(arr, target_dtype, na_value, ctx)
 
     # could out.dtype trim?
     if not may_trim(arr.dtype, out.dtype):
