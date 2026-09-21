@@ -11,6 +11,31 @@ from dashboard.config import _resolve_fields_for_group_raw
 _perf_plot_redraws = 0
 
 
+def _resolve_marker_window(x_range, xlim, times):
+    """Resolve the (start, end) marker window for a timeseries view.
+
+    Prefers the live ``x_range`` (the current visible window reported by the
+    ``RangeX`` stream after pan/zoom) when it is valid, otherwise falls back
+    to the view-specific ``xlim``, and clamps the result to the data bounds.
+    Returns ``None`` when no usable window can be derived.
+    """
+    if times is None or len(times) == 0:
+        return None
+    if x_range is not None and len(x_range) == 2 \
+            and not pd.isna(x_range[0]) and not pd.isna(x_range[1]):
+        start, end = x_range[0], x_range[1]
+    elif xlim is not None:
+        start, end = xlim[0], xlim[1]
+    else:
+        return None
+    min_t, max_t = times.min(), times.max()
+    start = max(start, min_t)
+    end = min(end, max_t)
+    if not end > start:
+        return None
+    return (start, end)
+
+
 def build_timeseries_views(data, map_state, selection_state, render_spinner=None):
     start_total = time.perf_counter()
     view_config = data.client.get_view(data.view_name)
@@ -130,7 +155,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
 
-    def build_timeseries_overlay(view="left", x_range=None):
+    def build_timeseries_overlay(view="left"):
         max_points = 5000 if view == "left" else None
         if selection_state is None:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
@@ -161,14 +186,6 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
 
         row_dim = selection_state.row_dim
         col_dim = selection_state.col_dim
-
-        # Compute marker positions from x_range
-        n_markers = 8
-        if (x_range is not None and len(x_range) == 2
-                and not pd.isna(x_range[0]) and not pd.isna(x_range[1])):
-            marker_times = pd.date_range(start=x_range[0], end=x_range[1], periods=n_markers)
-        else:
-            marker_times = pd.date_range(start=times.min(), end=times.max(), periods=n_markers)
 
         # Select per-combo cache for this view type
         cache = _left_curves if view == "left" else _full_curves
@@ -215,21 +232,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
                 curve = hv.Curve(curve_df, time_dim, y_axis_label, label=label).opts(
                     color=color,
                 )
-
-                # Scatter markers at tick-like positions
-                times_ns = np.array(times, dtype="datetime64[ns]").astype("int64")
-                marker_times_ns = np.array(marker_times, dtype="datetime64[ns]").astype("int64")
-                marker_y = np.interp(marker_times_ns, times_ns, series_vals)
-                marker_df = pd.DataFrame({
-                    time_dim: marker_times,
-                    y_axis_label: marker_y,
-                })
-                scatter = hv.Scatter(marker_df, time_dim, y_axis_label).opts(
-                    color=color,
-                    marker=shape,
-                    size=8,
-                )
-                cache[key] = curve * scatter
+                cache[key] = curve
                 meta_cache[key] = meta
 
         if not cache:
@@ -239,6 +242,68 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
 
         print(f"[timeseries] Returning overlay with {len(cache)} curves")
         return hv.Overlay(list(cache.values()))
+
+    def build_marker_overlay(view="left", x_range=None, xlim=None):
+        n_markers = 5
+
+        if selection_state is None:
+            return hv.Overlay([])
+        selected_combos = selection_state.get_selected_combinations()
+        if not selected_combos or not selection_state.sites:
+            return hv.Overlay([])
+
+        site_lookup = {s["entity_index"]: s for s in selection_state.sites}
+        times = next(
+            (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
+            None,
+        )
+        if times is None or len(times) == 0:
+            return hv.Overlay([])
+
+        window = _resolve_marker_window(x_range, xlim, times)
+        if window is None:
+            return hv.Overlay([])
+        marker_times = pd.date_range(start=window[0], end=window[1], periods=n_markers)
+
+        row_shapes = getattr(selection_state, "_row_shapes", {})
+        col_colors = getattr(selection_state, "_col_colors", {})
+        row_dim = selection_state.row_dim
+        col_dim = selection_state.col_dim
+
+        times_ns = np.array(times, dtype="datetime64[ns]").astype("int64")
+        marker_times_ns = np.array(marker_times, dtype="datetime64[ns]").astype("int64")
+
+        scatters = []
+        for entity_idx, depth_idx in selected_combos:
+            site = site_lookup.get(entity_idx)
+            if site is None or depth_idx >= len(site["series"]):
+                continue
+            depths_arr = np.asarray(site["depths"]).ravel()
+            depth_val = depths_arr[depth_idx] if depth_idx < len(depths_arr) else depth_idx
+            site_id = site["site_id"]
+            label = f"{site_id} @ {depth_val:.2f}"
+
+            row_key = site_id if row_dim == "entity" else depth_val
+            col_key = depth_val if col_dim == "vertical" else site_id
+            shape = row_shapes.get(str(row_key), "circle")
+            color = col_colors.get(str(col_key), "#000000")
+
+            series_vals = site["series"][depth_idx]
+            marker_y = np.interp(marker_times_ns, times_ns, series_vals)
+            marker_df = pd.DataFrame({
+                time_dim: marker_times,
+                y_axis_label: marker_y,
+            })
+            scatter = hv.Scatter(marker_df, time_dim, y_axis_label, label=label).opts(
+                color=color,
+                marker=shape,
+                size=8,
+            )
+            scatters.append(scatter)
+
+        if not scatters:
+            return hv.Overlay([])
+        return hv.Overlay(scatters)
 
     def clamp_range(center, span, times):
         if len(times) == 0:
@@ -346,6 +411,10 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
     _left_reset_key = [None]  # (version, center) tuple per view
     _mid_reset_key = [None]
     _right_reset_key = [None]
+    _marker_state = {"left": [None, None], "mid": [None, None], "right": [None, None]}
+    # [last_key, last_adopted_x_range] per view: when the (version, center)
+    # key changes the marker window re-anchors to xlim, and a live x_range is
+    # only adopted when it differs from the stored baseline (a real pan/zoom).
 
     def create_timeseries_view(center=None, view="left", x_range=None, **_):
         nonlocal _center_time
@@ -353,6 +422,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         nonlocal _mid_ylim_cache, _mid_ylim_key
         nonlocal _right_ylim_cache, _right_ylim_key
         nonlocal _overlay_cache, _overlay_version
+        nonlocal _marker_state
         global _perf_plot_redraws
         t_view = time.perf_counter()
         _perf_plot_redraws += 1
@@ -397,10 +467,20 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             ylim = _right_ylim_cache
 
         if _overlay_version != selection_state.version:
-            _overlay_cache["left"] = build_timeseries_overlay(view="left", x_range=x_range)
-            _overlay_cache["full"] = build_timeseries_overlay(view="full", x_range=x_range)
+            _overlay_cache["left"] = build_timeseries_overlay(view="left")
+            _overlay_cache["full"] = build_timeseries_overlay(view="full")
             _overlay_version = selection_state.version
         overlay = _overlay_cache["left"] if view == "left" else _overlay_cache["full"]
+        marker_window = None
+        _marker_key = (selection_state.version, center)
+        _marker_adapt = _marker_state[view]
+        if _marker_adapt[0] != _marker_key:
+            _marker_adapt[0] = _marker_key
+            _marker_adapt[1] = x_range
+        elif x_range is not None and x_range != _marker_adapt[1]:
+            _marker_adapt[1] = x_range
+            marker_window = x_range
+        overlay = overlay * build_marker_overlay(view=view, x_range=marker_window, xlim=xlim)
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
         n_visible = int(np.sum((times >= xlim[0]) & (times <= xlim[1])))
         print(f"[ylim] view={view} xlim=({xlim[0]}, {xlim[1]}) n_visible={n_visible} ylim={ylim}")

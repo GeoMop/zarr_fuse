@@ -940,6 +940,31 @@ Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
   real source/20/cubic/overlays-bukov, loader produces 3 in-range GCPs,
   py_compile OK, suite 129 passed / 1 skipped, lines <=120. Real build/upload
   left to the user: `python build_overlay_tiles.py` in dashboard/scripts.
+- 2026-09-18 (timeseries markers per window, done): Borehole markers now have
+  an X-step relative to the visible window (5 markers per window X range) and
+  reset live on pan/zoom. Implemented in `dashboard/multi_time_views.py`:
+  (1) `build_timeseries_overlay` stores curves only (dropped the baked
+  `curve * scatter` and its full-range `n_markers=8` positions), (2) new pure
+  helper `_resolve_marker_window(x_range, xlim, times)` prefers the live
+  `x_range` when valid, else view `xlim`, clamped to data bounds, (3) new
+  `build_marker_overlay(view, x_range, xlim)` builds 5 scatters per combo via
+  `np.interp`, (4) compose per render `curves * markers * vline` in
+  `create_timeseries_view` so the existing RangeX streams recompute markers on
+  every start/end change. Added `dashboard/test/test_marker_window.py` (8
+  tests: live range, None/NaT fallback to xlim, malformed range, clamping to
+  bounds, inverted range, empty times, partial out-of-data clamp). Suite:
+  137 passed / 1 skipped (baseline 129 + 8 new).
+- 2026-09-21 (markers stale RangeX on center change, done): After moving the red
+  line, mid/right initial views showed no borehole markers until the next pan/zoom.
+  Cause: `RangeX` only updates on pan/zoom, so on a center change
+  `_resolve_marker_window` preferred the stale `x_range` over the freshly
+  computed `xlim`, placing markers outside the visible window. Fixed in
+  `dashboard/multi_time_views.py` `create_timeseries_view` by guarding the marker
+  window source with per-view `_marker_state` (last (version, center) key +
+  last adopted x_range): re-anchor to `xlim` on every key change (red-line move,
+  variable switch, initial load) and only adopt live `x_range` when it differs
+  from the stored baseline (a real pan/zoom). `build_marker_overlay` and
+  `_resolve_marker_window` unchanged; marker unit tests unaffected.
 - 2026-09-10 (real overlay, line-art readability): User reports numbers/small
   notes on the zoomed-in overlay lose pixels ("missing pixels"). Cause: single
   `resampling` knob fed `cubic` into both gdalwarp and gdal2tiles; cubic (and
