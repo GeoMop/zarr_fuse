@@ -282,18 +282,18 @@ gunicorn --worker-class gthread --workers 1 --threads 4 \
 ```dockerfile
 FROM python:3.11-slim
 
-WORKDIR /app
+WORKDIR /ui
 
 # Install dependencies
 RUN pip install zarr-fuse>=0.2.0 zarr_fuse.dashboard
 
 # Copy your config
-COPY config/ /app/config/
-COPY schemas/ /app/schemas/
+COPY config/ /ui/config/
+COPY schemas/ /ui/schemas/
 
 # Set required env vars
 ENV HV_DASHBOARD_ENDPOINT=my_data
-ENV ENDPOINTS_PATH=/app/config/endpoints.yaml
+ENV ENDPOINTS_PATH=/ui/config/endpoints.yaml
 
 # Run dashboard
 CMD ["zf-dashboard"]

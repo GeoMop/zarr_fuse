@@ -7,6 +7,7 @@ from asyncio import wait_for
 
 import zarr
 CpuBuffer = zarr.core.buffer.cpu.Buffer
+from zarr.core.buffer.core import default_buffer_prototype
 from datetime import datetime, timezone
 
 
@@ -41,6 +42,7 @@ def get_logger(store, path: str, name: str | None = None) -> Logger:
     # Remove any existing handlers (to avoid duplicate logs)
     for h in list(logger.handlers):
         logger.removeHandler(h)
+        h.close()
 
     if store is None:
         handler: Handler = StderrLogHandler(path)
@@ -89,6 +91,7 @@ class StoreLogHandler(Handler, _BaseFormatterMixin):
         self.store = store
         self.group_path = group_path
         self.prefix = "logs"
+        self._buffer_prototype = default_buffer_prototype()
 
         self._setup_formatter(group_path)
 
@@ -99,9 +102,7 @@ class StoreLogHandler(Handler, _BaseFormatterMixin):
         self._schedule = lambda coro: asyncio.run_coroutine_threadsafe(coro, self._loop)
 
         # choose initial append strategy
-
         if isinstance(store, (zarr.storage.LocalStore,)) and getattr(store, 'supports_partial_writes', False):
-            # still work on LocalStore.
             self._append = self._append_unsafe
         else:
             self._append = self._append_safe
@@ -132,7 +133,6 @@ class StoreLogHandler(Handler, _BaseFormatterMixin):
         exists = await self.store.exists(key)
 
         if exists:
-            print(f"[DEBUG] Calling store.get - key: {key}, buffer_prototype: {self._buffer_prototype}, store_type: {type(self.store)}")
             buf_old = await self.store.get(key, self._buffer_prototype)
             bytes_old = buf_old.as_numpy_array().tobytes()
             bytes_new = buf.as_numpy_array().tobytes()
@@ -141,13 +141,14 @@ class StoreLogHandler(Handler, _BaseFormatterMixin):
 
         await self.store.set(key, buf)
 
-    def wait_for_last_message(self):
+    def wait_for_last_message(self, timeout: float = 5.0):
         if self._append_fut is None:
             return
         try:
-            self._append_fut.result()
+            self._append_fut.result(timeout=timeout)
+        except TimeoutError:
+            sys.stderr.write(f"[StoreLogHandler] log write timed out after {timeout}s\n")
         except Exception:
-            # print full traceback for diagnostics
             sys.excepthook(*sys.exc_info())
 
     def _schedule_and_maybe_wait(self, key: str, buf: CpuBuffer, wait: bool):

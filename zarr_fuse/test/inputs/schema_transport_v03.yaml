@@ -27,7 +27,7 @@ run_XYZ:
       df_col: None
       sorted: False
       chunk_size: 1
-      merge: None
+      step_limits: None
     qmc:
       unit: ""
       dtype: "int"
@@ -35,7 +35,7 @@ run_XYZ:
       df_col: None
       sorted: False
       chunk_size: 1
-      merge: None
+      step_limits: None
 
     param_name:
       unit: ""

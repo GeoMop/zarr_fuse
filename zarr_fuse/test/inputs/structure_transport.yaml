@@ -46,27 +46,24 @@ run_XYZ:
     iid:
         sorted: False
         chunk_size: 1
-        merge: None
+        step_limits: None
     qmc:
         sorted: False
         chunk_size: 1
-        merge: None
+        step_limits: None
 
     param_name:
         sorted: False
         chunk_size: 16
-        merge:
-            step_limits: None
+        step_limits: None
 
     time:
       chunk_size: 1024
-      merge:
-        step_limits: None
+      step_limits: None
 
     X:
       chunk_size: 1024
-      merge:
-        step_limits: None
+      step_limits: None
 
 
   ATTRS:

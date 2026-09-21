@@ -1,13 +1,18 @@
 import os
 
-import panel as pn
-from dotenv import load_dotenv
+from dashboard.config import load_environment_from_config, resolve_endpoints_path
 
+# Bootstrap env loading before importing dashboard modules that read env vars at import time.
+load_environment_from_config(resolve_endpoints_path())
+
+# Backward-compatible mapping: if legacy ZF_ vars are present but S3_ are not, set them
+os.environ.setdefault("S3_ACCESS_KEY", os.getenv("ZF_S3_ACCESS_KEY"))
+os.environ.setdefault("S3_SECRET_KEY", os.getenv("ZF_S3_SECRET_KEY"))
+os.environ.setdefault("S3_ENDPOINT_URL", os.getenv("ZF_S3_ENDPOINT_URL"))
+
+import panel as pn
 from dashboard.composed import build_dashboard
 from dashboard.tile_service import S3TileHandler
-
-# Load environment variables from .env file if present
-load_dotenv()
 
 pn.extension()
 

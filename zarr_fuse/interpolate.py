@@ -4,9 +4,10 @@ from typing import Tuple, List, Dict
 import numpy as np
 import xarray as xr
 import attrs
+import warnings
 
-from .zarr_schema import Coord
 from . import units
+from .zarr_schema import Coord
 from .tools import adjust_grid
 
 
@@ -20,6 +21,91 @@ class PartialOverlapError(ValueError):
         # Build your message from the fields
         return (f"The updating coord {self.coord_name} has"
                 f"overlap size [{self.idx_split}] < existing coord length [{self.coord_len}].")
+
+
+@attrs.define(frozen=True)
+class InterpolationFallbackWarning(UserWarning):
+    coord_names: Tuple[str, ...]
+
+    def __str__(self) -> str:
+        return (
+            f"Falling back from linear interpolation to nearest/P0 interpolation "
+            f"for coordinates {self.coord_names}."
+        )
+
+
+def round_coord_to_step_unit(values: np.ndarray, schema: Coord) -> np.ndarray:
+    """Round datetime coordinates down to the unit configured for coordinate steps."""
+    if not isinstance(schema.unit, units.DateTimeUnit):
+        return values
+
+    tick = units.PINT_UNIT_TO_DATETIME_TICK[str(schema.step_limits.unit)]
+    rounded = values.astype(f"datetime64[{tick}]")
+    return rounded.astype(values.dtype)
+
+
+def normalize_update_coords(
+        ds_update: xr.Dataset,
+        schema: Dict[str, Coord],
+) -> xr.Dataset:
+    """Round datetime update coordinates and discard duplicate rounded labels."""
+    normalized = ds_update
+    for dim, coord_schema in schema.items():
+        values = normalized[dim].values
+        coord_attrs = normalized[dim].attrs.copy()
+        rounded = round_coord_to_step_unit(values, coord_schema)
+        _, first_indices = np.unique(rounded, return_index=True)
+        first_indices = np.sort(first_indices)
+        normalized = normalized.assign_coords({dim: rounded})
+        if len(first_indices) < len(rounded):
+            dependent_names = [
+                name
+                for name, data_array in normalized.data_vars.items()
+                if dim in data_array.dims
+            ]
+            if dependent_names:
+                dependent = normalized[dependent_names].groupby(dim).first(skipna=True)
+                static = normalized.drop_vars(dependent_names)
+                if dim in static.coords:
+                    static = static.drop_vars(dim)
+                dataset_attrs = normalized.attrs.copy()
+                normalized = xr.merge(
+                    [dependent, static],
+                    compat="override",
+                    join="outer",
+                )
+                normalized.attrs = dataset_attrs
+            else:
+                normalized = normalized.isel({dim: first_indices})
+            normalized = normalized.sel({dim: rounded[first_indices]})
+        normalized[dim].attrs = coord_attrs
+    return normalized
+
+
+def check_sorted_coord_values(
+        values: np.ndarray,
+        coord_name: str,
+        log: logging.Logger | None,
+        *,
+        context: str = "Coordinate values",
+) -> bool:
+    """Log and report whether coordinate values are strictly sorted."""
+    if len(values) <= 1:
+        return True
+
+    bad_mask = values[:-1] >= values[1:]
+    if np.all(~bad_mask):
+        return True
+
+    bad_idx = int(np.flatnonzero(bad_mask)[0])
+    if log is None:
+        log = dflt_logger
+    log.error(
+        f"{context} for {coord_name} are not sorted at positions "
+        f"{bad_idx} and {bad_idx + 1}: {values[bad_idx]!r} >= "
+        f"{values[bad_idx + 1]!r}; got {values}"
+    )
+    return False
 
 
 def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
@@ -48,7 +134,12 @@ def sort_by_coord(new_values:np.ndarray, old_values:np.ndarray,
         idx_sort = np.argsort(new_values)
         new_sorted = new_values[idx_sort]
         if len(old_values) > 0:
-            assert np.all(old_values[:-1]<=old_values[1:]), f"Existing coordinate values are not sorted, got {old_values}"
+            check_sorted_coord_values(
+                old_values,
+                schema.name,
+                log,
+                context="Existing coordinate values",
+            )
             max_old = old_values[-1]
             idx_split = np.searchsorted(new_sorted, max_old, side='right')
         else:
@@ -74,7 +165,7 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     :param new_coords: coordinate values in the updating dataset
     :param old_coords: coordinate values in the existing dataset
     :param schema: schema dictionary
-    :return:
+    :return: (merged coords, split_index)
     1. asserts for non-sorted case
     2. replace part before split index by old values in same range
     3. for step_limit modify part after split index
@@ -93,17 +184,12 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
         # the range of old_values we can potentialy interpolate to.
         # new_values[0] <= old_values[i_min] and ald_values[i_max-1] <= new_values[-1]
 
-        sorted_diff = np.diff(new_sorted)
-        dtype_zero = sorted_diff.dtype.type(0)
-        if not np.all(sorted_diff > dtype_zero):
-            mask = np.diff(new_sorted) <= dtype_zero
-            no_diff = np.arange(len(mask), dtype=int)[mask]
-            #no_diff_10 = no_diff[:max(0,10)]
-
-            print(f"Non unique values in new coords {schema.name}")
-            print(no_diff)
-            print(new_values.astype(str).tolist())
-            #print(np.stack((new_values[no_diff_10], new_values[no_diff_10 + 1]), axis=1))
+        check_sorted_coord_values(
+            new_sorted,
+            schema.name,
+            log,
+            context="New coordinate values",
+        )
 
         old_part_min = new_sorted[0]
         old_range_min = np.searchsorted(old_values, old_part_min, side='left')
@@ -122,6 +208,12 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
             # Same as default case.
             log.error(f"Ignoring unsupported interpolation for non-sorted coordinates (step_limits={schema.step_limits}\n)")
         update_old_part = new_sorted[:idx_split]
+        if len(update_old_part) > 0:
+            old_pos = {v: i for i, v in enumerate(old_values)}
+            selected_old_pos = np.array([old_pos[v] for v in update_old_part], dtype=int)
+            old_range_min = int(selected_old_pos.min())
+            old_range_max = int(selected_old_pos.max()) + 1
+            update_old_part = np.array(old_values[old_range_min:old_range_max])
 
     # Phase 2: determine extension
 
@@ -129,11 +221,11 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     last_old = old_values[-1] if len(old_values) > 0 else new_values[idx_split]
     if schema.step_limits.no_new() or len(new_append) == 0:
         # no extension allowed
-        if len(new_append) > 1:
-            # Non-fatal error.
-            log.error(f"Dimension {schema.name}: extension not allowed (step_limits=None). "
-                      f"Appended coordinates ignored: {new_append[1:]}.")
-        # one value in extension is allowed, but used only to interpolate
+        if len(new_append) > 0:
+            log.error(
+                f"Dimension {schema.name}: new coordinates are not allowed "
+                f"(step_limits=None). Rejected coordinates: {new_append}."
+            )
         update_new_part = np.array([], dtype=new_append.dtype)
     elif schema.step_limits.any_new() or not schema.sorted:
         # default case, add all new coords
@@ -141,18 +233,17 @@ def interpolate_coord(new_values:np.ndarray, old_values:np.ndarray,
     else:
         # Constrained coordinates step.
         # Construct adjusted coordinates grid.
-        step_range = schema.step_limits
-        range_array = np.array([step_range.start, step_range.end])
-        to_unit = schema.unit.delta_unit()
-        step_range = schema._make_quantity(range_array, from_unit = step_range.unit) \
-                    .to(to_unit).magnitude
-        # Have compatible dtype for DateTime base unit.
-        step_range = np.array(step_range, dtype=schema.unit.delta_dtype(schema.dtype))
+        step_values = np.array([schema.step_limits.start, schema.step_limits.end])
+        step_range = schema.unit.delta_array(
+            step_values,
+            from_unit=schema.step_limits.unit,
+            dtype=schema.dtype,
+        )
 
 
         if last_old < new_append[0]:
             extension_part = np.concatenate(
-                [np.array([last_old]),new_append]
+                [np.array([last_old]), new_append]
             )
         else:
             assert False, f"Old maximum {last_old} must be less than new append part first value {new_append}"
@@ -193,37 +284,81 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
 
     # Phase 2: determine overlap and extension
     coords_new = [
-        (d,
+        (dim,
          interpolate_coord(
-             ds_update[d].values,
-             ds_existing[d].values,
-             dim_idx_sort[d],
-             schema[d], log)
+             ds_update[dim].values,
+             ds_existing[dim].values,
+             dim_idx_sort[dim],
+             schema[dim], log)
         )
-        for d in ds_update.dims
+        for dim in ds_update.dims
     ]
-    interp_coords = {d: c for d, (c, idx) in coords_new if schema[d].sorted and len(c) > 0}
-    split_indices = [(d, idx) for d, (c, idx) in coords_new]
+    interp_coords = {dim: coords for dim, (coords, idx) in coords_new
+                     if schema[dim].sorted and len(coords) > 0}
+    split_indices = [(dim, idx) for dim, (coords, idx) in coords_new]
 
     # Phase 3: interpolate ds_sorted to new coords
     dim_sorters = {d: sorter for d, (sorter, _) in dim_idx_sort.items()}
     ds_sorted = ds_update.isel(**dim_sorters)
 
-    # first attempt linear interpolation
-    ds_linear = ds_sorted.interp(
-        interp_coords,
-        method='linear',
-        assume_sorted=True
+    nearest_coords = {
+        dim: coords
+        for dim, coords in interp_coords.items()
+        if ds_sorted.sizes[dim] <= 1
+    }
+    linear_coords = {
+        dim: coords
+        for dim, coords in interp_coords.items()
+        if dim not in nearest_coords
+    }
+
+    ds_nearest = ds_sorted.interp(
+        nearest_coords,
+        method='nearest',
+        assume_sorted=True,
     )
-    # then nearest-neighbor fallback to fill any NaNs
-    # ds_nearest = ds_sorted.interp(
-    #     interp_coords,
-    #     method='nearest',
-    #     assume_sorted=True
-    # )
-    # combine: use linear where available, else nearest
-    #ds_interpolated = ds_linear.combine_first(ds_nearest)
-    ds_interpolated = ds_linear
+
+    # Fill NaNs only for the interpolation calculation. Restore their source
+    # positions below so sparse data does not contaminate neighboring values.
+    ds_for_interp = ds_nearest.copy()
+    for var_name, data_array in ds_nearest.data_vars.items():
+        for dim in linear_coords:
+            if dim in data_array.dims:
+                data_array = data_array.interpolate_na(
+                    dim=dim,
+                    method='linear',
+                    use_coordinate=True,
+                )
+        ds_for_interp[var_name] = data_array
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            ds_interpolated = ds_for_interp.interp(
+                linear_coords,
+                method='linear',
+                assume_sorted=True,
+            )
+    except RuntimeWarning:
+        log.warning(
+            InterpolationFallbackWarning(linear_coords)
+        )
+        ds_interpolated = ds_for_interp.interp(
+            linear_coords,
+            method='nearest',
+            assume_sorted=True,
+        )
+
+    for var_name, data_array in ds_sorted.data_vars.items():
+        source_nan = data_array.isnull()
+        output_nan = source_nan.reindex(
+            {dim: ds_interpolated[dim] for dim in source_nan.dims},
+            fill_value=False,
+        )
+        ds_interpolated[var_name] = ds_interpolated[var_name].where(~output_nan)
+    all_coords = {d: c for d, (c, idx) in coords_new}
+    ds_interpolated = ds_interpolated.reindex(all_coords, fill_value=np.nan)
+
     # meaningful methods available for multidim data:
     # “nearest”, “linear”, “pchip” (Piecewise Cubic Hermite Interpolating Polynomial)
     #

@@ -1,6 +1,7 @@
 import logging
 import re
 from typing import *
+import warnings
 
 import attrs
 import numpy as np
@@ -39,9 +40,12 @@ class TrimmedArrayWarning(Warning):
 
     def __str__(self):
         size = len(self.trimmed_values)
-        if size > 10:
-            return f"Trimmed values detected: [{self.preview}, ... (size= {size} more)]"
-        return f"Trimmed values detected: [{self.preview}]"
+        if size == 0:
+            return f"Trimming conversion with no values actually trimmed."
+        if size <= 10:
+            return f"Trimmed values detected: [{self.preview}]"
+
+        return f"Trimmed values detected: [{self.preview}, ... (size= {size} more)]"
 
 
 def _preview(values: np.ndarray, limit: int = 10) -> str:
@@ -310,7 +314,9 @@ def to_typed_array(x: Any, target_dtype: Optional[np.dtype], ctx:'SchemaCtx', na
         return np.asarray(x)
     arr = np.asarray(x)
     try:
-        out = np.asarray(arr, dtype=target_dtype)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", np.exceptions.ComplexWarning)
+            out = np.asarray(arr, dtype=target_dtype)
     except (ValueError, TypeError) as e:
         if na_value is None:
             failed = _unconvertible_values(arr, target_dtype)
@@ -324,8 +330,7 @@ def to_typed_array(x: Any, target_dtype: Optional[np.dtype], ctx:'SchemaCtx', na
         return out
 
     trim_mask = _trim_change_mask(arr, out)
-    if np.any(trim_mask):
-        trimmed_values = arr[trim_mask]
-        ctx.warning(TrimmedArrayWarning(trimmed_values))
+    trimmed_values = arr[trim_mask]
+    ctx.warning(TrimmedArrayWarning(trimmed_values))
 
     return out

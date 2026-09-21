@@ -23,7 +23,13 @@ def _resolve_endpoints_path() -> Path:
     env_path = os.getenv("ENDPOINTS_PATH")
     if env_path:
         return Path(env_path)
-    return Path(__file__).resolve().parent / "config" / "endpoints.yaml"
+    return (
+        Path(__file__).resolve().parent.parent
+        / "app"
+        / "databuk"
+        / "config"
+        / "endpoints.yaml"
+    )
 
 
 def _cache_dir_from_endpoints() -> str | None:

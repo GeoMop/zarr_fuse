@@ -19,16 +19,24 @@ def adjust_grid(x:np.ndarray, step_range:np.array) -> np.ndarray:
     out = [xs[0]]
     last = xs[0]
     for xi in xs[1:]:
-        d = xi - last
-        if d < min_step:
-            continue
-        if d > max_step:
+        while True:
+            d = xi - last
+            if d < min_step:
+                break
+            if d <= max_step:
+                out.append(xi)
+                last = xi
+                break
+
+            # Choose one step that leaves a remainder no greater than the
+            # maximum step. Datetime division may round this step down to the
+            # coordinate resolution, so enforce the minimum before advancing.
             n = int(np.ceil(d / max_step))
             step = d / n
-            for k in range(1, n):
-                out.append(last + k * step)
-        out.append(xi)
-        last = xi
+            if step < min_step:
+                step = min_step
+            out.append(last + step)
+            last = out[-1]
     return np.array(out)
 
 

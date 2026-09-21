@@ -9,6 +9,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from .queue_storage import QueueStorage
+
 load_dotenv()
 
 LOG = logging.getLogger(__name__)
@@ -20,6 +22,10 @@ class BaseConfig:
     log_level: str = "INFO"
     port: int = 8000
     worker_poll_interval: int = 30
+    # Retention window (in hours) for the time filter (see io/time_filter.py):
+    # an item is held until it is more than this much older than the newest
+    # time_like_coord value seen in the same batch. 0 disables holding.
+    retention_time: float = 96.0
 
 
 @dataclass(frozen=True)
@@ -31,35 +37,22 @@ class SmtpConfig:
     username: str = ""
     password: str = ""
 
-    @property
-    def enabled(self) -> bool:
-        return bool(self.notify_to and self.host)
-
 
 @dataclass(frozen=True)
 class AppConfig:
-    queue_dir: Path
+    queue: QueueStorage
     config_path: Path
     config: dict[str, Any]
     base: BaseConfig
     smtp: SmtpConfig
     stop_event: Event = field(default_factory=Event, compare=False)
+    # Anomalies already emailed, so a batch that keeps being re-examined on
+    # every worker poll does not re-send the same notification.
+    notified_anomalies: set[str] = field(default_factory=set, compare=False)
 
     @property
     def config_dir(self) -> Path:
         return self.config_path.parent
-
-    @property
-    def accepted_dir(self) -> Path:
-        return self.queue_dir / "accepted"
-
-    @property
-    def success_dir(self) -> Path:
-        return self.queue_dir / "success"
-
-    @property
-    def failed_dir(self) -> Path:
-        return self.queue_dir / "failed"
 
 
 def _parse_base_config(raw: dict) -> BaseConfig:
@@ -68,6 +61,7 @@ def _parse_base_config(raw: dict) -> BaseConfig:
         log_level=raw.get("log_level", BaseConfig.log_level),
         port=int(os.getenv("PORT", raw.get("port", BaseConfig.port))),
         worker_poll_interval=int(raw.get("worker_poll_interval", BaseConfig.worker_poll_interval)),
+        retention_time=float(raw.get("retention_time", BaseConfig.retention_time)),
     )
 
 
@@ -76,7 +70,8 @@ def _parse_smtp_config(raw: dict) -> SmtpConfig:
     if isinstance(notify_to, str):
         notify_to = [x.strip() for x in notify_to.split(",") if x.strip()]
 
-    password = os.getenv("SMTP_PASSWORD").strip()
+    smtp_password_env = os.getenv("SMTP_PASSWORD")
+    password = smtp_password_env.strip() if smtp_password_env else ""
 
     return SmtpConfig(
         notify_to=list(notify_to),
@@ -102,26 +97,18 @@ def load_app_config(config_path: str | Path) -> "AppConfig":
     base = _parse_base_config(cfg_block.get("base", {}))
     smtp = _parse_smtp_config(cfg_block.get("smtp", {}))
 
-    queue_dir = Path(base.queue_dir_path).resolve()
+    queue = QueueStorage(base.queue_dir_path)
 
     app_config = AppConfig(
-        queue_dir=queue_dir,
+        queue=queue,
         config_path=config_path,
         config=config,
         base=base,
         smtp=smtp,
     )
 
-    app_config.accepted_dir.mkdir(parents=True, exist_ok=True)
-    app_config.success_dir.mkdir(parents=True, exist_ok=True)
-    app_config.failed_dir.mkdir(parents=True, exist_ok=True)
+    queue.ensure_layout()
 
-    LOG.info(
-        "Application config loaded. queue_dir=%s accepted=%s success=%s failed=%s",
-        queue_dir,
-        app_config.accepted_dir,
-        app_config.success_dir,
-        app_config.failed_dir,
-    )
+    LOG.info("Application config loaded. queue=%s", queue.url)
 
     return app_config

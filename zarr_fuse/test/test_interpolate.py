@@ -8,12 +8,21 @@ import re
 from zarr_fuse import schema as zf_schema
 
 try:
+    import matplotlib
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 except ImportError:
-    pass
+    plt = None
 
 # ---- adjust this import to match your module path! ----
-from zarr_fuse.interpolate import interpolate_ds, sort_by_coord, interpolate_coord, dflt_logger
+from zarr_fuse.interpolate import (
+    dflt_logger,
+    interpolate_coord,
+    interpolate_ds,
+    normalize_update_coords,
+    round_coord_to_step_unit,
+    sort_by_coord,
+)
 #from ds_interpolate import sort_by_coord, interpolate_coord, interpolate_ds
 
 def _ctx(data: dict):
@@ -121,37 +130,159 @@ def test_interpolate_coord_sorted():
     # sorted, step_limits - no extension
     merged, split = run_interp(old, [1, 1.5, 2.1], step_limits="no_new")
     assert split == 2
-    np.allclose(merged, [1, 2])
+    assert np.allclose(merged, [1, 2])
 
     new = [1, 1.5, 2.1, 3, 10]
     merged, split = run_interp(old, new, step_limits="no_new")
     # apendend coordinates ignored. Non-fatal error.
+    assert split == 2
     assert np.allclose(merged, [1, 2])
+
+    merged, split = run_interp(old, [3, 10], step_limits="no_new")
+    assert split == 0
+    assert len(merged) == 0
 
     # sorted, step_limits - full extension
     merged, split = run_interp(old, new, step_limits="any_new")
     assert split == 2
-    np.allclose(merged, [1, 2, 2.1, 3, 10])
+    assert np.allclose(merged, [1, 2, 2.1, 3, 10])
 
     new = [1, 1.5, 2, 3, 10]
     merged, split = run_interp(old, new, step_limits="any_new")
     assert split == 2
-    np.allclose(merged, [1, 2, 3, 10])
+    assert np.allclose(merged, [1, 2, 3, 10])
 
     # sorted, step_limits - unexact step limits
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
                     unit='h',
-                    step_limits={'start':72, 'end':126, 'unit':'minutes'}) # 1.2 h, 2.1 h
+                    step_limits={'start':72, 'end':126, 'unit':'minute'}) # 1.2 h, 2.1 h
     assert split == 2
     np.allclose(merged, [1, 2, 4, 5.75, 7.5, 8.75,  10])
 
     new = [1, 1.5, 2, 3, 4, 7.5, 10]
     merged, split = run_interp(old, new,
                     unit='h',
-                    step_limits=dict(start=150, end=150, unit='minutes')) # 2.5 h
+                    step_limits=dict(start=150, end=150, unit='minute')) # 2.5 h
     assert split == 2
-    np.allclose(merged, [1, 2, 3.5 + 1/3.0, 5 + 2/3.0, 7.5,  10])
+    np.testing.assert_allclose(merged, [1, 2, 4.5, 7, 9.5])
+
+
+def test_round_datetime_coord_to_step_limit_unit():
+    """Round incoming seconds to the minute unit specified by step limits."""
+    schema = zf_schema.Coord(_ctx({
+        "name": "date_time",
+        "unit": {"tick": "s", "tz": "UTC"},
+        "sorted": True,
+        "step_limits": [30, 30, "minute"],
+    }))
+    values = np.array(
+        ["2024-05-22T10:00:01", "2024-05-22T10:01:00"],
+        dtype="datetime64[s]",
+    )
+
+    rounded = round_coord_to_step_unit(values, schema)
+
+    np.testing.assert_array_equal(
+        rounded,
+        np.array(["2024-05-22T10:00:00", "2024-05-22T10:01:00"], dtype="datetime64[s]"),
+    )
+
+
+def test_normalize_update_coords_discards_rounded_duplicates():
+    """Keep one value when rounding two incoming timestamps to the same coordinate."""
+    schema = zf_schema.Coord(_ctx({
+        "name": "date_time",
+        "unit": {"tick": "s", "tz": "UTC"},
+        "sorted": True,
+        "step_limits": [30, 30, "minute"],
+    }))
+    update = xr.Dataset(
+        {"data": ("date_time", np.array([100.0, 101.0]))},
+        coords={
+            "date_time": np.array(
+                ["2024-05-22T10:00:00", "2024-05-22T10:00:01"],
+                dtype="datetime64[s]",
+            ),
+        },
+    )
+
+    normalized = normalize_update_coords(update, {"date_time": schema})
+
+    np.testing.assert_array_equal(
+        normalized["date_time"].values,
+        np.array(["2024-05-22T10:00:00"], dtype="datetime64[s]"),
+    )
+    np.testing.assert_array_equal(normalized["data"].values, np.array([100.0]))
+
+
+def test_normalize_update_coords_merges_sparse_rounded_duplicates():
+    """Merge non-NaN values from sparse slices sharing one rounded timestamp."""
+    schema = {
+        "date_time": zf_schema.Coord(_ctx({
+            "name": "date_time",
+            "unit": {"tick": "s", "tz": "UTC"},
+            "sorted": True,
+            "step_limits": [30, 30, "minute"],
+        })),
+        "depth": zf_schema.Coord(_ctx({
+            "name": "depth",
+            "unit": "",
+            "sorted": True,
+            "step_limits": [],
+        })),
+    }
+    update = xr.Dataset(
+        {
+            "data": (
+                ("date_time", "depth"),
+                np.array([[10.0, np.nan], [np.nan, 20.0]]),
+            ),
+            "borehole_project_id": ((), "project-1"),
+        },
+        coords={
+            "date_time": np.array(
+                ["2024-05-22T10:00:00", "2024-05-22T10:00:01"],
+                dtype="datetime64[s]",
+            ),
+            "depth": np.array([0.0, 1.0]),
+        },
+    )
+
+    normalized = normalize_update_coords(update, schema)
+
+    np.testing.assert_array_equal(
+        normalized["date_time"].values,
+        np.array(["2024-05-22T10:00:00"], dtype="datetime64[s]"),
+    )
+    np.testing.assert_allclose(
+        normalized["data"].values,
+        np.array([[10.0, 20.0]]),
+        equal_nan=False,
+    )
+    assert normalized["borehole_project_id"].item() == "project-1"
+
+
+def test_interpolate_coord_sorted_no_new_logs_only_extension_values(caplog):
+    old = np.array([0.0, 1.0, 2.0])
+    new = np.array([1.0, 1.5, 2.1, 3.0, 10.0])
+    schema = zf_schema.Coord(_ctx(dict(
+        name="tst_coord",
+        unit="",
+        sorted=True,
+        step_limits="no_new",
+    )))
+
+    caplog.set_level(logging.ERROR, logger="zarr_fuse.interpolate")
+    idx_sorter = sort_by_coord(new, old, schema, dflt_logger)
+    merged, split = interpolate_coord(new, old, idx_sorter, schema, dflt_logger)
+
+    assert split == 2
+    assert np.allclose(merged, [1.0, 2.0])
+    assert "1.5" not in caplog.text
+    assert "2.1" in caplog.text
+    assert "3." in caplog.text or "3.0" in caplog.text
+    assert "10." in caplog.text or "10.0" in caplog.text
 
 
 
@@ -191,6 +322,38 @@ def test_interpolate_coord_unsorted():
     # unable to interpolate
     merged, split = run_interp(old, new, sort=False, step_limits=[1, 2])
     np.allclose(merged, [1, 2,  10, 3])
+
+
+@pytest.mark.parametrize(
+    "step_limits",
+    [
+        [30, 30, "minute"],
+        [30, 40, "minute"],
+        [15, 45, "minute"],
+    ],
+)
+def test_interpolate_coord_does_not_create_subminimum_datetime_steps(step_limits):
+    """Keep datetime extension steps within the configured lower and upper bounds."""
+    schema = zf_schema.Coord(_ctx({
+        "name": "date_time",
+        "unit": {"tick": "s", "tz": "UTC"},
+        "sorted": True,
+        "step_limits": step_limits,
+    }))
+    old = np.array(["2024-05-22T09:30:00"], dtype="datetime64[s]")
+    new = np.array(
+        ["2024-05-22T10:00:01", "2024-05-22T10:30:01"],
+        dtype="datetime64[s]",
+    )
+
+    idx_sorter = sort_by_coord(new, old, schema, dflt_logger)
+    merged, _ = interpolate_coord(new, old, idx_sorter, schema, dflt_logger)
+
+    steps = np.diff(merged).astype("timedelta64[s]")
+    lower = np.timedelta64(step_limits[0], "m")
+    upper = np.timedelta64(step_limits[1], "m")
+    assert np.all(steps >= lower)
+    assert np.all(steps <= upper)
 
 
 
@@ -394,3 +557,184 @@ def test_interpolate_ds():
     assert np.all(np.isnan(merged_vals[nan_mask]))
 
 
+def test_interpolate_ds_unsorted_singleton_dim():
+    # Regression for the KeyError in interpolate.py when an unsorted dimension
+    # is present in ds_sorted but intentionally excluded from interp_coords.
+    existing_x = np.array([0.0, 1.0])
+    update_x = np.array([0.0, 1.0])
+    existing_borehole = np.array(["A"])
+    update_borehole = np.array(["A"])
+
+    existing_ds = xr.Dataset(
+        {"data": (("x", "borehole"), np.array([[0.0], [1.0]]))},
+        coords={"x": existing_x, "borehole": existing_borehole},
+    )
+    update_ds = xr.Dataset(
+        {"data": (("x", "borehole"), np.array([[10.0], [11.0]]))},
+        coords={"x": update_x, "borehole": update_borehole},
+    )
+
+    coord_schema = lambda x: zf_schema.Coord(_ctx(x))
+    schema = {
+        "x": coord_schema(dict(
+            name="x",
+            unit="h",
+            sorted=True,
+            step_limits=[],
+        )),
+        "borehole": coord_schema(dict(
+            name="borehole",
+            unit="",
+            type="str[8]",
+            sorted=False,
+            step_limits=[],
+        )),
+    }
+
+    ds_int, splits = interpolate_ds(update_ds, existing_ds, schema)
+
+    assert dict(splits)["borehole"] == 1
+    np.testing.assert_array_equal(ds_int.coords["borehole"].values, np.array(["A"]))
+    np.testing.assert_array_equal(ds_int.coords["x"].values, np.array([0.0, 1.0]))
+    assert ds_int["data"].shape == (2, 1)
+
+
+def test_interpolate_ds_returns_linear_interpolation_result():
+    """The successful linear pass must provide the returned data values."""
+    existing_ds = xr.Dataset(
+        {"data": ("x", np.array([10.0, 11.0, 12.0]))},
+        coords={"x": np.array([0.0, 1.0, 2.0])},
+    )
+    update_ds = xr.Dataset(
+        {"data": ("x", np.array([20.0, 24.0]))},
+        coords={"x": np.array([0.0, 2.0])},
+    )
+    schema = {
+        "x": zf_schema.Coord(_ctx({
+            "name": "x",
+            "unit": "h",
+            "sorted": True,
+            "step_limits": [],
+        })),
+    }
+
+    interpolated, splits = interpolate_ds(update_ds, existing_ds, schema)
+
+    assert dict(splits) == {"x": 3}
+    np.testing.assert_array_equal(
+        interpolated["data"].values,
+        np.array([20.0, 22.0, 24.0]),
+    )
+
+
+def test_interpolate_ds_does_not_spread_nan_values():
+    """Interpolate around missing source values without contaminating neighbors."""
+    existing_ds = xr.Dataset(
+        {"data": ("x", np.array([0.0, 5.0, 10.0, 15.0, 20.0]))},
+        coords={"x": np.array([0.0, 0.5, 1.0, 1.5, 2.0])},
+    )
+    update_ds = xr.Dataset(
+        {"data": ("x", np.array([10.0, np.nan, 30.0, 40.0]))},
+        coords={"x": np.array([0.0, 1.0, 2.0, 3.0])},
+    )
+    schema = {
+        "x": zf_schema.Coord(_ctx({
+            "name": "x",
+            "unit": "",
+            "sorted": True,
+            "step_limits": [],
+        })),
+    }
+
+    interpolated, _ = interpolate_ds(update_ds, existing_ds, schema)
+
+    np.testing.assert_allclose(
+        interpolated["data"].values,
+        np.array([10.0, 15.0, np.nan, 25.0, 30.0, 40.0]),
+        equal_nan=True,
+    )
+
+
+def test_interpolate_ds_preserves_empty_target_coord():
+    existing_ds = xr.Dataset(
+        {"data": (("x", "p"), np.array([[10.0, 11.0], [20.0, 21.0]]))},
+        coords={"x": np.array([1.0, 2.0]), "p": np.array(["A", "B"])},
+    )
+    update_ds = xr.Dataset(
+        {"data": (("x", "p"), np.array([[30.0], [40.0]]))},
+        coords={"x": np.array([3.0, 10.0]), "p": np.array(["C"])},
+    )
+
+    coord_schema = lambda x: zf_schema.Coord(_ctx(x))
+    schema = {
+        "x": coord_schema(dict(
+            name="x",
+            unit="h",
+            sorted=True,
+            step_limits="no_new",
+        )),
+        "p": coord_schema(dict(
+            name="p",
+            unit="",
+            type="str[8]",
+            sorted=False,
+            step_limits=[],
+        )),
+    }
+
+    ds_int, splits = interpolate_ds(update_ds, existing_ds, schema)
+
+    assert dict(splits) == {"x": 0, "p": 0}
+    assert ds_int.sizes["x"] == 0
+    assert ds_int.sizes["p"] == 1
+    np.testing.assert_array_equal(ds_int.coords["p"].values, np.array(["C"]))
+    assert ds_int["data"].size == 0
+
+
+def test_interpolate_ds_reports_unsorted_existing_datetime_coord(caplog):
+    """Reproduce the ingress failure path with a synthetic existing datetime coordinate."""
+    existing_time = np.array(
+        [
+            "2025-09-15T09:00:00",
+            "2025-09-15T10:00:00",
+            "2025-09-15T09:30:00",
+            "2025-09-15T10:30:00",
+        ],
+        dtype="datetime64[s]",
+    )
+    update_time = np.array(["2025-09-15T11:00:00"], dtype="datetime64[s]")
+    existing_borehole = np.array(["A"])
+    update_borehole = np.array(["A"])
+
+    existing_ds = xr.Dataset(
+        {"data": (("date_time", "borehole"), np.array([[0.0], [1.0], [2.0], [3.0]]))},
+        coords={"date_time": existing_time, "borehole": existing_borehole},
+    )
+    update_ds = xr.Dataset(
+        {"data": (("date_time", "borehole"), np.array([[10.0]]))},
+        coords={"date_time": update_time, "borehole": update_borehole},
+    )
+
+    coord_schema = lambda x: zf_schema.Coord(_ctx(x))
+    schema = {
+        "date_time": coord_schema(dict(
+            name="date_time",
+            unit={"tick": "s", "tz": "UTC"},
+            source_unit={"tick": "s", "tz": "UTC"},
+            sorted=True,
+            step_limits=[],
+        )),
+        "borehole": coord_schema(dict(
+            name="borehole",
+            unit="",
+            type="str[8]",
+            sorted=False,
+            step_limits=[],
+        )),
+    }
+
+    caplog.set_level(logging.ERROR, logger="zarr_fuse.interpolate")
+    interpolate_ds(update_ds, existing_ds, schema)
+
+    assert "date_time" in caplog.text
+    assert "positions 1 and 2" in caplog.text

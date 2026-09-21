@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import pytest
+
 from zf.cli import main
 
 def test_help(capsys):
@@ -10,6 +13,8 @@ def test_help(capsys):
     out, err = capsys.readouterr()
     assert "Zarr-fuse command line tool" in out
     assert "cp        Copy all datasets" in out
+    assert "list" in out
+    assert "Inspect a zarr store" in out
 
 
 def test_cp():
@@ -19,3 +24,15 @@ def test_cp():
         '--dst.STORE_URL=file://dest.zarr',
         '',
         'dst_schema.yaml'])
+
+
+def test_list(capsys):
+    store = Path(__file__).resolve().parents[2] / "tools" / "hlavo_testing_bucket" / "profiles.zarr"
+    main([
+        "list",
+        f"--store.STORE_URL=file://{store}",
+    ])
+
+    out, err = capsys.readouterr()
+    assert "store: profiles.zarr" in out
+    assert "profiles.zarr/Uhelna" in out
