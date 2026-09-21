@@ -354,11 +354,8 @@ class Variable(AddressMixin):
             # DateTime specialization
             quantity = units._create_dt_quantity(values, from_unit, log=self._address)
         else:
-            try:
-                if dtype is not None:
-                    values = to_typed_array(values, dtype, self._address)
-            except ValueError:
-                raise ValueError(f"Variable '{self.name}' has values not-convertible to the type: {dtype}.")
+            if dtype is not None:
+                values = to_typed_array(values, dtype, self._address, na_value=self.na_value)
 
             # Pint specialization when a unit string is provided
             assert isinstance(from_unit, (units.Unit, units.NoneUnit))
