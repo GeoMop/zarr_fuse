@@ -20,7 +20,7 @@ jobs:
 
       frontend_image: jbrezmorf/zarr-fuse-holoviz-frontend
       namespace: zarr-fuse-dashboard-development
-      release-name: dashboard-development
+      release-name: holoviz-development
 
       deploy: true
       tag: generate
