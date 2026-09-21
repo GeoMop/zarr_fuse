@@ -1,0 +1,14 @@
+{{- if .Values.frontend.config.enabled }}
+{{- $files := .Files.Glob "config/*" }}
+{{- if eq (len $files) 0 }}
+{{- fail "frontend.config.enabled is true but no files are staged under charts/holoviz/config/" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "holoviz.configMapName" . }}
+  labels:
+    {{- include "holoviz.labels" . | nindent 4 }}
+data:
+  {{- $files.AsConfig | nindent 2 }}
+{{- end }}

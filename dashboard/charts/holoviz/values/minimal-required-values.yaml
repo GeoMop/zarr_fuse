@@ -1,0 +1,8 @@
+# Values that let "helm lint --strict" and "helm template" pass without a deployment target
+# (same pattern as ingress_server/charts/ingress-server/values/minimal-required-values.yaml).
+frontend:
+  s3:
+    endpointUrl: "http://localhost:9000"
+    secrets:
+      accessKey: "s3-access-key"
+      secretKey: "s3-secret-key"

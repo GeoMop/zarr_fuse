@@ -1,9 +1,16 @@
+# Override the chart name used in resource names and labels.
+nameOverride: ""
+# Override the fully qualified name. Default: "<release>-holoviz", or just "<release>" when the
+# release name already contains "holoviz". Every resource of a release is named from it, so
+# several releases can live in one namespace.
+fullnameOverride: ""
+
 registry:
   host: docker.io
 
 frontend:
-  name: holoviz-frontend
   replicaCount: 1
+  # View from zf_view.yaml that this release serves (HV_DASHBOARD_VIEW).
   viewName: bukov_endpoint
   cacheDir: /tmp/zf_tiles
   image:
@@ -21,10 +28,24 @@ frontend:
       name: http
 
   s3:
+    # Name of an existing Secret with the keys ZF_S3_ACCESS_KEY, ZF_S3_SECRET_KEY and
+    # ZF_S3_ENDPOINT_URL. Recommended: create it once per namespace (see README) so credentials
+    # never pass through CI or the Helm release history. When set, the chart renders no Secret
+    # and ignores endpointUrl / secrets below.
+    existingSecret: ""
+    # Fallback used only when existingSecret is empty: the chart renders a Secret from these.
     endpointUrl: "https://s3.cl4.du.cesnet.cz"
     secrets:
-      accessKey: "your-access-key"
-      secretKey: "your-secret-key"
+      accessKey: ""
+      secretKey: ""
+
+  config:
+    # Render a release-scoped ConfigMap from the files staged under charts/holoviz/config/
+    # (zf_view.yaml plus the schema files it references) and mount it at mountPath.
+    # ZF_VIEW_PATH and SCHEMAS_PATH are set to match.
+    enabled: false
+    mountPath: /opt/dashboard/config
+    viewFile: zf_view.yaml
 
   extraEnv: []
 
@@ -59,7 +80,14 @@ frontend:
         type: RuntimeDefault
 
 ingress:
+  enabled: true
   className: "nginx"
   annotations:
     kubernetes.io/tls-acme: "true"
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  # Public hostname. Empty: zarr-fuse-<release>.dyn.cloud.e-infra.cz
+  host: ""
+  tls:
+    enabled: true
+    # Empty: derived from the host (dots replaced by dashes, "-tls" suffix).
+    secretName: ""

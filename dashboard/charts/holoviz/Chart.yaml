@@ -1,8 +1,8 @@
 apiVersion: v2
-name: holoviz-dashboard
-description: HoloViz dashboard deployment (frontend-only Panel app)
+name: holoviz
+description: HoloViz dashboard for zarr-fuse stores (frontend-only Panel app)
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: "0.2.0"
 home: https://github.com/geomop/zarr_fuse
 sources:

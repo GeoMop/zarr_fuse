@@ -1,0 +1,3 @@
+# View configuration staged here at deploy time (see README / the reusable workflow).
+config/
+charts/*.tgz

@@ -378,6 +378,51 @@ the generic re-fetch loop from `refresh_views`.
    callers can report per-site failures.
 5. Update and extend tests in `dashboard/test/`.
 
+## Planned Work: Helm Chart Standardization + CI Secrets (2026-09-21)
+
+### Goal
+
+Review of `dashboard/charts/holoviz` and the dashboard workflows (user request, 2026-09-21). Findings:
+
+- Resource names (`holoviz-frontend`, `holoviz-frontend-secrets`, `holoviz-ingress`) ignore the
+  release name, so two releases cannot coexist in one namespace; the Service selector matches pods
+  of any release.
+- Only `app.kubernetes.io/name` is set on resources; no `helm.sh/chart`, `instance`, `managed-by`
+  outside the pod template, no `_helpers.tpl`, chart name (`holoviz-dashboard`) differs from its
+  directory (`holoviz`).
+- CI creates the S3 Secret through `helm --set` from GitHub secrets (values and secrets end up in
+  the release history) and a ConfigMap through `kubectl` outside the release (unmanaged, fixed
+  name `dashboard-config`, collides between releases).
+- `dashboard-pull-request.yaml` and `dashboard-push-main.yaml` filter on `app/databuk/dashboard/**`,
+  a path that does not exist, so they never trigger; the PR one duplicates
+  `holoviz-dashboard-pull-request.yaml` (same namespace and release) and would race it if fixed.
+
+### Steps
+
+1. Chart: add `templates/_helpers.tpl` (`holoviz.name/fullname/chart/labels/selectorLabels`,
+   host helper), rename chart to `holoviz`, bump to 0.3.0, `nameOverride`/`fullnameOverride`.
+   All resources named from `fullname`, standard labels everywhere, selector = name + instance.
+2. Chart: `frontend.s3.existingSecret` (reference a pre-created Secret with `ZF_S3_*` keys); the
+   templated Secret is rendered only when it is empty. Empty credential defaults +
+   `values/minimal-required-values.yaml` for lint (same pattern as the ingress-server chart).
+3. Chart: `frontend.config.*` renders a release-scoped ConfigMap from files staged under
+   `charts/holoviz/config/` (`.Files.Glob`) and mounts it; sets `ZF_VIEW_PATH`/`SCHEMAS_PATH`.
+   `ingress.enabled/host/tls` values with the current e-infra defaults.
+4. Reusable workflow: stage `zf_view.yaml` + schemas into the chart instead of `kubectl create
+   configmap`; new `s3-secret-name` input with a preflight `kubectl get secret` check and a
+   printed create command; the `--set` credential path stays as a deprecated fallback for external
+   callers; `configmap_name`/`mount-volume-name` inputs kept but ignored (callers would break on
+   unknown inputs). Lint with the minimal values file.
+5. Caller workflows: use `s3-secret-name`, fix path filters, add `concurrency` per release,
+   remove the duplicate `dashboard-pull-request.yaml`.
+6. Chart README: prerequisites (Secret created once per namespace), values, multiple releases.
+
+### Verification
+
+- `helm lint --strict` with the minimal values, `helm template` for two release names in one
+  namespace (distinct resource names, selectors carry `instance`), template with staged config.
+- Workflow YAML parses; no cluster access from this environment, so no live deploy test.
+
 ## AGENT Questions And Remarks
 
 - The reported variable-switch bug is actually two independent defects with a
@@ -469,6 +514,27 @@ the generic re-fetch loop from `refresh_views`.
   rewriting that resolver to be import-safe is already planned as a later
   step of the overlay automation work. Until then use
   `--ignore=dashboard/test/s3_tile_resolver_test.py`.
+
+- 2026-09-21 (chart / CI review, open decisions):
+  - USER: the S3 Secret is now expected to exist as `zarr-fuse-s3` in `zarr-fuse-dashboard` and
+    `zarr-fuse-dashboard-development` (keys `ZF_S3_ACCESS_KEY`, `ZF_S3_SECRET_KEY`,
+    `ZF_S3_ENDPOINT_URL`). Create it before the next deploy (command in the chart README and in the
+    workflow's preflight error); the `S3_ACCESS_KEY` / `S3_SECRET_KEY` GitHub secrets can then be
+    removed. Different name wanted?
+  - `dashboard-reusable-workflow.yaml` now has the layout of `ingress-server-reusable-workflow.yaml`.
+    External callers (HLAVO) must move from `source_repo` / `source_ref` / `source-views-path` /
+    `source-schemas-path` / `frontend_image` / `configmap_name` / `mount-volume-name` and the
+    lowercase secrets to `views-path` / `schemas-path` / `docker-repository` / `s3-secret-name` with
+    `secrets: inherit` (`KUBECONFIG`, `DOCKER_PASSWORD`); the caller repository is checked out
+    directly, so no token inputs remain.
+  - `ingress_server/charts/ingress-server` has the same shape (fixed names via `app.name`, only
+    `app.kubernetes.io/name`, credentials via `--set`); apply the same `_helpers.tpl` +
+    `existingSecret` treatment there?
+  - The PR workflow still overwrites the single `holoviz-development` release. With release-scoped
+    names a per-PR release (`holoviz-pr-<number>`, uninstalled on PR close) is now possible.
+  - The reusable workflow still creates the namespace from CI when the kubeconfig allows it; keep,
+    or require pre-created namespaces like the ingress-server workflow does?
+  - `dashboard-push-main.yaml` deploys the `dashboard-main` branch, not `main`; intended?
 
 ## AGENT log
 
@@ -985,3 +1051,24 @@ Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
   NEXT: user rebuilds (`python build_overlay_tiles.py`), A/B zoom on numbers;
   fallback ladder: tiles->near; if the source lacks pixels at 100% add a
   stroke-contrast/alpha-threshold post-step.
+- 2026-09-21 (Helm chart standardization + CI secrets, done): `dashboard/charts/holoviz` renamed to
+  `holoviz` (0.3.0) with `templates/_helpers.tpl` (`name`, `fullname`, `chart`, `labels`,
+  `selectorLabels`, `host`, `tlsSecretName`, `s3SecretName`, `configMapName`); Deployment, Service,
+  Ingress, Secret and the new ConfigMap are named from `fullname`, carry the standard
+  `app.kubernetes.io/*` + `helm.sh/chart` labels and select on name + instance + component.
+  `frontend.s3.existingSecret` skips the templated Secret; `frontend.config.enabled` renders a
+  ConfigMap from files staged under `charts/holoviz/config/` (git-ignored) with a checksum
+  annotation, replacing the `kubectl create configmap` step and the `extraEnv` / `extraVolumes`
+  wiring; `ingress.enabled/host/tls`, `nameOverride` / `fullnameOverride`,
+  `values/minimal-required-values.yaml` for lint. Workflows: reusable workflow rewritten
+  in the style of `ingress-server-reusable-workflow.yaml` (kebab-case inputs with defaults, uppercase
+  secrets, `prepare-configuration` job uploads `zf_view.yaml` + schemas as an artifact that the
+  deploy job downloads into `charts/holoviz/config/`, `alpine/k8s` deploy container, plain
+  `helm upgrade` with `frontend.s3.existingSecret` from `s3-secret-name`, no kubectl secret or
+  configmap handling); callers use `secrets: inherit` and job-level `concurrency`, path filters fixed
+  (`app/databuk/dashboard/**` did not exist); duplicate `dashboard-pull-request.yaml` removed. Chart README rewritten.
+  Verified: `helm lint --strict` (minimal values) clean, `helm template` for two releases in one
+  namespace gives distinct names, ConfigMap content round-trips byte-identical, `required` /
+  no-staged-files errors fire, ingress toggles work; workflow YAML parses, caller inputs and secrets
+  cross-checked against the reusable workflow, actionlint clean apart from two pre-existing
+  shellcheck infos. No cluster access here, so no live deploy.

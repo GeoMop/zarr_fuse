@@ -1,281 +1,220 @@
-name: Dashboard reusable deploy
-
+name: Dashboard - reusable workflow
 on:
   workflow_call:
     inputs:
-      zarr-fuse-ref:
-        description: "Ref for zarr_fuse (branch or commit)"
-        required: true
-        type: string
-
-      deploy:
-        description: "Whether to deploy the Helm chart"
-        required: false
-        type: boolean
-        default: false
-
       push-container:
-        description: "Whether to push the frontend image"
+        description: Whether to push the container image
         required: false
         type: boolean
         default: true
-
-      source_repo:
-        description: "Repository containing views and schemas"
-        required: true
-        type: string
-
-      source_ref:
-        description: "Git ref in the source repository"
-        required: true
-        type: string
-
-      source-views-path:
-        description: "Path to zf_view.yaml in the source repository"
-        required: true
-        type: string
-
-      source-schemas-path:
-        description: "Path to the schemas directory in the source repository"
-        required: true
-        type: string
-
-      frontend_image:
-        description: "Frontend image name"
-        required: true
-        type: string
-
-      namespace:
-        description: "Kubernetes namespace"
-        required: true
-        type: string
-
+      deploy:
+        description: Whether to deploy the Helm chart
+        required: false
+        type: boolean
+        default: false
       tag:
-        description: "Image tag or version"
+        description: The tag to use for the container image
         required: false
         type: string
-        default: "generate"
-
+        default: generate
+      namespace:
+        description: The Kubernetes namespace to use
+        required: false
+        type: string
       release-name:
-        description: "Helm release name"
-        required: true
-        type: string
-
-      configmap_name:
-        description: "ConfigMap name for views and schemas"
+        description: The Helm release name to use
         required: false
         type: string
-        default: "dashboard-config"
-
-      mount-volume-name:
-        description: "Kubernetes ConfigMap volume name"
+      view-name:
+        description: The view from zf_view.yaml the release serves (HV_DASHBOARD_VIEW)
         required: false
         type: string
-        default: "config"
+        default: bukov_endpoint
+      s3-secret-name:
+        description: Existing Secret in the namespace with ZF_S3_ACCESS_KEY, ZF_S3_SECRET_KEY and ZF_S3_ENDPOINT_URL
+        required: false
+        type: string
+        default: zarr-fuse-s3
+      docker-repository:
+        description: The Docker repository to use
+        required: false
+        type: string
+        default: jbrezmorf/zarr-fuse-holoviz-frontend
+      docker-registry:
+        description: The Docker registry to use
+        required: false
+        type: string
+        default: docker.io
+      views-path:
+        description: Path to zf_view.yaml in the caller repository
+        required: false
+        type: string
+        default: app/databuk/config/zf_view.yaml
+      schemas-path:
+        description: Path to the directory with the schema files in the caller repository
+        required: false
+        type: string
+        default: app/databuk/config/schemas
+      extra-helm-args:
+        description: Extra Helm arguments to pass during deployment
+        required: false
+        type: string
+        default: ""
+      zarr-fuse-ref:
+        description: "Ref/branch/tag of the GeoMop/zarr_fuse repository for external use"
+        required: false
+        type: string
+        default: "main"
     secrets:
-      kubeconfig:
-        required: true
-      source_repo_token:
-        required: true
-      zarr_repo_token:
-        required: false
       DOCKER_PASSWORD:
+        description: "Docker registry password for pushing images"
         required: false
-      s3_access_key:
-        required: true
-      s3_secret_key:
-        required: true
-
+      KUBECONFIG:
+        description: "Base64-encoded kubeconfig for Kubernetes deployment"
+        required: false
 jobs:
   get-version-tag:
     name: Get version tag
     runs-on: ubuntu-latest
     outputs:
-      version-tag: ${{ steps.get_version_tag.outputs.version-tag }}
+      version-tag: ${{ steps.get_version_tag.outputs.version_tag }}
     steps:
       - name: Checkout zarr_fuse
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
-          ref: ${{ inputs['zarr-fuse-ref'] }}
-          path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
+          ref: ${{ inputs.zarr-fuse-ref }}
 
       - name: Get version tag
         id: get_version_tag
         run: |
           if [[ ${{ inputs.tag }} == "generate" ]]; then
-            echo "version-tag=ci-$(git -C main-repo rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+            echo "version_tag=ci-$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
           else
-            echo "version-tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+            echo "version_tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
           fi
 
-  containerize-frontend:
-    name: Containerize frontend
+  prepare-configuration:
+    name: Prepare dashboard configuration
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@v6
+
+      - name: Copy configuration files
+        run: |
+          VIEWS_FILE="${{ inputs.views-path }}"
+          SCHEMAS_DIR="${{ inputs.schemas-path }}"
+          DEST_DIR="ci-config"
+
+          if [[ ! -f "$VIEWS_FILE" ]]; then
+            echo "Views file '$VIEWS_FILE' does not exist."
+            exit 1
+          fi
+          if [[ ! -d "$SCHEMAS_DIR" ]]; then
+            echo "Schemas directory '$SCHEMAS_DIR' does not exist."
+            exit 1
+          fi
+
+          mkdir -p "$DEST_DIR"
+          cp "$VIEWS_FILE" "$DEST_DIR"/zf_view.yaml
+          cp "$SCHEMAS_DIR"/*.yaml "$DEST_DIR"/
+      - name: Upload configuration files as artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: dashboard-configuration
+          path: ci-config/
+
+  containerize:
+    name: Containerize dashboard
+    runs-on: ubuntu-latest
+    needs:
+      - get-version-tag
     container:
       image: quay.io/buildah/stable:v1.35.4
       options: --privileged
-    needs:
-      - get-version-tag
     steps:
       - name: Checkout zarr_fuse
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
-          ref: ${{ inputs['zarr-fuse-ref'] }}
-          path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
+          ref: ${{ inputs.zarr-fuse-ref }}
 
       - name: Containerize
-        uses: ./main-repo/.github/actions/containerize
+        uses: ./.github/actions/containerize
         with:
-          repository: ${{ inputs.frontend_image }}
+          registry: ${{ inputs.docker-registry }}
+          repository: ${{ inputs.docker-repository }}
           tag: ${{ needs.get-version-tag.outputs.version-tag }}
           containerfile-path: dashboard/oci/frontend.Containerfile
-          push: ${{ inputs['push-container'] }}
+          push: ${{ inputs.push-container }}
           registry-username: ${{ vars.DOCKER_USERNAME }}
           registry-password: ${{ secrets.DOCKER_PASSWORD }}
-          working-directory: main-repo
+          working-directory: .
+          extra-build-args: --build-arg APP_VERSION="${{ needs.get-version-tag.outputs.version-tag }}"
 
   lint-helm-chart:
-    name: Lint HoloViz Helm chart
+    name: Lint dashboard Helm chart
     runs-on: ubuntu-latest
     container:
       image: docker.io/alpine/k8s:1.29.14
     needs:
-      - get-version-tag
+      - containerize
     steps:
       - name: Checkout zarr_fuse
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
-          ref: ${{ inputs['zarr-fuse-ref'] }}
-          path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
+          ref: ${{ inputs.zarr-fuse-ref }}
 
       - name: Lint helm chart
-        uses: ./main-repo/.github/actions/helm-lint
+        uses: ./.github/actions/helm-lint
         with:
-          working-directory: main-repo/dashboard/charts/holoviz
+          working-directory: dashboard/charts/holoviz
+          values: --values values/minimal-required-values.yaml
 
   deploy:
-    name: Deploy dashboard
+    name: Deploy dashboard to e-infra rancher
     runs-on: ubuntu-latest
     if: ${{ inputs.deploy }}
+    container:
+      image: docker.io/alpine/k8s:1.29.14
     needs:
-      - get-version-tag
-      - containerize-frontend
       - lint-helm-chart
+      - get-version-tag
+      - prepare-configuration
     env:
       KUBECONFIG: ./kubeconfig.yaml
+    defaults:
+      run:
+        working-directory: dashboard/charts
     steps:
-      - name: Checkout zarr_fuse (main-repo)
-        uses: actions/checkout@v4
+      - name: Checkout zarr_fuse
+        uses: actions/checkout@v6
         with:
           repository: GeoMop/zarr_fuse
-          ref: ${{ inputs['zarr-fuse-ref'] }}
-          path: main-repo
-          token: ${{ secrets.zarr_repo_token }}
+          ref: ${{ inputs.zarr-fuse-ref }}
 
-      - name: Checkout source repo (HLAVO or caller)
-        uses: actions/checkout@v4
+      - name: Download configuration files artifact
+        uses: actions/download-artifact@v7
         with:
-          repository: ${{ inputs.source_repo }}
-          ref: ${{ inputs.source_ref }}
-          path: source-repo
-          token: ${{ secrets.source_repo_token }}
+          name: dashboard-configuration
+          path: dashboard/charts/holoviz/config/
 
       - name: Decode kubeconfig
-        run: echo "${{ secrets.kubeconfig }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
+        run: echo "${{ secrets.KUBECONFIG }}" | base64 -d > kubeconfig.yaml && chmod 600 kubeconfig.yaml
 
-      - name: Ensure namespace exists (check permissions first)
-        run: |
-          set -euo pipefail
-          NS="${{ inputs.namespace }}"
-          echo "Checking namespace '$NS'..."
-          if kubectl get namespace "$NS" >/dev/null 2>&1; then
-            echo "Namespace '$NS' already exists."
-          else
-            echo "Namespace '$NS' does not exist. Checking permission to create namespaces..."
-            if kubectl auth can-i create namespace >/dev/null 2>&1; then
-              echo "Permission granted: creating namespace '$NS'..."
-              kubectl create namespace "$NS"
-            else
-              echo "Permission denied: this kubeconfig user cannot create namespaces."
-              echo "Please create the namespace '$NS' manually or provide a kubeconfig with namespace-create rights."
-              exit 1
-            fi
-          fi
-
-      - name: Set context to namespace
+      - name: Set context
         run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
 
-      - name: Validate source files
-        shell: bash
+      - name: Deploy app
         run: |
-          set -euo pipefail
-
-          VIEW_FILE="source-repo/${{ inputs['source-views-path'] }}"
-          SCHEMAS_DIR="source-repo/${{ inputs['source-schemas-path'] }}"
-
-          if [[ ! -f "$VIEW_FILE" ]]; then
-            echo "Missing views file: $VIEW_FILE"
-            exit 1
-          fi
-
-          if [[ ! -d "$SCHEMAS_DIR" ]]; then
-            echo "Missing schemas directory: $SCHEMAS_DIR"
-            exit 1
-          fi
-
-      - name: Create ConfigMap from source files
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          VIEW_FILE="source-repo/${{ inputs['source-views-path'] }}"
-          SCHEMAS_DIR="source-repo/${{ inputs['source-schemas-path'] }}"
-
-          echo "Creating ConfigMap ${{ inputs.configmap_name }} in namespace '${{ inputs.namespace }}' from:"
-          echo " - views: $VIEW_FILE"
-          echo " - schemas dir: $SCHEMAS_DIR"
-
-          if kubectl create configmap "${{ inputs.configmap_name }}" \
-            --namespace "${{ inputs.namespace }}" \
-            --from-file=zf_view.yaml="$VIEW_FILE" \
-            --from-file="$SCHEMAS_DIR" \
-            --dry-run=client -o yaml | kubectl apply -f -; then
-            echo "ConfigMap applied successfully."
-          else
-            echo "Failed to create ConfigMap. Checking permissions and namespace..."
-            kubectl auth can-i create configmaps --namespace="${{ inputs.namespace }}" || true
-            kubectl get namespace "${{ inputs.namespace }}" -o yaml || true
-            kubectl get configmap --namespace="${{ inputs.namespace }}" -o name || true
-            echo "If this runner's kubeconfig user lacks permissions, update the KUBECONFIG secret or grant the user create/apply rights in the namespace."
-            exit 1
-          fi
-
-      - name: Deploy Helm chart from main-repo
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          helm upgrade "${{ inputs['release-name'] }}" main-repo/dashboard/charts/holoviz \
-            --install --atomic --timeout 10m \
-            --namespace "${{ inputs.namespace }}" \
-            --set "frontend.image.name=${{ inputs.frontend_image }}" \
-            --set "frontend.image.tag=${{ needs.get-version-tag.outputs.version-tag }}" \
-            --set "frontend.s3.secrets.accessKey=${{ secrets.s3_access_key }}" \
-            --set "frontend.s3.secrets.secretKey=${{ secrets.s3_secret_key }}" \
-            --set "frontend.extraEnv[0].name=ZF_VIEW_PATH" \
-            --set "frontend.extraEnv[0].value=/opt/dashboard/config/zf_view.yaml" \
-            --set "frontend.extraEnv[1].name=SCHEMAS_PATH" \
-            --set "frontend.extraEnv[1].value=/opt/dashboard/schemas" \
-            --set "frontend.extraVolumes[0].name=${{ inputs['mount-volume-name'] }}" \
-            --set "frontend.extraVolumes[0].configMap.name=${{ inputs.configmap_name }}" \
-            --set "frontend.extraVolumeMounts[0].name=${{ inputs['mount-volume-name'] }}" \
-            --set "frontend.extraVolumeMounts[0].mountPath=/opt/dashboard/config/zf_view.yaml" \
-            --set "frontend.extraVolumeMounts[0].subPath=zf_view.yaml" \
-            --set "frontend.extraVolumeMounts[1].name=${{ inputs['mount-volume-name'] }}" \
-            --set "frontend.extraVolumeMounts[1].mountPath=/opt/dashboard/schemas"
+          helm upgrade ${{ inputs.release-name }} holoviz \
+          --install --atomic --timeout 10m --namespace "${{ inputs.namespace }}" \
+          --set registry.host="${{ inputs.docker-registry }}" \
+          --set frontend.image.name="${{ inputs.docker-repository }}" \
+          --set frontend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
+          --set frontend.viewName="${{ inputs.view-name }}" \
+          --set frontend.s3.existingSecret="${{ inputs.s3-secret-name }}" \
+          --set frontend.config.enabled=true \
+          ${{ inputs.extra-helm-args }}
