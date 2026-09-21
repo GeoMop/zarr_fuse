@@ -730,6 +730,42 @@ def test_merge_ds_respects_schema_na_value(tmp_path, var_type, na_value, dtype):
     npt.assert_array_equal(result, expected)
 
 
+def test_update_does_not_spread_nan_interpolation(tmp_path):
+    """Preserve neighboring values when an update has a missing source value."""
+    schema_dict = {
+        "VARS": {
+            "data": {
+                "unit": "",
+                "type": "float64",
+                "na_value": "nan",
+                "coords": ["x"],
+            },
+        },
+        "COORDS": {
+            "x": {"unit": "", "type": "float64", "sorted": True},
+        },
+        "ATTRS": {"STORE_URL": str(tmp_path / "nan_interpolation.zarr")},
+    }
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {"data": ("x", np.array([0.0, 5.0, 10.0, 15.0, 20.0]))},
+        coords={"x": [0.0, 0.5, 1.0, 1.5, 2.0]},
+    ))
+
+    node = zf.open_store(schema_dict)
+    node.update_from_ds(xr.Dataset(
+        {"data": ("x", np.array([10.0, np.nan, 30.0, 40.0]))},
+        coords={"x": [0.0, 1.0, 2.0, 3.0]},
+    ))
+
+    result = zf.open_store(schema_dict).dataset["data"].values
+    npt.assert_allclose(
+        result,
+        np.array([10.0, 15.0, 10.0, 25.0, 30.0, 40.0]),
+    )
+
+
 def test_write_ds_partial_chunk_update(smart_tmp_path):
     """Node.write_ds must overwrite a region smaller than its Zarr chunk."""
     store_path = smart_tmp_path / "partial_chunk_update.zarr"

@@ -6,6 +6,7 @@ import xarray as xr
 import attrs
 import warnings
 
+from . import units
 from .zarr_schema import Coord
 from .tools import adjust_grid
 
@@ -31,6 +32,54 @@ class InterpolationFallbackWarning(UserWarning):
             f"Falling back from linear interpolation to nearest/P0 interpolation "
             f"for coordinates {self.coord_names}."
         )
+
+
+def round_coord_to_step_unit(values: np.ndarray, schema: Coord) -> np.ndarray:
+    """Round datetime coordinates down to the unit configured for coordinate steps."""
+    if not isinstance(schema.unit, units.DateTimeUnit):
+        return values
+
+    tick = units.PINT_UNIT_TO_DATETIME_TICK[str(schema.step_limits.unit)]
+    rounded = values.astype(f"datetime64[{tick}]")
+    return rounded.astype(values.dtype)
+
+
+def normalize_update_coords(
+        ds_update: xr.Dataset,
+        schema: Dict[str, Coord],
+) -> xr.Dataset:
+    """Round datetime update coordinates and discard duplicate rounded labels."""
+    normalized = ds_update
+    for dim, coord_schema in schema.items():
+        values = normalized[dim].values
+        coord_attrs = normalized[dim].attrs.copy()
+        rounded = round_coord_to_step_unit(values, coord_schema)
+        _, first_indices = np.unique(rounded, return_index=True)
+        first_indices = np.sort(first_indices)
+        normalized = normalized.assign_coords({dim: rounded})
+        if len(first_indices) < len(rounded):
+            dependent_names = [
+                name
+                for name, data_array in normalized.data_vars.items()
+                if dim in data_array.dims
+            ]
+            if dependent_names:
+                dependent = normalized[dependent_names].groupby(dim).first(skipna=True)
+                static = normalized.drop_vars(dependent_names)
+                if dim in static.coords:
+                    static = static.drop_vars(dim)
+                dataset_attrs = normalized.attrs.copy()
+                normalized = xr.merge(
+                    [dependent, static],
+                    compat="override",
+                    join="outer",
+                )
+                normalized.attrs = dataset_attrs
+            else:
+                normalized = normalized.isel({dim: first_indices})
+            normalized = normalized.sel({dim: rounded[first_indices]})
+        normalized[dim].attrs = coord_attrs
+    return normalized
 
 
 def check_sorted_coord_values(
@@ -264,28 +313,49 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
     }
 
     ds_nearest = ds_sorted.interp(
-            nearest_coords,
-            method='nearest',
-            assume_sorted=True
-        )
+        nearest_coords,
+        method='nearest',
+        assume_sorted=True,
+    )
+
+    # Fill NaNs only for the interpolation calculation. Restore their source
+    # positions below so sparse data does not contaminate neighboring values.
+    ds_for_interp = ds_nearest.copy()
+    for var_name, data_array in ds_nearest.data_vars.items():
+        for dim in linear_coords:
+            if dim in data_array.dims:
+                data_array = data_array.interpolate_na(
+                    dim=dim,
+                    method='linear',
+                    use_coordinate=True,
+                )
+        ds_for_interp[var_name] = data_array
 
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
-            ds_interpolated = ds_nearest.interp(
+            ds_interpolated = ds_for_interp.interp(
                 linear_coords,
                 method='linear',
-                assume_sorted=True
+                assume_sorted=True,
             )
     except RuntimeWarning:
         log.warning(
             InterpolationFallbackWarning(linear_coords)
         )
-        ds_interpolated = ds_nearest.interp(
+        ds_interpolated = ds_for_interp.interp(
             linear_coords,
             method='nearest',
-            assume_sorted=True
+            assume_sorted=True,
         )
+
+    for var_name, data_array in ds_sorted.data_vars.items():
+        source_nan = data_array.isnull()
+        output_nan = source_nan.reindex(
+            {dim: ds_interpolated[dim] for dim in source_nan.dims},
+            fill_value=False,
+        )
+        ds_interpolated[var_name] = ds_interpolated[var_name].where(~output_nan)
     all_coords = {d: c for d, (c, idx) in coords_new}
     ds_interpolated = ds_interpolated.reindex(all_coords, fill_value=np.nan)
 

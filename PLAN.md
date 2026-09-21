@@ -5,36 +5,45 @@
 - `PLAN.md` is the active planning document for current repository work.
 - `_PLAN.md` contains older branch-specific review notes and is treated as
   historical input, not the active plan.
-- Current user priority: fix a small set of failing tests, first separating
-  true code failures from failures caused by missing secrets or remote access.
+- Current user priority: review and clarify this plan before starting more
+  implementation work.
+- 2026-09-19 review: multidimensional merge extension handling and unsorted
+  interpolation lookup are resolved in the current code and have regression
+  coverage. Local store-open behavior remains contradictory in this plan, and
+  the delayed-date_time merge goal is underspecified.
 
 ## Active Priorities
 
-### P0. Triage failing tests
+### P0. schema step_limit doesn't work [RESOLVED 2026-09-19]
 
-- Identify the currently failing tests and group them into:
-  - deterministic local failures
-  - S3 or secret-gated failures
-  - hangs or timeout regressions
-- Reproduce local failures with targeted pytest invocations before any broader
-  suite run.
-- For S3-backed tests, prefer explicit skip conditions when required secrets or
-  endpoints are unavailable.
-- Add a shared pytest fixture to load local secret environment variables from
-  `.secrets_env` for tests that opt into remote-backed execution.
+The constrained-grid bug was reproduced in `adjust_grid`: a gap just above
+the maximum step created an inserted step below the minimum. The fix advances
+by one valid minimum step and drops the incompatible off-grid endpoint. New
+datetime coverage exercises `[30, 30]`, `[30, 40]`, and `[15, 45]` minute
+limits. The implemented schema key is `step_limits` (plural); the singular
+`step_limit` spelling in the original report remains a naming inconsistency.
 
-### P1. Stabilize local store open behavior
+Observed: Schema with step_limit: [30, 30, 'minute'] still allow times <date> 10:00:00 and <date> 10:00:01
+both pass through. When one ofe these times is for the coord depth == 0 and other for the depth == 1,
+it makes lot of NaNs.
+- fist reproduce the problem with a test, parametrize with more step_limit values like [30, 40, 'm'] or [15, 45, 'm']
+  these could ocasionaly allow 10:00:01 value or even 10:05:00 instead of 10:00:00 but still just one of these.
+- Next fid fix for this
 
-- Continue the investigation from `_PLAN.md` around local store open hangs in
-  `zarr_fuse/zarr_storage.py`.
-- Prioritize `test_open_store[options0]`, `test_node_tree[local]`, and related
-  local-only coverage before touching S3 behavior.
-- Add or refine a deterministic regression test once the blocking path is
-  confirmed.
-- 2026-06-20 status: local and S3 store-open tests now pass in the current
-  environment, so this item is no longer the active blocker.
 
-### P1. Review empty dataset first-write semantics
+### P0. NaN interpolation [RESOLVED 2026-09-19]
+
+The pure xarray reproduction confirmed that a source NaN contaminated
+neighboring linear interpolation results. Interpolation now fills NaNs only
+for the calculation and restores NaNs at their original source coordinates.
+Both pure interpolation and `node.update_from_ds` regression tests pass.
+Probable bug: Interpolate uses NaN values as well compromising the surrounding values.
+- must be carefully tested first on small data and out of the node.update
+- if confirmed a work around must be also teste out of update
+- only then integrate and test within update
+
+
+### P1. Review empty dataset first-write semantics [OPEN]
 
 - Revisit the `__empty__` handling and first-write path in
   `zarr_fuse/zarr_storage.py`.
@@ -42,40 +51,25 @@
   groups.
 - Add regression coverage for empty-to-first-write transitions.
 
-### P1. Correct multidimensional coordinate extension application
 
-- Keep `merge_ds` extension slabs disjoint while checking the extending
-  dimension independently from the slabs' Cartesian data sizes.
-- Reindex every non-appended dimension to the coordinates currently present
-  in the store before applying each extension in reverse dimension order.
-- Extend storage tests with zero-overlap and mixed-overlap updates across three
-  coordinates, including structural extensions whose dependent values are NaN.
-- Generalize missing-value filling to use each schema variable's `na_value`,
-  including integer and string variables without native NaN representations.
-
-### P2. Tighten schema and read-path consistency
+### P2. Tighten schema and read-path consistency [PARTIAL - OPEN]
 
 - Reconcile the `composed` attribute contract across write and read code paths.
-- Fix or confirm the coordinate uniqueness validation noted in `_PLAN.md`.
+- The coordinate uniqueness typo noted in `_PLAN.md` appears resolved: the
+  current validation uses `np_var` and has related schema/storage coverage.
+- The `composed` attribute contract remains open; `_read_df` still directly
+  indexes the attribute and no final contract decision is recorded.
 - Add tests only after the intended behavior is explicit.
 
-### P2. Fix interpolation lookup for unsorted dims
 
-- Reproduce the `KeyError` in `interpolate.py` when an unsorted dimension is
-  present in `ds_sorted` but absent from `interp_coords`.
-- Fix the nearest-coordinate selection to iterate over `interp_coords.items()`
-  and read the size from `ds_sorted` for the same key.
-- Add a regression test that covers a dataset with a sorted dimension and an
-  unsorted singleton dimension.
-
-### P2. Separate S3 compatibility work
+### P2. Separate S3 compatibility work [OPEN - ENVIRONMENT-GATED]
 
 - Keep S3 async/sync behavior review separate from local test stabilization.
 - Avoid mixing environment setup issues with library regressions in one change.
 - When S3 tests are expected to require secrets, document that requirement in
   the test or fixture entry point.
 
-### P2. Warning triage
+### P2. Warning triage [PARTIAL - OPEN]
 
 - Classify current pytest warnings before deciding whether to suppress, fix, or
   document them.
@@ -86,6 +80,11 @@
   - stale warnings already removed by newer edits
 
 #### Warning classification snapshot
+
+2026-09-19 status: the Tk destructor warning no longer reproduces in the known
+mixed local runs; the plotting-test distinction remains postponed. The Zarr v3
+UTF warning and the `logs/` namespace warning also remain postponed. The
+section is not complete.
 
 - `zarr_fuse/test/test_zarr_storage.py::test_open_store[options1]`:
   `PytestUnraisableExceptionWarning` from `tkinter.Variable.__del__` and
@@ -165,16 +164,24 @@
 
 ## Planned Work: Delayed date_time Merge
 
-### Goal
+### Goal [UNCLEAR]
+
+The intended final behavior for delayed `date_time` merging is not stated in
+this plan. In particular, it is unclear whether drifted timestamps should be
+preserved as source coordinates, mapped to a constrained grid, or rejected.
 
 
-4. Add unsupported schema-key diagnostics.
+4. Add unsupported schema-key diagnostics. [OPEN]
    - Add validation for unsupported keys in schema config dictionaries.
    - Prefer a clear error for unsupported nested `merge` blocks and other
      ignored keys, so old or misspelled schema items cannot silently change
      merge behavior.
 
-6. Update tests after implementation.
+6. Update tests after implementation. [PARTIAL]
+   - The existing delayed-update tests and the 2026-09-19 drift tests cover
+     sorted output, stepped grids, delayed writes, and the constrained
+     multi-month drift case. The unsupported-key diagnostics still have no
+     implementation or test coverage.
    - For default `merge = None`, assert sorted `date_time`, assert delayed
      in-range values are not inserted, and assert an error is logged.
    - For stepped merge, assert intermediate coordinates are introduced after the
@@ -253,6 +260,15 @@
   set on `AppConfig`), so a restart re-notifies about a persisting anomaly and
   a long-running process never re-reminds. If either behavior is wrong, the
   de-duplication needs a time window or on-disk state.
+
+- 2026-09-19 plan review: The P0 test-triage priority has no current baseline
+  failure list, so its scope is understood but its completion criteria are not
+  measurable yet.
+
+- 2026-09-19 plan review: The delayed `date_time` merge goal is unclear about
+  whether source timestamp drift is expected to remain in the coordinate,
+  snap to the configured grid, or be rejected. This must be decided before
+  implementing further merge changes.
 
 ## AGENT log
 
@@ -390,3 +406,12 @@
   emails are preserved. The branch's schema-based auto-detection of the time
   coordinate and its `store_key` grouping were dropped in the resolution;
   `ExtractedItem` is addressed by `FileRef` throughout.
+- 2026-09-17: Extended the standalone xarray/Dask Zarr compatibility scenario
+  with a lazy read, reindex, and `fillna` before the overlap and extension writes.
+- 2026-09-19: Reviewed priority status; marked resolved merge/interpolation
+  work, retained contradictory local-store evidence, and recorded the unclear
+  delayed-date_time merge goal.
+- 2026-09-19: Resolved the constrained step-limit interpolation boundary bug;
+  targeted interpolation regressions pass.
+- 2026-09-19: Resolved NaN contamination during interpolation with pure and
+  `node.update_from_ds` regressions covering source and neighboring values.
