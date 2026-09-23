@@ -376,10 +376,9 @@ def build_dashboard():
         doc = pn.state.curdoc
 
         def _do_tap():
-            try:
-                map_handlers["on_map_tap"](_x, _y)
-            finally:
-                timeseries_loading.visible = False
+            # The spinner is turned off by the deferred fetch loop inside
+            # on_map_tap once the last member's data has landed, not here.
+            map_handlers["on_map_tap"](_x, _y, loading=timeseries_loading)
 
         if doc is not None:
             # Use timeout, not next_tick — next_tick runs synchronously during

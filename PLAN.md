@@ -965,6 +965,51 @@ Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
   variable switch, initial load) and only adopt live `x_range` when it differs
   from the stored baseline (a real pan/zoom). `build_marker_overlay` and
   `_resolve_marker_window` unchanged; marker unit tests unaffected.
+- 2026-09-22 (click merged markers select all members, done): Previously tapping a
+  clustered map marker still added only the nearest single borehole, because
+  `_cluster_points` discarded cluster membership and `on_map_tap` resolved
+  against the un-clustered per-borehole arrays. Changed `_cluster_points` to
+  return `(clustered_df, member_lists)` (entity indices per cluster, falling back
+  to row indices), and the map callback stores the last render as
+  `data.current_clusters` (centroid lon/lat + `entity_indices`, empty for the
+  no-data paths). `on_map_tap` now resolves the nearest cluster centroid and,
+  when within the tap threshold, adds every member via `_fetch_timeseries`
+  (single-member/empty-cluster taps keep the existing nearest-marker behavior,
+  single failure semantics preserved). Added `dashboard/test/test_cluster_members.py`
+  (7 tests: no-range 1:1, row-index fallback, proximity merge, distant separate,
+  empty df, out-of-view empty, centroid/label).
+- 2026-09-22 (click merged markers select all members, threshold follow-up, done):
+  Clicking a merged dot of 3+ boreholes still failed because `on_map_tap` ran the
+  single-marker gate (`min_dist > threshold_deg**2`, threshold 0.0002 degrees)
+  BEFORE cluster logic, yet merged dots are drawn at their centroid, which can sit
+  farther than that tolerance from every member. Fixed in `dashboard/multi_time_views.py`:
+  `_cluster_points` (`dashboard/map_views.py`) now also returns per-cluster `radii`
+  (max centroid-to-member distance in degrees, 0.0 for single/empty) and the map
+  callback stores them as `data.current_clusters[].radius`; the tap path now resolves
+  clusters first via a pure `_resolve_tap_targets(x, y, clusters, all_meta, nearest_idx,
+  min_dist, threshold_deg)` that hits a merged cluster within `max(threshold_deg,
+  radius)` and returns all members (single-member/empty/single-marker paths unchanged,
+  len>1 multi-fetch semantics preserved in `on_map_tap`). Extended
+  `dashboard/test/test_cluster_members.py` (3-tuple signature + 5 `_resolve_tap_targets`
+  tests: centroid hit, within-radius hit, radius miss -> single fallback, no-cluster
+  fallback, far click None). Suite: 149 passed / 1 skipped (baseline 144 + 5 new).
+- 2026-09-22 (map tap registration-first, table-before-plots, done): A map click
+  (single or merged) previously fetched every target's timeseries synchronously
+  BEFORE the plot-selection table row appeared, so merged-cluster clicks showed
+  nothing until all N fetches finished. Now `SelectionState` gains
+  `register_site` (pending empty row, bumps `layout_version` only) and `fill_site`
+  (populates a pending row, auto-checks finite depths, bumps `version`; bumps
+  `layout_version` when the depth set grows). `on_map_tap` registers ALL resolved
+  boreholes immediately (site_id from `all_meta` by entity_index, fallback
+  `entity_label_<idx>`), then fills each site's data in a deferred callback
+  (100 ms `doc.add_timeout_callback`, inline fallback without a doc) per arriving
+  member, firing `borehole_stream.event` for the first resolved index. The
+  `timeseries_loading` spinner now lives under the deferred fetch loop (cleared
+  when the last member lands) instead of `on_tap_event`'s `_do_tap` finally.
+  Added `dashboard/test/test_register_fill_site.py` (7 tests: pending row without
+  version bump, no checked cells, duplicate noop, fill auto-check, layout bump on
+  depth growth, unknown-site False, register+fill preserves prior sites).
+  Suite: 156 passed / 1 skipped (baseline 149 + 7 new).
 - 2026-09-10 (real overlay, line-art readability): User reports numbers/small
   notes on the zoomed-in overlay lose pixels ("missing pixels"). Cause: single
   `resampling` knob fed `cubic` into both gdalwarp and gdal2tiles; cubic (and
