@@ -136,9 +136,7 @@ The dashboard uses [python-dotenv](https://pypi.org/project/python-dotenv/) to a
 
 The detailed guides live in [docs/](docs):
 
-- [Quick Start](docs/QUICKSTART.md)
-- [Template Files](docs/TEMPLATE.md)
-- [Workflow](docs/WORKFLOW.md)
+- [New Project Setup (Templates + Workflow)](docs/TEMPLATE.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Config Packaging](docs/CONFIG_PACKAGING.md)
 - [Refactor Notes](docs/REFACTOR_NOTES.md)

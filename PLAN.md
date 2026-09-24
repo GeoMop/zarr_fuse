@@ -1046,3 +1046,29 @@ Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
   NEXT: user rebuilds (`python build_overlay_tiles.py`), A/B zoom on numbers;
   fallback ladder: tiles->near; if the source lacks pixels at 100% add a
   stroke-contrast/alpha-threshold post-step.
+- 2026-09-24 (dashboard docs consolidation, done): Merged QUICKSTART.md +
+  WORKFLOW.md + TEMPLATE.md into a single new-project guide kept as
+  `dashboard/docs/TEMPLATE.md` (user decision: merge, scope includes
+  QUICKSTART, survivor named TEMPLATE.md). The merged doc covers planning /
+  prerequisites / structure / install / file templates (`.env`,
+  `zf_view.yaml`, `my_schema.yaml`, `requirements.txt`) / validation /
+  run / troubleshooting (de-duplicated from both sources) / customizations /
+  deployment (dev, gunicorn, Docker -> DEPLOYMENT.md) / file checklist /
+  success indicators / env-var quick reference. Also fixed config drift in
+  the yaml examples: `defaults.metric` -> `defaults.display_variable`,
+  removed the unsupported `labels:` and `cmap:` blocks (config.py:
+  ViewConfig/MapConfig have no such fields), fixed the `<< 'EOF'` heredoc
+  that wrote a literal `$(pwd)` into `.env` (python-dotenv does not expand
+  it; absolute path required), and replaced QUICKSTART's invalid
+  `zarr.open_group('s3://...')` with xarray `open_zarr`. Deleted
+  `dashboard/docs/QUICKSTART.md` and `dashboard/docs/WORKFLOW.md`. Updated
+  `dashboard/README.md` (doc link list now 6 entries, no QUICKSTART/
+  WORKFLOW) and rewrote `dashboard/docs/DOCS_INDEX.md` (Read-This-First
+  single TEMPLATE block, decision tree, main docs, getting-help, file
+  organization, reading order, TL;DR, history table with a merge note).
+  Verified: grep shows only the intentional history-note mentions of the
+  removed files; all touched docs have no line >120 (CONFIG_PACKAGING.md /
+  tile_pyramid_README.md pre-existing long lines untouched).
+  OPEN / REMARKS: the files were user-committed during earlier sessions;
+  these doc edits remain uncommitted for git-cola review. `tile_url_cache.json`
+  churn was left alone per earlier user decision.
