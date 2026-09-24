@@ -1010,6 +1010,22 @@ Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
   version bump, no checked cells, duplicate noop, fill auto-check, layout bump on
   depth growth, unknown-site False, register+fill preserves prior sites).
   Suite: 156 passed / 1 skipped (baseline 149 + 7 new).
+- 2026-09-22 (build_overlay_tiles.py config-only sourcing, done): Removed the
+  10 CLI value-override flags (`--image`, `--georef`, `--min-zoom`,
+  `--max-zoom`, `--gcp-srs`, `--target-srs`, `--resampling`, `--bucket`,
+  `--prefix`, `--endpoint-url`) so zf_view.yaml ``tile_build`` is the sole
+  source for build values. Deleted `_resolve_param`; `main()` reads
+  `tile_build.*` directly (the config layer owns defaults: `min_zoom=0`,
+  `max_zoom=20`, `target_srs=EPSG:3857`, `gcp_srs=EPSG:4326`,
+  `resampling=near`) and sets `endpoint_url = schema_endpoint_url(...)`.
+  Startup summary prints plain values (no source labels); missing-S3 errors
+  point at `tile_build.s3` only. `_run_delete` dropped the `bucket_src` /
+  `prefix_src` params. Kept operational flags: `--view-path`, `--view`,
+  `--force`, `--dry-run`, `--no-cleanup`, `--delete`, `--yes`; the
+  `tile_resampling = tile_build.tile_resampling or resampling` fallback is
+  unchanged. Verified: py_compile, `--help` shows the 7 kept flags,
+  `--dry-run` resolves the app/databuk view config-only end to end,
+  `--delete --force` / bare `--yes` guards still reject.
 - 2026-09-10 (real overlay, line-art readability): User reports numbers/small
   notes on the zoomed-in overlay lose pixels ("missing pixels"). Cause: single
   `resampling` knob fed `cubic` into both gdalwarp and gdal2tiles; cubic (and
