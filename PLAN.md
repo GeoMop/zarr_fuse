@@ -1072,3 +1072,19 @@ Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
   OPEN / REMARKS: the files were user-committed during earlier sessions;
   these doc edits remain uncommitted for git-cola review. `tile_url_cache.json`
   churn was left alone per earlier user decision.
+- 2026-09-24 (dashboard README scripts section, done): Added a `## Scripts`
+  section to `dashboard/README.md` (between the tile section and File
+  Organization) with brief one-line explanations for all 8 tracked files in
+  `dashboard/scripts/` (`start_dashboard.ps1`, `check_view_stores.py`,
+  `check_s3_bucket_access.py`, `scan_store_health.py`,
+  `build_overlay_tiles.py`, `setup_gdal_env.ps1`/`.sh`,
+  `prepare_bukov_gcps.py`) and a note that scripts read `ZF_S3_*` creds from
+  the gitignored `scripts/.env`. Also aligned two stale config examples in the
+  same README (user approved): "Using Custom Data Sources" now uses
+  `defaults.display_variable` and drops the unsupported `labels:` block;
+  "Building Tiles (Optional)" dropped the removed `tile_build.enabled` and
+  shows the current `tile_build` shape (paths, zoom range, CRS,
+  resampling, nested `s3.bucket/prefix`) sourced from `TileBuildConfig`
+  (config.py:101-114). Verified: no README line >120 (table rows were over
+  the limit and rewritten as a wrapped bullet list); README renders cleanly.
+  Docs-only change, no tests run.

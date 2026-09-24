@@ -106,12 +106,8 @@ my_view:
       entity: "station"
   
   defaults:
-    metric: "temperature"
+    display_variable: "temperature"
     group_path: "/"
-  
-  labels:
-    metric: "Temperature (°C)"
-    depth_unit: "meters"
 ```
 
 ## Environment Variables (.env)
@@ -145,17 +141,58 @@ The detailed guides live in [docs/](docs):
 
 ## Building Tiles (Optional)
 
-For map overlay support, tiles can be pre-built:
+For map overlay support, tiles can be pre-built with `scripts/build_overlay_tiles.py`.
+Build parameters (paths, zoom range, CRS, resampling, S3 target) come from the
+`tile_build` section of the selected view:
 
 ```yaml
 tile_build:
-  enabled: true
   source_image: "my_overlay.png"
   georef_file: "my_georef.json"
-  tiles_dir: "config/tiles"
+  vrt_file: "tiles/source_gcps.vrt"
+  warped_tif: "tiles/source_3857.tif"
+  rgba_vrt: "tiles/source_3857_rgba.vrt"
+  tiles_dir: "tiles"
+  min_zoom: 0              # default
+  max_zoom: 20             # default
+  target_srs: "EPSG:3857"  # default
+  gcp_srs: "EPSG:4326"     # default
+  resampling: "near"       # default
+  tile_resampling: "average"
+  s3:
+    bucket: "my-bucket"
+    prefix: "overlays/my-project/"
 ```
 
+Insert the `tile_build` block above to build and upload tiles whenever the S3
+prefix does not yet contain any (ensure-semantics; `--force` rebuilds).
 See [docs/tile_pyramid_README.md](docs/tile_pyramid_README.md) for details.
+
+## Scripts
+
+Developer utilities in [scripts/](scripts). All scripts read `ZF_S3_*`
+credentials from the general environment (filled from the gitignored
+`scripts/.env` when present); their module docstrings carry full usage:
+
+- `start_dashboard.ps1` - Windows: start the dashboard from the repository root
+  via `python -m dashboard.serve_dashboard`; alternative to `zf-dashboard`.
+- `check_view_stores.py` - Validate the views in `zf_view.yaml` and their data
+  stores: reachability, group paths, expected variables/coordinates, and finite
+  sample values.
+- `check_s3_bucket_access.py` - Interactive S3 access tool: set credentials,
+  full bucket scan, access check, inspect access policy.
+- `scan_store_health.py` - `df.info()`-style health report for a
+  schema-described store: dtype, dims, shape, size, missing counts per
+  coordinate and data variable.
+- `build_overlay_tiles.py` - Ensure overlay tiles exist on S3: build (GDAL
+  VRT/warp/RGBA/gdal2tiles) and upload as one operation; parameters come from
+  the `tile_build` section of the selected view; supports `--force`,
+  `--dry-run`, `--delete`.
+- `setup_gdal_env.ps1` / `setup_gdal_env.sh` - Create a conda `gdal-test`
+  environment (conda-forge only) with GDAL, required by
+  `build_overlay_tiles.py` (Windows / Linux-macOS).
+- `prepare_bukov_gcps.py` - Legacy Bukov GCP VRT preparation; superseded by
+  `build_overlay_tiles.py`, kept for reference.
 
 ## File Organization
 
