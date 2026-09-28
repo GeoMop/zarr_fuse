@@ -4,6 +4,7 @@ import logging
 
 from ..models import MetadataModel
 from ..app_config import AppConfig
+from ..local_cache import content_hash
 from .content_type import classify_content_type, get_content_type_suffix
 from .validate import sanitize_node_path
 
@@ -28,14 +29,22 @@ def save_data(
         LOG.exception("Failed to sanitize node_path: %r", metadata.node_path)
         raise
 
-    updated_md = metadata.model_copy(update={"node_path": str(safe_child) if safe_child else None})
+    updated_md = metadata.model_copy(update={
+        "node_path": str(safe_child) if safe_child else None,
+        "sha256": content_hash(payload),
+    })
 
     content_type = classify_content_type(updated_md.content_type)
     if content_type is None:
         raise ValueError(f"Unsupported content type: {updated_md.content_type}")
 
+    name = new_item_name(updated_md.endpoint_name, get_content_type_suffix(content_type))
+
+    # The queue storage is the source of truth, the local copy comes second
+    # and only spares the worker a download.
     app_config.queue.put_item(
-        name=new_item_name(updated_md.endpoint_name, get_content_type_suffix(content_type)),
+        name=name,
         payload=payload,
         meta=updated_md.model_dump_json().encode("utf-8"),
     )
+    app_config.cache.put(name, payload)

@@ -19,6 +19,7 @@ from ingress_server.io.time_filter import (
     sort_by_data_time,
     time_key_type_conflict,
 )
+from ingress_server.manifest import ManifestStore, default_manifest_url
 from ingress_server.models import MetadataModel
 from ingress_server.queue_storage import QueueStorage
 from ingress_server import worker
@@ -149,8 +150,10 @@ def test_unreadable_time_coord_is_recorded_on_the_item():
 def test_anomaly_is_emailed_only_once(tmp_path, monkeypatch):
     """The worker re-examines held items on every poll, so a persisting anomaly
     must notify once instead of mailing the same report every cycle."""
+    queue = QueueStorage(str(tmp_path / "queue"))
     app_config = AppConfig(
-        queue=QueueStorage(str(tmp_path / "queue")),
+        queue=queue,
+        manifest=ManifestStore(default_manifest_url(queue.url)),
         config_path=tmp_path / "unused_config.yaml",
         config={},
         base=BaseConfig(),

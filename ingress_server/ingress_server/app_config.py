@@ -9,6 +9,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from .local_cache import LocalCache
+from .manifest import ManifestStore, default_manifest_url
 from .queue_storage import QueueStorage
 
 load_dotenv()
@@ -26,6 +28,12 @@ class BaseConfig:
     # an item is held until it is more than this much older than the newest
     # time_like_coord value seen in the same batch. 0 disables holding.
     retention_time: float = 96.0
+    # zarr-fuse store of the queue manifest (see manifest.py): a local path or
+    # an s3:// URL. Unset means "manifest.zarr" under the queue root.
+    manifest_url: str | None = None
+    # Local directory for copies of the queue payloads (see local_cache.py),
+    # read by the worker instead of downloading them. Unset disables the cache.
+    cache_dir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -41,10 +49,12 @@ class SmtpConfig:
 @dataclass(frozen=True)
 class AppConfig:
     queue: QueueStorage
+    manifest: ManifestStore
     config_path: Path
     config: dict[str, Any]
     base: BaseConfig
     smtp: SmtpConfig
+    cache: LocalCache = field(default_factory=lambda: LocalCache(None))
     stop_event: Event = field(default_factory=Event, compare=False)
     # Anomalies already emailed, so a batch that keeps being re-examined on
     # every worker poll does not re-send the same notification.
@@ -62,6 +72,8 @@ def _parse_base_config(raw: dict) -> BaseConfig:
         port=int(os.getenv("PORT", raw.get("port", BaseConfig.port))),
         worker_poll_interval=int(raw.get("worker_poll_interval", BaseConfig.worker_poll_interval)),
         retention_time=float(raw.get("retention_time", BaseConfig.retention_time)),
+        manifest_url=raw.get("manifest_url", BaseConfig.manifest_url),
+        cache_dir=raw.get("cache_dir", BaseConfig.cache_dir),
     )
 
 
@@ -98,17 +110,27 @@ def load_app_config(config_path: str | Path) -> "AppConfig":
     smtp = _parse_smtp_config(cfg_block.get("smtp", {}))
 
     queue = QueueStorage(base.queue_dir_path)
+    manifest = ManifestStore(base.manifest_url or default_manifest_url(queue.url))
+    cache = LocalCache(base.cache_dir)
 
     app_config = AppConfig(
         queue=queue,
+        manifest=manifest,
         config_path=config_path,
         config=config,
         base=base,
         smtp=smtp,
+        cache=cache,
     )
 
     queue.ensure_layout()
+    manifest.ensure_store()
 
-    LOG.info("Application config loaded. queue=%s", queue.url)
+    LOG.info(
+        "Application config loaded. queue=%s manifest=%s cache=%s",
+        queue.url,
+        manifest.url,
+        cache.root,
+    )
 
     return app_config
