@@ -1088,3 +1088,14 @@ Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
   (config.py:101-114). Verified: no README line >120 (table rows were over
   the limit and rewritten as a wrapped bullet list); README renders cleanly.
   Docs-only change, no tests run.
+- 2026-09-28: Temporary CL4 outage -> switched dashboard config to the CESNET
+  backup store `https://s3.cl2.du.cesnet.cz`. Reverted-to-CL4 list:
+  `app/databuk/config/schemas/bukov_schema.yaml:4` and
+  `app/databuk/inputs/schemas/bukov_schema.yaml:7` (`ATTRS.S3_ENDPOINT_URL`),
+  `dashboard/charts/holoviz/values.yaml:24` (`frontend.s3.endpointUrl`),
+  `app/databuk/config/zf_view.yaml:21` (`source.uri`, now
+  `temperature_monitoring_steady.zarr` -> back to `temperature_monitoring.zarr`),
+  and `zf_view.yaml:52` + `:69-70` (overlay `source_uri` and `tile_build.s3`,
+  back to bucket `app-databuk-test-service`). New local cl2 keys were written
+  to the gitignored `dashboard/scripts/.env` and `zarr_fuse/test/.env`; the
+  disclosed CL4 keys should be rotated.
