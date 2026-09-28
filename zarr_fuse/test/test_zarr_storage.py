@@ -804,6 +804,48 @@ def test_write_ds_partial_chunk_update(smart_tmp_path):
     np.testing.assert_array_equal(reopened["data"].values, np.array([10.0, 12.0]))
 
 
+def test_first_update_chunks_by_schema_chunk_size(tmp_path):
+    """
+    The first write creates the arrays, and zarr fixes their chunk shape then.
+    It must follow the schema chunk_size, not the size of the first update:
+    a single-row first update would otherwise make every later row a chunk.
+    """
+    schema_dict = {
+        "VARS": {
+            "data": {"unit": "", "type": "float64", "coords": ["x"]},
+            "grid": {"unit": "", "type": "float64", "coords": ["x", "y"]},
+        },
+        "COORDS": {
+            "x": {"unit": "", "type": "float64", "chunk_size": 3},
+            "y": {"unit": "", "type": "float64"},
+        },
+        "ATTRS": {"STORE_URL": str(tmp_path / "first_update_chunks.zarr")},
+    }
+
+    zf.open_store(schema_dict).update(
+        pl.DataFrame({"x": [0.0, 0.0], "y": [0.0, 1.0], "data": [10.0, 10.0], "grid": [1.0, 2.0]})
+    )
+    zf.open_store(schema_dict).update(pl.DataFrame({
+        "x": [1.0, 2.0, 3.0, 4.0],
+        "y": [0.0, 0.0, 0.0, 0.0],
+        "data": [11.0, 12.0, 13.0, 14.0],
+        "grid": [3.0, 4.0, 5.0, 6.0],
+    }))
+
+    group = zarr.open_group(str(tmp_path / "first_update_chunks.zarr"), mode="r")
+    assert group["x"].chunks == (3,)
+    assert group["data"].chunks == (3,)
+    # A multi-dimensional variable keeps the first-write chunking: the default
+    # chunk_size of y (1024) must not turn into a 3 x 1024 chunk.
+    assert group["grid"].chunks == (1, 2)
+    assert group["y"].chunks == (1024,)
+
+    ds = zf.open_store(schema_dict).dataset
+    np.testing.assert_array_equal(ds["x"].values, [0.0, 1.0, 2.0, 3.0, 4.0])
+    np.testing.assert_array_equal(ds["data"].values, [10.0, 11.0, 12.0, 13.0, 14.0])
+
+
+
 def test_merge_ds_expands_empty_cartesian_extension(smart_tmp_path):
     """Extend one coordinate when another update coordinate is rejected."""
     store_path = smart_tmp_path / "empty_cartesian_extension.zarr"
