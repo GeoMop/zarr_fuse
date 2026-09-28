@@ -28,6 +28,8 @@ class ExtractedItem:
     schema_path: Path
     obj: DataObject
     time_key: Any = None
+    # Maximum time_like_coord value, the time_key being the minimum.
+    time_max: Any = None
     time_error: str | None = None
 
 
@@ -85,23 +87,45 @@ def _time_diff(a: Any, b: Any) -> float:
     return float(a) - float(b)
 
 
-def _time_value(obj: DataObject, column: str) -> Any:
-    """Read the representative (minimum) value of `column` from the
-    extracted object, normalized for sorting/retention comparisons."""
+def _time_bounds(obj: DataObject, column: str) -> tuple[Any, Any]:
+    """Read the minimum and the maximum value of `column` from the extracted
+    object, normalized for sorting/retention comparisons. The minimum is the
+    representative value of the item."""
     if isinstance(obj, xr.Dataset):
         if column not in obj.coords:
             raise TimeKeyError(f"coordinate {column!r} not in the extracted dataset")
         if obj.coords[column].size == 0:
             raise TimeKeyError(f"coordinate {column!r} is empty")
-        raw = obj.coords[column].values.min()
+        values = obj.coords[column].values
+        raw_min, raw_max = values.min(), values.max()
     else:
         if column not in obj.columns:
             raise TimeKeyError(f"column {column!r} not in the extracted dataframe")
         if obj.height == 0:
             raise TimeKeyError(f"column {column!r} is empty")
-        raw = obj.get_column(column).min()
+        series = obj.get_column(column)
+        raw_min, raw_max = series.min(), series.max()
 
-    return _normalize_time_value(raw)
+    time_min = _normalize_time_value(raw_min)
+    # The maximum is informational only (manifest data_time_max): a value
+    # that cannot be normalized must not cost the item its time key.
+    try:
+        time_max = _normalize_time_value(raw_max)
+    except TimeKeyError:
+        LOG.debug("Unreadable maximum %r of %r, left unknown", raw_max, column, exc_info=True)
+        time_max = None
+    return time_min, time_max
+
+
+def format_time_key(value: Any) -> str:
+    """Text form of a normalized time value: ISO 8601 for a datetime, the
+    number for a numeric time-like index, empty for an unknown value."""
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        # The base class method: a pandas Timestamp would add nanoseconds.
+        return datetime.isoformat(value)
+    return repr(float(value))
 
 
 def make_extracted_item(
@@ -119,7 +143,7 @@ def make_extracted_item(
 
     if metadata.time_like_coord:
         try:
-            item.time_key = _time_value(obj, metadata.time_like_coord)
+            item.time_key, item.time_max = _time_bounds(obj, metadata.time_like_coord)
         except Exception as exc:
             item.time_error = f"time_like_coord={metadata.time_like_coord!r}: {exc}"
             LOG.error(
