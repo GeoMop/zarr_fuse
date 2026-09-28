@@ -9,8 +9,11 @@ metadata:
     app.kubernetes.io/name: {{ .Values.app.name }}
 spec:
   replicas: {{ .Values.deployment.replicaCount }}
+  # Recreate, not RollingUpdate: the worker is the single consumer of the
+  # queue and the only writer of its manifest, so an old and a new pod must
+  # never run at the same time.
   strategy:
-    type: RollingUpdate
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ .Values.app.name }}
