@@ -192,7 +192,134 @@ preserved as source coordinates, mapped to a constrained grid, or rejected.
      into the generated grid instead of appending unsorted values.
    - For both modes, keep the final sorted-coordinate assertion.
 
+## Planned Work: Ingress S3 Manifest (#113) [IMPLEMENTED - AWAITING REVIEW]
+
+Branch `SM-ingress-s3-manifest`, forked from `origin/main` at `a2a23c5`.
+Meeting note: "S3 Manifest: schema for the auxiliary ZARR store
+(data_time -> [source, file, state, ...])".
+
+### Decisions (USER, 2026-09-28)
+
+- Index: one entry per item keyed by the receipt time (`received_at`,
+  microsecond offsets keep keys unique); the data time is stored as the
+  `data_time_min` / `data_time_max` variables. A `data_time` index would
+  overwrite entries of payloads sharing a data time and has no value at
+  receipt.
+- The manifest is the source of truth for the item state; the queue folders
+  only mirror it for convenience.
+- S3 is written first and is the source of truth; a local file is only a
+  hash-verified cache in front of it. No local-first write, no background
+  upload.
+- Scope: the whole #113, i.e. manifest, worker driven by the manifest, local
+  cache with hash check.
+
+### Implemented
+
+- `ingress_server/manifest.py`: schema (embedded YAML) and `ManifestStore`
+  with `register`, `record`, `pending`, `failed`, `find`. The store is built
+  from explicit options, since `zf.open_store` would let `ZF_STORE_URL`
+  (required by the helm chart) redirect the manifest into the data store.
+- `ingress_server/local_cache.py`: `LocalCache` (atomic writes, SHA-256
+  checked reads, eviction) and `content_hash`.
+- Receipt path (`io/files.save_data`): SHA-256 in the sidecar metadata
+  (`MetadataModel.sha256`), payload to the queue first, local copy second.
+- Worker pass: register the accepted payloads without a pending entry (an
+  item found registered already is moved to its recorded state folder),
+  process the pending manifest entries (local copy if its hash matches, queue
+  download otherwise), record the data time and outcomes, then move the
+  payloads with their sidecars and evict the copies. Sidecars are kept, so
+  the queue stays readable by the previous version (rollback). Metadata too
+  long for the manifest is kept there without `dataframe_row`, which is then
+  read from the sidecar. The failed-entry reset and folder recovery run at
+  the start of the worker thread (`_recover_failed`), not in the server
+  startup; `startup_check` only asserts the layout and the store.
+  `working_loop` now survives a failing pass (it used to kill the thread).
+- `ManifestStore` repairs torn writes on open (arrays of different lengths
+  are cut to the shortest, a torn creation is recreated), passes an explicit
+  logger to zarr-fuse (the default store logger leaks a thread per open), and
+  fills gaps of up to 64 unchanged rows so a pass writes one run.
+- Helm chart: `strategy: Recreate`, so no two workers write the manifest.
+- Config: `configuration.base.manifest_url` (default
+  `<queue root>/manifest.zarr`) and `configuration.base.cache_dir`
+  (default: no cache).
+- zarr-fuse: the first write of a node now chunks its 1-D arrays by the
+  schema `chunk_size` (`Node._set_creation_chunks`); before, the chunk shape
+  was the size of the first write, e.g. one manifest row. Multi-dimensional
+  variables keep the first-write chunking: the default 1024 per coordinate
+  would make e.g. 1024**3 chunks (review finding).
+- Tests: `ingress_server/tests/test_manifest.py` (27 local tests), existing
+  worker tests wired to the manifest, config-loading tests isolated to
+  tmp_path; zarr-fuse chunking regression test and a strict xfail reproducer
+  of the unsorted-row corruption below.
+- 2026-09-28 multi-agent review: 23 findings, fixed except those listed as
+  open in the last section.
+
+### zarr-fuse constraints found (workarounds in the manifest)
+
+- A sorted coordinate silently drops keys older than the newest stored one,
+  so the manifest coordinate is unsorted.
+- Overwriting non-adjacent existing rows of an unsorted coordinate corrupts
+  the rows between them (strings become `'nan'`, ints the int64 minimum),
+  and fails for datetime variables. `ManifestStore.record` writes runs of
+  consecutive rows only. Reproducer:
+  `test_update_of_non_adjacent_unsorted_rows_keeps_rows_between` (xfail).
+- NaT in a datetime variable cannot be read back (no `_FillValue`), so the
+  data time is stored as an ISO string, empty when unknown.
+- A discrete range on a `str[n]` variable fails when writing (string NA vs
+  integer codes), so `state` is a plain string.
+- An int variable needs an explicit `na_value`; `None` fails in `pivot_nd`.
+- `str[n]` truncates silently, so `record` rejects too long values and an
+  item whose metadata does not fit is parked in `failed/` unregistered.
+- A composed coordinate with a string component hashes differently in every
+  process (see the last section).
+- zarr-fuse writes the arrays of an update one by one; an interrupted append
+  leaves them of different lengths and the store unreadable until repaired.
+- Every zarr-fuse update decodes the whole datetime key coordinate (dateutil
+  per row); measured ~8 s per update at 200k rows.
+
 ## AGENT Questions And Remarks
+
+- JB (#113 manifest): `zarr_fuse/zarr_storage.py` gained
+  `_set_creation_chunks` on this branch: new stores chunk 1-D arrays by the
+  documented `chunk_size` instead of the first-write size. Existing stores
+  and multi-dimensional variables are unaffected. A core-library change that
+  needs JB's review; it can be split from the ingress work by file.
+- JB: `chunk_size: None` is dropped when the schema is serialized, so it
+  becomes the default 1024 once the store exists; the `zf_schema.md` comment
+  "equal to len(values) for fixed size coord" is not implemented.
+- JB: `zarr_fuse.logger.get_logger` starts an event loop thread per store
+  object and never stops it. The manifest passes its own logger, but
+  `zf.open_store` in `worker._store_one` (pre-existing) still leaks one per
+  stored item.
+- JB: pre-existing on main (ca96f30): `interpolate_ds` runs `interpolate_na`
+  on string variables of a sorted coordinate, which truncates them to one
+  character (`<U8` -> `<U1`). Found during the #113 review.
+- #113 manifest: each zarr-fuse update costs O(manifest size); the manifest
+  needs pruning or archiving of terminal entries before it reaches ~100k
+  rows. Outcomes are still recorded once per pass, so a crash re-stores the
+  items of that pass (idempotent, but repeated work).
+- JB: updating non-adjacent rows of an unsorted coordinate corrupts the rows
+  in between (see the strict xfail test). Likely the `reindex(...,
+  fill_value=np.nan)` at the end of `interpolate_ds`; related to #139.
+- JB: `zf.open_store` option precedence contradicts its docs. The code lets
+  environment variables win over schema ATTRS and kwargs; `store_vars.md`
+  says kwargs win. The manifest calls the private `_zarr_store_open` to get
+  a store the environment cannot redirect; a public way to do that is
+  missing.
+- On main, `to_typed_array` logs "Trimming conversion with no values actually
+  trimmed" for every `str[n]` conversion, i.e. once per string variable on
+  every manifest write. `SM-fix-values-conversions` touches the same code.
+- #113 manifest: the manifest grows without pruning. `find` scans the whole
+  `item_name` column; it only runs for payloads found outside their state
+  folder, which should be rare. Every start still resets all failed entries
+  to accepted, as the folder recovery did before.
+- #113 manifest: the S3 worker test (`test_queue_storage_s3.py`) now also
+  writes an S3 manifest, but it was not run (no S3 secrets here).
+- The repo `venv` was rebuilt with Python 3.14, the only interpreter on this
+  machine; tox targets 3.11-3.13.
+- Composed coordinates with a string component get a process-dependent Python
+  `hash()` in `coerce_df`. This is a latent zarr-fuse bug outside the manifest
+  work. A stable hash such as `hashlib` over a canonical encoding would fix it.
 
 - A sorted-coordinate variant of the schema-NA merge regression propagated a
   floating NaN through interpolation and lost otherwise valid extension
@@ -415,3 +542,11 @@ preserved as source coordinates, mapped to a constrained grid, or rejected.
   targeted interpolation regressions pass.
 - 2026-09-19: Resolved NaN contamination during interpolation with pure and
   `node.update_from_ds` regressions covering source and neighboring values.
+- 2026-09-28: Reviewed #113 and the ingress queue code on main. Drafted the
+  manifest schema and first-PR steps; the index choice and scope wait on USER.
+- 2026-09-28: Implemented the #113 manifest, the worker driven by it and the
+  hash-verified local cache; fixed zarr-fuse first-write chunking and added
+  a reproducer of the unsorted-row corruption.
+- 2026-09-28: Fixed the review findings: logger leak, torn-write repair,
+  Recreate rollout, 1-D-only creation chunking, kept sidecars with reduced
+  manifest metadata, cache hardening, recovery off the startup path.
