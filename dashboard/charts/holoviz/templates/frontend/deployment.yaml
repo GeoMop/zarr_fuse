@@ -15,7 +15,6 @@ spec:
         {{- include "holoviz.labels" . | nindent 8 }}
       {{- if .Values.frontend.config.enabled }}
       annotations:
-        # Restart the pods whenever the staged configuration changes.
         checksum/config: {{ include (print $.Template.BasePath "/frontend/configmap.yaml") . | sha256sum }}
       {{- end }}
     spec:
@@ -27,7 +26,7 @@ spec:
         {{- if .Values.frontend.config.enabled }}
         - name: config
           configMap:
-            name: {{ include "holoviz.configMapName" . }}
+            name: {{ include "holoviz.fullname" . }}-config
         {{- end }}
         {{- with .Values.frontend.extraVolumes }}
         {{- toYaml . | nindent 8 }}
@@ -55,9 +54,9 @@ spec:
               value: /home/app/.config/matplotlib
             {{- if .Values.frontend.config.enabled }}
             - name: ZF_VIEW_PATH
-              value: {{ printf "%s/%s" .Values.frontend.config.mountPath .Values.frontend.config.viewFile | quote }}
+              value: /opt/dashboard/config/zf_view.yaml
             - name: SCHEMAS_PATH
-              value: {{ .Values.frontend.config.mountPath | quote }}
+              value: /opt/dashboard/config
             {{- end }}
             {{- with .Values.frontend.extraEnv }}
             {{- toYaml . | nindent 12 }}
@@ -67,7 +66,7 @@ spec:
               mountPath: /home/app
             {{- if .Values.frontend.config.enabled }}
             - name: config
-              mountPath: {{ .Values.frontend.config.mountPath | quote }}
+              mountPath: /opt/dashboard/config
               readOnly: true
             {{- end }}
             {{- with .Values.frontend.extraVolumeMounts }}

@@ -10,7 +10,7 @@ jobs:
   build-and-deploy:
     name: Build and deploy HoloViz dashboard
     uses: ./.github/workflows/dashboard-reusable-workflow.yaml
-    # Every PR deploys the same development release, so runs are queued per workflow, not per branch.
+    # All PRs deploy the same release, so they share one concurrency group.
     concurrency:
       group: "${{ github.workflow }}-build-and-deploy"
       cancel-in-progress: false
