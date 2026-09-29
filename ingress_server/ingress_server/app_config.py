@@ -28,11 +28,7 @@ class BaseConfig:
     # an item is held until it is more than this much older than the newest
     # time_like_coord value seen in the same batch. 0 disables holding.
     retention_time: float = 96.0
-    # zarr-fuse store of the queue manifest (see manifest.py): a local path or
-    # an s3:// URL. Unset means "manifest.zarr" under the queue root.
     manifest_url: str | None = None
-    # Local directory for copies of the queue payloads (see local_cache.py),
-    # read by the worker instead of downloading them. Unset disables the cache.
     cache_dir: str | None = None
 
 

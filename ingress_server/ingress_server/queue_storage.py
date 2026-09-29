@@ -14,26 +14,20 @@ addressed by a `FileRef`, a POSIX-style key relative to the queue root:
 written by the previous per-endpoint directory layout keeps working.
 Every payload has a metadata sidecar stored under ``ref + ".meta.json"``.
 
-The manifest (see `manifest.py`) is the source of truth for the state of an
-item; the queue folder of a registered item just mirrors that state for
-convenience. The sidecar hands a new item over to the worker and stays with
-its payload.
-
 Consistency
 -----------
 S3 provides neither an atomic rename nor a multi-object transaction, so the
-two object operations are ordered so that an error in between leaves a
-recoverable state:
+payload object alone decides where an item is, and the two object operations
+are ordered so that an error in between leaves a recoverable state:
 
 - `put_item` writes the metadata first and the payload second. Listing yields
-  payloads only, hence a listed new payload always has its metadata. An
+  payloads only, hence a listed payload always has its metadata. An
   interrupted put leaves an orphaned sidecar that no listing ever returns.
 - `move` moves the payload first and the metadata second. An interrupted move
   leaves the item counted as moved, again with an orphaned sidecar in the
   source queue. The opposite order must not be used: it would strip the
-  metadata of an unregistered item still listed as accepted.
-- A registered payload left in accepted/ without its sidecar (e.g. an
-  interrupted move back) is found by scanning the manifest.
+  metadata of an item still listed as accepted, and the worker would keep
+  failing on it forever.
 
 Writes are plain `pipe_file` calls, i.e. atomic on S3 (a PUT either lands or
 does not), but not on a local filesystem. A payload torn by a crash mid-write
@@ -172,11 +166,7 @@ class QueueStorage:
         return self.scan_accepted()[0]
 
     def scan_accepted(self) -> tuple[list[FileRef], set[FileRef]]:
-        """
-        Payload refs in the accepted queue (see `list_accepted`) together with
-        the refs of those that still have their metadata sidecar. With the
-        manifest, a sidecar marks an item not registered yet.
-        """
+        """Payload refs in the accepted queue and the subset of them that has a sidecar."""
         names = self._item_names(ACCEPTED)
         name_set = set(names)
 
@@ -198,7 +188,6 @@ class QueueStorage:
         return self.fs.cat_file(self._abs(self.meta_ref(ref))).decode("utf-8")
 
     def find_item(self, name: str) -> FileRef | None:
-        """Ref of the payload of an item in whichever queue it is, None if in none."""
         for queue_name in QUEUE_NAMES:
             ref = FileRef(f"{queue_name}/{name}")
             if self.fs.exists(self._abs(ref)):
@@ -210,7 +199,7 @@ class QueueStorage:
         return self.relocate(ref, self.dest_ref(ref, dest_queue))
 
     def relocate(self, ref: FileRef, dest: FileRef) -> FileRef:
-        """Move a payload and its metadata sidecar (if any) between any two queues."""
+        """Move a payload and its metadata between any two queues."""
         # Payload first, see the module docstring.
         self.fs.mv(self._abs(ref), self._abs(dest))
 

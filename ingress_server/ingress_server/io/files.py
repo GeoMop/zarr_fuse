@@ -40,8 +40,6 @@ def save_data(
 
     name = new_item_name(updated_md.endpoint_name, get_content_type_suffix(content_type))
 
-    # The queue storage is the source of truth, the local copy comes second
-    # and only spares the worker a download.
     app_config.queue.put_item(
         name=name,
         payload=payload,

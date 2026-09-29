@@ -60,10 +60,9 @@ def app_config(
     cache: LocalCache | None = None,
 ) -> AppConfig:
     """
-    Worker config for the staged queue, with the manifest next to it and no
-    local cache unless given. Holding is disabled by default: the fixture
-    payloads span less than the default retention window, so every item
-    would be held back and nothing would reach the store.
+    Worker config for the staged queue. Holding is disabled by default: the
+    fixture payloads span less than the default retention window, so every
+    item would be held back and nothing would reach the store.
     """
     return AppConfig(
         queue=storage,

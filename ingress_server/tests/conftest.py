@@ -47,8 +47,4 @@ def s3_queue_config(load_repo_secret_env, monkeypatch) -> dict:
 
 @pytest.fixture(autouse=True)
 def isolated_queue_dir(tmp_path, monkeypatch):
-    """
-    Tests that load the endpoint config get a queue (and its manifest) under
-    tmp_path, never the configured or a developer .env QUEUE_DIR_PATH.
-    """
     monkeypatch.setenv("QUEUE_DIR_PATH", str(tmp_path / "config_queue"))

@@ -28,7 +28,6 @@ class ExtractedItem:
     schema_path: Path
     obj: DataObject
     time_key: Any = None
-    # Maximum time_like_coord value, the time_key being the minimum.
     time_max: Any = None
     time_error: str | None = None
 
@@ -89,8 +88,7 @@ def _time_diff(a: Any, b: Any) -> float:
 
 def _time_bounds(obj: DataObject, column: str) -> tuple[Any, Any]:
     """Read the minimum and the maximum value of `column` from the extracted
-    object, normalized for sorting/retention comparisons. The minimum is the
-    representative value of the item."""
+    object, normalized for sorting/retention comparisons."""
     if isinstance(obj, xr.Dataset):
         if column not in obj.coords:
             raise TimeKeyError(f"coordinate {column!r} not in the extracted dataset")
@@ -107,8 +105,6 @@ def _time_bounds(obj: DataObject, column: str) -> tuple[Any, Any]:
         raw_min, raw_max = series.min(), series.max()
 
     time_min = _normalize_time_value(raw_min)
-    # The maximum is informational only (manifest data_time_max): a value
-    # that cannot be normalized must not cost the item its time key.
     try:
         time_max = _normalize_time_value(raw_max)
     except TimeKeyError:
@@ -118,12 +114,9 @@ def _time_bounds(obj: DataObject, column: str) -> tuple[Any, Any]:
 
 
 def format_time_key(value: Any) -> str:
-    """Text form of a normalized time value: ISO 8601 for a datetime, the
-    number for a numeric time-like index, empty for an unknown value."""
     if value is None:
         return ""
     if isinstance(value, datetime):
-        # The base class method: a pandas Timestamp would add nanoseconds.
         return datetime.isoformat(value)
     return repr(float(value))
 

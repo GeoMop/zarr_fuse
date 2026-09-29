@@ -1,50 +1,7 @@
 """
-Manifest of the ingress queue: an auxiliary zarr-fuse store keeping one entry
-per received payload (issue #113).
-
-Source of truth
----------------
-The manifest is the source of truth for the processing state of a queue item.
-The `accepted` / `success` / `failed` queue folders only mirror that state for
-convenience: a payload is moved after its new state is recorded, and a payload
-found in a folder that disagrees with its entry is moved by the worker later.
-
-Single writer
--------------
-zarr-fuse does not support concurrent writers, so only the worker thread
-writes the manifest, and only one ingress server may run at a time (the helm
-chart uses the Recreate strategy). The receipt path (passive endpoints, active
-scrappers) stores the payload with its metadata sidecar in `accepted/`; the
-worker registers every accepted payload that has no manifest entry yet.
-
-The sidecar stays next to its payload. The manifest keeps the item metadata
-without the unbounded `dataframe_row` when the full JSON does not fit its
-variable; the sidecar is then read for it. The sidecars also keep the queue
-readable by an ingress server without the manifest.
-
-Keys
-----
-Entries are keyed by the receipt time. `MetadataModel.received_at` has a
-one-second resolution, so `register` adds the smallest free microsecond offset
-to keep the keys unique; being the only writer, it can do so safely.
-
-zarr-fuse constraints behind the schema
----------------------------------------
-- The key coordinate is unsorted: a sorted coordinate silently drops keys
-  older than the newest stored one.
-- A datetime variable must not contain NaT, reading it back fails. The data
-  time is unknown before extraction and may also be numeric, so it is stored
-  as a string, empty when unknown.
-- A discrete string range fails when writing, so `state` is a plain string.
-- Overwriting non-adjacent rows of an unsorted coordinate corrupts the rows
-  between them, so `record` writes runs of consecutive rows.
-- zarr-fuse writes the arrays one by one, so an interrupted write can leave
-  them inconsistent; `_repair` fixes that when the store is opened.
-- `zf.open_store` lets the ZF_STORE_URL environment variable override the
-  store URL, which would put the manifest into the data store. The manifest
-  store is therefore built from explicit options.
-
-NOTE: this module must not import app_config or io.* (app_config imports it).
+Manifest of the ingress queue (#113): a zarr-fuse store with one entry per
+received payload, the source of truth for the item state. Written by the
+worker only.
 """
 import os
 import logging
@@ -70,11 +27,8 @@ KEY = "received_at"
 KEY_DTYPE = "datetime64[us]"
 KEY_TICK = np.timedelta64(1, "us")
 KEY_WINDOW = np.timedelta64(1, "s")
-# Longest run of unchanged rows `record` rewrites to join two runs of changed rows.
 MAX_GAP_FILL = 64
 
-# Width of the string variables; `record` rejects longer values instead of
-# letting zarr-fuse truncate them.
 STR_WIDTHS = {
     "item_name": 128,
     "source": 64,
@@ -86,7 +40,6 @@ STR_WIDTHS = {
     "metadata": 2048,
 }
 
-# Arrays of the manifest node, the key coordinate included.
 ARRAYS = {KEY, "updated_at", *STR_WIDTHS}
 
 SCHEMA_YAML = f"""
@@ -141,8 +94,6 @@ ATTRS:
 
 @dataclass(frozen=True)
 class ManifestEntry:
-    """One manifest row, i.e. the state of a single queue item."""
-
     key: np.datetime64
     item_name: str
     source: str
@@ -152,7 +103,6 @@ class ManifestEntry:
     data_time_max: str = ""
     error: str = ""
     metadata: str = ""
-    # Time of the last change, as read from the store; `record` sets it anew.
     updated_at: np.datetime64 | None = field(default=None, compare=False)
 
     def with_state(self, state: str, error: str = "") -> "ManifestEntry":
@@ -160,12 +110,10 @@ class ManifestEntry:
 
 
 def default_manifest_url(queue_url: str) -> str:
-    """Manifest location next to the queue folders: ``<queue root>/manifest.zarr``."""
     return f"{queue_url.rstrip('/')}/manifest.zarr"
 
 
 def receipt_key(received_at: str) -> np.datetime64:
-    """Manifest key base of an item from its ISO `received_at` timestamp."""
     dt = datetime.fromisoformat(received_at)
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
@@ -173,7 +121,7 @@ def receipt_key(received_at: str) -> np.datetime64:
 
 
 def validate_entry(entry: ManifestEntry) -> None:
-    """Raise ValueError if a value is too long for its variable; zarr-fuse would truncate it."""
+    """Raise ValueError for a value longer than its variable; zarr-fuse would truncate it."""
     for name, width in STR_WIDTHS.items():
         value = getattr(entry, name)
         if len(value) > width:
@@ -188,11 +136,6 @@ def _utc_now() -> np.datetime64:
 
 
 def _store_options(url: str) -> dict[str, str]:
-    """
-    zarr-fuse store options of the manifest. Credentials come from the same
-    ZF_S3_* variables the queue and the data stores use, but the URL is
-    never taken from ZF_STORE_URL, see the module docstring.
-    """
     if url.startswith("file://"):
         url = url[len("file://"):]
 
@@ -206,25 +149,16 @@ def _store_options(url: str) -> dict[str, str]:
 
 
 class ManifestStore:
-    """
-    Access to the manifest store. The store is opened anew for every
-    operation, so that each worker pass sees its current content.
-    """
-
     def __init__(self, url: str):
         self.url = url
         self._options = _store_options(url)
         self._schema = zf.schema.deserialize(yaml.safe_load(SCHEMA_YAML))
 
     def _open_node(self) -> zf.Node:
-        # A private zarr-fuse function: the public `zf.open_store` would let
-        # ZF_STORE_URL redirect the manifest into the data store.
+        # Not zf.open_store: ZF_STORE_URL would redirect the manifest into the data store.
         store = zarr_storage._zarr_store_open(self._options)
-        # An explicit logger: the default zarr-fuse store logger starts an
-        # event loop thread per store object and never closes it.
+        # The default zarr-fuse logger starts a thread per store that never ends.
         node = zf.Node("", store, new_schema=self._schema, mode="a", logger=LOG)[NODE]
-        # Surface an inconsistent store here, see `_repair`: arrays of different
-        # lengths fail to open, missing arrays are just absent from the dataset.
         ds = node.dataset
         if KEY in ds.coords and not ARRAYS <= set(ds.variables):
             raise ValueError(f"Manifest {self.url} lacks the arrays {sorted(ARRAYS - set(ds.variables))}")
@@ -239,17 +173,7 @@ class ManifestStore:
             return self._open_node()
 
     def _repair(self) -> bool:
-        """
-        Repair the damage an interrupted write leaves behind; return whether
-        anything was repaired. zarr-fuse writes the arrays one by one:
-
-        - An interrupted append leaves arrays of different lengths. They are
-          cut to the shortest one; the rows cut off belong to a registration
-          that did not complete, so their items get registered again.
-        - An interrupted first write leaves some arrays missing. Only that
-          first registration was in the store, so the node is dropped and
-          recreated empty.
-        """
+        """Fix the arrays an interrupted write left inconsistent; return whether anything changed."""
         store = zarr_storage._zarr_store_open(self._options)
         try:
             group = zarr.open_group(store, path=NODE, mode="r+")
@@ -287,10 +211,7 @@ class ManifestStore:
         return self._node().dataset
 
     def ensure_store(self) -> None:
-        """Create the store if missing; fail fast on a misconfigured backend."""
         self._node()
-
-    # --- reads ---
 
     @staticmethod
     def _keys(ds: xr.Dataset) -> np.ndarray:
@@ -300,7 +221,6 @@ class ManifestStore:
 
     @staticmethod
     def _rows(ds: xr.Dataset, index: np.ndarray) -> list[ManifestEntry]:
-        """Entries of the given row positions, reading only their chunks."""
         if len(index) == 0:
             return []
 
@@ -328,19 +248,13 @@ class ManifestStore:
         return sorted(entries, key=lambda entry: entry.key)
 
     def pending(self) -> list[ManifestEntry]:
-        """Entries still waiting for processing, in the receipt order."""
         return self._entries_in_state(ACCEPTED)
 
     def failed(self) -> list[ManifestEntry]:
         return self._entries_in_state(FAILED)
 
     def find(self, item_names: set[str]) -> dict[str, ManifestEntry]:
-        """
-        Entries of the given item names. Scans the whole item_name column, one
-        chunk at a time; meant for the rare payloads without a sidecar, whose
-        receipt time is unknown. Items with a sidecar are looked up by
-        `register`, within their receipt second.
-        """
+        """Entries of the given item names; scans the whole item_name column."""
         if not item_names:
             return {}
 
@@ -358,21 +272,13 @@ class ManifestStore:
 
         return {entry.item_name: entry for entry in self._rows(ds, np.array(index, dtype=int))}
 
-    # --- writes ---
-
     def record(self, entries: list[ManifestEntry]) -> None:
-        """
-        Write complete entries, adding new keys and overwriting existing ones.
-        Raise ValueError on a value too long for its variable, before writing
-        anything (see `validate_entry`).
-        """
         if not entries:
             return
 
         for entry in entries:
             validate_entry(entry)
 
-        # Keep the last entry of a repeated key.
         by_key = {entry.key.astype(KEY_DTYPE).tolist(): entry for entry in entries}
         ds = self._dataset()
         positions = {key: i for i, key in enumerate(self._keys(ds).tolist())}
@@ -382,12 +288,8 @@ class ManifestStore:
             (positions[key], entry) for key, entry in by_key.items() if key in positions
         )
 
-        # zarr-fuse overwrites existing rows of an unsorted coordinate as one
-        # region from the first to the last of them, and corrupts the rows in
-        # between that are not part of the update (strings become 'nan').
-        # Every write therefore covers consecutive rows only. Each write costs
-        # a full zarr-fuse update, so short gaps are filled with the unchanged
-        # rows read back from the store, making one run out of several.
+        # zarr-fuse corrupts the rows between non-adjacent updated rows of an unsorted
+        # coordinate, so every write covers consecutive rows; short gaps are refilled.
         runs: list[list[tuple[int, ManifestEntry]]] = []
         for position, entry in existing:
             if runs and position - runs[-1][-1][0] - 1 <= MAX_GAP_FILL:
@@ -403,10 +305,6 @@ class ManifestStore:
         self._write(new)
 
     def _write(self, entries: list[ManifestEntry], unchanged: list[ManifestEntry] = ()) -> None:
-        """
-        One zarr-fuse update of the changed `entries`, stamped with the current
-        time, and of the `unchanged` entries, which keep their own time.
-        """
         rows = [*entries, *unchanged]
         if not rows:
             return
@@ -430,15 +328,8 @@ class ManifestStore:
         self, entries: list[ManifestEntry]
     ) -> tuple[list[ManifestEntry], dict[str, ManifestEntry]]:
         """
-        Record new items. The `key` of a given entry is its receipt second,
-        the registered entry gets the smallest free microsecond within it.
-
-        An item already present within its receipt second is not recorded
-        again: its stored entry is returned instead, so that the caller can
-        tell a new item from one registered before (e.g. one whose move to its
-        state folder was interrupted).
-
-        Return the registered entries and the stored entries by item name.
+        Record the new items under a free key within their receipt second.
+        Return them and the stored entries of the items registered before.
         """
         if not entries:
             return [], {}

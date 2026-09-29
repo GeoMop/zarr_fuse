@@ -63,9 +63,7 @@ def _read_local_file(data_path: Path) -> tuple[MetadataModel, bytes]:
 
 def _extract_one(app_config: AppConfig, ref: FileRef | Path) -> ExtractedItem:
     """
-    Read a payload with its metadata sidecar and extract the data object out
-    of it. The worker pass reads registered items from the manifest instead
-    (see `_process_available_files`).
+    Read a payload with its metadata and extract the data object out of it.
 
     Passing a local `Path` instead of a queue `FileRef` is deprecated; put the
     payload into the queue instead.
@@ -90,7 +88,6 @@ def _extract_payload(
     metadata: MetadataModel,
     payload: bytes,
 ) -> ExtractedItem:
-    """Extract the data object out of a payload."""
     schema_path = metadata.resolve_schema_path(app_config.config_dir)
     if not schema_path.exists():
         raise ValueError(f"No schema for endpoint {metadata.endpoint_name}: {schema_path}")
@@ -164,7 +161,6 @@ def _notify_anomalies(app_config: AppConfig, anomalies: list[dict]) -> None:
 
 
 def _item_name(ref: FileRef) -> str:
-    """Name of a queue item, i.e. its ref without the queue folder."""
     return ref.partition("/")[2]
 
 
@@ -173,7 +169,6 @@ def _accepted_ref(entry: ManifestEntry) -> FileRef:
 
 
 def _failed(entry: ManifestEntry, exc: Exception) -> ManifestEntry:
-    """The entry marked failed, keeping as much of the reason as fits the manifest."""
     width = STR_WIDTHS["error"]
     error = f"{type(exc).__name__}: {exc}"
     if len(error) > width:
@@ -182,11 +177,6 @@ def _failed(entry: ManifestEntry, exc: Exception) -> ManifestEntry:
 
 
 def _move_item(app_config: AppConfig, ref: FileRef, state: str) -> bool:
-    """
-    Move an accepted item to the queue folder of its terminal state and drop
-    its local copy; best effort. Only a known terminal state names a folder:
-    a damaged manifest row must not move the payload out of every queue.
-    """
     if state not in (SUCCESS, FAILED):
         LOG.error("Not moving %s: manifest state %r is not a terminal state", ref, state)
         return False
@@ -202,17 +192,11 @@ def _move_item(app_config: AppConfig, ref: FileRef, state: str) -> bool:
 
 
 def _park_in_failed(app_config: AppConfig, ref: FileRef) -> bool:
-    """Move an item that gets no manifest entry to failed/ and drop its local copy."""
     app_config.cache.evict(_item_name(ref))
     return _move_to_failed(app_config, ref)
 
 
 def _manifest_metadata(metadata: MetadataModel) -> str:
-    """
-    Metadata JSON kept in the manifest. When it does not fit the manifest
-    variable, the unbounded `dataframe_row` is left out and the worker reads
-    it from the sidecar instead (see `_item_metadata`).
-    """
     full = metadata.model_dump_json()
     if len(full) <= STR_WIDTHS["metadata"]:
         return full
@@ -220,7 +204,7 @@ def _manifest_metadata(metadata: MetadataModel) -> str:
 
 
 def _item_metadata(app_config: AppConfig, entry: ManifestEntry) -> MetadataModel:
-    """Metadata of a pending item: the manifest copy, or the sidecar if that copy is reduced."""
+    """Metadata from the manifest, or from the sidecar if the manifest copy lacks dataframe_row."""
     data = json.loads(entry.metadata)
     if "dataframe_row" in data:
         return MetadataModel.model_validate(data)
@@ -228,7 +212,6 @@ def _item_metadata(app_config: AppConfig, entry: ManifestEntry) -> MetadataModel
 
 
 def _data_time_text(value, ref: FileRef) -> str:
-    """Text form of a data time for the manifest, empty if it does not fit."""
     text = format_time_key(value)
     if len(text) > STR_WIDTHS["data_time_min"]:
         LOG.warning("Data time %r of %s does not fit the manifest, left empty", text, ref)
@@ -237,11 +220,6 @@ def _data_time_text(value, ref: FileRef) -> str:
 
 
 def _new_entry(ref: FileRef, metadata: MetadataModel) -> ManifestEntry:
-    """
-    Manifest entry of a newly received item, keyed by its receipt second;
-    `ManifestStore.register` makes the key unique. Raise ValueError if the
-    item does not fit the manifest.
-    """
     try:
         key = receipt_key(metadata.received_at)
     except ValueError:
@@ -270,14 +248,8 @@ def _admit_new_items(
     with_meta: set[FileRef],
 ) -> tuple[bool, list[ManifestEntry]]:
     """
-    Handle the accepted payloads that are not pending in the manifest. New
-    items are registered. Items registered before, whose move to the folder
-    of their recorded state was interrupted, are moved there now. A payload
-    whose metadata cannot be read or does not fit the manifest, and a payload
-    without a sidecar unknown to the manifest, are parked in failed/ without
-    a manifest entry.
-
-    Return whether a payload left the accepted queue, and the new entries.
+    Register the accepted payloads not pending in the manifest; move those
+    registered before to their state folder. Return (progressed, registered).
     """
     progressed = False
     entries: list[ManifestEntry] = []
@@ -301,7 +273,6 @@ def _admit_new_items(
     for entry in registered:
         LOG.info("Registered %s under %s", entry.item_name, entry.key)
 
-    # Without a sidecar the receipt time is unknown, so the whole manifest is scanned.
     known.update(app_config.manifest.find({_item_name(ref) for ref in without_meta}))
     for ref in without_meta:
         if _item_name(ref) not in known:
@@ -319,11 +290,6 @@ def _admit_new_items(
 
 
 def _read_payload(app_config: AppConfig, entry: ManifestEntry) -> bytes:
-    """
-    Payload of a pending item: the local copy when its content hash matches
-    the manifest, the queue storage otherwise. A payload found in another
-    queue folder than accepted/ (an interrupted recovery) is moved back first.
-    """
     payload = app_config.cache.get(entry.item_name, entry.sha256)
     if payload is not None:
         return payload
@@ -347,21 +313,12 @@ def _read_payload(app_config: AppConfig, entry: ManifestEntry) -> bytes:
 
 
 def _finish(app_config: AppConfig, updates: list[ManifestEntry]) -> bool:
-    """
-    Record the changed entries, then move the items that reached a terminal
-    state to the queue folder of that state and drop their local copies. The
-    manifest goes first as the source of truth; a payload left behind by an
-    interrupted move is moved by a later pass (see `_admit_new_items`).
-    Return whether an item left the accepted state.
-    """
     if not updates:
         return False
 
     try:
         app_config.manifest.record(updates)
     except Exception:
-        # `record` may have written some runs of rows already; a later pass
-        # moves the payloads of the entries it did record.
         LOG.exception("Failed to record %d manifest update(s)", len(updates))
         return False
 
@@ -377,17 +334,12 @@ def _finish(app_config: AppConfig, updates: list[ManifestEntry]) -> bool:
 
 def _process_available_files(app_config: AppConfig) -> bool:
     """
-    Run one pass over the queue and report whether at least one item left the
-    accepted state. The manifest drives the pass (see manifest.py): the
-    accepted payloads without a pending entry are admitted first, then the
-    pending manifest entries are processed.
-
-    An item that fails to be recorded as done is not progress: counting it as
-    such would make `working_loop` skip its sleep and redo the pass forever.
-    Items held back by the retention window are not progress either — they
-    are waiting for newer data, not for the CPU.
+    Run one pass over the accepted queue and report whether at least one item
+    left it. An item that can be neither stored nor recorded as failed is not
+    progress: counting it as such would make `working_loop` skip its sleep and
+    re-list the whole queue forever. Items held back by the retention window
+    are not progress either — they are waiting for newer data, not for the CPU.
     """
-    # Phase 0: register the newly received items and reconcile the folders.
     refs, with_meta = app_config.queue.scan_accepted()
     pending = app_config.manifest.pending()
     pending_names = {entry.item_name for entry in pending}
@@ -399,13 +351,12 @@ def _process_available_files(app_config: AppConfig) -> bool:
     )
     pending = sorted(pending + registered, key=lambda entry: entry.key)
 
-    # Changed manifest entries by item name, recorded at the end of the pass.
     updates: dict[str, ManifestEntry] = {}
     entries: dict[FileRef, ManifestEntry] = {}
     batch: list[ExtractedItem] = []
     anomalies: list[dict] = []
 
-    # Phase 1: extract all pending items; nothing is written to the store yet,
+    # Phase 1: extract all accepted files; nothing is written to the store yet,
     # so an interrupted batch is safely re-extracted on the next pass.
     for entry in pending:
 
@@ -465,9 +416,9 @@ def _process_available_files(app_config: AppConfig) -> bool:
     _notify_anomalies(app_config, anomalies)
 
     # Phase 3a: hold back items that are not yet older than retention_time
-    # relative to the newest data seen in this batch — they stay pending and
-    # are re-checked on the next pass, once newer data has actually arrived
-    # to age them out.
+    # relative to the newest data seen in this batch — they stay in
+    # accepted/ and are re-checked on the next pass, once newer data has
+    # actually arrived to age them out.
     ready_items, held_items = partition_by_retention(sorted_batch, app_config.base.retention_time)
 
     if held_items:
@@ -499,31 +450,18 @@ def _process_available_files(app_config: AppConfig) -> bool:
             LOG.exception("Processing failed for %s", item.ref)
             updates[entry.item_name] = _failed(entry, exc)
 
-    # Phase 4: record the outcome, then let the queue folders follow.
     progressed |= _finish(app_config, list(updates.values()))
     return progressed
 
 
 def _recover_failed(app_config: AppConfig) -> None:
-    """
-    Retry the failed items: reset their manifest entries to accepted, move
-    the failed/ folder back (items without an entry are retried as well), and
-    drop the local copies of items no longer in accepted/.
-
-    Runs in the worker thread, not in the server startup: on a large manifest
-    it may take longer than the startup probe allows.
-    """
     LOG.info("Recovering: moving failed -> accepted")
     try:
         failed = app_config.manifest.failed()
         app_config.manifest.record([entry.with_state(ACCEPTED) for entry in failed])
     except Exception:
-        # The folders are still recovered: a registered item moved back to
-        # accepted/ while its entry stays failed is moved to failed/ again by
-        # the next pass (see `_admit_new_items`).
         LOG.exception("Failed to reset the failed manifest entries")
 
-    # The folders follow the manifest.
     app_config.queue.recover_failed()
 
     app_config.cache.sweep(keep={_item_name(ref) for ref in app_config.queue.list_accepted()})
@@ -541,8 +479,6 @@ def working_loop(app_config: AppConfig, poll_sleep: float = 30.0) -> None:
         try:
             progressed = _process_available_files(app_config)
         except Exception:
-            # E.g. the queue or the manifest storage being unreachable; the
-            # worker thread must survive it and retry after the poll sleep.
             LOG.exception("Worker pass failed")
             progressed = False
 
@@ -553,12 +489,9 @@ def working_loop(app_config: AppConfig, poll_sleep: float = 30.0) -> None:
 
 
 def startup_check(app_config: AppConfig) -> None:
-    """
-    Re-assert the queue layout and the manifest store instead of trusting the
-    ones load_app_config checked: they may have been emptied or re-created
-    since, and on S3 this is also where a credential or permission problem
-    surfaces before polling. The failed items are recovered by the worker.
-    """
+    # Re-assert the layout instead of trusting the one load_app_config checked:
+    # the queue may have been emptied or re-created since, and on S3 this is
+    # also where a credential or permission problem surfaces before polling.
     app_config.queue.ensure_layout()
     app_config.manifest.ensure_store()
 
