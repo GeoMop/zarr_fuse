@@ -21,7 +21,7 @@ frontend:
       name: http
 
   s3:
-    endpointUrl: "https://s3.cl4.du.cesnet.cz"
+    endpointUrl: "https://s3.cl2.du.cesnet.cz"
     secrets:
       accessKey: "your-access-key"
       secretKey: "your-secret-key"
