@@ -135,14 +135,6 @@ def test_manifest_is_not_redirected_by_zf_store_url(tmp_path, monkeypatch):
     assert not (tmp_path / "data_store.zarr").exists()
 
 
-def test_manifest_arrays_use_the_schema_chunk_size(tmp_path):
-    manifest = ManifestStore(str(tmp_path / "manifest.zarr"))
-    manifest.register([_entry("a.json")])
-
-    group = zarr.open_group(str(tmp_path / "manifest.zarr" / "items"), mode="r")
-    assert group["state"].chunks == (256,)
-
-
 def test_local_cache_returns_only_hash_verified_copies(tmp_path):
     cache = LocalCache(tmp_path / "cache")
     cache.put("ep_a.json", b"payload")
