@@ -1,9 +1,6 @@
-"""
-Queue manifest (issue #113): the manifest store itself, the local payload
-cache, and the worker driven by the manifest. All tests are local.
-"""
 import json
 import logging
+import threading
 
 import numpy as np
 import pytest
@@ -18,7 +15,6 @@ from ingress_server.manifest import (
     STR_WIDTHS,
     ManifestEntry,
     ManifestStore,
-    default_manifest_url,
     receipt_key,
 )
 from ingress_server.models import MetadataModel
@@ -30,15 +26,10 @@ RECEIVED_AT = "2025-09-19T11:15:24Z"
 
 @pytest.fixture
 def queue(tmp_path, monkeypatch) -> QueueStorage:
-    """A local queue; the bukov data store goes to tmp_path, never to the manifest."""
     monkeypatch.setenv("ZF_STORE_URL", str(tmp_path / "bukov_store.zarr"))
     storage = QueueStorage(str(tmp_path / "queue"))
     storage.ensure_layout()
     return storage
-
-
-def _manifest(queue: QueueStorage) -> ManifestStore:
-    return ManifestStore(default_manifest_url(queue.url))
 
 
 def _entry(name: str, received_at: str = RECEIVED_AT, **kwargs) -> ManifestEntry:
@@ -64,8 +55,6 @@ def _sidecar_names(queue: QueueStorage, queue_name: str) -> set[str]:
     return {name for name in queue._item_names(queue_name) if name.endswith(".meta.json")}
 
 
-# --- manifest store ---
-
 def test_register_makes_keys_unique_and_skips_registered_items(tmp_path):
     manifest = ManifestStore(str(tmp_path / "manifest.zarr"))
 
@@ -75,8 +64,6 @@ def test_register_makes_keys_unique_and_skips_registered_items(tmp_path):
     base = receipt_key(RECEIVED_AT)
     assert [entry.key for entry in registered] == [base, base + np.timedelta64(1, "us")]
 
-    # A repeated registration must not reset the state of a processed item;
-    # it returns the stored entry instead.
     manifest.record([registered[0].with_state("success")])
     registered, known = manifest.register([_entry("a.json")])
 
@@ -87,8 +74,6 @@ def test_register_makes_keys_unique_and_skips_registered_items(tmp_path):
 
 
 def test_record_keeps_rows_between_the_updated_ones(tmp_path):
-    """zarr-fuse corrupts rows between non-adjacent updated rows of an unsorted
-    coordinate; `record` must avoid that by writing consecutive rows only."""
     manifest = ManifestStore(str(tmp_path / "manifest.zarr"))
     entries, _ = manifest.register([
         _entry(f"{i}.json", received_at=f"2025-09-19T11:15:2{i}Z", metadata=f'{{"i": {i}}}')
@@ -105,8 +90,6 @@ def test_record_keeps_rows_between_the_updated_ones(tmp_path):
 
 
 def test_record_joins_runs_without_changing_the_rows_between(tmp_path, monkeypatch):
-    """Short gaps are filled with the stored rows, so one zarr-fuse update covers
-    all changed rows; the filled rows keep their values and their updated_at."""
     manifest = ManifestStore(str(tmp_path / "manifest.zarr"))
     entries, _ = manifest.register([
         _entry(f"{i}.json", received_at=f"2025-09-19T11:15:{i:02d}Z", metadata=f'{{"i": {i}}}')
@@ -143,7 +126,6 @@ def test_record_rejects_values_too_long_to_store(tmp_path):
 
 
 def test_manifest_is_not_redirected_by_zf_store_url(tmp_path, monkeypatch):
-    """ZF_STORE_URL points zarr-fuse to the data store; the manifest must stay put."""
     monkeypatch.setenv("ZF_STORE_URL", str(tmp_path / "data_store.zarr"))
     manifest = ManifestStore(str(tmp_path / "manifest.zarr"))
 
@@ -154,15 +136,12 @@ def test_manifest_is_not_redirected_by_zf_store_url(tmp_path, monkeypatch):
 
 
 def test_manifest_arrays_use_the_schema_chunk_size(tmp_path):
-    """The first registration creates the arrays; a single item must not fix a one-row chunk."""
     manifest = ManifestStore(str(tmp_path / "manifest.zarr"))
     manifest.register([_entry("a.json")])
 
     group = zarr.open_group(str(tmp_path / "manifest.zarr" / "items"), mode="r")
     assert group["state"].chunks == (256,)
 
-
-# --- local cache ---
 
 def test_local_cache_returns_only_hash_verified_copies(tmp_path):
     cache = LocalCache(tmp_path / "cache")
@@ -173,7 +152,6 @@ def test_local_cache_returns_only_hash_verified_copies(tmp_path):
     assert cache.get("ep_a.json", "") is None
     assert cache.get("missing.json", content_hash(b"payload")) is None
 
-    # Names escaping the cache directory are refused, even when the target exists.
     (tmp_path / "escape.json").write_bytes(b"payload")
     assert cache.get("../escape.json", content_hash(b"payload")) is None
     cache.put("../escape2.json", b"x")
@@ -212,10 +190,7 @@ def test_save_data_records_the_hash_and_caches_the_payload(queue, tmp_path):
     assert cache.get(name, meta["sha256"]) == b'[{"a": 1}]'
 
 
-# --- worker driven by the manifest ---
-
 def _stage_with_hash(queue: QueueStorage, cache: LocalCache | None = None) -> list[str]:
-    """Stage the bukov payloads as the receipt path does: hash in the sidecar, copy in the cache."""
     names = bukov.stage_items(queue)
     for name in names:
         ref = bukov.item_ref(name)
@@ -255,12 +230,10 @@ def test_worker_records_the_items_and_their_data_time(queue, caplog):
 
     assert _payload_names(queue, "accepted") == set()
     assert _payload_names(queue, "success") == item_names
-    # The sidecars travel with their payloads, so an older server can still read the queue.
     assert _sidecar_names(queue, "success") == {name + ".meta.json" for name in item_names}
 
 
 def test_held_items_stay_pending_with_their_data_time(queue):
-    """With the default retention window, all bukov payloads are held back."""
     bukov.stage_items(queue)
     app_config = bukov.app_config(queue, retention_time=96.0)
 
@@ -285,7 +258,6 @@ def test_worker_reads_the_local_copy_instead_of_the_queue(queue, tmp_path, monke
     assert _process_available_files(app_config)
 
     assert {entry.state for entry in _all_entries(app_config.manifest).values()} == {"success"}
-    # Processed items leave the cache.
     assert not any(path.is_file() for path in (tmp_path / "cache").rglob("*"))
 
 
@@ -318,7 +290,6 @@ def test_payload_not_matching_its_hash_fails(queue):
 
 
 def test_interrupted_move_is_finished_without_reprocessing(queue, caplog):
-    """A payload left in accepted/ although the manifest says success is only moved."""
     names = bukov.stage_items(queue)
     app_config = bukov.app_config(queue)
     _process_available_files(app_config)
@@ -336,8 +307,6 @@ def test_interrupted_move_is_finished_without_reprocessing(queue, caplog):
 
 
 def test_payload_left_without_sidecar_is_finished_by_a_manifest_scan(queue, caplog):
-    """An interrupted move may leave the payload in accepted/ and its sidecar
-    in success/; the entry is then found by scanning the manifest."""
     names = bukov.stage_items(queue)
     app_config = bukov.app_config(queue)
     _process_available_files(app_config)
@@ -400,11 +369,7 @@ def test_working_loop_survives_a_failing_pass(queue, monkeypatch):
     assert len(calls) == 2
 
 
-# --- review follow-ups ---
-
 def test_long_dataframe_row_is_read_from_the_sidecar(queue, monkeypatch):
-    """Metadata too long for the manifest is kept without dataframe_row, which
-    the worker then reads from the sidecar."""
     names = bukov.stage_items(queue)
     ref = bukov.item_ref(names[0])
     meta = json.loads(queue.read_meta_text(ref))
@@ -430,7 +395,6 @@ def test_long_dataframe_row_is_read_from_the_sidecar(queue, monkeypatch):
 
 
 def test_torn_append_is_repaired_on_open(tmp_path):
-    """An append interrupted between two arrays leaves them of different lengths."""
     manifest = ManifestStore(str(tmp_path / "manifest.zarr"))
     manifest.register([_entry("a.json"), _entry("b.json")])
 
@@ -455,8 +419,6 @@ def test_interrupted_creation_is_recreated_on_open(tmp_path):
 
 
 def test_manifest_operations_do_not_leak_threads(tmp_path):
-    import threading
-
     manifest = ManifestStore(str(tmp_path / "manifest.zarr"))
     manifest.register([_entry("a.json")])
     before = threading.active_count()
@@ -468,7 +430,6 @@ def test_manifest_operations_do_not_leak_threads(tmp_path):
 
 
 def test_damaged_state_does_not_move_the_payload(queue):
-    """A state that is not a terminal state (e.g. a damaged row) must not become a folder name."""
     queue._write("accepted/ep_x.json", b"[]")
     app_config = bukov.app_config(queue)
     app_config.manifest.record([
@@ -505,10 +466,9 @@ def test_cache_sweep_keeps_only_listed_items(tmp_path):
 
 
 def test_pending_payload_found_in_another_folder_is_moved_back(queue):
-    """An interrupted recovery may leave a pending item's payload in failed/."""
     names = bukov.stage_items(queue)
     app_config = bukov.app_config(queue, retention_time=96.0)
-    _process_available_files(app_config)  # registers, all held
+    _process_available_files(app_config)
 
     name = f"{bukov.ENDPOINT}_{names[0]}"
     queue.relocate(f"accepted/{name}", f"failed/{name}")
