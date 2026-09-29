@@ -93,7 +93,16 @@ def build_dashboard():
         sizing_mode="stretch_width",
     )
     table_loading = pn.Row(visible=False)
-    controller, store_selector, node_select, variable_selector, variable_metadata, node_hint, store_info = build_sidebar(
+    (
+        controller,
+        store_selector,
+        node_select,
+        variable_selector,
+        variable_metadata,
+        node_hint,
+        store_info,
+        reload_button,
+    ) = build_sidebar(
         view_name, view, structure, views=views,
         loading_indicator=loading_indicator, timeseries_loading=timeseries_loading,
         render_spinner=render_spinner, rendering_status=rendering_status,
@@ -468,8 +477,50 @@ def build_dashboard():
             else:
                 _run_refresh()
 
+    def on_reload(_event=None):
+        """Re-read the current view / group / variable from the store.
+
+        The current dashboard state is kept: view, group path, variable, the
+        registered sites and their checked depths.  Only the underlying data is
+        discarded and fetched again, then the map and the timeseries panes are
+        rebuilt.  This is intentionally a data refresh only -- the data
+        structure tree and the variable list are not re-read, and the
+        timeseries time window re-anchors to the rebuilt views.
+        """
+        if loading_indicator.visible:
+            return  # debounce — a reload is already running
+
+        loading_indicator.visible = True
+
+        def _run_reload():
+            try:
+                # Drop cached map/timeseries payloads; the zarr nodes reopen
+                # their dataset lazily so values are re-read from the store.
+                data.client.clear_cache()
+                if data.display_variable:
+                    # Refresh each site in place so the table position and the
+                    # checked depths survive the reload.
+                    _refetch_sites()
+                refresh_views(rebuild_map=True)
+            except Exception as exc:  # noqa: BLE001 - surface any reload failure
+                import traceback
+                traceback.print_exc()
+                rendering_status.object = f"⚠️ Reload failed: {str(exc)[:80]}"
+                rendering_status.visible = True
+                pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
+                print(f"[reload] ERROR: {exc}")
+            finally:
+                loading_indicator.visible = False
+
+        doc = pn.state.curdoc
+        if doc is not None:
+            doc.add_next_tick_callback(_run_reload)
+        else:
+            _run_reload()
+
     node_select.param.watch(on_node_change, ["value"])
     store_selector.param.watch(on_store_change, ["value"])
+    reload_button.on_click(on_reload)
 
     template = """
 {%% extends base %%}

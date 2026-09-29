@@ -226,7 +226,16 @@ def build_sidebar(view_name, view_config, structure, views=None,
         styles={"padding": "10px"},
     )
 
-    return controller, store_selector, tree_view, variable_selector, variable_metadata, node_hint, store_info
+    return (
+        controller,
+        store_selector,
+        tree_view,
+        variable_selector,
+        variable_metadata,
+        node_hint,
+        store_info,
+        reload_button,
+    )
 
 
 
