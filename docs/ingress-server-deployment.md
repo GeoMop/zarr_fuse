@@ -195,12 +195,24 @@ volume (the default, backed by the chart's PVC) or in S3. To switch to S3, set
 ```
 
 Both modes share one fsspec-backed implementation, so the layout is the same:
-each queue holds flat item files named `<endpoint>_<UTC timestamp>_<uid>` with
-a `.meta.json` sidecar. Items left over from the previous per-endpoint
-directory layout are still listed and processed.
+each queue holds flat item files named `<endpoint>_<UTC timestamp>_<uid>`
+with a `.meta.json` sidecar. The worker records every item in the queue
+manifest, a zarr-fuse store kept by default at `<queue>/manifest.zarr` (see
+`manifest_url` and `cache_dir` in the ingress server README). The manifest is
+the source of truth for the item state, the folders only mirror it. The
+sidecars are kept, so rolling back to an ingress server without the manifest
+still processes the queue; do not delete the manifest while this version runs.
+Items left over from the previous per-endpoint directory layout are still
+listed and processed.
 
-The worker is a single consumer in both modes (no locking); keep
-`deployment.replicaCount: 1`.
+With an S3 queue, `cache_dir` can point to a local directory, e.g. under the
+pod's `/tmp` volume, so that the worker reads local payload copies instead of
+downloading them. A lost cache only costs downloads.
+
+The worker is a single consumer in both modes (no locking) and the only
+writer of the manifest; keep `deployment.replicaCount: 1`. The chart deploys
+with the `Recreate` strategy, so an upgrade stops the old pod before the new
+one starts; do not switch it to `RollingUpdate`.
 
 ---
 

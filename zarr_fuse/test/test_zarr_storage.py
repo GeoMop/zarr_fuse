@@ -804,6 +804,38 @@ def test_write_ds_partial_chunk_update(smart_tmp_path):
     np.testing.assert_array_equal(reopened["data"].values, np.array([10.0, 12.0]))
 
 
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="interpolate_ds reindexes the unsorted overlap with NaN and fill_missing "
+           "restores only values equal to the schema na_value, so the untouched rows "
+           "between the updated ones are overwritten for every variable whose na_value "
+           "is not NaN (str, int, float with a sentinel); datetime variables raise "
+           "instead (see PLAN.md, #139).",
+)
+def test_update_of_non_adjacent_unsorted_rows_keeps_rows_between(tmp_path):
+    """Overwriting rows 0 and 2 of an unsorted coordinate must leave row 1 intact."""
+    schema_dict = {
+        "VARS": {
+            "label": {"type": "str[8]", "coords": ["x"]},
+            "count": {"type": "int64", "na_value": -1, "coords": ["x"]},
+        },
+        "COORDS": {"x": {"unit": "", "type": "float64", "sorted": False}},
+        "ATTRS": {"STORE_URL": str(tmp_path / "unsorted_gap.zarr")},
+    }
+
+    zf.open_store(schema_dict).update(
+        pl.DataFrame({"x": [0.0, 1.0, 2.0], "label": ["a", "b", "c"], "count": [0, 1, 2]})
+    )
+    zf.open_store(schema_dict).update(
+        pl.DataFrame({"x": [0.0, 2.0], "label": ["A", "C"], "count": [10, 12]})
+    )
+
+    ds = zf.open_store(schema_dict).dataset
+    np.testing.assert_array_equal(ds["label"].values, ["A", "b", "C"])
+    np.testing.assert_array_equal(ds["count"].values, [10, 1, 12])
+
+
 def test_merge_ds_expands_empty_cartesian_extension(smart_tmp_path):
     """Extend one coordinate when another update coordinate is rejected."""
     store_path = smart_tmp_path / "empty_cartesian_extension.zarr"
