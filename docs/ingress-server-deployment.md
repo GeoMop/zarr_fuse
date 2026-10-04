@@ -149,6 +149,9 @@ inputs/
 └── extract/
 ```
 
+A caller repository that keeps its schemas outside the configuration directory sets the `schemas-dir-path` input of
+the reusable workflow; that directory is copied into `inputs/schemas/`.
+
 ## endpoints_config.yaml
 
 Defines:
