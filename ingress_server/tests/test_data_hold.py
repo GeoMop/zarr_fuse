@@ -6,6 +6,7 @@ from pathlib import Path
 import zarr_fuse as zf
 
 from ingress_server.app_config import AppConfig, BaseConfig, SmtpConfig
+from ingress_server.manifest import ManifestStore, default_manifest_url
 from ingress_server.models import MetadataModel
 from ingress_server.queue_storage import QueueStorage
 from ingress_server.worker import _process_available_files
@@ -82,6 +83,7 @@ def _app_config(tmp_path: Path) -> AppConfig:
     storage.ensure_layout()
     return AppConfig(
         queue=storage,
+        manifest=ManifestStore(default_manifest_url(storage.url)),
         config_path=tmp_path / "unused_config.yaml",
         config={},
         base=BaseConfig(retention_time=RETENTION_HOURS),

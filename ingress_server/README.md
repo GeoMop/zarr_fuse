@@ -156,6 +156,11 @@ configuration:
                                        # seen in the same batch (see the
                                        # per-endpoint time_like_coord option
                                        # below). 0 disables holding.
+    manifest_url: null                # zarr-fuse store tracking the queue items;
+                                      # default "<queue_dir_path>/manifest.zarr"
+    cache_dir: null                   # local directory for payload copies read
+                                      # by the worker instead of downloading
+                                      # them from an S3 queue; null disables it
 
   smtp:
     notify_to: ["ops@example.com"]
@@ -173,6 +178,30 @@ item is written in receipt order — so the email is the only signal. Each
 distinct anomaly is mailed once per worker process, not once per poll cycle.
 
 The rest of the file defines passive endpoints and active scrappers (see sections below).
+
+## Queue manifest
+
+The worker records each received payload in the manifest, an auxiliary zarr-fuse store (`manifest_url`). The
+entry is keyed by the receipt time and holds the item file name, its source, the SHA-256 digest of the payload,
+the processing state (`accepted`, `success`, `failed`), the failure reason, the data time range (minimum and
+maximum of `time_like_coord`) and the item metadata. When the metadata JSON is longer than the manifest variable
+(2048 characters), the manifest keeps it without the `dataframe_row` of an active scrapper.
+
+The manifest is the source of truth for the item state. The queue folders `accepted/`, `success/` and `failed/`
+only mirror it for convenience. The receipt path stores the payload with a `.meta.json` sidecar. The worker
+records each accepted payload not yet in the manifest, processes the pending manifest entries and then moves
+each payload with its sidecar to the folder of its new state. The sidecars are kept, so an ingress server
+without the manifest can still process the queue. A payload whose metadata cannot be read or does not fit the
+manifest, and a payload without a sidecar, get no manifest entry; they are moved to `failed/` as before.
+Payloads processed before the manifest was introduced have no entry either.
+
+The worker is the only writer of the manifest, so only one ingress server may run on a queue at a time (the
+helm chart deploys with the `Recreate` strategy). At its start, the worker resets the failed entries to
+`accepted` and moves `failed/` back to `accepted/`, i.e. the failed items are retried.
+
+With `cache_dir` set, the receipt path also keeps a local copy of each payload. The worker reads that copy when
+its digest matches the manifest and downloads the payload from the queue storage otherwise. The copy is
+dropped once the item is processed, and copies of items no longer in `accepted/` are swept at the worker start.
 
 ---
 
