@@ -6,6 +6,7 @@ on:
     paths:
       - dashboard/**
       - app/databuk/config/**
+  workflow_dispatch:
 jobs:
   build-and-deploy:
     name: Build and deploy HoloViz dashboard
@@ -19,5 +20,5 @@ jobs:
       tag: generate
       namespace: zarr-fuse-dashboard-development
       release-name: holoviz-development
-      zarr-fuse-ref: ${{ github.head_ref }}
+      zarr-fuse-ref: ${{ github.head_ref || github.ref_name }}
     secrets: inherit
