@@ -965,6 +965,67 @@ Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
   variable switch, initial load) and only adopt live `x_range` when it differs
   from the stored baseline (a real pan/zoom). `build_marker_overlay` and
   `_resolve_marker_window` unchanged; marker unit tests unaffected.
+- 2026-09-22 (click merged markers select all members, done): Previously tapping a
+  clustered map marker still added only the nearest single borehole, because
+  `_cluster_points` discarded cluster membership and `on_map_tap` resolved
+  against the un-clustered per-borehole arrays. Changed `_cluster_points` to
+  return `(clustered_df, member_lists)` (entity indices per cluster, falling back
+  to row indices), and the map callback stores the last render as
+  `data.current_clusters` (centroid lon/lat + `entity_indices`, empty for the
+  no-data paths). `on_map_tap` now resolves the nearest cluster centroid and,
+  when within the tap threshold, adds every member via `_fetch_timeseries`
+  (single-member/empty-cluster taps keep the existing nearest-marker behavior,
+  single failure semantics preserved). Added `dashboard/test/test_cluster_members.py`
+  (7 tests: no-range 1:1, row-index fallback, proximity merge, distant separate,
+  empty df, out-of-view empty, centroid/label).
+- 2026-09-22 (click merged markers select all members, threshold follow-up, done):
+  Clicking a merged dot of 3+ boreholes still failed because `on_map_tap` ran the
+  single-marker gate (`min_dist > threshold_deg**2`, threshold 0.0002 degrees)
+  BEFORE cluster logic, yet merged dots are drawn at their centroid, which can sit
+  farther than that tolerance from every member. Fixed in `dashboard/multi_time_views.py`:
+  `_cluster_points` (`dashboard/map_views.py`) now also returns per-cluster `radii`
+  (max centroid-to-member distance in degrees, 0.0 for single/empty) and the map
+  callback stores them as `data.current_clusters[].radius`; the tap path now resolves
+  clusters first via a pure `_resolve_tap_targets(x, y, clusters, all_meta, nearest_idx,
+  min_dist, threshold_deg)` that hits a merged cluster within `max(threshold_deg,
+  radius)` and returns all members (single-member/empty/single-marker paths unchanged,
+  len>1 multi-fetch semantics preserved in `on_map_tap`). Extended
+  `dashboard/test/test_cluster_members.py` (3-tuple signature + 5 `_resolve_tap_targets`
+  tests: centroid hit, within-radius hit, radius miss -> single fallback, no-cluster
+  fallback, far click None). Suite: 149 passed / 1 skipped (baseline 144 + 5 new).
+- 2026-09-22 (map tap registration-first, table-before-plots, done): A map click
+  (single or merged) previously fetched every target's timeseries synchronously
+  BEFORE the plot-selection table row appeared, so merged-cluster clicks showed
+  nothing until all N fetches finished. Now `SelectionState` gains
+  `register_site` (pending empty row, bumps `layout_version` only) and `fill_site`
+  (populates a pending row, auto-checks finite depths, bumps `version`; bumps
+  `layout_version` when the depth set grows). `on_map_tap` registers ALL resolved
+  boreholes immediately (site_id from `all_meta` by entity_index, fallback
+  `entity_label_<idx>`), then fills each site's data in a deferred callback
+  (100 ms `doc.add_timeout_callback`, inline fallback without a doc) per arriving
+  member, firing `borehole_stream.event` for the first resolved index. The
+  `timeseries_loading` spinner now lives under the deferred fetch loop (cleared
+  when the last member lands) instead of `on_tap_event`'s `_do_tap` finally.
+  Added `dashboard/test/test_register_fill_site.py` (7 tests: pending row without
+  version bump, no checked cells, duplicate noop, fill auto-check, layout bump on
+  depth growth, unknown-site False, register+fill preserves prior sites).
+  Suite: 156 passed / 1 skipped (baseline 149 + 7 new).
+- 2026-09-22 (build_overlay_tiles.py config-only sourcing, done): Removed the
+  10 CLI value-override flags (`--image`, `--georef`, `--min-zoom`,
+  `--max-zoom`, `--gcp-srs`, `--target-srs`, `--resampling`, `--bucket`,
+  `--prefix`, `--endpoint-url`) so zf_view.yaml ``tile_build`` is the sole
+  source for build values. Deleted `_resolve_param`; `main()` reads
+  `tile_build.*` directly (the config layer owns defaults: `min_zoom=0`,
+  `max_zoom=20`, `target_srs=EPSG:3857`, `gcp_srs=EPSG:4326`,
+  `resampling=near`) and sets `endpoint_url = schema_endpoint_url(...)`.
+  Startup summary prints plain values (no source labels); missing-S3 errors
+  point at `tile_build.s3` only. `_run_delete` dropped the `bucket_src` /
+  `prefix_src` params. Kept operational flags: `--view-path`, `--view`,
+  `--force`, `--dry-run`, `--no-cleanup`, `--delete`, `--yes`; the
+  `tile_resampling = tile_build.tile_resampling or resampling` fallback is
+  unchanged. Verified: py_compile, `--help` shows the 7 kept flags,
+  `--dry-run` resolves the app/databuk view config-only end to end,
+  `--delete --force` / bare `--yes` guards still reject.
 - 2026-09-10 (real overlay, line-art readability): User reports numbers/small
   notes on the zoomed-in overlay lose pixels ("missing pixels"). Cause: single
   `resampling` knob fed `cubic` into both gdalwarp and gdal2tiles; cubic (and
@@ -985,3 +1046,56 @@ Verified locally: `py_compile`, `--help`, blank/not-found schema error paths
   NEXT: user rebuilds (`python build_overlay_tiles.py`), A/B zoom on numbers;
   fallback ladder: tiles->near; if the source lacks pixels at 100% add a
   stroke-contrast/alpha-threshold post-step.
+- 2026-09-24 (dashboard docs consolidation, done): Merged QUICKSTART.md +
+  WORKFLOW.md + TEMPLATE.md into a single new-project guide kept as
+  `dashboard/docs/TEMPLATE.md` (user decision: merge, scope includes
+  QUICKSTART, survivor named TEMPLATE.md). The merged doc covers planning /
+  prerequisites / structure / install / file templates (`.env`,
+  `zf_view.yaml`, `my_schema.yaml`, `requirements.txt`) / validation /
+  run / troubleshooting (de-duplicated from both sources) / customizations /
+  deployment (dev, gunicorn, Docker -> DEPLOYMENT.md) / file checklist /
+  success indicators / env-var quick reference. Also fixed config drift in
+  the yaml examples: `defaults.metric` -> `defaults.display_variable`,
+  removed the unsupported `labels:` and `cmap:` blocks (config.py:
+  ViewConfig/MapConfig have no such fields), fixed the `<< 'EOF'` heredoc
+  that wrote a literal `$(pwd)` into `.env` (python-dotenv does not expand
+  it; absolute path required), and replaced QUICKSTART's invalid
+  `zarr.open_group('s3://...')` with xarray `open_zarr`. Deleted
+  `dashboard/docs/QUICKSTART.md` and `dashboard/docs/WORKFLOW.md`. Updated
+  `dashboard/README.md` (doc link list now 6 entries, no QUICKSTART/
+  WORKFLOW) and rewrote `dashboard/docs/DOCS_INDEX.md` (Read-This-First
+  single TEMPLATE block, decision tree, main docs, getting-help, file
+  organization, reading order, TL;DR, history table with a merge note).
+  Verified: grep shows only the intentional history-note mentions of the
+  removed files; all touched docs have no line >120 (CONFIG_PACKAGING.md /
+  tile_pyramid_README.md pre-existing long lines untouched).
+  OPEN / REMARKS: the files were user-committed during earlier sessions;
+  these doc edits remain uncommitted for git-cola review. `tile_url_cache.json`
+  churn was left alone per earlier user decision.
+- 2026-09-24 (dashboard README scripts section, done): Added a `## Scripts`
+  section to `dashboard/README.md` (between the tile section and File
+  Organization) with brief one-line explanations for all 8 tracked files in
+  `dashboard/scripts/` (`start_dashboard.ps1`, `check_view_stores.py`,
+  `check_s3_bucket_access.py`, `scan_store_health.py`,
+  `build_overlay_tiles.py`, `setup_gdal_env.ps1`/`.sh`,
+  `prepare_bukov_gcps.py`) and a note that scripts read `ZF_S3_*` creds from
+  the gitignored `scripts/.env`. Also aligned two stale config examples in the
+  same README (user approved): "Using Custom Data Sources" now uses
+  `defaults.display_variable` and drops the unsupported `labels:` block;
+  "Building Tiles (Optional)" dropped the removed `tile_build.enabled` and
+  shows the current `tile_build` shape (paths, zoom range, CRS,
+  resampling, nested `s3.bucket/prefix`) sourced from `TileBuildConfig`
+  (config.py:101-114). Verified: no README line >120 (table rows were over
+  the limit and rewritten as a wrapped bullet list); README renders cleanly.
+  Docs-only change, no tests run.
+- 2026-09-28: Temporary CL4 outage -> switched dashboard config to the CESNET
+  backup store `https://s3.cl2.du.cesnet.cz`. Reverted-to-CL4 list:
+  `app/databuk/config/schemas/bukov_schema.yaml:4` and
+  `app/databuk/inputs/schemas/bukov_schema.yaml:7` (`ATTRS.S3_ENDPOINT_URL`),
+  `dashboard/charts/holoviz/values.yaml:24` (`frontend.s3.endpointUrl`),
+  `app/databuk/config/zf_view.yaml:21` (`source.uri`, now
+  `temperature_monitoring_steady.zarr` -> back to `temperature_monitoring.zarr`),
+  and `zf_view.yaml:52` + `:69-70` (overlay `source_uri` and `tile_build.s3`,
+  back to bucket `app-databuk-test-service`). New local cl2 keys were written
+  to the gitignored `dashboard/scripts/.env` and `zarr_fuse/test/.env`; the
+  disclosed CL4 keys should be rotated.

@@ -28,19 +28,15 @@ All parameters are wired to the project configuration:
 - the view is selected via ``--view`` / ``HV_DASHBOARD_VIEW``, falling back to
   ``_dashboard.default_endpoint``;
 - build parameters (paths, zoom range, CRS, resampling, S3 bucket/prefix)
-  come from the ``tile_build`` section of the selected view;
+  come exclusively from the ``tile_build`` section of the selected view;
 - generic processing defaults (zoom range, CRS values, resampling) are owned
   by the config layer (``TileBuildConfig`` in ``dashboard/config.py``); the
   S3 bucket/prefix target must be configured explicitly in zf_view.yaml
-  (``tile_build.s3``) or given per-run via ``--bucket``/``--prefix``;
+  (``tile_build.s3``);
 - credentials come from the general environment (``ZF_S3_ACCESS_KEY``,
   ``ZF_S3_SECRET_KEY``), filled from the ``_dashboard.env_file`` referenced by
   zf_view.yaml;
-- the S3 endpoint URL is owned by the view schema (``ATTRS.S3_ENDPOINT_URL``);
-  ``--endpoint-url`` can override it manually.
-
-CLI flags always win over config values. The startup summary shows where
-each value came from.
+- the S3 endpoint URL is owned by the view schema (``ATTRS.S3_ENDPOINT_URL``).
 
 Local pipeline:
 
@@ -195,26 +191,6 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser.add_argument("--view", default=None,
                         help="view name in zf_view.yaml (default: HV_DASHBOARD_VIEW "
                              "env, then _dashboard.default_endpoint)")
-    parser.add_argument("--image", default=None,
-                        help="override source_image from the view config")
-    parser.add_argument("--georef", default=None,
-                        help="override georef_file from the view config")
-    parser.add_argument("--min-zoom", type=int, default=None,
-                        help="override min_zoom from the view config")
-    parser.add_argument("--max-zoom", type=int, default=None,
-                        help="override max_zoom from the view config")
-    parser.add_argument("--gcp-srs", default=None,
-                        help="override gcp_srs from the view config")
-    parser.add_argument("--target-srs", default=None,
-                        help="override target_srs from the view config")
-    parser.add_argument("--resampling", default=None,
-                        help="override resampling from the view config")
-    parser.add_argument("--bucket", default=None,
-                        help="override tile_build.s3.bucket from the view config")
-    parser.add_argument("--prefix", default=None,
-                        help="override tile_build.s3.prefix from the view config")
-    parser.add_argument("--endpoint-url", default=None,
-                        help="override ATTRS.S3_ENDPOINT_URL from the view schema")
     parser.add_argument("--force", action="store_true",
                         help="full redo: bypass the S3 existence short-circuit "
                              "and rebuild all local steps even if outputs exist")
@@ -256,15 +232,6 @@ def load_georef_points(georef_path: Path) -> list[dict[str, Any]]:
             f"ERROR: need at least 3 enabled control points, found {len(points)} in {georef_path}"
         )
     return points
-
-
-def _resolve_param(cli_value: Any, config_value: Any, builtin: Any) -> tuple[Any, str]:
-    """Resolve one parameter: CLI flag beats config value beats builtin default."""
-    if cli_value is not None:
-        return cli_value, "flag"
-    if config_value is not None:
-        return config_value, "config"
-    return builtin, "default"
 
 
 def step_build_gcps_vrt(image_path: Path, georef_path: Path, vrt_path: Path,
@@ -555,16 +522,14 @@ def _validate_args(args: argparse.Namespace) -> None:
 
 
 def _run_delete(args: argparse.Namespace, views_path: Path, views_src: str,
-                view_name: str, bucket: Optional[str], bucket_src: str,
-                prefix: Optional[str], prefix_src: str,
-                endpoint_url: Optional[str]) -> None:
+                view_name: str, bucket: Optional[str],
+                prefix: Optional[str], endpoint_url: Optional[str]) -> None:
     """Delete flow: print the target, guard the prefix, then delete."""
     normalized_prefix = (prefix or "").strip("/")
     target_desc = f"s3://{bucket or '(unset)'}/{normalized_prefix}"
-    s3_src = "flag" if args.bucket is not None or args.prefix is not None else bucket_src
     print(f"Views file     : {views_path} ({views_src})")
     print(f"View           : {view_name}")
-    print(f"s3 target      : {target_desc} ({s3_src})")
+    print(f"s3 target      : {target_desc}")
     print(f"endpoint       : {endpoint_url or '(AWS default)'}")
     print()
 
@@ -575,12 +540,12 @@ def _run_delete(args: argparse.Namespace, views_path: Path, views_src: str,
     if missing_s3:
         raise SystemExit(
             "ERROR: S3 target not configured: set " + " and ".join(missing_s3)
-            + " in zf_view.yaml, or pass --bucket/--prefix."
+            + " in zf_view.yaml."
         )
     if not normalized_prefix:
         raise SystemExit(
             "ERROR: refusing to delete with an empty prefix: this would target "
-            "the whole bucket. Configure tile_build.s3.prefix or pass --prefix."
+            "the whole bucket. Configure tile_build.s3.prefix in zf_view.yaml."
         )
 
     assert bucket is not None
@@ -614,13 +579,13 @@ def main(argv: Optional[list[str]] = None) -> None:
     tile_build = view.tile_build
     base_dir = views_path.parent.parent
 
-    bucket, bucket_src = _resolve_param(args.bucket, tile_build.s3.bucket, None)
-    prefix, prefix_src = _resolve_param(args.prefix, tile_build.s3.prefix, None)
-    endpoint_url = args.endpoint_url or schema_endpoint_url(views_path, view_name)
+    bucket = tile_build.s3.bucket
+    prefix = tile_build.s3.prefix
+    endpoint_url = schema_endpoint_url(views_path, view_name)
 
     if args.delete:
-        _run_delete(args, views_path, views_src, view_name, bucket, bucket_src,
-                    prefix, prefix_src, endpoint_url)
+        _run_delete(args, views_path, views_src, view_name, bucket, prefix,
+                    endpoint_url)
         return
 
     def _cfg_path(raw: Any) -> Optional[Path]:
@@ -631,12 +596,8 @@ def main(argv: Optional[list[str]] = None) -> None:
             path = base_dir / path
         return path.resolve()
 
-    image_path, image_src = _resolve_param(
-        Path(args.image).expanduser().resolve() if args.image else None,
-        _cfg_path(tile_build.source_image), None)
-    georef_path, georef_src = _resolve_param(
-        Path(args.georef).expanduser().resolve() if args.georef else None,
-        _cfg_path(tile_build.georef_file), None)
+    image_path = _cfg_path(tile_build.source_image)
+    georef_path = _cfg_path(tile_build.georef_file)
     vrt_path = _cfg_path(tile_build.vrt_file)
     tif_path = _cfg_path(tile_build.warped_tif)
     rgba_vrt_path = _cfg_path(tile_build.rgba_vrt)
@@ -651,11 +612,11 @@ def main(argv: Optional[list[str]] = None) -> None:
         for out in (vrt_path, tif_path, rgba_vrt_path, tiles_dir):
             out.parent.mkdir(parents=True, exist_ok=True)
 
-    min_zoom, min_zoom_src = _resolve_param(args.min_zoom, tile_build.min_zoom, None)
-    max_zoom, max_zoom_src = _resolve_param(args.max_zoom, tile_build.max_zoom, None)
-    gcp_srs, gcp_srs_src = _resolve_param(args.gcp_srs, tile_build.gcp_srs, None)
-    target_srs, target_srs_src = _resolve_param(args.target_srs, tile_build.target_srs, None)
-    resampling, resampling_src = _resolve_param(args.resampling, tile_build.resampling, None)
+    min_zoom = tile_build.min_zoom
+    max_zoom = tile_build.max_zoom
+    gcp_srs = tile_build.gcp_srs
+    target_srs = tile_build.target_srs
+    resampling = tile_build.resampling
     tile_resampling = tile_build.tile_resampling or resampling
 
     assert image_path is not None and georef_path is not None
@@ -667,18 +628,16 @@ def main(argv: Optional[list[str]] = None) -> None:
 
     print(f"Views file     : {views_path} ({views_src})")
     print(f"View           : {view_name}")
-    print(f"source_image   : {image_path} ({image_src})")
-    print(f"georef_file    : {georef_path} ({georef_src})")
-    print(f"zoom range     : {min_zoom}-{max_zoom} "
-          f"({'flag' if args.min_zoom is not None or args.max_zoom is not None else min_zoom_src})")
-    print(f"gcp_srs        : {gcp_srs} ({gcp_srs_src})")
-    print(f"target_srs     : {target_srs} ({target_srs_src})")
-    print(f"resampling     : {resampling} ({resampling_src})")
-    print(f"tile resampl.  : {tile_resampling} (config or warp resampling)")
+    print(f"source_image   : {image_path}")
+    print(f"georef_file    : {georef_path}")
+    print(f"zoom range     : {min_zoom}-{max_zoom}")
+    print(f"gcp_srs        : {gcp_srs}")
+    print(f"target_srs     : {target_srs}")
+    print(f"resampling     : {resampling}")
+    print(f"tile resampl.  : {tile_resampling}")
     if bucket is not None or prefix is not None:
         s3_desc = f"{bucket or '(unset)'}/{(prefix or '').strip('/')}"
-        s3_src = "flag" if args.bucket is not None or args.prefix is not None else bucket_src
-        print(f"s3 target      : {s3_desc} ({s3_src})")
+        print(f"s3 target      : {s3_desc}")
     else:
         print("s3 target      : (unset)")
     print(f"endpoint       : {endpoint_url or '(AWS default)'}")
@@ -698,7 +657,7 @@ def main(argv: Optional[list[str]] = None) -> None:
         if missing_s3:
             raise SystemExit(
                 "ERROR: S3 target not configured: set " + " and ".join(missing_s3)
-                + " in zf_view.yaml, or pass --bucket/--prefix."
+                + " in zf_view.yaml."
             )
         upload_config = resolve_upload_config(endpoint_url)
         s3 = _s3_client(upload_config)

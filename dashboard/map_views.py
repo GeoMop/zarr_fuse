@@ -63,15 +63,27 @@ WORLD_YLIM = (-20037508.34, 20037508.34)
 def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, eps_factor=0.05, buffer_factor=0.1):
     """
     Cluster borehole points based on current view extent.
-    Returns a DataFrame with lon, lat, merged_count, label columns.
+
+    Returns ``(clustered_df, member_lists, radii)`` where ``clustered_df`` has
+    ``lon, lat, merged_count, label`` columns, ``member_lists[i]`` holds the
+    entity indices (or positional row indices when no ``entity_index`` column
+    exists) that make up cluster row ``i``, and ``radii[i]`` is the max
+    centroid-to-member distance in degrees (0.0 for single-member/empty).
     """
+    def _members(subset):
+        if "entity_index" in subset.columns:
+            return [int(v) for v in subset["entity_index"]]
+        return list(subset.index)
+
     if x_range is None or y_range is None or len(df) == 0:
-        return pd.DataFrame({
+        clustered = pd.DataFrame({
             lon_field: df[lon_field] if len(df) > 0 else [],
             lat_field: df[lat_field] if len(df) > 0 else [],
             "merged_count": [1] * len(df) if len(df) > 0 else [],
             "label": df[entity_field] if len(df) > 0 else [],
         })
+        members = [_members(df.iloc[[i]]) for i in range(len(df))]
+        return clustered, members, [0.0] * len(df)
 
     # Calculate cluster distance (eps) as eps_factor of view width in degrees
     view_width = x_range[1] - x_range[0]
@@ -85,7 +97,7 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, ep
     )
     visible_df = df[mask].copy()
     if len(visible_df) == 0:
-        return pd.DataFrame({lon_field: [], lat_field: [], "merged_count": [], "label": []})
+        return pd.DataFrame({lon_field: [], lat_field: [], "merged_count": [], "label": []}), [], []
 
     # Grid-based clustering: round coordinates to eps grid
     visible_df["grid_lon"] = (visible_df[lon_field] / eps).round() * eps
@@ -94,11 +106,17 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, ep
     # Group by grid cell
     grouped = visible_df.groupby(["grid_lon", "grid_lat"])
     clustered_rows = []
+    member_lists = []
+    radii = []
     for (glon, glat), group in grouped:
         merged_count = len(group)
         # Use centroid of the group for the clustered point
         center_lon = group[lon_field].mean()
         center_lat = group[lat_field].mean()
+        # Max centroid-to-member distance (degrees)
+        radius = float(np.max(
+            np.sqrt((group[lon_field] - center_lon) ** 2 + (group[lat_field] - center_lat) ** 2)
+        )) if len(group) > 0 else 0.0
         # Use first entity label as representative
         label = group[entity_field].iloc[0] if entity_field in group.columns else ""
         clustered_rows.append({
@@ -107,8 +125,10 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, ep
             "merged_count": merged_count,
             "label": label,
         })
+        member_lists.append(_members(group))
+        radii.append(radius)
 
-    return pd.DataFrame(clustered_rows)
+    return pd.DataFrame(clustered_rows), member_lists, radii
 
 
 def _load_overlay(view_config):
@@ -182,6 +202,7 @@ def build_map_view(data, tap_stream):
             df = getattr(data_obj, 'current_map_df', pd.DataFrame())
             if len(df) == 0:
                 empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": []})
+                data_obj.current_clusters = []
                 return gv.Points(
                     empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count"], crs=ccrs.PlateCarree()
                 ).opts(
@@ -190,10 +211,22 @@ def build_map_view(data, tap_stream):
                     tools=["hover"], responsive=True, title=title,
                 )
             if cluster_enabled:
-                clustered = _cluster_points(x_range, y_range, df, lon_f, lat_f, ent_f, eps_factor, buffer_factor)
+                clustered, members, radii = _cluster_points(
+                    x_range, y_range, df, lon_f, lat_f, ent_f, eps_factor, buffer_factor
+                )
             else:
                 # No clustering - pass through all points
                 clustered = df.assign(merged_count=1, label=df[ent_f] if ent_f in df.columns else "")
+                if "entity_index" in df.columns:
+                    members = [[int(v)] for v in df["entity_index"]]
+                else:
+                    members = [[i] for i in range(len(df))]
+                radii = [0.0] * len(df)
+            data_obj.current_clusters = [
+                {"lon": float(row[lon_f]), "lat": float(row[lat_f]),
+                 "entity_indices": members[i], "radius": radii[i]}
+                for i, row in clustered.iterrows()
+            ]
             if len(clustered) == 0:
                 empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": []})
                 return gv.Points(

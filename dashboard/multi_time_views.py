@@ -36,6 +36,37 @@ def _resolve_marker_window(x_range, xlim, times):
     return (start, end)
 
 
+def _resolve_tap_targets(x, y, clusters, all_meta, nearest_idx, min_dist, threshold_deg):
+    """Resolve the borehole target(s) for a map tap.
+
+    A merged cluster dot is drawn at its centroid, which can sit farther than
+    ``threshold_deg`` (a fixed single-marker tolerance) from any of its members.
+    When the click lands within ``max(threshold_deg, cluster_radius)`` of a
+    merged cluster centroid, return all of its members; otherwise fall back to
+    the nearest single marker (respecting ``threshold_deg``).
+
+    Returns a list of marker-meta dicts (each carrying ``entity_index`` for
+    cluster members, or the original ``marker_meta`` for the single fallback),
+    or ``None`` when the click resolves to nothing.
+    """
+    if clusters:
+        cl_lats = np.array([c["lat"] for c in clusters], dtype=float)
+        cl_lons = np.array([c["lon"] for c in clusters], dtype=float)
+        c_dist = (cl_lats - float(y)) ** 2 + (cl_lons - float(x)) ** 2
+        nearest_cluster = int(np.nanargmin(c_dist))
+        cluster = clusters[nearest_cluster]
+        radius = float(cluster.get("radius", 0.0))
+        hit_threshold = max(threshold_deg, radius)
+        if float(c_dist[nearest_cluster]) <= hit_threshold ** 2:
+            members = cluster.get("entity_indices") or []
+            if len(members) > 1:
+                return [{"entity_index": int(m)} for m in members]
+
+    if min_dist <= threshold_deg ** 2:
+        return [all_meta[nearest_idx]]
+    return None
+
+
 def build_timeseries_views(data, map_state, selection_state, render_spinner=None):
     start_total = time.perf_counter()
     view_config = data.client.get_view(data.view_name)
@@ -566,7 +597,55 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         ],
     )
 
-    def on_map_tap(x, y):
+    def _fill_registered_site(entity_index):
+        """Fetch the current variable's timeseries for a pre-registered site.
+
+        The row is already visible in the plot-selection table (registered by
+        ``on_map_tap`` via ``register_site``); this call fills its data in
+        place so the plots update as each borehole's data arrives.  Returns
+        the resolved ``entity_index`` on success or ``None`` on failure.
+        """
+        start = time.perf_counter()
+        print(f"[fill_ts] Filling registered idx={entity_index}")
+        if not data.display_variable:
+            print(f"[fill_ts] No variable selected — skipping fill")
+            return None
+        fig = data.client.get_timeseries_data(
+            data.view_name,
+            group_path=data.group_path,
+            lat=0.0,
+            lon=0.0,
+            variable=data.display_variable,
+            entity_index=int(entity_index),
+        )
+        if fig.get("status") == "error":
+            reason = fig.get("reason", "Failed to load timeseries")
+            print(f"[fill_ts] Error: {reason}")
+            print(f"[timing] timeseries fill failed: {time.perf_counter() - start:.3f}s")
+            return None
+
+        times = pd.to_datetime(fig.get("times", []))
+        depths = np.array(fig.get("depths", []), dtype=float)
+        series = [np.array(values, dtype=float) for values in fig.get("series", [])]
+        resolved_index = int(fig.get("borehole_index", entity_index))
+        if not series:
+            print(f"[fill_ts] No data for idx={resolved_index} — leaving row registered")
+            print(f"[timing] timeseries fill failed: {time.perf_counter() - start:.3f}s")
+            return None
+        if resolved_index != entity_index:
+            print(f"[fill_ts] WARNING: resolved idx={resolved_index} != registered "
+                  f"idx={entity_index} — filling the registered row")
+        selection_state.fill_site(
+            entity_index,
+            series=series,
+            times=times,
+            depths=depths,
+        )
+        print(f"[plot_selection] Site filled: {entity_label}_{resolved_index}")
+        print(f"[timing] timeseries fill+state: {time.perf_counter() - start:.3f}s")
+        return resolved_index
+
+    def on_map_tap(x, y, loading=None):
         if x is None or y is None:
             y, x, matched_meta = _default_coords()
             print(f"[tap] Initial load: using default coords y={y:.4f}, x={x:.4f}")
@@ -582,6 +661,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         print(f"[tap] Computing nearest marker from {len(all_meta)} available markers")
         if lats_raw is None or lons_raw is None or not len(all_meta):
             print(f"[tap] No markers available or missing lats/lons")
+            if loading is not None:
+                loading.visible = False
             return None
 
         lats = np.array(lats_raw, dtype=float)
@@ -590,22 +671,75 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         nearest_idx = int(np.nanargmin(dist))
         print(f"[tap] nearest_idx={nearest_idx}, distance={dist[nearest_idx]:.2e}")
         if not (0 <= nearest_idx < len(all_meta)):
+            if loading is not None:
+                loading.visible = False
             return None
 
         min_dist = float(dist[nearest_idx])
         # Selection threshold (degrees). Tweak this for your map zoom level.
         threshold_deg = 0.0002
-        if min_dist > threshold_deg ** 2:
+        # Merge-aware resolution: clicking a merged cluster dot selects all of
+        # its members even when the cluster centroid lies farther than the
+        # single-marker tolerance from the nearest member.  Falls back to the
+        # plain nearest-single-borehole behavior when no cluster matches.
+        clusters = getattr(data, "current_clusters", None) or []
+        targets = _resolve_tap_targets(
+            x, y, clusters, all_meta, nearest_idx, min_dist, threshold_deg
+        )
+        if targets is None:
             print(f"[tap] Outside threshold ({min_dist:.2e} > {threshold_deg**2:.2e}): not selecting")
+            if loading is not None:
+                loading.visible = False
             return None
+        if len(targets) > 1:
+            print(f"[tap] Merged cluster: adding {len(targets)} boreholes "
+                  f"{[t['entity_index'] for t in targets]}")
 
-        marker_meta = all_meta[nearest_idx]
-        print(f"[tap] Selected marker_meta={marker_meta}")
-        print(f"[tap] Calling _fetch_timeseries with marker_meta={marker_meta}")
-        entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=marker_meta)
-        if entity_index is not None:
-            borehole_stream.event(borehole_index=entity_index)
-        return entity_index
+        if loading is not None:
+            loading.visible = True
+
+        # Registration-first: surface every selected borehole in the plot
+        # selection table immediately, then fetch/fill each site's data as it
+        # arrives (plots update progressively per member).
+        meta_for_eidx = {
+            int(m["entity_index"]): m.get("site_id")
+            for m in all_meta
+            if isinstance(m, dict) and m.get("entity_index") is not None
+        }
+        for target in targets:
+            eidx = int(target["entity_index"])
+            sid = target.get("site_id")
+            if not sid:
+                sid = meta_for_eidx.get(eidx) or f"{entity_label}_{eidx}"
+            selection_state.register_site(eidx, sid)
+
+        def _do_deferred_fetch():
+            resolved_index = None
+            try:
+                for target in targets:
+                    eidx = int(target["entity_index"])
+                    resolved = _fill_registered_site(eidx)
+                    if resolved is None:
+                        continue
+                    if resolved_index is None:
+                        resolved_index = resolved
+                if resolved_index is not None:
+                    borehole_stream.event(borehole_index=resolved_index)
+                return resolved_index
+            finally:
+                if loading is not None:
+                    loading.visible = False
+
+        doc = pn.state.curdoc
+        if doc is not None:
+            # Small timeout (same trick as on_tap_event): the deferred fetch
+            # runs after the current callback yields, so the table row flush
+            # reaches the frontend before the blocking per-site fetches start.
+            doc.add_timeout_callback(_do_deferred_fetch, 100)
+        else:
+            _do_deferred_fetch()
+
+        return int(targets[0]["entity_index"]) if targets else None
 
     def fetch_site_entity(entity_index):
         """Fetch the current variable's timeseries for a specific entity index.

@@ -5,33 +5,15 @@
 Start here based on what you want to do:
 
 ### 🚀 **Just want to use it in a new project?**
-→ Read **[QUICKSTART.md](QUICKSTART.md)**
+→ Read **[TEMPLATE.md](TEMPLATE.md)**
 
-Step-by-step walkthrough of:
-1. Installing zarr_fuse + dashboard
-2. Understanding your data
-3. Creating schema files
-4. Creating views config
-5. Running the dashboard
-
-### 📋 **Want a template to copy/paste?**
-→ Use **[TEMPLATE.md](TEMPLATE.md)**
-
-Ready-to-use files you can copy:
-- `.env` template
-- `config/zf_view.yaml` template
-- `schemas/my_schema.yaml` template
-- Copy-paste setup commands
-
-### 🔄 **Want the complete workflow?**
-→ Read **[WORKFLOW.md](WORKFLOW.md)**
-
-Visual workflow from start to finish:
+Complete guide covering:
 1. Planning phase (what you need to know)
-2. Setup phase (step-by-step)
+2. Template files (.env, zf_view.yaml, my_schema.yaml)
 3. Validation phase (verify everything)
-4. Run phase (start dashboard)
+4. Running the dashboard
 5. Troubleshooting quick reference
+6. Deployment overview (development, gunicorn, Docker)
 
 ### 📦 **Need to deploy to production?**
 → Read **[DEPLOYMENT.md](DEPLOYMENT.md)**
@@ -69,16 +51,13 @@ Summary of all changes made for plug-and-play:
 Do you want to...
 │
 ├─ Use dashboard in a new project?
-│  └─→ QUICKSTART.md → TEMPLATE.md
+│  └─→ TEMPLATE.md
 │
 ├─ Deploy to production?
 │  └─→ DEPLOYMENT.md
 │
 ├─ Understand the configuration?
 │  └─→ CONFIG_PACKAGING.md
-│
-├─ See the complete workflow?
-│  └─→ WORKFLOW.md
 │
 └─ Understand the refactor?
    └─→ REFACTOR_NOTES.md
@@ -95,32 +74,16 @@ Main dashboard documentation. Read this for:
 - Environment variable configuration
 - Troubleshooting
 
-### QUICKSTART.md ⭐ START HERE
-Complete guide for using in a new project. Read this for:
-- Step-by-step setup (8 steps)
-- Understanding your data
-- Creating schema files
-- Creating views config
-- Testing your setup
-- Deployment options
+### TEMPLATE.md ⭐ START HERE
+Complete guide for using the dashboard in a new project. Read this for:
+- Planning phase (what you need to know)
+- Template files (.env, config/zf_view.yaml, schemas/my_schema.yaml)
+- Copy-paste setup commands
+- Validation phase tests and verification checklist
+- Running the dashboard
 - Troubleshooting by error
-
-### TEMPLATE.md
-Copy-paste templates and checklist. Use this to:
-- Create .env file
-- Create config/zf_view.yaml
-- Create schemas/my_schema.yaml
-- Verify everything works
-- Quick setup commands
-
-### WORKFLOW.md
-Complete workflow visualization. Read this for:
-- Overview of the process
-- Planning phase questions
-- Setup phase commands
-- Validation phase tests
-- Troubleshooting quick reference
-- Success indicators
+- Customizations
+- Deployment overview (development, gunicorn, Docker)
 
 ### DEPLOYMENT.md
 Production deployment guide. Read this for:
@@ -152,13 +115,13 @@ Technical refactor summary. Read this for:
 ### Common Issues
 
 **"Where do I start?"**
-→ Start with [QUICKSTART.md](QUICKSTART.md)
+→ Start with [TEMPLATE.md](TEMPLATE.md)
 
 **"What files do I need to create?"**
 → Copy templates from [TEMPLATE.md](TEMPLATE.md)
 
 **"Something went wrong"**
-→ Check troubleshooting in [QUICKSTART.md](QUICKSTART.md) or [WORKFLOW.md](WORKFLOW.md)
+→ Check the troubleshooting section in [TEMPLATE.md](TEMPLATE.md)
 
 **"How do I deploy?"**
 → Read [DEPLOYMENT.md](DEPLOYMENT.md)
@@ -173,12 +136,10 @@ Technical refactor summary. Read this for:
 ```
 dashboard/
 ├── README.md                    ← What is this?
-├── QUICKSTART.md               ← START HERE for new projects ⭐
-├── TEMPLATE.md                 ← Copy-paste templates
-├── WORKFLOW.md                 ← Complete workflow
-├── DEPLOYMENT.md               ← Production setup
-├── CONFIG_PACKAGING.md         ← Technical details
-├── REFACTOR_NOTES.md          ← What changed
+├── TEMPLATE.md                  ← START HERE for new projects ⭐ (templates + workflow)
+├── DEPLOYMENT.md                ← Production setup
+├── CONFIG_PACKAGING.md          ← Technical details
+├── REFACTOR_NOTES.md           ← What changed
 ├── .env.example                ← Env var template
 ├── pyproject.toml              ← Package metadata
 ├── config/
@@ -198,16 +159,14 @@ dashboard/
 
 1. **First time?** Read in this order:
    - README.md (overview)
-   - QUICKSTART.md (step-by-step)
-   - TEMPLATE.md (copy templates)
+   - TEMPLATE.md (planning, templates, setup, troubleshooting)
 
 2. **Deploying?** Read:
-   - QUICKSTART.md (to understand)
+   - TEMPLATE.md (to understand setup)
    - DEPLOYMENT.md (for production)
 
 3. **Troubleshooting?** Read:
-   - WORKFLOW.md (troubleshooting section)
-   - Check error messages in QUICKSTART.md
+   - TEMPLATE.md (troubleshooting section)
 
 4. **Advanced?** Read:
    - CONFIG_PACKAGING.md (understand packaging)
@@ -238,7 +197,7 @@ export ZF_VIEW_PATH=$(pwd)/config/zf_view.yaml
 zf-dashboard
 ```
 
-That's it! For details, see QUICKSTART.md
+That's it! For details, see TEMPLATE.md
 
 ---
 
@@ -247,16 +206,14 @@ That's it! For details, see QUICKSTART.md
 | File | Purpose | Created |
 |------|---------|---------|
 | README.md | Main docs | Original |
-| QUICKSTART.md | New project setup | Refactor v2 |
-| TEMPLATE.md | Copy-paste templates | Refactor v2 |
-| WORKFLOW.md | Visual workflow | Refactor v2 |
+| TEMPLATE.md | New project setup: templates + workflow (QUICKSTART + WORKFLOW merged) | Refactor v2 |
 | DEPLOYMENT.md | Production setup | Refactor v1 |
 | CONFIG_PACKAGING.md | Technical details | Refactor v2 |
 | REFACTOR_NOTES.md | Change summary | Refactor v2 |
 
+> QUICKSTART.md and WORKFLOW.md were merged into TEMPLATE.md (single new-project guide).
+
 ---
 
-**Questions? Start with README.md, then go to QUICKSTART.md**
-
-**Ready to go? Use TEMPLATE.md and follow WORKFLOW.md**
+**Questions? Start with README.md, then go to TEMPLATE.md**
 

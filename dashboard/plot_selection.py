@@ -264,6 +264,79 @@ class SelectionState(param.Parameterized):
             self._bump_version()
         print(f"[SelectionState] Removed site {site_id} (idx={entity_index})")
 
+    def register_site(self, entity_index, site_id):
+        """Register a site row in the table without fetching any data.
+
+        Used by the map-tap flow so the selected borehole appears in the
+        plot-selection table immediately, before the (deferred) timeseries
+        fetch lands.  The pending site holds empty depths/series/times and no
+        checked cells, keeps *version* untouched (plots unchanged) and bumps
+        only *layout_version* (table rebuild).  Call ``fill_site`` once the
+        data arrives.
+        """
+        for site in self._sites:
+            if site["entity_index"] == entity_index:
+                print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
+                return
+
+        self._cancel_panel_bump()
+        self._sites.append({
+            "entity_index": int(entity_index),
+            "site_id": str(site_id),
+            "depths": np.array([], dtype=float),
+            "series": [],
+            "times": pd.to_datetime([]),
+        })
+        self.layout_version += 1
+        print(f"[SelectionState] Registered pending site {site_id} (idx={entity_index})")
+
+    def fill_site(self, entity_index, series, times, depths) -> bool:
+        """Populate a pending site (from ``register_site``) with fetched data.
+
+        Stores the series/times/depths and auto-checks the finite depths,
+        mirroring ``add_site`` bookkeeping without rebuilding the table for a
+        brand-new row.  Bumps *version* (redraw plots) and, when the depth set
+        changes, *layout_version* (adds the depth columns to the table).
+
+        Returns ``False`` when no site with *entity_index* is registered (the
+        caller should ``register_site`` then ``fill_site`` instead).
+        """
+        site = None
+        for s in self._sites:
+            if s["entity_index"] == entity_index:
+                site = s
+                break
+        if site is None:
+            return False
+
+        depths_arr = np.asarray(depths, dtype=float).ravel()
+        finite_depths = [float(d) for d in depths_arr if np.isfinite(float(d))]
+
+        depth_changed = False
+        old_depths = np.asarray(site["depths"]).ravel()
+        if not np.array_equal(old_depths, depths_arr, equal_nan=True):
+            old_depth_count = self._depth_count_for(site["site_id"])
+            site["depths"] = depths_arr
+            self._reconcile_checked(site, old_depth_count)
+            depth_changed = True
+
+        site["series"] = series
+        site["times"] = times
+
+        for dv in finite_depths:
+            key = (str(site["site_id"]), dv)
+            if key not in self._checked:
+                self._checked.add(key)
+                self._checked_count += 1
+
+        if depth_changed:
+            self.layout_version += 1
+            print(f"[SelectionState] Filled site idx={entity_index} (depths changed)")
+        else:
+            print(f"[SelectionState] Filled site idx={entity_index}")
+        self._bump_version()
+        return True
+
     def update_site_data(self, entity_index, series, times, depths=None) -> bool:
         """Replace an existing site's series/times in place.
 

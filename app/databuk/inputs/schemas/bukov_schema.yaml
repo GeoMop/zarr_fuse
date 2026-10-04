@@ -4,7 +4,7 @@ ATTRS:
 
     # S3 store for data up to 2024
     STORE_URL: "s3://bukov/store_latlon_2024.zarr"
-    S3_ENDPOINT_URL: "https://s3.cl4.du.cesnet.cz"
+    S3_ENDPOINT_URL: "https://s3.cl2.du.cesnet.cz"
 
     #store_type: 'local'                 # 'guess' type is default
     location_file: &loc_file bukov_locations.csv
