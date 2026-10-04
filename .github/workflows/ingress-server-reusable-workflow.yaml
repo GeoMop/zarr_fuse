@@ -44,6 +44,11 @@ on:
         required: false
         type: string
         default: app/databuk/inputs
+      schemas-dir-path:
+        description: Optional directory with schemas, copied into the configuration as schemas/
+        required: false
+        type: string
+        default: ""
       extra-helm-args:
         description: Extra Helm arguments to pass during deployment
         required: false
@@ -113,6 +118,20 @@ jobs:
           rm -rf "$DEST_DIR/*"
 
           cp -r "$SRC_DIR"/. "$DEST_DIR"/
+
+      - name: Copy schemas
+        if: ${{ inputs.schemas-dir-path != '' }}
+        run: |
+          SRC_DIR="${{ inputs.schemas-dir-path }}"
+
+          if [[ ! -d "$SRC_DIR" ]]; then
+            echo "Schemas directory '$SRC_DIR' does not exist."
+            exit 1
+          fi
+
+          mkdir -p ci-inputs/schemas
+          cp -r "$SRC_DIR"/. ci-inputs/schemas/
+
       - name: Upload configuration files as artifact
         uses: actions/upload-artifact@v6
         with:
