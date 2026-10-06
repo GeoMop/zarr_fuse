@@ -25,14 +25,13 @@ The dashboard is configured via:
 1. **YAML views file** (`zf_view.yaml`) - defines data sources
 2. **Environment variables** - runtime config and S3 credentials
 
-### Required Environment Variables
+### Configuration and Environment Variables
 
 ```bash
-# Required: Which view to load from zf_view.yaml
-HV_DASHBOARD_VIEW=bukov_endpoint
+# The default view is configured in the _dashboard.default_view key
+# of zf_view.yaml.
 
-# Optional: Path to your zf_view.yaml file
-# Default: packaged config/zf_view.yaml
+# Optional: Explicit path to your zf_view.yaml file
 ZF_VIEW_PATH=/path/to/your/zf_view.yaml
 
 # S3 credentials (if using S3 data sources)
@@ -58,9 +57,6 @@ From dashboard folder (monorepo):
 cp .env.example .env
 # Edit .env and set ZF_S3_* values
 
-# Set which view to use
-export HV_DASHBOARD_VIEW=bukov_endpoint
-
 # Start dashboard
 zf-dashboard
 ```
@@ -78,7 +74,6 @@ For a new project with your own data, provide your own `zf_view.yaml`:
 ```bash
 # Point to your config
 export ZF_VIEW_PATH=/path/to/my_project/config/zf_view.yaml
-export HV_DASHBOARD_VIEW=my_view
 
 # Start dashboard
 zf-dashboard
@@ -215,9 +210,6 @@ credentials from the general environment (filled from the gitignored
 
 ### "ZF_VIEW_PATH not found"
 Set `ZF_VIEW_PATH` env var pointing to your `zf_view.yaml` file.
-
-### "HV_DASHBOARD_VIEW is required"
-Set `HV_DASHBOARD_VIEW` env var to match a view name in your `zf_view.yaml`.
 
 ### S3 connection fails
 Verify `ZF_S3_ACCESS_KEY`, `ZF_S3_SECRET_KEY`, and `ZF_S3_ENDPOINT_URL` are set correctly.
