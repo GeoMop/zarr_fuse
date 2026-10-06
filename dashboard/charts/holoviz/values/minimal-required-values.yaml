@@ -1,0 +1,6 @@
+frontend:
+  s3:
+    endpointUrl: "http://localhost:9000"
+    secrets:
+      accessKey: "s3-access-key"
+      secretKey: "s3-secret-key"

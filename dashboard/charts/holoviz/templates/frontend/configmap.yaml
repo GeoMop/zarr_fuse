@@ -1,0 +1,14 @@
+{{- if .Values.frontend.config.enabled }}
+{{- $files := .Files.Glob "config/*" }}
+{{- if not $files }}
+{{- fail "frontend.config.enabled needs zf_view.yaml and the schemas copied into the chart's config/ directory" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "holoviz.fullname" . }}-config
+  labels:
+    {{- include "holoviz.labels" . | nindent 4 }}
+data:
+  {{- $files.AsConfig | nindent 2 }}
+{{- end }}
