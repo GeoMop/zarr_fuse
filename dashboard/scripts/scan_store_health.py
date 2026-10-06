@@ -44,7 +44,7 @@ from dotenv import load_dotenv
 
 # Standalone configuration: set the paths below or pass the corresponding CLI options.
 # Required environment variables: ZF_S3_ACCESS_KEY, ZF_S3_SECRET_KEY,
-# and ZF_S3_ENDPOINT_URL (S3_* aliases are also accepted).
+# and ZF_S3_ENDPOINT_URL.
 SCHEMA_PATH = ""
 GROUP_PATH = ""
 ENV_FILE_PATH = ""
@@ -55,17 +55,9 @@ if ENV_FILE_PATH:
 import zarr_fuse as zf
 
 
-def _env(*names: str) -> str:
-    for name in names:
-        value = os.getenv(name)
-        if value:
-            return value
-    return ""
-
-
-S3_ACCESS_KEY = _env("ZF_S3_ACCESS_KEY", "S3_ACCESS_KEY")
-S3_SECRET_KEY = _env("ZF_S3_SECRET_KEY", "S3_SECRET_KEY")
-S3_ENDPOINT_URL = _env("ZF_S3_ENDPOINT_URL", "S3_ENDPOINT_URL")
+S3_ACCESS_KEY = os.getenv("ZF_S3_ACCESS_KEY", "")
+S3_SECRET_KEY = os.getenv("ZF_S3_SECRET_KEY", "")
+S3_ENDPOINT_URL = os.getenv("ZF_S3_ENDPOINT_URL", "")
 
 
 def _mask_secret(value: str | None) -> str:
