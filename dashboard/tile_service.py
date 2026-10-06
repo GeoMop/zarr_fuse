@@ -25,18 +25,18 @@ try:
 except FileNotFoundError:
     VIEWS_PATH = None
 
-_VIEW_NAME = os.getenv("HV_DASHBOARD_VIEW") or os.getenv("HV_DASHBOARD_ENDPOINT")
-if _VIEW_NAME is None and VIEWS_PATH is not None:
-    _VIEW_NAME = get_default_endpoint_name(VIEWS_PATH)
+DEFAULT_VIEW_NAME = os.getenv("HV_DASHBOARD_VIEW") or os.getenv("HV_DASHBOARD_ENDPOINT")
+if DEFAULT_VIEW_NAME is None and VIEWS_PATH is not None:
+    DEFAULT_VIEW_NAME = get_default_endpoint_name(VIEWS_PATH)
 
 
-def _overlay_source_from_view() -> tuple[str, str] | None:
+def _overlay_source_from_view(view_name: str) -> tuple[str, str] | None:
     """Resolve (bucket, prefix) from the view's overlay source_uri.
 
     Returns ``None`` when the uri is missing, malformed, or not an ``s3://``
     URI. When present it takes full precedence over TILE_BUCKET/TILE_PREFIX.
     """
-    if not _VIEW_NAME or VIEWS_PATH is None:
+    if not view_name or VIEWS_PATH is None:
         return None
     if not VIEWS_PATH.exists():
         return None
@@ -44,7 +44,7 @@ def _overlay_source_from_view() -> tuple[str, str] | None:
     try:
         from dashboard.config import _parse_view_config
         config = _parse_view_config(VIEWS_PATH)
-        view = config.get(_VIEW_NAME)
+        view = config.get(view_name)
     except Exception:
         return None
 
@@ -65,92 +65,75 @@ def _overlay_source_from_view() -> tuple[str, str] | None:
     prefix = parsed.path.strip("/")
     return bucket, (prefix + "/" if prefix else "")
 
-OVERLAY_ENABLED = (
-    overlay_enabled(VIEWS_PATH, _VIEW_NAME)
-    if VIEWS_PATH is not None
-    else False
-)
+def _cache_dir_from_view(view_name: str) -> str | None:
+    if not view_name or VIEWS_PATH is None:
+        return None
 
-if OVERLAY_ENABLED:
-    ENDPOINT_URL = schema_endpoint_url(VIEWS_PATH, _VIEW_NAME)
+    views_path = VIEWS_PATH
+    if not views_path.exists():
+        return None
 
-    # visualization.overlay.source_uri governs the tile location when set;
-    # otherwise fall back to TILE_BUCKET/TILE_PREFIX or the defaults above.
-    source = _overlay_source_from_view()
-    if source:
-        BUCKET_NAME, PREFIX = source
+    try:
+        from dashboard.config import _parse_view_config
+        config = _parse_view_config(views_path)
+    except Exception:
+        return None
 
-    def _cache_dir_from_view() -> str | None:
-        if not _VIEW_NAME or VIEWS_PATH is None:
-            return None
+    view = config.get(view_name)
+    if not isinstance(view, dict):
+        return None
 
-        views_path = VIEWS_PATH
-        if not views_path.exists():
-            return None
+    visualization = view.get("visualization", {})
+    overlay = visualization.get("overlay", {}) if isinstance(visualization, dict) else {}
+    cache_dir = overlay.get("cache_dir") if isinstance(overlay, dict) else None
 
-        try:
-            from dashboard.config import _parse_view_config
-            config = _parse_view_config(views_path)
-        except Exception:
-            return None
+    # Backward compatibility for older view configs.
+    if not isinstance(cache_dir, str) or not cache_dir.strip():
+        tile_build = view.get("tile_build", {})
+        if isinstance(tile_build, dict):
+            cache_dir = tile_build.get("cache_dir")
 
-        view = config.get(_VIEW_NAME)
-        if not isinstance(view, dict):
-            return None
+    if not isinstance(cache_dir, str) or not cache_dir.strip():
+        return None
 
-        visualization = view.get("visualization", {})
-        overlay = visualization.get("overlay", {}) if isinstance(visualization, dict) else {}
-        cache_dir = overlay.get("cache_dir") if isinstance(overlay, dict) else None
+    expanded = os.path.expandvars(os.path.expanduser(cache_dir.strip()))
+    candidate = Path(expanded)
+    if candidate.is_absolute():
+        return str(candidate)
 
-        # Backward compatibility for older view configs.
-        if not isinstance(cache_dir, str) or not cache_dir.strip():
-            tile_build = view.get("tile_build", {})
-            if isinstance(tile_build, dict):
-                cache_dir = tile_build.get("cache_dir")
+    # Relative paths are resolved against the project base dir (parent of config dir).
+    base_dir = views_path.parent.parent
+    return str(base_dir / candidate)
 
-        if not isinstance(cache_dir, str) or not cache_dir.strip():
-            return None
+def _view_settings(view_name: str) -> tuple[str, str, Path, object] | None:
+    if VIEWS_PATH is None or not view_name or not overlay_enabled(VIEWS_PATH, view_name):
+        return None
 
-        expanded = os.path.expandvars(os.path.expanduser(cache_dir.strip()))
-        candidate = Path(expanded)
-        if candidate.is_absolute():
-            return str(candidate)
-
-        # Relative paths are resolved against the project base dir (parent of config dir).
-        base_dir = views_path.parent.parent
-        return str(base_dir / candidate)
-
-    # Cache location precedence:
-    # 1) ZF_CACHE_DIR env var
-    # 2) visualization.overlay.cache_dir in zf_view.yaml for selected view
-    # 3) OS temp directory
-    CACHE_DIR = Path(
+    source = _overlay_source_from_view(view_name)
+    bucket, prefix = source or (BUCKET_NAME, PREFIX)
+    endpoint_url = schema_endpoint_url(VIEWS_PATH, view_name)
+    cache_dir = Path(
         os.getenv("ZF_CACHE_DIR")
-        or _cache_dir_from_view()
+        or _cache_dir_from_view(view_name)
         or tempfile.gettempdir()
     )
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    CACHE_FILE = CACHE_DIR / "tile_url_cache.json"
-
-    s3 = boto3.client(
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = cache_dir / f"{view_name}_tile_url_cache.json"
+    client = boto3.client(
         "s3",
         aws_access_key_id=ACCESS_KEY,
         aws_secret_access_key=SECRET_KEY,
-        endpoint_url=ENDPOINT_URL,
+        endpoint_url=endpoint_url,
     )
-else:
-    ENDPOINT_URL = None
-    CACHE_DIR = None
-    CACHE_FILE = None
-    s3 = None
+    return bucket, prefix, cache_file, client
 
 
-def load_cache() -> dict:
-    if CACHE_FILE is None or not CACHE_FILE.exists():
+def load_cache(cache_file: Path) -> dict:
+    if not cache_file.exists():
         return {}
 
     try:
-        with CACHE_FILE.open("r", encoding="utf-8") as f:
+        with cache_file.open("r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception:
         return {}
@@ -162,29 +145,29 @@ def load_cache() -> dict:
     }
 
 
-def save_cache(data: dict) -> None:
-    if CACHE_FILE is None:
-        return
-    tmp = CACHE_FILE.with_suffix(".tmp")
+def save_cache(cache_file: Path, data: dict) -> None:
+    tmp = cache_file.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    tmp.replace(CACHE_FILE)
-
-
-cache: dict[str, dict] = load_cache()
+    tmp.replace(cache_file)
 
 
 def tile_id(z: int, x: int, y: int) -> str:
     return f"{z}/{x}/{y}"
 
 
-def tile_key(z: int, x: int, y: int) -> str:
-    return f"{PREFIX}{z}/{x}/{y}.png"
+def tile_key(prefix: str, z: int, x: int, y: int) -> str:
+    return f"{prefix}{z}/{x}/{y}.png"
 
 
-def get_tile_url(z: int, x: int, y: int, expires_in: int = DEFAULT_EXPIRES_IN) -> str:
-    if not OVERLAY_ENABLED or s3 is None:
+def get_tile_url(z: int, x: int, y: int, view_name: str,
+                 expires_in: int = DEFAULT_EXPIRES_IN) -> str:
+    settings = _view_settings(view_name)
+    if settings is None:
         raise HTTPError(404, "Overlay is disabled")
+
+    bucket, prefix, cache_file, s3 = settings
+    cache = load_cache(cache_file)
 
     tid = tile_id(z, x, y)
     now = time.time()
@@ -193,11 +176,11 @@ def get_tile_url(z: int, x: int, y: int, expires_in: int = DEFAULT_EXPIRES_IN) -
     if item and item.get("expires_at", 0) > now:
         return item["url"]
 
-    key = tile_key(z, x, y)
+    key = tile_key(prefix, z, x, y)
 
     url = s3.generate_presigned_url(
         "get_object",
-        Params={"Bucket": BUCKET_NAME, "Key": key},
+        Params={"Bucket": bucket, "Key": key},
         ExpiresIn=expires_in,
     )
 
@@ -205,18 +188,16 @@ def get_tile_url(z: int, x: int, y: int, expires_in: int = DEFAULT_EXPIRES_IN) -
         "url": url,
         "expires_at": now + expires_in - EXPIRY_BUFFER_SECONDS,
     }
-    save_cache(cache)
+    save_cache(cache_file, cache)
     return url
 
 
 class S3TileHandler(RequestHandler):
     def get(self, z: str, x: str, y: str):
-        if not OVERLAY_ENABLED or s3 is None:
-            raise HTTPError(404, "Overlay is disabled")
-
         try:
             z_i, x_i, y_i = int(z), int(x), int(y)
-            url = get_tile_url(z_i, x_i, y_i)
+            view_name = self.get_argument("view", DEFAULT_VIEW_NAME)
+            url = get_tile_url(z_i, x_i, y_i, view_name)
         except HTTPError:
             raise
         except Exception as e:
