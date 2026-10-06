@@ -42,14 +42,17 @@ if str(REPO_ROOT) not in sys.path:
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).with_name(".env"))
+# Standalone configuration: set the paths below or pass the corresponding CLI options.
+# Required environment variables: ZF_S3_ACCESS_KEY, ZF_S3_SECRET_KEY,
+# and ZF_S3_ENDPOINT_URL (S3_* aliases are also accepted).
+SCHEMA_PATH = ""
+GROUP_PATH = ""
+ENV_FILE_PATH = ""
+
+if ENV_FILE_PATH:
+    load_dotenv(ENV_FILE_PATH)
 
 import zarr_fuse as zf
-
-
-
-SCHEMA_PATH = "dashboard/scripts/bukov_temperatures_schema.yaml"
-GROUP_PATH = "bukov"
 
 
 def _env(*names: str) -> str:
