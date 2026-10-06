@@ -135,7 +135,6 @@ The detailed guides live in [docs/](docs):
 - [New Project Setup (Templates + Workflow)](docs/TEMPLATE.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Config Packaging](docs/CONFIG_PACKAGING.md)
-- [Refactor Notes](docs/REFACTOR_NOTES.md)
 - [Tile Pyramid Guide](docs/tile_pyramid_README.md)
 - [Docs Index](docs/DOCS_INDEX.md)
 
@@ -191,8 +190,6 @@ credentials from the general environment (filled from the gitignored
 - `setup_gdal_env.ps1` / `setup_gdal_env.sh` - Create a conda `gdal-test`
   environment (conda-forge only) with GDAL, required by
   `build_overlay_tiles.py` (Windows / Linux-macOS).
-- `prepare_bukov_gcps.py` - Legacy Bukov GCP VRT preparation; superseded by
-  `build_overlay_tiles.py`, kept for reference.
 
 ## File Organization
 

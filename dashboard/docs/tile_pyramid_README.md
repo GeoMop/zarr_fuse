@@ -135,18 +135,18 @@ The dashboard itself does not need GDAL at runtime if it only consumes already g
 
 ## Preprocessing steps used in this project
 
-### 1. Create a GCP-based VRT
-A script reads the georeference file and attaches control points to the source image.
+### 1. Build the overlay tile pipeline
+`build_overlay_tiles.py` reads the selected view's `tile_build` configuration,
+attaches the configured control points, creates the intermediate raster files,
+generates the XYZ tile pyramid, and uploads it to the configured S3 prefix.
 
-Example:
+Preview the configured pipeline with:
 
 ```powershell
-python .\dashboard\scripts\prepare_bukov_gcps.py
+python .\dashboard\scripts\build_overlay_tiles.py --dry-run
 ```
 
-This creates a file such as:
-
-- `bukov_gcps.vrt`
+Use the configured view file and S3 credentials for a real build.
 
 ### 2. Warp to Web Mercator
 The GCP VRT is warped into EPSG:3857.

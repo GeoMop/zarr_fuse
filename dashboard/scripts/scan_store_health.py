@@ -7,8 +7,8 @@ missing values (NaN / NaT / None / empty string).  The optional ``GROUP_PATH``
 constant lets you inspect a specific data group instead of the store root.
 
 S3 credentials are read from the ``ZF_S3_ACCESS_KEY`` / ``ZF_S3_SECRET_KEY`` /
-``ZF_S3_ENDPOINT_URL`` environment variables (with ``S3_*`` fallback) so they
-are not committed to the repository.
+``ZF_S3_ENDPOINT_URL`` environment variables so they are not committed to the
+repository.
 
 Configuration (fill in per project, no hardcoded store specifics):
     SCHEMA_PATH   - path to the zarr-fuse schema YAML for the store
