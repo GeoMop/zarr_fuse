@@ -89,12 +89,6 @@ def _cache_dir_from_view(view_name: str) -> str | None:
     overlay = visualization.get("overlay", {}) if isinstance(visualization, dict) else {}
     cache_dir = overlay.get("cache_dir") if isinstance(overlay, dict) else None
 
-    # Backward compatibility for older view configs.
-    if not isinstance(cache_dir, str) or not cache_dir.strip():
-        tile_build = view.get("tile_build", {})
-        if isinstance(tile_build, dict):
-            cache_dir = tile_build.get("cache_dir")
-
     if not isinstance(cache_dir, str) or not cache_dir.strip():
         return None
 

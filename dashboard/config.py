@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import yaml
 from dotenv import load_dotenv
+from zarr_fuse import schema as zf_schema
 
 VIEWS_ENV_VAR = "ZF_VIEW_PATH"
 LEGACY_ENDPOINTS_ENV_VAR = "ENDPOINTS_PATH"
@@ -698,12 +699,11 @@ def schema_endpoint_url(config_path: Path, view_name: str) -> Optional[str]:
         return None
 
     try:
-        with schema_path.open("r", encoding="utf-8") as f:
-            schema = yaml.safe_load(f) or {}
+        schema = zf_schema.deserialize(schema_path)
     except Exception:
         return None
 
-    attrs = schema.get("ATTRS")
+    attrs = schema.ds.ATTRS
     if not isinstance(attrs, dict):
         return None
 
