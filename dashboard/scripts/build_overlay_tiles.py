@@ -450,10 +450,11 @@ def run_delete(s3, bucket: str, prefix: str, dry_run: bool, yes: bool) -> int:
     from botocore.exceptions import ClientError
 
     normalized_prefix = prefix.strip("/")
+    s3_prefix = f"{normalized_prefix}/" if normalized_prefix else ""
     keys: list[str] = []
     try:
         paginator = s3.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=bucket, Prefix=normalized_prefix):
+        for page in paginator.paginate(Bucket=bucket, Prefix=s3_prefix):
             keys.extend(obj["Key"] for obj in page.get("Contents", []))
     except ClientError as exc:
         raise SystemExit(
@@ -498,7 +499,7 @@ def run_delete(s3, bucket: str, prefix: str, dry_run: bool, yes: bool) -> int:
 
     left = 0
     for page in s3.get_paginator("list_objects_v2").paginate(
-        Bucket=bucket, Prefix=normalized_prefix
+        Bucket=bucket, Prefix=s3_prefix
     ):
         left += len(page.get("Contents", []))
     if left:
