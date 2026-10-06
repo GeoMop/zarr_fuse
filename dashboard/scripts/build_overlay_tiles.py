@@ -365,27 +365,27 @@ def _s3_client(upload_config: dict[str, Optional[str]]):
     )
 
 
-def tiles_exist_on_s3(s3, bucket: str, prefix: str) -> bool:
-    """Return True if any object exists under bucket/prefix.
+def _completion_key(prefix: str) -> str:
+    normalized_prefix = prefix.strip("/")
+    return f"{normalized_prefix}/.zarr-fuse-complete" if normalized_prefix else ".zarr-fuse-complete"
 
-    This is the tile-system presence test: a non-empty prefix means the tile
-    pyramid was already built and published, so nothing needs to be redone.
-    """
+
+def tiles_exist_on_s3(s3, bucket: str, prefix: str) -> bool:
+    """Return True only when a completed tile upload marker exists."""
     from botocore.exceptions import ClientError
 
     normalized_prefix = prefix.strip("/")
     try:
-        response = s3.list_objects_v2(
-            Bucket=bucket,
-            Prefix=normalized_prefix,
-            MaxKeys=1,
-        )
+        s3.head_object(Bucket=bucket, Key=_completion_key(normalized_prefix))
     except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in {"404", "NoSuchKey", "NotFound"}:
+            return False
         raise SystemExit(
             f"ERROR: S3 existence check failed on s3://{bucket}/{normalized_prefix} "
             f"({exc}). Check credentials and endpoint."
         )
-    return int(response.get("KeyCount", 0)) > 0
+    return True
 
 
 def upload_tiles(tiles_dir: Path, s3, bucket: str, prefix: str) -> tuple[int, int]:
@@ -703,6 +703,11 @@ def main(argv: Optional[list[str]] = None) -> None:
         print("\n[6/6] uploading tiles")
         assert bucket is not None
         uploaded, unchanged = upload_tiles(tiles_dir, s3, str(bucket), normalized_prefix)
+        s3.put_object(
+            Bucket=str(bucket),
+            Key=_completion_key(normalized_prefix),
+            Body=b"",
+        )
         print(f"Tiles uploaded: {uploaded}, unchanged/skipped: {unchanged}")
         if args.no_cleanup:
             print("--no-cleanup: keeping locally generated tiles as-is")
