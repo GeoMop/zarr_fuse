@@ -663,29 +663,27 @@ def get_default_endpoint_name(config_path: Path) -> Optional[str]:
     return None
 
 
-def load_view_config(config_path: Path, view_name: Optional[str] = None) -> ViewConfig:
-    """Load ONE view config; falls back to the configured default view name."""
+def load_view_config(config_path: Path, view_name: str) -> ViewConfig:
+    """Load one explicitly named view configuration."""
     views = load_views(config_path)
 
     if not views:
         raise ValueError(f"No views configured in {config_path}")
 
-    name = view_name or get_default_endpoint_name(config_path)
-    if not name:
-        raise ValueError("view_name required; no default view configured")
+    if not view_name:
+        raise ValueError("view_name is required")
 
-    if name not in views:
-        raise KeyError(f"View '{name}' not found in {config_path}")
+    if view_name not in views:
+        raise KeyError(f"View '{view_name}' not found in {config_path}")
 
-    return views[name]
+    return views[view_name]
 
 
-def schema_endpoint_url(config_path: Path, view_name: Optional[str] = None) -> Optional[str]:
+def schema_endpoint_url(config_path: Path, view_name: str) -> Optional[str]:
     """Resolve the S3 endpoint URL strictly from the view schema file.
 
-    The S3 endpoint URL is owned by the schema (ATTRS.S3_ENDPOINT_URL); no
-    environment fallback is applied here. When ``view_name`` is omitted the
-    configured default view is used.
+    The S3 endpoint URL is owned by the schema (ATTRS.S3_ENDPOINT_URL), and
+    the view name must be provided explicitly.
     """
     if not config_path.exists():
         return None
