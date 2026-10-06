@@ -642,7 +642,7 @@ def load_views(config_path: Path) -> Dict[str, ViewConfig]:
 
 
 def get_default_endpoint_name(config_path: Path) -> Optional[str]:
-    """Return the default endpoint name from the _dashboard section, if configured."""
+    """Return the default view name from the _dashboard section, if configured."""
     if not config_path.exists():
         return None
 
@@ -652,13 +652,13 @@ def get_default_endpoint_name(config_path: Path) -> Optional[str]:
     if not isinstance(meta, dict):
         return None
 
-    default_endpoint = meta.get("default_endpoint")
-    if not isinstance(default_endpoint, str):
+    default_view = meta.get("default_view")
+    if not isinstance(default_view, str):
         return None
 
-    view_config = config.get(default_endpoint)
+    view_config = config.get(default_view)
     if isinstance(view_config, dict):
-        return default_endpoint
+        return default_view
 
     return None
 

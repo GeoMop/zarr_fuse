@@ -25,9 +25,11 @@ try:
 except FileNotFoundError:
     VIEWS_PATH = None
 
-DEFAULT_VIEW_NAME = os.getenv("HV_DASHBOARD_VIEW") or os.getenv("HV_DASHBOARD_ENDPOINT")
-if DEFAULT_VIEW_NAME is None and VIEWS_PATH is not None:
-    DEFAULT_VIEW_NAME = get_default_endpoint_name(VIEWS_PATH)
+DEFAULT_VIEW_NAME = (
+    get_default_endpoint_name(VIEWS_PATH)
+    if VIEWS_PATH is not None
+    else None
+)
 
 
 def _overlay_source_from_view(view_name: str) -> tuple[str, str] | None:

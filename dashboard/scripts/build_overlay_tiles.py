@@ -25,8 +25,7 @@ All parameters are wired to the project configuration:
   entry point (``find_view_file``, as used by composed.py): ``--view-path``
   flag, then ``ZF_VIEW_PATH`` env, then an upward search from the current
   directory;
-- the view is selected via ``--view`` / ``HV_DASHBOARD_VIEW``, falling back to
-  ``_dashboard.default_endpoint``;
+- the view is selected from ``_dashboard.default_view`` in ``zf_view.yaml``;
 - build parameters (paths, zoom range, CRS, resampling, S3 bucket/prefix)
   come exclusively from the ``tile_build`` section of the selected view;
 - generic processing defaults (zoom range, CRS values, resampling) are owned
@@ -184,13 +183,11 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description="Build overlay XYZ tiles from a georeferenced image and upload them to S3.",
+        allow_abbrev=False,
     )
     parser.add_argument("--view-path", default=None,
                         help="path to zf_view.yaml (default: ZF_VIEW_PATH env, "
                              "then upward search from the current directory)")
-    parser.add_argument("--view", default=None,
-                        help="view name in zf_view.yaml (default: HV_DASHBOARD_VIEW "
-                             "env, then _dashboard.default_endpoint)")
     parser.add_argument("--force", action="store_true",
                         help="full redo: bypass the S3 existence short-circuit "
                              "and rebuild all local steps even if outputs exist")
@@ -568,12 +565,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     views_path, views_src = _resolve_views_path(args.view_path)
     load_environment_from_config(views_path)
 
-    view_name = args.view or os.getenv("HV_DASHBOARD_VIEW") \
-        or get_default_endpoint_name(views_path)
+    view_name = get_default_endpoint_name(views_path)
     if not view_name:
         raise SystemExit(
-            "ERROR: no view selected. Pass --view, set HV_DASHBOARD_VIEW, "
-            "or configure _dashboard.default_endpoint in zf_view.yaml."
+            "ERROR: no default view configured. Set _dashboard.default_view "
+            "in zf_view.yaml."
         )
 
     view = load_view_config(views_path, view_name)
