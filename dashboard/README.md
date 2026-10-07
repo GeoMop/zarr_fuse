@@ -136,27 +136,28 @@ The detailed guides live in [docs/](docs):
 ## Building Tiles (Optional)
 
 For map overlay support, tiles can be pre-built with `scripts/build_overlay_tiles.py`.
-Build parameters (paths, zoom range, CRS, resampling, S3 target) come from the
+Build parameters (source paths, zoom range, resampling, S3 target) come from the
 `tile_build` section of the selected view:
 
 ```yaml
 tile_build:
   source_image: "my_overlay.png"
   georef_file: "my_georef.json"
-  vrt_file: "tiles/source_gcps.vrt"
-  warped_tif: "tiles/source_3857.tif"
-  rgba_vrt: "tiles/source_3857_rgba.vrt"
-  tiles_dir: "tiles"
+  gcp_srs: "EPSG:4326"     # default: CRS of the georef control points
   min_zoom: 0              # default
   max_zoom: 20             # default
-  target_srs: "EPSG:3857"  # default
-  gcp_srs: "EPSG:4326"     # default
-  resampling: "near"       # default
+  warp_resampling: "near"  # default: reprojection (gdalwarp) resampling
   tile_resampling: "average"
   s3:
     bucket: "my-bucket"
     prefix: "overlays/my-project/"
 ```
+
+Relative paths resolve against `base_dir`, the directory above the config's directory
+(`zf_view.yaml.parent.parent`). The section is validated strictly: unknown or removed keys
+(for example `vrt_file`, `warped_tif`, `rgba_vrt`, `tiles_dir`, `target_srs`, `resampling`)
+raise a `ValueError` naming them. Intermediate rasters and the target CRS (EPSG:3857) are
+internal to the build script; it writes them under `workdir/tile_build/<view_name>/`.
 
 Insert the `tile_build` block above to build and upload tiles whenever the S3
 prefix does not yet contain any (ensure-semantics; `--force` rebuilds).

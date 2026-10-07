@@ -55,15 +55,10 @@ bukov_endpoint:
   tile_build:
     source_image: "config/source_overlay/12p_final.png"
     georef_file: "config/source_overlay/bukov_georef.json"
-    vrt_file: "test_overlay/source_gcps.vrt"
-    warped_tif: "test_overlay/source_3857.tif"
-    rgba_vrt: "test_overlay/source_3857_rgba.vrt"
-    tiles_dir: "test_overlay/tiles"
+    gcp_srs: "EPSG:4326"
     min_zoom: 0
     max_zoom: 20
-    target_srs: "EPSG:3857"
-    gcp_srs: "EPSG:4326"
-    resampling: "near"
+    warp_resampling: "near"
     tile_resampling: "average"
     s3:
       bucket: "bukov"

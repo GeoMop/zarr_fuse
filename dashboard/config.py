@@ -100,19 +100,23 @@ class TileS3Config:
 
 @dataclass
 class TileBuildConfig:
-    source_image: Optional[str] = None
-    georef_file: Optional[str] = None
-    vrt_file: Optional[str] = None
-    warped_tif: Optional[str] = None
-    rgba_vrt: Optional[str] = None
-    tiles_dir: Optional[str] = None
-    min_zoom: int = 0
-    max_zoom: int = 20
-    target_srs: str = "EPSG:3857"
-    gcp_srs: str = "EPSG:4326"
-    resampling: str = "near"
-    tile_resampling: Optional[str] = None
-    s3: TileS3Config = field(default_factory=TileS3Config)
+    """Public ``tile_build`` section of zf_view.yaml (overlay tile pipeline).
+
+    ``base_dir`` is the directory above the config's directory
+    (``zf_view.yaml.parent.parent``); relative paths in this section
+    resolve against it. Intermediate raster paths and the target CRS are
+    internal to dashboard/scripts/build_overlay_tiles.py and are not
+    configurable.
+    """
+
+    source_image: Optional[str] = None  # source raster; path relative to base_dir
+    georef_file: Optional[str] = None  # QGIS-style GCP JSON (sourceX/sourceY pixels, mapX/mapY ground)
+    gcp_srs: str = "EPSG:4326"  # CRS of mapX/mapY in georef_file (gdal_translate -a_srs)
+    min_zoom: int = 0  # lowest XYZ zoom level built
+    max_zoom: int = 20  # highest XYZ zoom level built; overlay is missing above it
+    warp_resampling: str = "near"  # gdalwarp -r during reprojection to EPSG:3857
+    tile_resampling: Optional[str] = None  # gdal2tiles -r; None -> use warp_resampling
+    s3: TileS3Config = field(default_factory=TileS3Config)  # publish target bucket/prefix
 
 
 @dataclass
@@ -138,6 +142,17 @@ class ViewConfig:
 
 FIELD_NAMES = {"lat", "lon", "time", "vertical", "entity"}
 REQUIRED_FIELD_NAMES = {"lat", "lon", "time", "entity"}
+
+TILE_BUILD_ALLOWED_KEYS = frozenset({
+    "source_image",
+    "georef_file",
+    "gcp_srs",
+    "min_zoom",
+    "max_zoom",
+    "warp_resampling",
+    "tile_resampling",
+    "s3",
+})
 
 
 def find_view_file() -> Path:
@@ -467,7 +482,18 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
     map_data = visualization_data["map"]
     timeseries_data = visualization_data["timeseries"]
     overlay_data = visualization_data["overlay"]
-    tile_build_data = view_data.get("tile_build", {"enabled": False})
+    tile_build_raw = view_data.get("tile_build")
+    tile_build_data = tile_build_raw if tile_build_raw is not None else {}
+    if not isinstance(tile_build_data, dict):
+        raise ValueError(f"View '{view_name}' tile_build must be a mapping/object")
+
+    unknown_tile_build_keys = sorted(set(tile_build_data) - TILE_BUILD_ALLOWED_KEYS)
+    if unknown_tile_build_keys:
+        raise ValueError(
+            f"View '{view_name}' tile_build contains unsupported key(s): "
+            f"{', '.join(unknown_tile_build_keys)}. "
+            f"Allowed keys: {', '.join(sorted(TILE_BUILD_ALLOWED_KEYS))}."
+        )
 
     if not isinstance(schema_data, dict):
         raise ValueError(f"View '{view_name}' variable_map must be a mapping/object")
@@ -590,15 +616,10 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
         tile_build=TileBuildConfig(
             source_image=tile_build_data.get("source_image"),
             georef_file=tile_build_data.get("georef_file"),
-            vrt_file=tile_build_data.get("vrt_file"),
-            warped_tif=tile_build_data.get("warped_tif"),
-            rgba_vrt=tile_build_data.get("rgba_vrt"),
-            tiles_dir=tile_build_data.get("tiles_dir"),
+            gcp_srs=tile_build_data.get("gcp_srs", "EPSG:4326"),
             min_zoom=tile_build_data.get("min_zoom", 0),
             max_zoom=tile_build_data.get("max_zoom", 20),
-            target_srs=tile_build_data.get("target_srs", "EPSG:3857"),
-            gcp_srs=tile_build_data.get("gcp_srs", "EPSG:4326"),
-            resampling=tile_build_data.get("resampling", "near"),
+            warp_resampling=tile_build_data.get("warp_resampling", "near"),
             tile_resampling=tile_build_data.get("tile_resampling"),
             s3=_build_tile_s3_config(tile_build_data.get("s3")),
         ),
