@@ -49,15 +49,11 @@ def _parse_view_config(config_path: Path) -> dict:
 class SourceConfig:
     """``source`` section of zf_view.yaml: where the view's dataset store lives.
 
-    ``type``, ``store_type`` and ``uri`` are required by config validation;
-    only ``uri`` is opened (via zarr_fuse), the other two are declarative
-    today. ``schema_path`` is stored raw (as configured, usually relative to
-    base_dir); the resolved absolute path lives in ``SchemaConfig.file``.
+    ``uri`` is the only required key and the only one opened (via zarr_fuse).
+    ``schema_path`` is required and used to locate the schema file; the
+    resolved absolute path is stored in ``SchemaConfig.file``, not here.
     """
-    type: str  # storage scheme of the store, e.g. "s3" or "local" (required, not read yet)
-    store_type: str  # store implementation, e.g. "zarr" (required, not read yet)
     uri: StoreURI  # store location opened by zarr_fuse, e.g. s3://bucket/store.zarr
-    schema_path: Optional[Path] = None  # schema YAML as configured (usually relative to base_dir)
 
 
 @dataclass
@@ -87,10 +83,9 @@ class SchemaDisplayConfig:
     """UI labels derived from the schema for the configured display variable.
 
     Built by ``_read_schema_display`` from the schema's VARS/COORDS metadata;
-    ``display_unit`` is looked up for ``defaults.display_variable``.
+    ``display_variable`` is passed through from ``defaults``.
     """
-    display_variable: Optional[str] = None  # variable whose unit was looked up (defaults.display_variable)
-    display_unit: Optional[str] = None  # unit of that variable from the schema VARS section
+    display_variable: Optional[str] = None  # selected display variable (defaults.display_variable)
     entity_name: Optional[str] = None  # dataset column shown as the site/entity label
     vertical_name: Optional[str] = None  # dataset column shown as the depth/level label
 
@@ -105,18 +100,13 @@ class DefaultsConfig:
 
 @dataclass
 class MapConfig:
-    """``visualization.map`` section: base map extent, marker look and clustering.
+    """``visualization.map`` section: marker look and clustering.
 
-    ``title``, ``point_size`` and the cluster keys are read by
-    ``map_views.build_map_view``; the extent/opacity keys are parsed but not
-    read by the current dashboard code yet.
+    ``title`` and ``point_size`` are required keys; all fields are read by
+    ``map_views.build_map_view``.
     """
-    center_lat: Optional[float] = None  # initial map center latitude (degrees, not read yet)
-    center_lon: Optional[float] = None  # initial map center longitude (degrees, not read yet)
-    zoom: Optional[int] = None  # initial zoom level (not read yet)
     title: Optional[str] = None  # map title (required); also shown on the points layer
     point_size: Optional[int] = None  # marker size of a single point / base size of a cluster (required)
-    alpha: Optional[float] = None  # marker opacity 0..1 (required, not read yet)
     cluster_enabled: bool = True  # group nearby markers into grid cells
     cluster_eps_factor: float = 0.05  # cluster grid size as a fraction of the current view width
     cluster_buffer_factor: float = 0.1  # margin around the view (fraction of width) still clustered
@@ -179,13 +169,11 @@ class VisualizationConfig:
 class ViewConfig:
     """One named view of zf_view.yaml: the full dashboard configuration for it.
 
-    Required keys: ``name``, ``reload_interval``, ``description``, ``version``,
-    ``source`` and ``schema``; every other section defaults to an empty config.
+    The YAML key of the view is stored as ``name``. Required sections:
+    ``source``, ``variable_map``, ``defaults`` and ``visualization``; every
+    other section defaults to an empty config.
     """
     name: str  # view key in zf_view.yaml; also the ?view= URL parameter
-    reload_interval: int  # seconds between automatic data reloads (no in-repo consumer yet)
-    description: str  # human-readable view description (not read yet)
-    version: str  # version string of this view configuration (not read yet)
     source: SourceConfig  # dataset store location
     schema: SchemaConfig  # resolved schema file + field mapping
     schema_display: SchemaDisplayConfig = field(default_factory=SchemaDisplayConfig)  # labels/units from schema
@@ -445,15 +433,11 @@ def _read_schema_display(
     if group_data is None:
         return SchemaDisplayConfig(
             display_variable=display_variable,
-            display_unit=None,
             entity_name=entity_field,
             vertical_name=vertical_field,
         )
 
-    vars_data = group_data.get("VARS", {})
     coords_data = group_data.get("COORDS", {})
-
-    variable_data = vars_data.get(display_variable or "", {})
 
     entity_name = entity_field
     if entity_field and entity_field in coords_data and isinstance(coords_data[entity_field], dict):
@@ -465,7 +449,6 @@ def _read_schema_display(
 
     return SchemaDisplayConfig(
         display_variable=display_variable,
-        display_unit=variable_data.get("unit"),
         entity_name=entity_name,
         vertical_name=vertical_name,
     )
@@ -572,10 +555,8 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
             f"View '{view_name}' must define either variable_map.fields or nested group mappings."
         )
 
-    required_source_fields = ["type", "store_type", "uri"]
-    for field_name in required_source_fields:
-        if not source_data.get(field_name):
-            raise ValueError(f"View '{view_name}' is missing source.{field_name}")
+    if not source_data.get("uri"):
+        raise ValueError(f"View '{view_name}' is missing source.uri")
 
     schema_file = source_data["schema_path"]
     schemas_path = os.getenv(SCHEMAS_ENV_VAR)
@@ -634,14 +615,8 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
 
     return ViewConfig(
         name=view_name,
-        reload_interval=view_data["reload_interval"],
-        description=view_data["description"],
-        version=view_data["version"],
         source=SourceConfig(
-            type=source_data["type"],
-            store_type=source_data["store_type"],
             uri=StoreURI(source_data["uri"]),
-            schema_path=Path(schema_file),
         ),
         schema=SchemaConfig(
             file=str(schema_file_path),
@@ -656,12 +631,8 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
         ),
             visualization=VisualizationConfig(
             map=MapConfig(
-                center_lat=map_data.get("center_lat"),
-                center_lon=map_data.get("center_lon"),
-                zoom=map_data.get("zoom"),
                 title=map_data["title"],
                 point_size=map_data["point_size"],
-                alpha=map_data["alpha"],
                 cluster_enabled=_cluster_get("cluster_enabled", True),
                 cluster_eps_factor=_cluster_get("cluster_eps_factor", 0.05),
                 cluster_buffer_factor=_cluster_get("cluster_buffer_factor", 0.1),

@@ -20,10 +20,7 @@ from dashboard.data import LocalClient
 def _make_view(display_variable: str = "temp") -> ViewConfig:
     return ViewConfig(
         name="demo",
-        reload_interval=0,
-        description="",
-        version="0",
-        source=SourceConfig(type="s3", store_type="zarr", uri=StoreURI("s3://demo")),
+        source=SourceConfig(uri=StoreURI("s3://demo")),
         schema=SchemaConfig(
             file="schema.yaml",
             fields=SchemaFieldsConfig(lat="lat", lon="lon", time="date_time", vertical="depth_level", entity="site_id"),

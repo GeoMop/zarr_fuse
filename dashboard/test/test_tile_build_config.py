@@ -22,12 +22,7 @@ _dashboard:
   default_view: "test_view"
 
 test_view:
-  description: "test view"
-  version: "1.0.0"
-  reload_interval: 300
   source:
-    type: "s3"
-    store_type: "zarr"
     uri: "s3://bucket/store.zarr"
     schema_path: "config/test_schema.yaml"
   variable_map:
@@ -43,7 +38,6 @@ test_view:
     map:
       title: "Test"
       point_size: 5
-      alpha: 0.5
     timeseries:
       middle_window_days: 30
       right_window_hours: 24
@@ -67,16 +61,16 @@ VALID_TILE_BUILD = """\
 REMOVED_KEYS = ["vrt_file", "warped_tif", "rgba_vrt", "tiles_dir", "target_srs", "s3"]
 
 
-def _write_view(tmp_path: Path, tile_build_block: str | None) -> Path:
+def _write_view(tmp_path: Path, tile_build_block: str | None, template: str = VIEW_TEMPLATE) -> Path:
     """Write a minimal but valid zf_view.yaml (+ schema) into tmp_path."""
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "test_schema.yaml").write_text("{}\n", encoding="utf-8")
 
     if tile_build_block is None:
-        text = VIEW_TEMPLATE.replace("  tile_build:\n{tile_build_block}\n", "")
+        text = template.replace("  tile_build:\n{tile_build_block}\n", "")
     else:
-        text = VIEW_TEMPLATE.replace("{tile_build_block}", tile_build_block)
+        text = template.replace("{tile_build_block}", tile_build_block)
 
     views_path = config_dir / "zf_view.yaml"
     views_path.write_text(text, encoding="utf-8")
@@ -154,6 +148,40 @@ def test_invalid_target_url_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="target_url"):
         load_views(views_path)
+
+
+def test_legacy_dead_keys_ignored(tmp_path: Path) -> None:
+    """A YAML written before the dead keys were removed keeps loading unchanged.
+
+    The keys ``description``, ``version``, ``reload_interval``, ``source.type``,
+    ``source.store_type``, ``map.alpha``, ``map.center_lat/center_lon/zoom`` are
+    no longer part of the schema; unknown view keys must stay ignored.
+    """
+    legacy_template = (
+        VIEW_TEMPLATE
+        .replace(
+            "test_view:\n",
+            'test_view:\n  description: "test view"\n  version: "1.0.0"\n  reload_interval: 300\n',
+        )
+        .replace(
+            '    uri: "s3://bucket/store.zarr"\n',
+            '    type: "s3"\n    store_type: "zarr"\n    uri: "s3://bucket/store.zarr"\n',
+        )
+        .replace(
+            "      point_size: 5\n",
+            "      point_size: 5\n"
+            "      alpha: 0.5\n"
+            "      center_lat: 50.0\n"
+            "      center_lon: 14.0\n"
+            "      zoom: 8\n",
+        )
+    )
+    views_path = _write_view(tmp_path, None, legacy_template)
+
+    cfg = load_view_config(views_path, VIEW_NAME)
+
+    assert cfg.source.uri == StoreURI("s3://bucket/store.zarr")
+    assert cfg.visualization.map.title == "Test"
 
 
 def test_parse_s3_uri() -> None:

@@ -9,13 +9,7 @@ _cluster_defaults: &cluster_defaults
   cluster_size_scale: 3.0
 
 bukov_endpoint:
-  description: "Bukov production view"
-  version: "1.0.0"
-  reload_interval: 300
-
   source:
-    type: "s3"
-    store_type: "zarr"
     #uri: "s3://bukov/store_latlon_2024.zarr"
     #uri: "s3://bukov/temperature_moitoring.zarr"
     uri: "s3://bukov/temperature_monitoring_steady.zarr"
@@ -38,7 +32,6 @@ bukov_endpoint:
     map:
       title: "Geographic Data View"
       point_size: 10
-      alpha: 0.8
       cluster:
         <<: *cluster_defaults
 
