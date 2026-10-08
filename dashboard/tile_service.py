@@ -3,12 +3,17 @@ import time
 import json
 import tempfile
 from pathlib import Path
-from urllib.parse import urlparse
 
 import boto3
 from tornado.web import RequestHandler, HTTPError
 
-from dashboard.config import find_view_file, get_default_endpoint_name, overlay_enabled, schema_endpoint_url
+from dashboard.config import (
+    find_view_file,
+    get_default_endpoint_name,
+    overlay_enabled,
+    parse_s3_uri,
+    schema_endpoint_url,
+)
 
 ACCESS_KEY = os.getenv("ZF_S3_ACCESS_KEY")
 SECRET_KEY = os.getenv("ZF_S3_SECRET_KEY")
@@ -59,12 +64,11 @@ def _overlay_source_from_view(view_name: str) -> tuple[str, str] | None:
     if not isinstance(uri, str) or not uri.strip():
         return None
 
-    parsed = urlparse(uri.strip())
-    if parsed.scheme != "s3" or not parsed.netloc:
+    parsed = parse_s3_uri(uri)
+    if parsed is None:
         return None
 
-    bucket = parsed.netloc
-    prefix = parsed.path.strip("/")
+    bucket, prefix = parsed
     return bucket, (prefix + "/" if prefix else "")
 
 def _cache_dir_from_view(view_name: str) -> str | None:

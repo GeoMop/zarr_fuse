@@ -30,8 +30,8 @@ All parameters are wired to the project configuration:
   come exclusively from the ``tile_build`` section of the selected view;
 - generic processing defaults (zoom range, GCP CRS, resampling) are owned
   by the config layer (``TileBuildConfig`` in ``dashboard/config.py``); the
-  S3 bucket/prefix target must be configured explicitly in zf_view.yaml
-  (``tile_build.s3``);
+  S3 publish target must be configured explicitly in zf_view.yaml
+  (``tile_build.target_url``, e.g. ``s3://bucket/prefix/``);
 - the target CRS (``TARGET_SRS``) and every intermediate path (GCP VRT,
   warped GeoTIFF, RGBA VRT, tile tree) are implementation details owned by
   this script: intermediates are written to the stable work directory
@@ -99,10 +99,12 @@ if str(REPO_ROOT) not in sys.path:
 
 try:
     from dashboard.config import (
+        _resolve_env_file_path,
         find_view_file,
         get_default_endpoint_name,
         load_environment_from_config,
         load_view_config,
+        parse_s3_uri,
         schema_endpoint_url,
     )
 except ModuleNotFoundError as exc:
@@ -224,7 +226,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                              "successful upload (default: remove them)")
     parser.add_argument("--delete", action="store_true",
                         help="delete every object under the configured "
-                             "tile_build.s3 prefix instead of building/uploading")
+                             "tile_build.target_url prefix instead of building/uploading")
     parser.add_argument("--yes", action="store_true",
                         help="confirm destructive operations; required with --delete")
     return parser.parse_args(argv)
@@ -556,19 +558,16 @@ def _run_delete(args: argparse.Namespace, views_path: Path, views_src: str,
     print(f"endpoint       : {endpoint_url or '(AWS default)'}")
     print()
 
-    missing_s3 = [
-        name for name, val in (("tile_build.s3.bucket", bucket),
-                               ("tile_build.s3.prefix", prefix)) if not val
-    ]
-    if missing_s3:
+    if bucket is None or not prefix:
         raise SystemExit(
-            "ERROR: S3 target not configured: set " + " and ".join(missing_s3)
-            + " in zf_view.yaml."
+            "ERROR: S3 target not configured: set tile_build.target_url "
+            "(s3://bucket/prefix/) in zf_view.yaml."
         )
     if not normalized_prefix:
         raise SystemExit(
             "ERROR: refusing to delete with an empty prefix: this would target "
-            "the whole bucket. Configure tile_build.s3.prefix in zf_view.yaml."
+            "the whole bucket. Configure a prefixed tile_build.target_url in "
+            "zf_view.yaml."
         )
 
     assert bucket is not None
@@ -601,8 +600,12 @@ def main(argv: Optional[list[str]] = None) -> None:
     tile_build = view.tile_build
     base_dir = views_path.parent.parent
 
-    bucket = tile_build.s3.bucket
-    prefix = tile_build.s3.prefix
+    bucket: Optional[str] = None
+    prefix: Optional[str] = None
+    if tile_build.target_url is not None:
+        parsed_target = parse_s3_uri(str(tile_build.target_url))
+        assert parsed_target is not None  # validated when the config was loaded
+        bucket, prefix = parsed_target
     endpoint_url = schema_endpoint_url(views_path, view_name)
 
     if args.delete:
@@ -610,16 +613,16 @@ def main(argv: Optional[list[str]] = None) -> None:
                     endpoint_url)
         return
 
-    def _cfg_path(raw: Any) -> Optional[Path]:
-        if raw is None:
-            return None
-        path = Path(str(raw)).expanduser()
-        if not path.is_absolute():
-            path = base_dir / path
-        return path.resolve()
-
-    image_path = _cfg_path(tile_build.source_image)
-    georef_path = _cfg_path(tile_build.georef_file)
+    image_path = (
+        _resolve_env_file_path(views_path, str(tile_build.source_image))
+        if tile_build.source_image is not None
+        else None
+    )
+    georef_path = (
+        _resolve_env_file_path(views_path, str(tile_build.georef_file))
+        if tile_build.georef_file is not None
+        else None
+    )
     if not all([image_path, georef_path]):
         raise SystemExit(
             f"ERROR: view '{view_name}' is missing required tile_build paths "
@@ -674,14 +677,10 @@ def main(argv: Optional[list[str]] = None) -> None:
     normalized_prefix = (prefix or "").strip("/")
     target_desc = f"s3://{bucket or '(unset)'}/{normalized_prefix}"
     if not offline:
-        missing_s3 = [
-            name for name, val in (("tile_build.s3.bucket", bucket),
-                                   ("tile_build.s3.prefix", prefix)) if not val
-        ]
-        if missing_s3:
+        if bucket is None or not prefix:
             raise SystemExit(
-                "ERROR: S3 target not configured: set " + " and ".join(missing_s3)
-                + " in zf_view.yaml."
+                "ERROR: S3 target not configured: set tile_build.target_url "
+                "(s3://bucket/prefix/) in zf_view.yaml."
             )
         upload_config = resolve_upload_config(endpoint_url)
         s3 = _s3_client(upload_config)

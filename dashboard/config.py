@@ -1,7 +1,8 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, NewType, Optional
+from urllib.parse import urlparse
 
 import yaml
 from dotenv import load_dotenv
@@ -10,6 +11,24 @@ from zarr_fuse import schema as zf_schema
 VIEWS_ENV_VAR = "ZF_VIEW_PATH"
 LEGACY_ENDPOINTS_ENV_VAR = "ENDPOINTS_PATH"
 SCHEMAS_ENV_VAR = "SCHEMAS_PATH"
+
+# Storage URI such as s3://bucket/prefix; distinct from plain textual values (gcp_srs, resampling, ...).
+StoreURI = NewType("StoreURI", str)
+
+
+def parse_s3_uri(uri: str) -> tuple[str, str] | None:
+    """Split an ``s3://bucket/prefix`` URI into ``(bucket, prefix)``.
+
+    Returns ``None`` when the URI is not a valid ``s3://`` URI (missing scheme
+    or missing bucket). ``prefix`` is the URI path without leading/trailing
+    slashes and is empty when the URI targets the bucket root. Shared by config
+    validation, the tile build script and the tile service so the urlparse
+    logic exists only once.
+    """
+    parsed = urlparse(uri.strip())
+    if parsed.scheme != "s3" or not parsed.netloc:
+        return None
+    return parsed.netloc, parsed.path.strip("/")
 
 # ---------------------------------------------------------------------------
 # Single-parse cache for zf_view.yaml
@@ -30,8 +49,8 @@ def _parse_view_config(config_path: Path) -> dict:
 class SourceConfig:
     type: str
     store_type: str
-    uri: str
-    schema_path: Optional[str] = None
+    uri: StoreURI
+    schema_path: Optional[Path] = None
 
 
 @dataclass
@@ -89,13 +108,7 @@ class TimeSeriesConfig:
 class OverlayConfig:
     enabled: bool = False
     tile_url: Optional[str] = None
-    source_uri: Optional[str] = None
-
-
-@dataclass
-class TileS3Config:
-    bucket: Optional[str] = None
-    prefix: Optional[str] = None
+    source_uri: Optional[StoreURI] = None
 
 
 @dataclass
@@ -109,14 +122,14 @@ class TileBuildConfig:
     configurable.
     """
 
-    source_image: Optional[str] = None  # source raster; path relative to base_dir
-    georef_file: Optional[str] = None  # QGIS-style GCP JSON (sourceX/sourceY pixels, mapX/mapY ground)
+    source_image: Optional[Path] = None  # source raster; path relative to base_dir
+    georef_file: Optional[Path] = None  # QGIS-style GCP JSON (sourceX/sourceY pixels, mapX/mapY ground)
     gcp_srs: str = "EPSG:4326"  # CRS of mapX/mapY in georef_file (gdal_translate -a_srs)
     min_zoom: int = 0  # lowest XYZ zoom level built
     max_zoom: int = 20  # highest XYZ zoom level built; overlay is missing above it
     warp_resampling: str = "near"  # gdalwarp -r during reprojection to EPSG:3857
     tile_resampling: Optional[str] = None  # gdal2tiles -r; None -> use warp_resampling
-    s3: TileS3Config = field(default_factory=TileS3Config)  # publish target bucket/prefix
+    target_url: Optional[StoreURI] = None  # publish target, e.g. s3://bucket/prefix/
 
 
 @dataclass
@@ -151,7 +164,7 @@ TILE_BUILD_ALLOWED_KEYS = frozenset({
     "max_zoom",
     "warp_resampling",
     "tile_resampling",
-    "s3",
+    "target_url",
 })
 
 
@@ -495,6 +508,16 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
             f"Allowed keys: {', '.join(sorted(TILE_BUILD_ALLOWED_KEYS))}."
         )
 
+    target_url_raw = tile_build_data.get("target_url") or None
+    if target_url_raw is not None and parse_s3_uri(str(target_url_raw)) is None:
+        raise ValueError(
+            f"View '{view_name}' tile_build.target_url must be an s3:// URI with a bucket, "
+            "e.g. s3://bucket/prefix/."
+        )
+
+    source_image_raw = tile_build_data.get("source_image")
+    georef_file_raw = tile_build_data.get("georef_file")
+
     if not isinstance(schema_data, dict):
         raise ValueError(f"View '{view_name}' variable_map must be a mapping/object")
 
@@ -576,8 +599,8 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
         source=SourceConfig(
             type=source_data["type"],
             store_type=source_data["store_type"],
-            uri=source_data["uri"],
-            schema_path=schema_file,
+            uri=StoreURI(source_data["uri"]),
+            schema_path=Path(schema_file),
         ),
         schema=SchemaConfig(
             file=str(schema_file_path),
@@ -610,29 +633,23 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
             overlay=OverlayConfig(
                 enabled=overlay_data["enabled"],
                 tile_url=overlay_data.get("tile_url"),
-                source_uri=overlay_data.get("source_uri"),
+                source_uri=(
+                    StoreURI(overlay_data["source_uri"])
+                    if overlay_data.get("source_uri")
+                    else None
+                ),
             ),
         ),
         tile_build=TileBuildConfig(
-            source_image=tile_build_data.get("source_image"),
-            georef_file=tile_build_data.get("georef_file"),
+            source_image=Path(str(source_image_raw)) if source_image_raw else None,
+            georef_file=Path(str(georef_file_raw)) if georef_file_raw else None,
             gcp_srs=tile_build_data.get("gcp_srs", "EPSG:4326"),
             min_zoom=tile_build_data.get("min_zoom", 0),
             max_zoom=tile_build_data.get("max_zoom", 20),
             warp_resampling=tile_build_data.get("warp_resampling", "near"),
             tile_resampling=tile_build_data.get("tile_resampling"),
-            s3=_build_tile_s3_config(tile_build_data.get("s3")),
+            target_url=StoreURI(str(target_url_raw)) if target_url_raw is not None else None,
         ),
-    )
-
-
-def _build_tile_s3_config(s3_data: Any) -> TileS3Config:
-    """Build the nested tile_build.s3 publish-target config (bucket, prefix)."""
-    if not isinstance(s3_data, dict):
-        return TileS3Config()
-    return TileS3Config(
-        bucket=s3_data.get("bucket"),
-        prefix=s3_data.get("prefix"),
     )
 
 

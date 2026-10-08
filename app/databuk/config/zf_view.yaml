@@ -60,6 +60,4 @@ bukov_endpoint:
     max_zoom: 20
     warp_resampling: "near"
     tile_resampling: "average"
-    s3:
-      bucket: "bukov"
-      prefix: "overlays/bukov/"
+    target_url: "s3://bukov/overlays/bukov/"

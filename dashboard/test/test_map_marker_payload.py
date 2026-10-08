@@ -6,7 +6,14 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from dashboard.config import DefaultsConfig, SchemaConfig, SchemaFieldsConfig, SourceConfig, ViewConfig
+from dashboard.config import (
+    DefaultsConfig,
+    SchemaConfig,
+    SchemaFieldsConfig,
+    SourceConfig,
+    StoreURI,
+    ViewConfig,
+)
 from dashboard.data import LocalClient
 
 
@@ -16,7 +23,7 @@ def _make_view(display_variable: str = "temp") -> ViewConfig:
         reload_interval=0,
         description="",
         version="0",
-        source=SourceConfig(type="s3", store_type="zarr", uri="s3://demo"),
+        source=SourceConfig(type="s3", store_type="zarr", uri=StoreURI("s3://demo")),
         schema=SchemaConfig(
             file="schema.yaml",
             fields=SchemaFieldsConfig(lat="lat", lon="lon", time="date_time", vertical="depth_level", entity="site_id"),

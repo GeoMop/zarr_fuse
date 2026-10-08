@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dashboard.config import load_view_config, load_views
+from dashboard.config import StoreURI, load_view_config, load_views, parse_s3_uri
 from dashboard.scripts.build_overlay_tiles import (
     TARGET_SRS,
     WORK_RGBA_VRT_NAME,
@@ -61,12 +61,10 @@ VALID_TILE_BUILD = """\
     max_zoom: 18
     warp_resampling: "bilinear"
     tile_resampling: "average"
-    s3:
-      bucket: "my-bucket"
-      prefix: "overlays/my/"
+    target_url: "s3://my-bucket/overlays/my/"
 """
 
-REMOVED_KEYS = ["vrt_file", "warped_tif", "rgba_vrt", "tiles_dir", "target_srs"]
+REMOVED_KEYS = ["vrt_file", "warped_tif", "rgba_vrt", "tiles_dir", "target_srs", "s3"]
 
 
 def _write_view(tmp_path: Path, tile_build_block: str | None) -> Path:
@@ -86,21 +84,22 @@ def _write_view(tmp_path: Path, tile_build_block: str | None) -> Path:
 
 
 def test_new_tile_build_shape_loads(tmp_path: Path) -> None:
+    """All documented tile_build keys load into the typed config, paths as Path, target as StoreURI."""
     views_path = _write_view(tmp_path, VALID_TILE_BUILD)
     cfg = load_view_config(views_path, VIEW_NAME).tile_build
 
-    assert cfg.source_image == "config/source_overlay/12p_final.png"
-    assert cfg.georef_file == "config/source_overlay/bukov_georef.json"
+    assert cfg.source_image == Path("config/source_overlay/12p_final.png")
+    assert cfg.georef_file == Path("config/source_overlay/bukov_georef.json")
     assert cfg.gcp_srs == "EPSG:4326"
     assert cfg.min_zoom == 3
     assert cfg.max_zoom == 18
     assert cfg.warp_resampling == "bilinear"
     assert cfg.tile_resampling == "average"
-    assert cfg.s3.bucket == "my-bucket"
-    assert cfg.s3.prefix == "overlays/my/"
+    assert cfg.target_url == StoreURI("s3://my-bucket/overlays/my/")
 
 
 def test_tile_build_defaults(tmp_path: Path) -> None:
+    """An absent tile_build section falls back to the documented defaults."""
     views_path = _write_view(tmp_path, None)
     cfg = load_view_config(views_path, VIEW_NAME).tile_build
 
@@ -111,8 +110,7 @@ def test_tile_build_defaults(tmp_path: Path) -> None:
     assert cfg.max_zoom == 20
     assert cfg.warp_resampling == "near"
     assert cfg.tile_resampling is None
-    assert cfg.s3.bucket is None
-    assert cfg.s3.prefix is None
+    assert cfg.target_url is None
 
 
 @pytest.mark.parametrize("key", REMOVED_KEYS)
@@ -147,6 +145,25 @@ def test_multiple_unknown_keys_listed(tmp_path: Path) -> None:
     assert "resampling" in message
     assert "tiles_dir" in message
     assert "Allowed keys:" in message
+
+
+def test_invalid_target_url_rejected(tmp_path: Path) -> None:
+    """A non-s3 target_url fails early at config load instead of at build time."""
+    block = '    target_url: "https://example.com/tiles/"\n'
+    views_path = _write_view(tmp_path, block)
+
+    with pytest.raises(ValueError, match="target_url"):
+        load_views(views_path)
+
+
+def test_parse_s3_uri() -> None:
+    """The shared parser splits bucket/prefix and rejects non-s3 URIs."""
+    assert parse_s3_uri("s3://bukov/overlays/bukov/") == ("bukov", "overlays/bukov")
+    assert parse_s3_uri("s3://bukov") == ("bukov", "")
+    assert parse_s3_uri("  s3://bukov/a  ") == ("bukov", "a")
+    assert parse_s3_uri("https://bukov/a") is None
+    assert parse_s3_uri("s3:///no-bucket") is None
+    assert parse_s3_uri("bukov/a") is None
 
 
 def test_internal_work_paths_derived(tmp_path: Path) -> None:
