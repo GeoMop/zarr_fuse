@@ -47,68 +47,103 @@ def _parse_view_config(config_path: Path) -> dict:
 
 @dataclass
 class SourceConfig:
-    type: str
-    store_type: str
-    uri: StoreURI
-    schema_path: Optional[Path] = None
+    """``source`` section of zf_view.yaml: where the view's dataset store lives.
+
+    ``type``, ``store_type`` and ``uri`` are required by config validation;
+    only ``uri`` is opened (via zarr_fuse), the other two are declarative
+    today. ``schema_path`` is stored raw (as configured, usually relative to
+    base_dir); the resolved absolute path lives in ``SchemaConfig.file``.
+    """
+    type: str  # storage scheme of the store, e.g. "s3" or "local" (required, not read yet)
+    store_type: str  # store implementation, e.g. "zarr" (required, not read yet)
+    uri: StoreURI  # store location opened by zarr_fuse, e.g. s3://bucket/store.zarr
+    schema_path: Optional[Path] = None  # schema YAML as configured (usually relative to base_dir)
 
 
 @dataclass
 class SchemaFieldsConfig:
-    lat: Optional[str] = None
-    lon: Optional[str] = None
-    time: Optional[str] = None
-    vertical: Optional[str] = None
-    entity: Optional[str] = None
+    """One field-mapping entry of ``variable_map``: standard field -> dataset name.
+
+    Values are variable/column names as stored in the dataset; ``None`` means
+    the dataset does not carry that field (e.g. no ``vertical`` coordinate).
+    """
+    lat: Optional[str] = None  # dataset name of the latitude field
+    lon: Optional[str] = None  # dataset name of the longitude field
+    time: Optional[str] = None  # dataset name of the time coordinate
+    vertical: Optional[str] = None  # dataset name of the depth/level coordinate (optional)
+    entity: Optional[str] = None  # dataset name of the site/borehole identity field
 
 
 @dataclass
 class SchemaConfig:
-    file: str
-    fields: SchemaFieldsConfig = field(default_factory=SchemaFieldsConfig)
-    group_fields: Dict[str, SchemaFieldsConfig] = field(default_factory=dict)
+    """Resolved schema file and field mapping of one view (from ``variable_map``)."""
+    file: str  # absolute path of the schema YAML (kept as str, not Path)
+    fields: SchemaFieldsConfig = field(default_factory=SchemaFieldsConfig)  # used when no group path matches
+    group_fields: Dict[str, SchemaFieldsConfig] = field(default_factory=dict)  # group path -> field mapping
 
 
 @dataclass
 class SchemaDisplayConfig:
-    display_variable: Optional[str] = None
-    display_unit: Optional[str] = None
-    entity_name: Optional[str] = None
-    vertical_name: Optional[str] = None
+    """UI labels derived from the schema for the configured display variable.
+
+    Built by ``_read_schema_display`` from the schema's VARS/COORDS metadata;
+    ``display_unit`` is looked up for ``defaults.display_variable``.
+    """
+    display_variable: Optional[str] = None  # variable whose unit was looked up (defaults.display_variable)
+    display_unit: Optional[str] = None  # unit of that variable from the schema VARS section
+    entity_name: Optional[str] = None  # dataset column shown as the site/entity label
+    vertical_name: Optional[str] = None  # dataset column shown as the depth/level label
 
 
 @dataclass
 class DefaultsConfig:
-    display_variable: Optional[str] = None
-    group_path: Optional[str] = None
-    default_site: Optional[str] = None
+    """``defaults`` section: selections applied when the view first loads."""
+    display_variable: Optional[str] = None  # variable selected in the dropdown at startup
+    group_path: Optional[str] = None  # variable_map group selected at startup ("/" = root)
+    default_site: Optional[str] = None  # site preselected at startup (matched against site_id)
 
 
 @dataclass
 class MapConfig:
-    center_lat: Optional[float] = None
-    center_lon: Optional[float] = None
-    zoom: Optional[int] = None
-    title: Optional[str] = None
-    point_size: Optional[int] = None
-    alpha: Optional[float] = None
-    cluster_enabled: bool = True
-    cluster_eps_factor: float = 0.05
-    cluster_buffer_factor: float = 0.1
-    cluster_size_scale: float = 3.0
+    """``visualization.map`` section: base map extent, marker look and clustering.
+
+    ``title``, ``point_size`` and the cluster keys are read by
+    ``map_views.build_map_view``; the extent/opacity keys are parsed but not
+    read by the current dashboard code yet.
+    """
+    center_lat: Optional[float] = None  # initial map center latitude (degrees, not read yet)
+    center_lon: Optional[float] = None  # initial map center longitude (degrees, not read yet)
+    zoom: Optional[int] = None  # initial zoom level (not read yet)
+    title: Optional[str] = None  # map title (required); also shown on the points layer
+    point_size: Optional[int] = None  # marker size of a single point / base size of a cluster (required)
+    alpha: Optional[float] = None  # marker opacity 0..1 (required, not read yet)
+    cluster_enabled: bool = True  # group nearby markers into grid cells
+    cluster_eps_factor: float = 0.05  # cluster grid size as a fraction of the current view width
+    cluster_buffer_factor: float = 0.1  # margin around the view (fraction of width) still clustered
+    cluster_size_scale: float = 3.0  # marker size added per member of a cluster
 
 
 @dataclass
 class TimeSeriesConfig:
-    middle_window_days: Optional[int] = None
-    right_window_hours: Optional[int] = None
+    """``visualization.timeseries`` section: x-axis windows of the time panes.
+
+    Both keys are required in zf_view.yaml (the dataclass defaults are for
+    standalone construction only).
+    """
+    middle_window_days: Optional[int] = None  # time span of the middle (month-scale) pane, in days
+    right_window_hours: Optional[int] = None  # time span of the right (day-scale) pane, in hours
 
 
 @dataclass
 class OverlayConfig:
-    enabled: bool = False
-    tile_url: Optional[str] = None
-    source_uri: Optional[StoreURI] = None
+    """``visualization.overlay`` section: XYZ raster tile overlay on the base map.
+
+    Read at runtime from the raw view dict (``map_views`` / ``tile_service``);
+    the typed object is what ``load_views`` returns.
+    """
+    enabled: bool = False  # master switch (HV_OVERLAY_ENABLED=0 forces it off)
+    tile_url: Optional[str] = None  # XYZ template, e.g. /tiles/{Z}/{X}/{Y}.png (HV_OVERLAY_TILE_URL fallback)
+    source_uri: Optional[StoreURI] = None  # s3:// prefix holding the tiles; tile service signs URLs from it
 
 
 @dataclass
@@ -125,7 +160,7 @@ class TileBuildConfig:
     source_image: Optional[Path] = None  # source raster; path relative to base_dir
     georef_file: Optional[Path] = None  # QGIS-style GCP JSON (sourceX/sourceY pixels, mapX/mapY ground)
     gcp_srs: str = "EPSG:4326"  # CRS of mapX/mapY in georef_file (gdal_translate -a_srs)
-    min_zoom: int = 0  # lowest XYZ zoom level built
+    min_zoom: int = 0  # lowest XYZ zoom level built; overlay is missing below it
     max_zoom: int = 20  # highest XYZ zoom level built; overlay is missing above it
     warp_resampling: str = "near"  # gdalwarp -r during reprojection to EPSG:3857
     tile_resampling: Optional[str] = None  # gdal2tiles -r; None -> use warp_resampling
@@ -134,23 +169,29 @@ class TileBuildConfig:
 
 @dataclass
 class VisualizationConfig:
-    map: MapConfig = field(default_factory=MapConfig)
-    timeseries: TimeSeriesConfig = field(default_factory=TimeSeriesConfig)
-    overlay: OverlayConfig = field(default_factory=OverlayConfig)
+    """``visualization`` section: grouping of the three UI subsections."""
+    map: MapConfig = field(default_factory=MapConfig)  # base map and markers
+    timeseries: TimeSeriesConfig = field(default_factory=TimeSeriesConfig)  # time axis windows
+    overlay: OverlayConfig = field(default_factory=OverlayConfig)  # raster tile overlay
 
 
 @dataclass
 class ViewConfig:
-    name: str
-    reload_interval: int
-    description: str
-    version: str
-    source: SourceConfig
-    schema: SchemaConfig
-    schema_display: SchemaDisplayConfig = field(default_factory=SchemaDisplayConfig)
-    defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
-    visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
-    tile_build: TileBuildConfig = field(default_factory=TileBuildConfig)
+    """One named view of zf_view.yaml: the full dashboard configuration for it.
+
+    Required keys: ``name``, ``reload_interval``, ``description``, ``version``,
+    ``source`` and ``schema``; every other section defaults to an empty config.
+    """
+    name: str  # view key in zf_view.yaml; also the ?view= URL parameter
+    reload_interval: int  # seconds between automatic data reloads (no in-repo consumer yet)
+    description: str  # human-readable view description (not read yet)
+    version: str  # version string of this view configuration (not read yet)
+    source: SourceConfig  # dataset store location
+    schema: SchemaConfig  # resolved schema file + field mapping
+    schema_display: SchemaDisplayConfig = field(default_factory=SchemaDisplayConfig)  # labels/units from schema
+    defaults: DefaultsConfig = field(default_factory=DefaultsConfig)  # startup selections
+    visualization: VisualizationConfig = field(default_factory=VisualizationConfig)  # map/timeseries/overlay
+    tile_build: TileBuildConfig = field(default_factory=TileBuildConfig)  # overlay tile build pipeline
 
 
 FIELD_NAMES = {"lat", "lon", "time", "vertical", "entity"}
