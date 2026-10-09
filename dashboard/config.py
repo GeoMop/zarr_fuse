@@ -60,21 +60,26 @@ class SourceConfig:
 class SchemaFieldsConfig:
     """One field-mapping entry of ``variable_map``: standard field -> dataset name.
 
-    Values are variable/column names as stored in the dataset; ``None`` means
-    the dataset does not carry that field (e.g. no ``vertical`` coordinate).
+    ``lat``, ``lon``, ``time`` and ``entity`` are required and always carry a
+    valid variable/column name. The ``vertical`` coordinate is optional and
+    ``None`` means the dataset does not carry that field.
     """
-    lat: Optional[str] = None  # dataset name of the latitude field
-    lon: Optional[str] = None  # dataset name of the longitude field
-    time: Optional[str] = None  # dataset name of the time coordinate
+    lat: str  # dataset name of the latitude field
+    lon: str  # dataset name of the longitude field
+    time: str  # dataset name of the time coordinate
+    entity: str  # dataset name of the site/borehole identity field
     vertical: Optional[str] = None  # dataset name of the depth/level coordinate (optional)
-    entity: Optional[str] = None  # dataset name of the site/borehole identity field
 
 
 @dataclass
 class SchemaConfig:
-    """Resolved schema file and field mapping of one view (from ``variable_map``)."""
+    """Resolved schema file and field mapping of one view (from ``variable_map``).
+
+    A root-level ``fields`` mapping is optional: views may instead define only
+    group-specific mappings in ``group_fields``.
+    """
     file: str  # absolute path of the schema YAML (kept as str, not Path)
-    fields: SchemaFieldsConfig = field(default_factory=SchemaFieldsConfig)  # used when no group path matches
+    fields: Optional[SchemaFieldsConfig] = None  # root mapping; absent for group-only views
     group_fields: Dict[str, SchemaFieldsConfig] = field(default_factory=dict)  # group path -> field mapping
 
 
@@ -93,8 +98,8 @@ class SchemaDisplayConfig:
 @dataclass
 class DefaultsConfig:
     """``defaults`` section: selections applied when the view first loads."""
-    display_variable: Optional[str] = None  # variable selected in the dropdown at startup
-    group_path: Optional[str] = None  # variable_map group selected at startup ("/" = root)
+    group_path: str  # variable_map group selected at startup ("/" = root)
+    display_variable: Optional[str] = None  # startup variable; None picks the first available one
     default_site: Optional[str] = None  # site preselected at startup (matched against site_id)
 
 
@@ -105,8 +110,8 @@ class MapConfig:
     ``title`` and ``point_size`` are required keys; all fields are read by
     ``map_views.build_map_view``.
     """
-    title: Optional[str] = None  # map title (required); also shown on the points layer
-    point_size: Optional[int] = None  # marker size of a single point / base size of a cluster (required)
+    title: str  # map title (required); also shown on the points layer
+    point_size: int  # marker size of a single point / base size of a cluster (required)
     cluster_enabled: bool = True  # group nearby markers into grid cells
     cluster_eps_factor: float = 0.05  # cluster grid size as a fraction of the current view width
     cluster_buffer_factor: float = 0.1  # margin around the view (fraction of width) still clustered
@@ -117,11 +122,10 @@ class MapConfig:
 class TimeSeriesConfig:
     """``visualization.timeseries`` section: x-axis windows of the time panes.
 
-    Both keys are required in zf_view.yaml (the dataclass defaults are for
-    standalone construction only).
+    Both keys are required in zf_view.yaml.
     """
-    middle_window_days: Optional[int] = None  # time span of the middle (month-scale) pane, in days
-    right_window_hours: Optional[int] = None  # time span of the right (day-scale) pane, in hours
+    middle_window_days: int  # time span of the middle (month-scale) pane, in days
+    right_window_hours: int  # time span of the right (day-scale) pane, in hours
 
 
 @dataclass
@@ -160,8 +164,8 @@ class TileBuildConfig:
 @dataclass
 class VisualizationConfig:
     """``visualization`` section: grouping of the three UI subsections."""
-    map: MapConfig = field(default_factory=MapConfig)  # base map and markers
-    timeseries: TimeSeriesConfig = field(default_factory=TimeSeriesConfig)  # time axis windows
+    map: MapConfig  # base map and markers
+    timeseries: TimeSeriesConfig  # time axis windows
     overlay: OverlayConfig = field(default_factory=OverlayConfig)  # raster tile overlay
 
 
@@ -176,9 +180,9 @@ class ViewConfig:
     name: str  # view key in zf_view.yaml; also the ?view= URL parameter
     source: SourceConfig  # dataset store location
     schema: SchemaConfig  # resolved schema file + field mapping
+    defaults: DefaultsConfig  # startup selections (required; group_path is mandatory)
+    visualization: VisualizationConfig  # map/timeseries/overlay
     schema_display: SchemaDisplayConfig = field(default_factory=SchemaDisplayConfig)  # labels/units from schema
-    defaults: DefaultsConfig = field(default_factory=DefaultsConfig)  # startup selections
-    visualization: VisualizationConfig = field(default_factory=VisualizationConfig)  # map/timeseries/overlay
     tile_build: TileBuildConfig = field(default_factory=TileBuildConfig)  # overlay tile build pipeline
 
 
@@ -288,6 +292,15 @@ def _normalize_group_path(group_path: Optional[str]) -> str:
     return "/".join(part for part in str(group_path).strip("/").split("/") if part)
 
 
+def _require_value(data: Dict[str, Any], key: str, context: str) -> Any:
+    """Return ``data[key]`` or raise when it is missing or explicitly null."""
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} must be a mapping/object")
+    if data.get(key) is None:
+        raise ValueError(f"{context}.{key} is required and must not be null")
+    return data[key]
+
+
 def _build_schema_fields(fields_data: Dict[str, Any], context: str) -> SchemaFieldsConfig:
     if not isinstance(fields_data, dict):
         raise ValueError(f"{context} must be a mapping/object")
@@ -296,12 +309,22 @@ def _build_schema_fields(fields_data: Dict[str, Any], context: str) -> SchemaFie
     if missing:
         raise ValueError(f"{context} is missing required keys: {', '.join(sorted(missing))}")
 
+    invalid = [
+        name
+        for name in REQUIRED_FIELD_NAMES
+        if not isinstance(fields_data.get(name), str) or not fields_data[name].strip()
+    ]
+    if invalid:
+        raise ValueError(
+            f"{context} has null or empty required field(s): {', '.join(sorted(invalid))}"
+        )
+
     return SchemaFieldsConfig(
-        lat=fields_data.get("lat"),
-        lon=fields_data.get("lon"),
-        time=fields_data.get("time"),
+        lat=fields_data["lat"],
+        lon=fields_data["lon"],
+        time=fields_data["time"],
+        entity=fields_data["entity"],
         vertical=fields_data.get("vertical"),
-        entity=fields_data.get("entity"),
     )
 
 
@@ -337,10 +360,11 @@ def _resolve_fields_for_group_raw(schema_config: dict, group_path: str | None) -
     """Resolve the effective fields dict for a group path by walking upward.
 
     This is the raw-dict version (used at runtime with untyped view config).
-    The typed counterpart is :func:`resolve_schema_fields`.
+    The typed counterpart is :func:`resolve_schema_fields`. Returns an empty
+    dict when the view has no mapping for the requested group.
     """
-    fields = schema_config.get("fields", {})
-    group_fields = schema_config.get("group_fields", {})
+    fields = schema_config.get("fields") or {}
+    group_fields = schema_config.get("group_fields", {}) or {}
     normalized = "/".join(part for part in (group_path or "").strip("/").split("/") if part)
 
     path = normalized
@@ -354,7 +378,12 @@ def _resolve_fields_for_group_raw(schema_config: dict, group_path: str | None) -
     return fields
 
 
-def resolve_schema_fields(schema: SchemaConfig, group_path: Optional[str]) -> SchemaFieldsConfig:
+def resolve_schema_fields(schema: SchemaConfig, group_path: Optional[str]) -> Optional[SchemaFieldsConfig]:
+    """Return the field mapping for ``group_path`` by walking upward.
+
+    Returns ``None`` when neither the group nor any ancestor (including the
+    root) defines a mapping. Group-only views leave the root ``fields`` unset.
+    """
     normalized = _normalize_group_path(group_path)
     path = normalized
 
@@ -595,16 +624,17 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
 
     schema_for_display = SchemaConfig(
         file=str(schema_file_path),
-        fields=root_fields or SchemaFieldsConfig(),
+        fields=root_fields,
         group_fields=group_fields,
     )
-    selected_fields = resolve_schema_fields(schema_for_display, defaults_data.get("group_path"))
+    group_path = _require_value(defaults_data, "group_path", f"View '{view_name}' defaults")
+    selected_fields = resolve_schema_fields(schema_for_display, group_path)
     schema_display = _read_schema_display(
         schema_file_path,
         defaults_data.get("display_variable"),
-        selected_fields.entity,
-        selected_fields.vertical,
-        defaults_data.get("group_path"),
+        selected_fields.entity if selected_fields else None,
+        selected_fields.vertical if selected_fields else None,
+        group_path,
     )
 
     # Support both flattened cluster keys and nested `cluster` mapping in zf_view.yaml
@@ -620,27 +650,31 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
         ),
         schema=SchemaConfig(
             file=str(schema_file_path),
-            fields=root_fields or SchemaFieldsConfig(),
+            fields=root_fields,
             group_fields=group_fields,
         ),
         schema_display=schema_display,
         defaults=DefaultsConfig(
-            display_variable=defaults_data["display_variable"],
-            group_path=defaults_data["group_path"],
+            group_path=group_path,
+            display_variable=defaults_data.get("display_variable"),
             default_site=defaults_data.get("default_site"),
         ),
-            visualization=VisualizationConfig(
+        visualization=VisualizationConfig(
             map=MapConfig(
-                title=map_data["title"],
-                point_size=map_data["point_size"],
+                title=_require_value(map_data, "title", f"View '{view_name}' visualization.map"),
+                point_size=_require_value(map_data, "point_size", f"View '{view_name}' visualization.map"),
                 cluster_enabled=_cluster_get("cluster_enabled", True),
                 cluster_eps_factor=_cluster_get("cluster_eps_factor", 0.05),
                 cluster_buffer_factor=_cluster_get("cluster_buffer_factor", 0.1),
                 cluster_size_scale=_cluster_get("cluster_size_scale", 3.0),
             ),
             timeseries=TimeSeriesConfig(
-                middle_window_days=timeseries_data["middle_window_days"],
-                right_window_hours=timeseries_data["right_window_hours"],
+                middle_window_days=_require_value(
+                    timeseries_data, "middle_window_days", f"View '{view_name}' visualization.timeseries"
+                ),
+                right_window_hours=_require_value(
+                    timeseries_data, "right_window_hours", f"View '{view_name}' visualization.timeseries"
+                ),
             ),
             overlay=OverlayConfig(
                 enabled=overlay_data["enabled"],
