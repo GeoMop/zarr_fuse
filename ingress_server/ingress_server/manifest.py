@@ -8,11 +8,11 @@ import logging
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 import polars as pl
 import xarray as xr
-import yaml
 import zarr
 import zarr_fuse as zf
 
@@ -22,74 +22,19 @@ from .queue_storage import ACCEPTED, FAILED, S3_SCHEME
 
 LOG = logging.getLogger(__name__)
 
-NODE = "items"
-KEY = "received_at"
+SCHEMA_PATH = Path(__file__).with_name("manifest.yaml")
+_SCHEMA = zf.schema.deserialize(SCHEMA_PATH)
+(NODE,) = _SCHEMA.groups
+(KEY,) = _SCHEMA.groups[NODE].ds.COORDS
+_VARS = _SCHEMA.groups[NODE].ds.VARS
+
 KEY_DTYPE = "datetime64[us]"
 KEY_TICK = np.timedelta64(1, "us")
 KEY_WINDOW = np.timedelta64(1, "s")
 MAX_GAP_FILL = 64
 
-STR_WIDTHS = {
-    "item_name": 128,
-    "source": 64,
-    "state": 16,
-    "sha256": 64,
-    "data_time_min": 32,
-    "data_time_max": 32,
-    "error": 256,
-    "metadata": 2048,
-}
-
-ARRAYS = {KEY, "updated_at", *STR_WIDTHS}
-
-SCHEMA_YAML = f"""
-ATTRS:
-  description: "Ingress queue manifest, one entry per received payload."
-{NODE}:
-  COORDS:
-    {KEY}:
-      description: "Payload receipt time; microsecond offsets keep the keys unique."
-      unit: {{tick: "us", tz: "UTC"}}
-      sorted: false
-      chunk_size: 256
-  VARS:
-    item_name:
-      description: "Payload object name within its queue folder."
-      type: "str[{STR_WIDTHS['item_name']}]"
-      coords: {KEY}
-    source:
-      description: "Name of the endpoint or active scrapper that received the payload."
-      type: "str[{STR_WIDTHS['source']}]"
-      coords: {KEY}
-    state:
-      description: "Processing state: accepted, success or failed."
-      type: "str[{STR_WIDTHS['state']}]"
-      coords: {KEY}
-    sha256:
-      description: "SHA-256 hex digest of the payload, computed at receipt."
-      type: "str[{STR_WIDTHS['sha256']}]"
-      coords: {KEY}
-    data_time_min:
-      description: "Minimum of the time_like_coord values of the payload, empty when unknown."
-      type: "str[{STR_WIDTHS['data_time_min']}]"
-      coords: {KEY}
-    data_time_max:
-      description: "Maximum of the time_like_coord values of the payload, empty when unknown."
-      type: "str[{STR_WIDTHS['data_time_max']}]"
-      coords: {KEY}
-    updated_at:
-      description: "Time of the last change of the entry."
-      unit: {{tick: "us", tz: "UTC"}}
-      coords: {KEY}
-    error:
-      description: "Reason of the failure of a failed item, empty otherwise."
-      type: "str[{STR_WIDTHS['error']}]"
-      coords: {KEY}
-    metadata:
-      description: "JSON of the item metadata (MetadataModel)."
-      type: "str[{STR_WIDTHS['metadata']}]"
-      coords: {KEY}
-"""
+STR_WIDTHS = {name: var.dtype.itemsize // 4 for name, var in _VARS.items() if var.dtype.kind == "U"}
+ARRAYS = {KEY, *_VARS}
 
 
 @dataclass(frozen=True)
@@ -152,7 +97,7 @@ class ManifestStore:
     def __init__(self, url: str):
         self.url = url
         self._options = _store_options(url)
-        self._schema = zf.schema.deserialize(yaml.safe_load(SCHEMA_YAML))
+        self._schema = zf.schema.deserialize(SCHEMA_PATH)
 
     def _open_node(self) -> zf.Node:
         # Not zf.open_store: ZF_STORE_URL would redirect the manifest into the data store.
