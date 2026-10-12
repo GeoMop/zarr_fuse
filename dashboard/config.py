@@ -210,7 +210,7 @@ def find_view_file() -> Path:
     3. Search upward from current working directory for:
        - dashboard/config/zf_view.yaml
        - config/zf_view.yaml
-       - app/databuk/config/zf_view.yaml
+       - dashboard/test_deployment/databuk/config/zf_view.yaml
     """
     env_path = os.getenv(VIEWS_ENV_VAR)
     env_label = VIEWS_ENV_VAR
@@ -240,7 +240,7 @@ def find_view_file() -> Path:
         for candidate in (
             base / "dashboard" / "config" / "zf_view.yaml",
             base / "config" / "zf_view.yaml",
-            base / "app" / "databuk" / "config" / "zf_view.yaml",
+            base / "dashboard" / "test_deployment" / "databuk" / "config" / "zf_view.yaml",
         ):
             if candidate.exists():
                 return candidate
@@ -250,7 +250,7 @@ def find_view_file() -> Path:
         "1. ZF_VIEW_PATH env var\n"
         "2. dashboard/config/zf_view.yaml\n"
         "3. config/zf_view.yaml\n"
-        "4. app/databuk/config/zf_view.yaml"
+        "4. dashboard/test_deployment/databuk/config/zf_view.yaml"
     )
 
 

@@ -1,6 +1,6 @@
 _dashboard:
   default_view: "bukov_endpoint"
-  env_file: "../../dashboard/scripts/.env"
+  env_file: "../../scripts/.env"
 
 _cluster_defaults: &cluster_defaults
   cluster_enabled: true

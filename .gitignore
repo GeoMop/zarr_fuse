@@ -185,24 +185,24 @@ cython_debug/
 
 app/hlavo_surface/inputs/.env
 # Dashboard
-app/databuk/dashboard/node_modules/
-app/databuk/dashboard/dist/
-app/databuk/dashboard/.vite/
-app/databuk/dashboard/.eslintcache
-app/databuk/dashboard/.env
-app/databuk/dashboard/.env.local
-app/databuk/dashboard/npm-debug.log*
-app/databuk/dashboard/yarn-error.log*
-app/databuk/dashboard/pnpm-debug.log*
-app/databuk/dashboard/.DS_Store
-app/databuk/dashboard/Thumbs.db
-app/databuk/dashboard/dist-ssr/
-app/databuk/dashboard/*.local
-app/databuk/dashboard/.vscode/*
-!app/databuk/dashboard/.vscode/extensions.json
+dashboard/test_deployment/databuk/dashboard/node_modules/
+dashboard/test_deployment/databuk/dashboard/dist/
+dashboard/test_deployment/databuk/dashboard/.vite/
+dashboard/test_deployment/databuk/dashboard/.eslintcache
+dashboard/test_deployment/databuk/dashboard/.env
+dashboard/test_deployment/databuk/dashboard/.env.local
+dashboard/test_deployment/databuk/dashboard/npm-debug.log*
+dashboard/test_deployment/databuk/dashboard/yarn-error.log*
+dashboard/test_deployment/databuk/dashboard/pnpm-debug.log*
+dashboard/test_deployment/databuk/dashboard/.DS_Store
+dashboard/test_deployment/databuk/dashboard/Thumbs.db
+dashboard/test_deployment/databuk/dashboard/dist-ssr/
+dashboard/test_deployment/databuk/dashboard/*.local
+dashboard/test_deployment/databuk/dashboard/.vscode/*
+!dashboard/test_deployment/databuk/dashboard/.vscode/extensions.json
 
 # Dashboard backend virtual environment
-app/databuk/dashboard/backend/venv/
-app/databuk/dashboard/backend/.env
+dashboard/test_deployment/databuk/dashboard/backend/venv/
+dashboard/test_deployment/databuk/dashboard/backend/.env
 
 ingress_server/inputs

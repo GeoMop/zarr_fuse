@@ -4,7 +4,7 @@ on:
     branches:
       - "**"
     paths:
-      - app/databuk/dashboard/**
+      - dashboard/test_deployment/databuk/dashboard/**
   workflow_dispatch:
 jobs:
   build:
@@ -15,8 +15,8 @@ jobs:
 
       source_repo: ${{ github.repository }}
       source_ref: ${{ github.sha }}
-      source-views-path: app/databuk/config/zf_view.yaml
-      source-schemas-path: app/databuk/config/schemas
+      source-views-path: dashboard/test_deployment/databuk/config/zf_view.yaml
+      source-schemas-path: dashboard/test_deployment/databuk/config/schemas
 
       frontend_image: jbrezmorf/zarr-fuse-holoviz-frontend
       namespace: zarr-fuse-dashboard-development
