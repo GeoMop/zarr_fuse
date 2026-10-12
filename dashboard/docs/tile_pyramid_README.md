@@ -137,8 +137,10 @@ The dashboard itself does not need GDAL at runtime if it only consumes already g
 
 ### 1. Build the overlay tile pipeline
 `build_overlay_tiles.py` reads the selected view's `tile_build` configuration,
-attaches the configured control points, creates the intermediate raster files,
+attaches the configured control points, creates the intermediate raster files under
+`workdir/tile_build/<view_name>/` (relative to `zf_view.yaml.parent.parent`),
 generates the XYZ tile pyramid, and uploads it to the configured S3 prefix.
+The target CRS is fixed to EPSG:3857 (XYZ web-map tiles) and is not configurable.
 
 Preview the configured pipeline with:
 
@@ -342,20 +344,15 @@ Keep in version control:
 - preprocessing scripts
 - view-specific configuration
 
-Usually ignore generated outputs such as:
+Usually ignore generated outputs. The build script keeps every intermediate
+(GCP VRT, warped GeoTIFF, RGBA VRT, tile tree) under a single work directory:
 
-- `tiles/`
-- `*_gcps.vrt`
-- `*_3857.tif`
-- `*_3857_rgba.vrt`
+- `workdir/tile_build/<view_name>/`
 
-Example `.gitignore` entries:
+Example `.gitignore` entry (already covered by the repository `.gitignore`):
 
 ```gitignore
-dashboard/config/**/tiles/
-dashboard/config/**/*_gcps.vrt
-dashboard/config/**/*_3857.tif
-dashboard/config/**/*_3857_rgba.vrt
+workdir/
 ```
 
 ---

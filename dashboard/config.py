@@ -1,7 +1,8 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, NewType, Optional
+from urllib.parse import urlparse
 
 import yaml
 from dotenv import load_dotenv
@@ -10,6 +11,24 @@ from zarr_fuse import schema as zf_schema
 VIEWS_ENV_VAR = "ZF_VIEW_PATH"
 LEGACY_ENDPOINTS_ENV_VAR = "ENDPOINTS_PATH"
 SCHEMAS_ENV_VAR = "SCHEMAS_PATH"
+
+# Storage URI such as s3://bucket/prefix; distinct from plain textual values (gcp_srs, resampling, ...).
+StoreURI = NewType("StoreURI", str)
+
+
+def parse_s3_uri(uri: str) -> tuple[str, str] | None:
+    """Split an ``s3://bucket/prefix`` URI into ``(bucket, prefix)``.
+
+    Returns ``None`` when the URI is not a valid ``s3://`` URI (missing scheme
+    or missing bucket). ``prefix`` is the URI path without leading/trailing
+    slashes and is empty when the URI targets the bucket root. Shared by config
+    validation, the tile build script and the tile service so the urlparse
+    logic exists only once.
+    """
+    parsed = urlparse(uri.strip())
+    if parsed.scheme != "s3" or not parsed.netloc:
+        return None
+    return parsed.netloc, parsed.path.strip("/")
 
 # ---------------------------------------------------------------------------
 # Single-parse cache for zf_view.yaml
@@ -28,116 +47,158 @@ def _parse_view_config(config_path: Path) -> dict:
 
 @dataclass
 class SourceConfig:
-    type: str
-    store_type: str
-    uri: str
-    schema_path: Optional[str] = None
+    """``source`` section of zf_view.yaml: where the view's dataset store lives.
+
+    ``uri`` is the only required key and the only one opened (via zarr_fuse).
+    ``schema_path`` is required and used to locate the schema file; the
+    resolved absolute path is stored in ``SchemaConfig.file``, not here.
+    """
+    uri: StoreURI  # store location opened by zarr_fuse, e.g. s3://bucket/store.zarr
 
 
 @dataclass
 class SchemaFieldsConfig:
-    lat: Optional[str] = None
-    lon: Optional[str] = None
-    time: Optional[str] = None
-    vertical: Optional[str] = None
-    entity: Optional[str] = None
+    """One field-mapping entry of ``variable_map``: standard field -> dataset name.
+
+    ``lat``, ``lon``, ``time`` and ``entity`` are required and always carry a
+    valid variable/column name. The ``vertical`` coordinate is optional and
+    ``None`` means the dataset does not carry that field.
+    """
+    lat: str  # dataset name of the latitude field
+    lon: str  # dataset name of the longitude field
+    time: str  # dataset name of the time coordinate
+    entity: str  # dataset name of the site/borehole identity field
+    vertical: Optional[str] = None  # dataset name of the depth/level coordinate (optional)
 
 
 @dataclass
 class SchemaConfig:
-    file: str
-    fields: SchemaFieldsConfig = field(default_factory=SchemaFieldsConfig)
-    group_fields: Dict[str, SchemaFieldsConfig] = field(default_factory=dict)
+    """Resolved schema file and field mapping of one view (from ``variable_map``).
+
+    A root-level ``fields`` mapping is optional: views may instead define only
+    group-specific mappings in ``group_fields``.
+    """
+    file: str  # absolute path of the schema YAML (kept as str, not Path)
+    fields: Optional[SchemaFieldsConfig] = None  # root mapping; absent for group-only views
+    group_fields: Dict[str, SchemaFieldsConfig] = field(default_factory=dict)  # group path -> field mapping
 
 
 @dataclass
 class SchemaDisplayConfig:
-    display_variable: Optional[str] = None
-    display_unit: Optional[str] = None
-    entity_name: Optional[str] = None
-    vertical_name: Optional[str] = None
+    """UI labels derived from the schema for the configured display variable.
+
+    Built by ``_read_schema_display`` from the schema's VARS/COORDS metadata;
+    ``display_variable`` is passed through from ``defaults``.
+    """
+    display_variable: Optional[str] = None  # selected display variable (defaults.display_variable)
+    entity_name: Optional[str] = None  # dataset column shown as the site/entity label
+    vertical_name: Optional[str] = None  # dataset column shown as the depth/level label
 
 
 @dataclass
 class DefaultsConfig:
-    display_variable: Optional[str] = None
-    group_path: Optional[str] = None
-    default_site: Optional[str] = None
+    """``defaults`` section: selections applied when the view first loads."""
+    group_path: str  # variable_map group selected at startup ("/" = root)
+    display_variable: Optional[str] = None  # startup variable; None picks the first available one
+    default_site: Optional[str] = None  # site preselected at startup (matched against site_id)
 
 
 @dataclass
 class MapConfig:
-    center_lat: Optional[float] = None
-    center_lon: Optional[float] = None
-    zoom: Optional[int] = None
-    title: Optional[str] = None
-    point_size: Optional[int] = None
-    alpha: Optional[float] = None
-    cluster_enabled: bool = True
-    cluster_eps_factor: float = 0.05
-    cluster_buffer_factor: float = 0.1
-    cluster_size_scale: float = 3.0
+    """``visualization.map`` section: marker look and clustering.
+
+    ``title`` and ``point_size`` are required keys; all fields are read by
+    ``map_views.build_map_view``.
+    """
+    title: str  # map title (required); also shown on the points layer
+    point_size: int  # marker size of a single point / base size of a cluster (required)
+    cluster_enabled: bool = True  # group nearby markers into grid cells
+    cluster_eps_factor: float = 0.05  # cluster grid size as a fraction of the current view width
+    cluster_buffer_factor: float = 0.1  # margin around the view (fraction of width) still clustered
+    cluster_size_scale: float = 3.0  # marker size added per member of a cluster
 
 
 @dataclass
 class TimeSeriesConfig:
-    middle_window_days: Optional[int] = None
-    right_window_hours: Optional[int] = None
+    """``visualization.timeseries`` section: x-axis windows of the time panes.
+
+    Both keys are required in zf_view.yaml.
+    """
+    middle_window_days: int  # time span of the middle (month-scale) pane, in days
+    right_window_hours: int  # time span of the right (day-scale) pane, in hours
 
 
 @dataclass
 class OverlayConfig:
-    enabled: bool = False
-    tile_url: Optional[str] = None
-    source_uri: Optional[str] = None
+    """``visualization.overlay`` section: XYZ raster tile overlay on the base map.
 
-
-@dataclass
-class TileS3Config:
-    bucket: Optional[str] = None
-    prefix: Optional[str] = None
+    Read at runtime from the raw view dict (``map_views`` / ``tile_service``);
+    the typed object is what ``load_views`` returns.
+    """
+    enabled: bool = False  # master switch (HV_OVERLAY_ENABLED=0 forces it off)
+    tile_url: Optional[str] = None  # XYZ template, e.g. /tiles/{Z}/{X}/{Y}.png (HV_OVERLAY_TILE_URL fallback)
+    source_uri: Optional[StoreURI] = None  # s3:// prefix holding the tiles; tile service signs URLs from it
 
 
 @dataclass
 class TileBuildConfig:
-    source_image: Optional[str] = None
-    georef_file: Optional[str] = None
-    vrt_file: Optional[str] = None
-    warped_tif: Optional[str] = None
-    rgba_vrt: Optional[str] = None
-    tiles_dir: Optional[str] = None
-    min_zoom: int = 0
-    max_zoom: int = 20
-    target_srs: str = "EPSG:3857"
-    gcp_srs: str = "EPSG:4326"
-    resampling: str = "near"
-    tile_resampling: Optional[str] = None
-    s3: TileS3Config = field(default_factory=TileS3Config)
+    """Public ``tile_build`` section of zf_view.yaml (overlay tile pipeline).
+
+    ``base_dir`` is the directory above the config's directory
+    (``zf_view.yaml.parent.parent``); relative paths in this section
+    resolve against it. Intermediate raster paths and the target CRS are
+    internal to dashboard/scripts/build_overlay_tiles.py and are not
+    configurable.
+    """
+
+    source_image: Optional[Path] = None  # source raster; path relative to base_dir
+    georef_file: Optional[Path] = None  # QGIS-style GCP JSON (sourceX/sourceY pixels, mapX/mapY ground)
+    gcp_srs: str = "EPSG:4326"  # CRS of mapX/mapY in georef_file (gdal_translate -a_srs)
+    min_zoom: int = 0  # lowest XYZ zoom level built; overlay is missing below it
+    max_zoom: int = 20  # highest XYZ zoom level built; overlay is missing above it
+    warp_resampling: str = "near"  # gdalwarp -r during reprojection to EPSG:3857
+    tile_resampling: Optional[str] = None  # gdal2tiles -r; None -> use warp_resampling
+    target_url: Optional[StoreURI] = None  # publish target, e.g. s3://bucket/prefix/
 
 
 @dataclass
 class VisualizationConfig:
-    map: MapConfig = field(default_factory=MapConfig)
-    timeseries: TimeSeriesConfig = field(default_factory=TimeSeriesConfig)
-    overlay: OverlayConfig = field(default_factory=OverlayConfig)
+    """``visualization`` section: grouping of the three UI subsections."""
+    map: MapConfig  # base map and markers
+    timeseries: TimeSeriesConfig  # time axis windows
+    overlay: OverlayConfig = field(default_factory=OverlayConfig)  # raster tile overlay
 
 
 @dataclass
 class ViewConfig:
-    name: str
-    reload_interval: int
-    description: str
-    version: str
-    source: SourceConfig
-    schema: SchemaConfig
-    schema_display: SchemaDisplayConfig = field(default_factory=SchemaDisplayConfig)
-    defaults: DefaultsConfig = field(default_factory=DefaultsConfig)
-    visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
-    tile_build: TileBuildConfig = field(default_factory=TileBuildConfig)
+    """One named view of zf_view.yaml: the full dashboard configuration for it.
+
+    The YAML key of the view is stored as ``name``. Required sections:
+    ``source``, ``variable_map``, ``defaults`` and ``visualization``; every
+    other section defaults to an empty config.
+    """
+    name: str  # view key in zf_view.yaml; also the ?view= URL parameter
+    source: SourceConfig  # dataset store location
+    schema: SchemaConfig  # resolved schema file + field mapping
+    defaults: DefaultsConfig  # startup selections (required; group_path is mandatory)
+    visualization: VisualizationConfig  # map/timeseries/overlay
+    schema_display: SchemaDisplayConfig = field(default_factory=SchemaDisplayConfig)  # labels/units from schema
+    tile_build: TileBuildConfig = field(default_factory=TileBuildConfig)  # overlay tile build pipeline
 
 
 FIELD_NAMES = {"lat", "lon", "time", "vertical", "entity"}
 REQUIRED_FIELD_NAMES = {"lat", "lon", "time", "entity"}
+
+TILE_BUILD_ALLOWED_KEYS = frozenset({
+    "source_image",
+    "georef_file",
+    "gcp_srs",
+    "min_zoom",
+    "max_zoom",
+    "warp_resampling",
+    "tile_resampling",
+    "target_url",
+})
 
 
 def find_view_file() -> Path:
@@ -231,6 +292,15 @@ def _normalize_group_path(group_path: Optional[str]) -> str:
     return "/".join(part for part in str(group_path).strip("/").split("/") if part)
 
 
+def _require_value(data: Dict[str, Any], key: str, context: str) -> Any:
+    """Return ``data[key]`` or raise when it is missing or explicitly null."""
+    if not isinstance(data, dict):
+        raise ValueError(f"{context} must be a mapping/object")
+    if data.get(key) is None:
+        raise ValueError(f"{context}.{key} is required and must not be null")
+    return data[key]
+
+
 def _build_schema_fields(fields_data: Dict[str, Any], context: str) -> SchemaFieldsConfig:
     if not isinstance(fields_data, dict):
         raise ValueError(f"{context} must be a mapping/object")
@@ -239,12 +309,22 @@ def _build_schema_fields(fields_data: Dict[str, Any], context: str) -> SchemaFie
     if missing:
         raise ValueError(f"{context} is missing required keys: {', '.join(sorted(missing))}")
 
+    invalid = [
+        name
+        for name in REQUIRED_FIELD_NAMES
+        if not isinstance(fields_data.get(name), str) or not fields_data[name].strip()
+    ]
+    if invalid:
+        raise ValueError(
+            f"{context} has null or empty required field(s): {', '.join(sorted(invalid))}"
+        )
+
     return SchemaFieldsConfig(
-        lat=fields_data.get("lat"),
-        lon=fields_data.get("lon"),
-        time=fields_data.get("time"),
+        lat=fields_data["lat"],
+        lon=fields_data["lon"],
+        time=fields_data["time"],
+        entity=fields_data["entity"],
         vertical=fields_data.get("vertical"),
-        entity=fields_data.get("entity"),
     )
 
 
@@ -280,10 +360,11 @@ def _resolve_fields_for_group_raw(schema_config: dict, group_path: str | None) -
     """Resolve the effective fields dict for a group path by walking upward.
 
     This is the raw-dict version (used at runtime with untyped view config).
-    The typed counterpart is :func:`resolve_schema_fields`.
+    The typed counterpart is :func:`resolve_schema_fields`. Returns an empty
+    dict when the view has no mapping for the requested group.
     """
-    fields = schema_config.get("fields", {})
-    group_fields = schema_config.get("group_fields", {})
+    fields = schema_config.get("fields") or {}
+    group_fields = schema_config.get("group_fields", {}) or {}
     normalized = "/".join(part for part in (group_path or "").strip("/").split("/") if part)
 
     path = normalized
@@ -297,7 +378,12 @@ def _resolve_fields_for_group_raw(schema_config: dict, group_path: str | None) -
     return fields
 
 
-def resolve_schema_fields(schema: SchemaConfig, group_path: Optional[str]) -> SchemaFieldsConfig:
+def resolve_schema_fields(schema: SchemaConfig, group_path: Optional[str]) -> Optional[SchemaFieldsConfig]:
+    """Return the field mapping for ``group_path`` by walking upward.
+
+    Returns ``None`` when neither the group nor any ancestor (including the
+    root) defines a mapping. Group-only views leave the root ``fields`` unset.
+    """
     normalized = _normalize_group_path(group_path)
     path = normalized
 
@@ -376,15 +462,11 @@ def _read_schema_display(
     if group_data is None:
         return SchemaDisplayConfig(
             display_variable=display_variable,
-            display_unit=None,
             entity_name=entity_field,
             vertical_name=vertical_field,
         )
 
-    vars_data = group_data.get("VARS", {})
     coords_data = group_data.get("COORDS", {})
-
-    variable_data = vars_data.get(display_variable or "", {})
 
     entity_name = entity_field
     if entity_field and entity_field in coords_data and isinstance(coords_data[entity_field], dict):
@@ -396,7 +478,6 @@ def _read_schema_display(
 
     return SchemaDisplayConfig(
         display_variable=display_variable,
-        display_unit=variable_data.get("unit"),
         entity_name=entity_name,
         vertical_name=vertical_name,
     )
@@ -467,7 +548,28 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
     map_data = visualization_data["map"]
     timeseries_data = visualization_data["timeseries"]
     overlay_data = visualization_data["overlay"]
-    tile_build_data = view_data.get("tile_build", {"enabled": False})
+    tile_build_raw = view_data.get("tile_build")
+    tile_build_data = tile_build_raw if tile_build_raw is not None else {}
+    if not isinstance(tile_build_data, dict):
+        raise ValueError(f"View '{view_name}' tile_build must be a mapping/object")
+
+    unknown_tile_build_keys = sorted(set(tile_build_data) - TILE_BUILD_ALLOWED_KEYS)
+    if unknown_tile_build_keys:
+        raise ValueError(
+            f"View '{view_name}' tile_build contains unsupported key(s): "
+            f"{', '.join(unknown_tile_build_keys)}. "
+            f"Allowed keys: {', '.join(sorted(TILE_BUILD_ALLOWED_KEYS))}."
+        )
+
+    target_url_raw = tile_build_data.get("target_url") or None
+    if target_url_raw is not None and parse_s3_uri(str(target_url_raw)) is None:
+        raise ValueError(
+            f"View '{view_name}' tile_build.target_url must be an s3:// URI with a bucket, "
+            "e.g. s3://bucket/prefix/."
+        )
+
+    source_image_raw = tile_build_data.get("source_image")
+    georef_file_raw = tile_build_data.get("georef_file")
 
     if not isinstance(schema_data, dict):
         raise ValueError(f"View '{view_name}' variable_map must be a mapping/object")
@@ -482,10 +584,8 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
             f"View '{view_name}' must define either variable_map.fields or nested group mappings."
         )
 
-    required_source_fields = ["type", "store_type", "uri"]
-    for field_name in required_source_fields:
-        if not source_data.get(field_name):
-            raise ValueError(f"View '{view_name}' is missing source.{field_name}")
+    if not source_data.get("uri"):
+        raise ValueError(f"View '{view_name}' is missing source.uri")
 
     schema_file = source_data["schema_path"]
     schemas_path = os.getenv(SCHEMAS_ENV_VAR)
@@ -524,16 +624,17 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
 
     schema_for_display = SchemaConfig(
         file=str(schema_file_path),
-        fields=root_fields or SchemaFieldsConfig(),
+        fields=root_fields,
         group_fields=group_fields,
     )
-    selected_fields = resolve_schema_fields(schema_for_display, defaults_data.get("group_path"))
+    group_path = _require_value(defaults_data, "group_path", f"View '{view_name}' defaults")
+    selected_fields = resolve_schema_fields(schema_for_display, group_path)
     schema_display = _read_schema_display(
         schema_file_path,
         defaults_data.get("display_variable"),
-        selected_fields.entity,
-        selected_fields.vertical,
-        defaults_data.get("group_path"),
+        selected_fields.entity if selected_fields else None,
+        selected_fields.vertical if selected_fields else None,
+        group_path,
     )
 
     # Support both flattened cluster keys and nested `cluster` mapping in zf_view.yaml
@@ -544,74 +645,57 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
 
     return ViewConfig(
         name=view_name,
-        reload_interval=view_data["reload_interval"],
-        description=view_data["description"],
-        version=view_data["version"],
         source=SourceConfig(
-            type=source_data["type"],
-            store_type=source_data["store_type"],
-            uri=source_data["uri"],
-            schema_path=schema_file,
+            uri=StoreURI(source_data["uri"]),
         ),
         schema=SchemaConfig(
             file=str(schema_file_path),
-            fields=root_fields or SchemaFieldsConfig(),
+            fields=root_fields,
             group_fields=group_fields,
         ),
         schema_display=schema_display,
         defaults=DefaultsConfig(
-            display_variable=defaults_data["display_variable"],
-            group_path=defaults_data["group_path"],
+            group_path=group_path,
+            display_variable=defaults_data.get("display_variable"),
             default_site=defaults_data.get("default_site"),
         ),
-            visualization=VisualizationConfig(
+        visualization=VisualizationConfig(
             map=MapConfig(
-                center_lat=map_data.get("center_lat"),
-                center_lon=map_data.get("center_lon"),
-                zoom=map_data.get("zoom"),
-                title=map_data["title"],
-                point_size=map_data["point_size"],
-                alpha=map_data["alpha"],
+                title=_require_value(map_data, "title", f"View '{view_name}' visualization.map"),
+                point_size=_require_value(map_data, "point_size", f"View '{view_name}' visualization.map"),
                 cluster_enabled=_cluster_get("cluster_enabled", True),
                 cluster_eps_factor=_cluster_get("cluster_eps_factor", 0.05),
                 cluster_buffer_factor=_cluster_get("cluster_buffer_factor", 0.1),
                 cluster_size_scale=_cluster_get("cluster_size_scale", 3.0),
             ),
             timeseries=TimeSeriesConfig(
-                middle_window_days=timeseries_data["middle_window_days"],
-                right_window_hours=timeseries_data["right_window_hours"],
+                middle_window_days=_require_value(
+                    timeseries_data, "middle_window_days", f"View '{view_name}' visualization.timeseries"
+                ),
+                right_window_hours=_require_value(
+                    timeseries_data, "right_window_hours", f"View '{view_name}' visualization.timeseries"
+                ),
             ),
             overlay=OverlayConfig(
                 enabled=overlay_data["enabled"],
                 tile_url=overlay_data.get("tile_url"),
-                source_uri=overlay_data.get("source_uri"),
+                source_uri=(
+                    StoreURI(overlay_data["source_uri"])
+                    if overlay_data.get("source_uri")
+                    else None
+                ),
             ),
         ),
         tile_build=TileBuildConfig(
-            source_image=tile_build_data.get("source_image"),
-            georef_file=tile_build_data.get("georef_file"),
-            vrt_file=tile_build_data.get("vrt_file"),
-            warped_tif=tile_build_data.get("warped_tif"),
-            rgba_vrt=tile_build_data.get("rgba_vrt"),
-            tiles_dir=tile_build_data.get("tiles_dir"),
+            source_image=Path(str(source_image_raw)) if source_image_raw else None,
+            georef_file=Path(str(georef_file_raw)) if georef_file_raw else None,
+            gcp_srs=tile_build_data.get("gcp_srs", "EPSG:4326"),
             min_zoom=tile_build_data.get("min_zoom", 0),
             max_zoom=tile_build_data.get("max_zoom", 20),
-            target_srs=tile_build_data.get("target_srs", "EPSG:3857"),
-            gcp_srs=tile_build_data.get("gcp_srs", "EPSG:4326"),
-            resampling=tile_build_data.get("resampling", "near"),
+            warp_resampling=tile_build_data.get("warp_resampling", "near"),
             tile_resampling=tile_build_data.get("tile_resampling"),
-            s3=_build_tile_s3_config(tile_build_data.get("s3")),
+            target_url=StoreURI(str(target_url_raw)) if target_url_raw is not None else None,
         ),
-    )
-
-
-def _build_tile_s3_config(s3_data: Any) -> TileS3Config:
-    """Build the nested tile_build.s3 publish-target config (bucket, prefix)."""
-    if not isinstance(s3_data, dict):
-        return TileS3Config()
-    return TileS3Config(
-        bucket=s3_data.get("bucket"),
-        prefix=s3_data.get("prefix"),
     )
 
 
