@@ -7,6 +7,8 @@ import numpy as np
 import zarr_fuse as zf
 
 from ingress_server.app_config import AppConfig, BaseConfig, SmtpConfig
+from ingress_server.local_cache import LocalCache
+from ingress_server.manifest import ManifestStore, default_manifest_url
 from ingress_server.queue_storage import FileRef, QueueStorage
 
 TESTS_DIR = Path(__file__).parent
@@ -52,7 +54,11 @@ def stage_items(storage: QueueStorage) -> list[str]:
     return names
 
 
-def app_config(storage: QueueStorage, retention_time: float = 0.0) -> AppConfig:
+def app_config(
+    storage: QueueStorage,
+    retention_time: float = 0.0,
+    cache: LocalCache | None = None,
+) -> AppConfig:
     """
     Worker config for the staged queue. Holding is disabled by default: the
     fixture payloads span less than the default retention window, so every
@@ -60,10 +66,12 @@ def app_config(storage: QueueStorage, retention_time: float = 0.0) -> AppConfig:
     """
     return AppConfig(
         queue=storage,
+        manifest=ManifestStore(default_manifest_url(storage.url)),
         config_path=CONFIG_PATH,
         config={},
         base=BaseConfig(retention_time=retention_time),
         smtp=SmtpConfig(),
+        cache=cache or LocalCache(None),
     )
 
 

@@ -11,7 +11,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from .models import EndpointConfig
 from .logging_setup import setup_logging
 from .app_config import load_app_config, AppConfig
-from .worker import startup_recover, install_signal_handlers, working_loop
+from .worker import startup_check, install_signal_handlers, working_loop
 from .active_scrapper import register_active_scrapper, ActiveScrapperConfig
 from .passive_scrapper import register_passive_scrapper
 
@@ -80,8 +80,8 @@ def _graceful_shutdown(app: FastAPI) -> None:
 
 def bootstrap_runtime(app: FastAPI, app_config: AppConfig) -> None:
     LOG.info("Bootstrapping runtime")
-    startup_recover(app_config)
-    LOG.info("Startup recovery finished")
+    startup_check(app_config)
+    LOG.info("Startup check finished")
     install_signal_handlers(app_config)
     LOG.debug("Signal handlers installed")
     _start_worker_thread(app, app_config)

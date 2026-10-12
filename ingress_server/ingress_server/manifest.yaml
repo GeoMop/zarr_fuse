@@ -1,0 +1,46 @@
+ATTRS:
+  description: "Ingress queue manifest, one entry per received payload."
+items:
+  COORDS:
+    received_at:
+      description: "Payload receipt time; microsecond offsets keep the keys unique."
+      unit: {tick: "us", tz: "UTC"}
+      sorted: false
+      chunk_size: 256
+  VARS:
+    item_name:
+      description: "Payload object name within its queue folder."
+      type: "str[128]"
+      coords: received_at
+    source:
+      description: "Name of the endpoint or active scrapper that received the payload."
+      type: "str[64]"
+      coords: received_at
+    state:
+      description: "Processing state: accepted, success or failed."
+      type: "str[16]"
+      coords: received_at
+    sha256:
+      description: "SHA-256 hex digest of the payload, computed at receipt."
+      type: "str[64]"
+      coords: received_at
+    data_time_min:
+      description: "Minimum of the time_like_coord values of the payload, empty when unknown."
+      type: "str[32]"
+      coords: received_at
+    data_time_max:
+      description: "Maximum of the time_like_coord values of the payload, empty when unknown."
+      type: "str[32]"
+      coords: received_at
+    updated_at:
+      description: "Time of the last change of the entry."
+      unit: {tick: "us", tz: "UTC"}
+      coords: received_at
+    error:
+      description: "Reason of the failure of a failed item, empty otherwise."
+      type: "str[256]"
+      coords: received_at
+    metadata:
+      description: "JSON of the item metadata (MetadataModel)."
+      type: "str[2048]"
+      coords: received_at
