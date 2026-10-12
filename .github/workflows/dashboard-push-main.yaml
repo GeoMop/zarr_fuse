@@ -15,7 +15,7 @@ jobs:
 
       source_repo: ${{ github.repository }}
       source_ref: ${{ github.sha }}
-      source-endpoints-path: app/databuk/config/endpoints.yaml
+      source-views-path: app/databuk/config/zf_view.yaml
       source-schemas-path: app/databuk/config/schemas
 
       frontend_image: jbrezmorf/zarr-fuse-holoviz-frontend

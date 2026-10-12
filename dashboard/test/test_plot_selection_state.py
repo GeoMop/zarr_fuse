@@ -192,6 +192,52 @@ class TestClear:
         assert len(state._checked) == 0
 
 
+class TestCheckedRestore:
+    def test_checked_combinations_returns_copy(self):
+        state = _make_state()
+        captured = state.checked_combinations()
+        assert captured == state._checked
+        # Mutating the returned copy must not affect the state
+        captured.clear()
+        assert ("BH-1", 0.0) in state._checked
+
+    def test_restore_checked_prunes_auto_checked_depths(self):
+        """After clear+re-add (variable change), restore the exact selection.
+
+        Re-adding a site auto-checks all finite depths; restore_checked must
+        prune back to the previously selected subset.
+        """
+        state = _make_state()
+
+        # Keep only BH-1@0.0 and BH-2@3.0 checked
+        state.set_checked("BH-1", 1.0, False)
+        state.set_checked("BH-1", 2.0, False)
+        state.set_checked("BH-2", 1.0, False)
+        state.set_checked("BH-2", 2.0, False)
+        saved = state.checked_combinations()
+        assert saved == {("BH-1", 0.0), ("BH-2", 3.0)}
+
+        state.clear()
+        for site in _make_state().sites:
+            state.add_site(
+                site["entity_index"], site["site_id"],
+                site["depths"], site["series"], site["times"],
+            )
+        assert len(state._checked) == 6, "re-add auto-checks all depths"
+
+        state.restore_checked(saved)
+        assert state.checked_combinations() == {("BH-1", 0.0), ("BH-2", 3.0)}
+
+    def test_restore_checked_ignores_missing_combos(self):
+        """Saved combos with no matching site/depth after clear are dropped."""
+        state = _make_state()
+        saved = {("BH-1", 0.0), ("BH-9", 123.0)}
+        state.clear()
+        state.add_site(0, "BH-1", [0.0], [[1]], ["2020-01-01"])
+        state.restore_checked(saved)
+        assert state.checked_combinations() == {("BH-1", 0.0)}
+
+
 class TestVersionBumps:
     def test_add_site_bumps_version_and_layout(self):
         state = SelectionState()

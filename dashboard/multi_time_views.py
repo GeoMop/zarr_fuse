@@ -11,25 +11,83 @@ from dashboard.config import _resolve_fields_for_group_raw
 _perf_plot_redraws = 0
 
 
+def _resolve_marker_window(x_range, xlim, times):
+    """Resolve the (start, end) marker window for a timeseries view.
+
+    Prefers the live ``x_range`` (the current visible window reported by the
+    ``RangeX`` stream after pan/zoom) when it is valid, otherwise falls back
+    to the view-specific ``xlim``, and clamps the result to the data bounds.
+    Returns ``None`` when no usable window can be derived.
+    """
+    if times is None or len(times) == 0:
+        return None
+    if x_range is not None and len(x_range) == 2 \
+            and not pd.isna(x_range[0]) and not pd.isna(x_range[1]):
+        start, end = x_range[0], x_range[1]
+    elif xlim is not None:
+        start, end = xlim[0], xlim[1]
+    else:
+        return None
+    min_t, max_t = times.min(), times.max()
+    start = max(start, min_t)
+    end = min(end, max_t)
+    if not end > start:
+        return None
+    return (start, end)
+
+
+def _resolve_tap_targets(x, y, clusters, all_meta, nearest_idx, min_dist, threshold_deg):
+    """Resolve the borehole target(s) for a map tap.
+
+    A merged cluster dot is drawn at its centroid, which can sit farther than
+    ``threshold_deg`` (a fixed single-marker tolerance) from any of its members.
+    When the click lands within ``max(threshold_deg, cluster_radius)`` of a
+    merged cluster centroid, return all of its members; otherwise fall back to
+    the nearest single marker (respecting ``threshold_deg``).
+
+    Returns a list of marker-meta dicts (each carrying ``entity_index`` for
+    cluster members, or the original ``marker_meta`` for the single fallback),
+    or ``None`` when the click resolves to nothing.
+    """
+    if clusters:
+        cl_lats = np.array([c["lat"] for c in clusters], dtype=float)
+        cl_lons = np.array([c["lon"] for c in clusters], dtype=float)
+        c_dist = (cl_lats - float(y)) ** 2 + (cl_lons - float(x)) ** 2
+        nearest_cluster = int(np.nanargmin(c_dist))
+        cluster = clusters[nearest_cluster]
+        radius = float(cluster.get("radius", 0.0))
+        hit_threshold = max(threshold_deg, radius)
+        if float(c_dist[nearest_cluster]) <= hit_threshold ** 2:
+            members = cluster.get("entity_indices") or []
+            if len(members) > 1:
+                return [{"entity_index": int(m)} for m in members]
+
+    if min_dist <= threshold_deg ** 2:
+        return [all_meta[nearest_idx]]
+    return None
+
+
 def build_timeseries_views(data, map_state, selection_state, render_spinner=None):
     start_total = time.perf_counter()
-    endpoint_config = data.client.get_endpoint(data.endpoint_name)
-    defaults_config = endpoint_config["defaults"]
-    schema_display = endpoint_config["schema_display"]
-    schema_config = endpoint_config["schema"]
+    view_config = data.client.get_view(data.view_name)
+    defaults_config = view_config["defaults"]
+    default_site_name = defaults_config.get("default_site")
+    schema_display = view_config["schema_display"]
+    schema_config = view_config["schema"]
     fields_config = _resolve_fields_for_group_raw(schema_config, data.group_path)
     time_dim = fields_config.get("time") or "time"
-    visualization_config = endpoint_config["visualization"]
+    visualization_config = view_config["visualization"]
     timeseries_config = visualization_config["timeseries"]
 
-    default_display_variable = data.display_variable
-
     metric_label = (
-        default_display_variable
+        data.display_variable
         or schema_display.get("display_variable")
         or "value"
     )
-    display_unit = schema_display.get("display_unit")
+    var_meta = data.client.get_variable_metadata(
+        data.view_name, data.group_path, metric_label
+    )
+    display_unit = var_meta.get("unit") if var_meta else None
     y_axis_label = f"{metric_label} ({display_unit})" if display_unit else metric_label
     entity_label = (
         schema_display.get("entity_name")
@@ -46,13 +104,25 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             lats = np.array([])
             lons = np.array([])
         if len(lats) == 0 or len(lons) == 0:
-            return 0.0, 0.0
-        return float(lats[0]), float(lons[0])
+            return 0.0, 0.0, None
+        if default_site_name:
+            all_meta = map_state.get("marker_meta") or []
+            for meta in all_meta:
+                if meta.get("site_id") == default_site_name:
+                    idx = all_meta.index(meta)
+                    return float(lats[idx]), float(lons[idx]), meta
+        return float(lats[0]), float(lons[0]), None
 
     def _fetch_timeseries(lat, lon, marker_meta=None):
+        """Fetch the current variable's timeseries and register a site.
+
+        Returns the resolved ``entity_index`` on success, or ``None`` when no
+        variable is selected or the fetch failed (callers can use this to
+        report per-site failures without leaving stale data behind).
+        """
         start = time.perf_counter()
         print(f"[fetch_ts] Called with lat={lat:.4f}, lon={lon:.4f}, marker_meta={marker_meta}")
-        if not default_display_variable:
+        if not data.display_variable:
             print(f"[fetch_ts] No variable selected — skipping fetch")
             return None
         marker_entity_index = marker_meta.get("entity_index") if isinstance(marker_meta, dict) else None
@@ -61,11 +131,11 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         if marker_entity_index is not None:
             print(f"[fetch_ts] Selected marker index={marker_entity_index}, site_id={marker_site_id}")
         fig = data.client.get_timeseries_data(
-            data.endpoint_name,
+            data.view_name,
             group_path=data.group_path,
             lat=lat,
             lon=lon,
-            variable=default_display_variable,
+            variable=data.display_variable,
             entity_index=selected_entity_index,
         )
         if fig.get("status") == "error":
@@ -81,19 +151,42 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         borehole_name = fig.get("borehole_name")
 
         site_id = borehole_name if borehole_name else f"{entity_label}_{entity_index}"
-        selection_state.add_site(
-            entity_index=entity_index,
-            site_id=site_id,
-            depths=depths,
-            series=series,
-            times=times,
-            force=True,
-        )
-        print(f"[plot_selection] Site added/updated: {site_id}")
+        exists = any(s["entity_index"] == entity_index for s in selection_state.sites)
+        if exists:
+            # In-place refresh on a variable change: preserve identity, checked
+            # depths and table position.  If the new variable yields no series,
+            # blank the site (empty depths) so no stale old-variable data is
+            # drawn, and report it as no-data via the None return.
+            if not series:
+                selection_state.update_site_data(
+                    entity_index,
+                    series=[],
+                    times=pd.to_datetime([]),
+                    depths=np.array([]),
+                )
+                print(f"[plot_selection] Site blanked (no data for variable): {site_id}")
+                print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
+                return None
+            selection_state.update_site_data(
+                entity_index,
+                series=series,
+                times=times,
+                depths=depths,
+            )
+            print(f"[plot_selection] Site updated: {site_id}")
+        else:
+            selection_state.add_site(
+                entity_index=entity_index,
+                site_id=site_id,
+                depths=depths,
+                series=series,
+                times=times,
+            )
+            print(f"[plot_selection] Site added: {site_id}")
         print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
         return entity_index
 
-    def build_timeseries_overlay(view="left", x_range=None):
+    def build_timeseries_overlay(view="left"):
         max_points = 5000 if view == "left" else None
         if selection_state is None:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
@@ -124,14 +217,6 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
 
         row_dim = selection_state.row_dim
         col_dim = selection_state.col_dim
-
-        # Compute marker positions from x_range
-        n_markers = 8
-        if (x_range is not None and len(x_range) == 2
-                and not pd.isna(x_range[0]) and not pd.isna(x_range[1])):
-            marker_times = pd.date_range(start=x_range[0], end=x_range[1], periods=n_markers)
-        else:
-            marker_times = pd.date_range(start=times.min(), end=times.max(), periods=n_markers)
 
         # Select per-combo cache for this view type
         cache = _left_curves if view == "left" else _full_curves
@@ -178,21 +263,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
                 curve = hv.Curve(curve_df, time_dim, y_axis_label, label=label).opts(
                     color=color,
                 )
-
-                # Scatter markers at tick-like positions
-                times_ns = np.array(times, dtype="datetime64[ns]").astype("int64")
-                marker_times_ns = np.array(marker_times, dtype="datetime64[ns]").astype("int64")
-                marker_y = np.interp(marker_times_ns, times_ns, series_vals)
-                marker_df = pd.DataFrame({
-                    time_dim: marker_times,
-                    y_axis_label: marker_y,
-                })
-                scatter = hv.Scatter(marker_df, time_dim, y_axis_label).opts(
-                    color=color,
-                    marker=shape,
-                    size=8,
-                )
-                cache[key] = curve * scatter
+                cache[key] = curve
                 meta_cache[key] = meta
 
         if not cache:
@@ -202,6 +273,60 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
 
         print(f"[timeseries] Returning overlay with {len(cache)} curves")
         return hv.Overlay(list(cache.values()))
+
+    def build_marker_overlay(view="left", x_range=None, xlim=None):
+        n_markers = 5
+
+        selected_combos = selection_state.get_selected_combinations()
+
+        site_lookup = {s["entity_index"]: s for s in selection_state.sites}
+        times = next(
+            (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
+            None,
+        )
+
+        window = _resolve_marker_window(x_range, xlim, times)
+        if window is None:
+            return hv.Overlay([])
+        marker_times = pd.date_range(start=window[0], end=window[1], periods=n_markers)
+
+        row_shapes = getattr(selection_state, "_row_shapes", {})
+        col_colors = getattr(selection_state, "_col_colors", {})
+        row_dim = selection_state.row_dim
+        col_dim = selection_state.col_dim
+
+        times_ns = np.array(times, dtype="datetime64[ns]").astype("int64")
+        marker_times_ns = np.array(marker_times, dtype="datetime64[ns]").astype("int64")
+
+        scatters = []
+        for entity_idx, depth_idx in selected_combos:
+            site = site_lookup.get(entity_idx)
+            if site is None or depth_idx >= len(site["series"]):
+                continue
+            depths_arr = np.asarray(site["depths"]).ravel()
+            depth_val = depths_arr[depth_idx] if depth_idx < len(depths_arr) else depth_idx
+            site_id = site["site_id"]
+            label = f"{site_id} @ {depth_val:.2f}"
+
+            row_key = site_id if row_dim == "entity" else depth_val
+            col_key = depth_val if col_dim == "vertical" else site_id
+            shape = row_shapes.get(str(row_key), "circle")
+            color = col_colors.get(str(col_key), "#000000")
+
+            series_vals = site["series"][depth_idx]
+            marker_y = np.interp(marker_times_ns, times_ns, series_vals)
+            marker_df = pd.DataFrame({
+                time_dim: marker_times,
+                y_axis_label: marker_y,
+            })
+            scatter = hv.Scatter(marker_df, time_dim, y_axis_label, label=label).opts(
+                color=color,
+                marker=shape,
+                size=8,
+            )
+            scatters.append(scatter)
+
+        return hv.Overlay(scatters)
 
     def clamp_range(center, span, times):
         if len(times) == 0:
@@ -261,6 +386,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         def _hook(plot, element):
             plot.state.x_range.start = xlim[0]
             plot.state.x_range.end = xlim[1]
+            plot.state.x_range.reset_start = xlim[0]
+            plot.state.x_range.reset_end = xlim[1]
             if bounds is not None:
                 plot.state.x_range.bounds = bounds
             if max_interval_ms is not None:
@@ -307,6 +434,10 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
     _left_reset_key = [None]  # (version, center) tuple per view
     _mid_reset_key = [None]
     _right_reset_key = [None]
+    _marker_state = {"left": [None, None], "mid": [None, None], "right": [None, None]}
+    # [last_key, last_adopted_x_range] per view: when the (version, center)
+    # key changes the marker window re-anchors to xlim, and a live x_range is
+    # only adopted when it differs from the stored baseline (a real pan/zoom).
 
     def create_timeseries_view(center=None, view="left", x_range=None, **_):
         nonlocal _center_time
@@ -314,6 +445,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         nonlocal _mid_ylim_cache, _mid_ylim_key
         nonlocal _right_ylim_cache, _right_ylim_key
         nonlocal _overlay_cache, _overlay_version
+        nonlocal _marker_state
         global _perf_plot_redraws
         t_view = time.perf_counter()
         _perf_plot_redraws += 1
@@ -333,7 +465,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         if center is not None:
             _center_time = center
         elif _center_time is None:
-            _center_time = times.max()
+            _center_time = times.min() + 0.95 * (times.max() - times.min())
         center_time = _center_time
 
         if view == "left":
@@ -358,10 +490,20 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             ylim = _right_ylim_cache
 
         if _overlay_version != selection_state.version:
-            _overlay_cache["left"] = build_timeseries_overlay(view="left", x_range=x_range)
-            _overlay_cache["full"] = build_timeseries_overlay(view="full", x_range=x_range)
+            _overlay_cache["left"] = build_timeseries_overlay(view="left")
+            _overlay_cache["full"] = build_timeseries_overlay(view="full")
             _overlay_version = selection_state.version
         overlay = _overlay_cache["left"] if view == "left" else _overlay_cache["full"]
+        marker_window = None
+        _marker_key = (selection_state.version, center)
+        _marker_adapt = _marker_state[view]
+        if _marker_adapt[0] != _marker_key:
+            _marker_adapt[0] = _marker_key
+            _marker_adapt[1] = x_range
+        elif x_range is not None and x_range != _marker_adapt[1]:
+            _marker_adapt[1] = x_range
+            marker_window = x_range
+        overlay = overlay * build_marker_overlay(view=view, x_range=marker_window, xlim=xlim)
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
         n_visible = int(np.sum((times >= xlim[0]) & (times <= xlim[1])))
         print(f"[ylim] view={view} xlim=({xlim[0]}, {xlim[1]}) n_visible={n_visible} ylim={ylim}")
@@ -447,13 +589,59 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         ],
     )
 
-    def on_map_tap(x, y):
+    def _fill_registered_site(entity_index):
+        """Fetch the current variable's timeseries for a pre-registered site.
+
+        The row is already visible in the plot-selection table (registered by
+        ``on_map_tap`` via ``register_site``); this call fills its data in
+        place so the plots update as each borehole's data arrives.  Returns
+        the resolved ``entity_index`` on success or ``None`` on failure.
+        """
+        start = time.perf_counter()
+        print(f"[fill_ts] Filling registered idx={entity_index}")
+        if not data.display_variable:
+            print(f"[fill_ts] No variable selected — skipping fill")
+            return None
+        fig = data.client.get_timeseries_data(
+            data.view_name,
+            group_path=data.group_path,
+            lat=0.0,
+            lon=0.0,
+            variable=data.display_variable,
+            entity_index=int(entity_index),
+        )
+        if fig.get("status") == "error":
+            reason = fig.get("reason", "Failed to load timeseries")
+            print(f"[fill_ts] Error: {reason}")
+            print(f"[timing] timeseries fill failed: {time.perf_counter() - start:.3f}s")
+            return None
+
+        times = pd.to_datetime(fig.get("times", []))
+        depths = np.array(fig.get("depths", []), dtype=float)
+        series = [np.array(values, dtype=float) for values in fig.get("series", [])]
+        resolved_index = int(fig.get("borehole_index", entity_index))
+        if not series:
+            print(f"[fill_ts] No data for idx={resolved_index} — leaving row registered")
+            print(f"[timing] timeseries fill failed: {time.perf_counter() - start:.3f}s")
+            return None
+        if resolved_index != entity_index:
+            print(f"[fill_ts] WARNING: resolved idx={resolved_index} != registered "
+                  f"idx={entity_index} — filling the registered row")
+        selection_state.fill_site(
+            entity_index,
+            series=series,
+            times=times,
+            depths=depths,
+        )
+        print(f"[plot_selection] Site filled: {entity_label}_{resolved_index}")
+        print(f"[timing] timeseries fill+state: {time.perf_counter() - start:.3f}s")
+        return resolved_index
+
+    def on_map_tap(x, y, loading=None):
         if x is None or y is None:
-            y, x = _default_coords()
+            y, x, matched_meta = _default_coords()
             print(f"[tap] Initial load: using default coords y={y:.4f}, x={x:.4f}")
-            print(f"[tap] marker_meta will be None (not computed for initial load)")
-            print(f"[tap] Calling _fetch_timeseries with marker_meta=None")
-            entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=None)
+            entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=matched_meta)
             if entity_index is not None:
                 borehole_stream.event(borehole_index=entity_index)
             return entity_index
@@ -465,6 +653,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         print(f"[tap] Computing nearest marker from {len(all_meta)} available markers")
         if lats_raw is None or lons_raw is None or not len(all_meta):
             print(f"[tap] No markers available or missing lats/lons")
+            if loading is not None:
+                loading.visible = False
             return None
 
         lats = np.array(lats_raw, dtype=float)
@@ -473,22 +663,85 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         nearest_idx = int(np.nanargmin(dist))
         print(f"[tap] nearest_idx={nearest_idx}, distance={dist[nearest_idx]:.2e}")
         if not (0 <= nearest_idx < len(all_meta)):
+            if loading is not None:
+                loading.visible = False
             return None
 
         min_dist = float(dist[nearest_idx])
         # Selection threshold (degrees). Tweak this for your map zoom level.
         threshold_deg = 0.0002
-        if min_dist > threshold_deg ** 2:
+        # Merge-aware resolution: clicking a merged cluster dot selects all of
+        # its members even when the cluster centroid lies farther than the
+        # single-marker tolerance from the nearest member.  Falls back to the
+        # plain nearest-single-borehole behavior when no cluster matches.
+        clusters = getattr(data, "current_clusters", None) or []
+        targets = _resolve_tap_targets(
+            x, y, clusters, all_meta, nearest_idx, min_dist, threshold_deg
+        )
+        if targets is None:
             print(f"[tap] Outside threshold ({min_dist:.2e} > {threshold_deg**2:.2e}): not selecting")
+            if loading is not None:
+                loading.visible = False
             return None
+        if len(targets) > 1:
+            print(f"[tap] Merged cluster: adding {len(targets)} boreholes "
+                  f"{[t['entity_index'] for t in targets]}")
 
-        marker_meta = all_meta[nearest_idx]
-        print(f"[tap] Selected marker_meta={marker_meta}")
-        print(f"[tap] Calling _fetch_timeseries with marker_meta={marker_meta}")
-        entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=marker_meta)
-        if entity_index is not None:
-            borehole_stream.event(borehole_index=entity_index)
-        return entity_index
+        if loading is not None:
+            loading.visible = True
+
+        # Registration-first: surface every selected borehole in the plot
+        # selection table immediately, then fetch/fill each site's data as it
+        # arrives (plots update progressively per member).
+        meta_for_eidx = {
+            int(m["entity_index"]): m.get("site_id")
+            for m in all_meta
+            if isinstance(m, dict) and m.get("entity_index") is not None
+        }
+        for target in targets:
+            eidx = int(target["entity_index"])
+            sid = target.get("site_id")
+            if not sid:
+                sid = meta_for_eidx.get(eidx) or f"{entity_label}_{eidx}"
+            selection_state.register_site(eidx, sid)
+
+        def _do_deferred_fetch():
+            resolved_index = None
+            try:
+                for target in targets:
+                    eidx = int(target["entity_index"])
+                    resolved = _fill_registered_site(eidx)
+                    if resolved is None:
+                        continue
+                    if resolved_index is None:
+                        resolved_index = resolved
+                if resolved_index is not None:
+                    borehole_stream.event(borehole_index=resolved_index)
+                return resolved_index
+            finally:
+                if loading is not None:
+                    loading.visible = False
+
+        doc = pn.state.curdoc
+        if doc is not None:
+            # Small timeout (same trick as on_tap_event): the deferred fetch
+            # runs after the current callback yields, so the table row flush
+            # reaches the frontend before the blocking per-site fetches start.
+            doc.add_timeout_callback(_do_deferred_fetch, 100)
+        else:
+            _do_deferred_fetch()
+
+        return int(targets[0]["entity_index"]) if targets else None
+
+    def fetch_site_entity(entity_index):
+        """Fetch the current variable's timeseries for a specific entity index.
+
+        Bypasses map nearest-marker resolution (and its coordinate/threshold
+        sensitivity) by passing ``marker_meta`` carrying the entity index, which
+        ``get_timeseries_data`` uses directly.  Returns the resolved
+        ``entity_index`` on success or ``None`` on failure.
+        """
+        return _fetch_timeseries(0.0, 0.0, {"entity_index": int(entity_index)})
 
     print(f"[timing] build_timeseries_views: {time.perf_counter() - start_total:.3f}s")
-    return line_left, line_mid, line_right, on_map_tap
+    return line_left, line_mid, line_right, on_map_tap, fetch_site_entity

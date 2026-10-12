@@ -2,6 +2,7 @@ import logging
 import math
 import os
 import time
+from urllib.parse import urlencode
 
 import cartopy.crs as ccrs
 import geoviews as gv
@@ -9,6 +10,14 @@ import holoviews as hv
 from holoviews.streams import RangeXY
 import numpy as np
 import pandas as pd
+
+from dashboard.config import overlay_enabled, find_view_file
+from geoviews import tile_sources as gvts
+
+try:
+    _vpath = find_view_file()
+except FileNotFoundError:
+    _vpath = None
 
 from geoviews import tile_sources as gvts
 
@@ -55,15 +64,27 @@ WORLD_YLIM = (-20037508.34, 20037508.34)
 def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, eps_factor=0.05, buffer_factor=0.1):
     """
     Cluster borehole points based on current view extent.
-    Returns a DataFrame with lon, lat, merged_count, label columns.
+
+    Returns ``(clustered_df, member_lists, radii)`` where ``clustered_df`` has
+    ``lon, lat, merged_count, label`` columns, ``member_lists[i]`` holds the
+    entity indices (or positional row indices when no ``entity_index`` column
+    exists) that make up cluster row ``i``, and ``radii[i]`` is the max
+    centroid-to-member distance in degrees (0.0 for single-member/empty).
     """
+    def _members(subset):
+        if "entity_index" in subset.columns:
+            return [int(v) for v in subset["entity_index"]]
+        return list(subset.index)
+
     if x_range is None or y_range is None or len(df) == 0:
-        return pd.DataFrame({
+        clustered = pd.DataFrame({
             lon_field: df[lon_field] if len(df) > 0 else [],
             lat_field: df[lat_field] if len(df) > 0 else [],
             "merged_count": [1] * len(df) if len(df) > 0 else [],
             "label": df[entity_field] if len(df) > 0 else [],
         })
+        members = [_members(df.iloc[[i]]) for i in range(len(df))]
+        return clustered, members, [0.0] * len(df)
 
     # Calculate cluster distance (eps) as eps_factor of view width in degrees
     view_width = x_range[1] - x_range[0]
@@ -77,7 +98,7 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, ep
     )
     visible_df = df[mask].copy()
     if len(visible_df) == 0:
-        return pd.DataFrame({lon_field: [], lat_field: [], "merged_count": [], "label": []})
+        return pd.DataFrame({lon_field: [], lat_field: [], "merged_count": [], "label": []}), [], []
 
     # Grid-based clustering: round coordinates to eps grid
     visible_df["grid_lon"] = (visible_df[lon_field] / eps).round() * eps
@@ -86,11 +107,17 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, ep
     # Group by grid cell
     grouped = visible_df.groupby(["grid_lon", "grid_lat"])
     clustered_rows = []
+    member_lists = []
+    radii = []
     for (glon, glat), group in grouped:
         merged_count = len(group)
         # Use centroid of the group for the clustered point
         center_lon = group[lon_field].mean()
         center_lat = group[lat_field].mean()
+        # Max centroid-to-member distance (degrees)
+        radius = float(np.max(
+            np.sqrt((group[lon_field] - center_lon) ** 2 + (group[lat_field] - center_lat) ** 2)
+        )) if len(group) > 0 else 0.0
         # Use first entity label as representative
         label = group[entity_field].iloc[0] if entity_field in group.columns else ""
         clustered_rows.append({
@@ -99,26 +126,28 @@ def _cluster_points(x_range, y_range, df, lon_field, lat_field, entity_field, ep
             "merged_count": merged_count,
             "label": label,
         })
+        member_lists.append(_members(group))
+        radii.append(radius)
 
-    return pd.DataFrame(clustered_rows)
+    return pd.DataFrame(clustered_rows), member_lists, radii
 
 
-def _load_overlay(endpoint_config):
-    if os.getenv("HV_OVERLAY_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
-        logger.info("Overlay disabled via HV_OVERLAY_ENABLED.")
+def _load_overlay(view_config):
+    if not overlay_enabled(_vpath, view_config.get("name")):
+        logger.info("Overlay disabled via config or HV_OVERLAY_ENABLED=0.")
         return None
 
-    visualization_config = endpoint_config["visualization"]
+    visualization_config = view_config["visualization"]
     overlay_config = visualization_config["overlay"]
-
-    if not overlay_config["enabled"]:
-        logger.info("Overlay disabled in endpoint config.")
-        return None
 
     tile_url = overlay_config["tile_url"] or os.getenv("HV_OVERLAY_TILE_URL", "").strip()
     if not tile_url:
         logger.info("No overlay tile URL configured.")
         return None
+
+    if tile_url.startswith("/tiles/") and view_config.get("name"):
+        separator = "&" if "?" in tile_url else "?"
+        tile_url = f"{tile_url}{separator}{urlencode({'view': view_config['name']})}"
 
     logger.info("Using tiled overlay: %s", tile_url)
     return gv.WMTS(tile_url).opts(alpha=0.9)
@@ -128,19 +157,19 @@ def build_map_view(data, tap_stream):
     start = time.perf_counter()
     base_map = gvts.OSM()
 
-    endpoint_config = data.client.get_endpoint(data.endpoint_name)
-    defaults_config = endpoint_config["defaults"]
-    visualization_config = endpoint_config["visualization"]
+    view_config = data.client.get_view(data.view_name)
+    defaults_config = view_config["defaults"]
+    visualization_config = view_config["visualization"]
     map_config = visualization_config["map"]
-    schema_config = endpoint_config["schema"]
-    schema_display = endpoint_config["schema_display"]
+    schema_config = view_config["schema"]
+    schema_display = view_config["schema_display"]
 
     lat_field = "lat"
     lon_field = "lon"
     entity_field = schema_display.get("entity_name") or "entity"
 
     if data.group_path:
-        schema_dict = endpoint_config["schema"]
+        schema_dict = view_config["schema"]
         group_fields = schema_dict.get("group_fields", {})
         normalized = "/".join(part for part in (data.group_path or "").strip("/").split("/") if part)
         path = normalized
@@ -160,7 +189,7 @@ def build_map_view(data, tap_stream):
             if fields.get("lon"):
                 lon_field = fields.get("lon")
 
-    overlay_layer = _load_overlay(endpoint_config)
+    overlay_layer = _load_overlay(view_config)
 
     # Step 4: DynamicMap callback - defined early so it's available in all code paths
     def _make_points_callback(data_obj, config, lon_f, lat_f, ent_f, title):
@@ -178,6 +207,7 @@ def build_map_view(data, tap_stream):
             df = getattr(data_obj, 'current_map_df', pd.DataFrame())
             if len(df) == 0:
                 empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": []})
+                data_obj.current_clusters = []
                 return gv.Points(
                     empty_clustered, kdims=[lon_f, lat_f], vdims=["label", "merged_count"], crs=ccrs.PlateCarree()
                 ).opts(
@@ -186,10 +216,22 @@ def build_map_view(data, tap_stream):
                     tools=["hover"], responsive=True, title=title,
                 )
             if cluster_enabled:
-                clustered = _cluster_points(x_range, y_range, df, lon_f, lat_f, ent_f, eps_factor, buffer_factor)
+                clustered, members, radii = _cluster_points(
+                    x_range, y_range, df, lon_f, lat_f, ent_f, eps_factor, buffer_factor
+                )
             else:
                 # No clustering - pass through all points
                 clustered = df.assign(merged_count=1, label=df[ent_f] if ent_f in df.columns else "")
+                if "entity_index" in df.columns:
+                    members = [[int(v)] for v in df["entity_index"]]
+                else:
+                    members = [[i] for i in range(len(df))]
+                radii = [0.0] * len(df)
+            data_obj.current_clusters = [
+                {"lon": float(row[lon_f]), "lat": float(row[lat_f]),
+                 "entity_indices": members[i], "radius": radii[i]}
+                for i, row in clustered.iterrows()
+            ]
             if len(clustered) == 0:
                 empty_clustered = pd.DataFrame({lon_f: [], lat_f: [], "merged_count": [], "label": []})
                 return gv.Points(
@@ -227,7 +269,7 @@ def build_map_view(data, tap_stream):
         fig = {"status": "error", "reason": "No variable selected"}
     else:
         fig = data.client.get_map_data(
-            data.endpoint_name,
+            data.view_name,
             group_path=data.group_path,
             variable=default_display_variable,
             time_index=0,

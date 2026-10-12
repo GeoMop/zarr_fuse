@@ -150,6 +150,21 @@ class SelectionState(param.Parameterized):
         site_id, depth_value = self._resolve_canonical(row_key, col_key)
         return self._site_has_depth(site_id, depth_value)
 
+    def site_depth_all_nan(self, site_id: str, depth_value: float) -> bool:
+        """Return ``True`` if *site_id*'s series at *depth_value* is all NaN."""
+        for site in self._sites:
+            if site["site_id"] == site_id:
+                depths_arr = np.asarray(site["depths"]).ravel()
+                for i, d in enumerate(depths_arr):
+                    if float(d) == float(depth_value):
+                        series = site.get("series", [])
+                        if i < len(series):
+                            arr = np.asarray(series[i]).ravel()
+                            return len(arr) > 0 and np.all(np.isnan(arr))
+                        return True
+                return False
+        return False
+
     def is_checked(self, row_key, col_key) -> bool | None:
         """Return checked state for *(row_key, col_key)*.
 
@@ -185,27 +200,17 @@ class SelectionState(param.Parameterized):
 
     # ── mutations ────────────────────────────────────────────────────
 
-    def add_site(self, entity_index, site_id, depths, series, times, force=False):
-        """Register a new site (or replace data if *force* is True and site exists).
+    def add_site(self, entity_index, site_id, depths, series, times):
+        """Register a new site and auto-check its finite depths.
 
-        When *force* is True and the entity_index already exists, the series/times
-        data is replaced (e.g. after a variable change).  Depth auto-selection is
-        **not** re-applied — existing checked states are preserved.
+        If an entity with the same *entity_index* already exists, the new
+        registration is ignored (a site is added once and refreshed only via
+        ``clear()`` + re-add, e.g. after a variable change).
         Triggers a table rebuild (**layout_version*).
         """
         for site in self._sites:
             if site["entity_index"] == entity_index:
-                if not force:
-                    print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
-                    return
-                # Replace data for a re-fetch (e.g. after variable change)
-                self._cancel_panel_bump()
-                site["depths"] = np.asarray(depths, dtype=float).ravel()
-                site["series"] = series
-                site["times"] = times
-                self.layout_version += 1
-                self._bump_version()
-                print(f"[SelectionState] Updated data for site {site_id} (idx={entity_index})")
+                print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
                 return
 
         depths_arr = np.asarray(depths, dtype=float).ravel()
@@ -259,6 +264,148 @@ class SelectionState(param.Parameterized):
             self._bump_version()
         print(f"[SelectionState] Removed site {site_id} (idx={entity_index})")
 
+    def register_site(self, entity_index, site_id):
+        """Register a site row in the table without fetching any data.
+
+        Used by the map-tap flow so the selected borehole appears in the
+        plot-selection table immediately, before the (deferred) timeseries
+        fetch lands.  The pending site holds empty depths/series/times and no
+        checked cells, keeps *version* untouched (plots unchanged) and bumps
+        only *layout_version* (table rebuild).  Call ``fill_site`` once the
+        data arrives.
+        """
+        for site in self._sites:
+            if site["entity_index"] == entity_index:
+                print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
+                return
+
+        self._cancel_panel_bump()
+        self._sites.append({
+            "entity_index": int(entity_index),
+            "site_id": str(site_id),
+            "depths": np.array([], dtype=float),
+            "series": [],
+            "times": pd.to_datetime([]),
+        })
+        self.layout_version += 1
+        print(f"[SelectionState] Registered pending site {site_id} (idx={entity_index})")
+
+    def fill_site(self, entity_index, series, times, depths) -> bool:
+        """Populate a pending site (from ``register_site``) with fetched data.
+
+        Stores the series/times/depths and auto-checks the finite depths,
+        mirroring ``add_site`` bookkeeping without rebuilding the table for a
+        brand-new row.  Bumps *version* (redraw plots) and, when the depth set
+        changes, *layout_version* (adds the depth columns to the table).
+
+        Returns ``False`` when no site with *entity_index* is registered (the
+        caller should ``register_site`` then ``fill_site`` instead).
+        """
+        site = None
+        for s in self._sites:
+            if s["entity_index"] == entity_index:
+                site = s
+                break
+        if site is None:
+            return False
+
+        depths_arr = np.asarray(depths, dtype=float).ravel()
+        finite_depths = [float(d) for d in depths_arr if np.isfinite(float(d))]
+
+        depth_changed = False
+        old_depths = np.asarray(site["depths"]).ravel()
+        if not np.array_equal(old_depths, depths_arr, equal_nan=True):
+            old_depth_count = self._depth_count_for(site["site_id"])
+            site["depths"] = depths_arr
+            self._reconcile_checked(site, old_depth_count)
+            depth_changed = True
+
+        site["series"] = series
+        site["times"] = times
+
+        for dv in finite_depths:
+            key = (str(site["site_id"]), dv)
+            if key not in self._checked:
+                self._checked.add(key)
+                self._checked_count += 1
+
+        if depth_changed:
+            self.layout_version += 1
+            print(f"[SelectionState] Filled site idx={entity_index} (depths changed)")
+        else:
+            print(f"[SelectionState] Filled site idx={entity_index}")
+        self._bump_version()
+        return True
+
+    def update_site_data(self, entity_index, series, times, depths=None) -> bool:
+        """Replace an existing site's series/times in place.
+
+        Used on a variable change to refresh data without clearing and
+        re-adding (which would rebuild the table).  The site's identity,
+        checked depths and row/column position are preserved.  Only the
+        *version* is bumped (redraw plots) unless the depth set changed, in
+        which case *layout_version* is also bumped (rebuild table).
+
+        Returns ``True`` if the site was updated, ``False`` if no site with
+        *entity_index* exists (the caller should ``add_site`` instead).
+        """
+        site = None
+        for s in self._sites:
+            if s["entity_index"] == entity_index:
+                site = s
+                break
+        if site is None:
+            return False
+
+        site["times"] = times
+        site["series"] = series
+
+        depth_changed = False
+        if depths is not None:
+            new_depths = np.asarray(depths, dtype=float).ravel()
+            old_depths = np.asarray(site["depths"]).ravel()
+            if not np.array_equal(old_depths, new_depths, equal_nan=True):
+                old_depth_count = self._depth_count_for(site["site_id"])
+                site["depths"] = new_depths
+                self._reconcile_checked(site, old_depth_count)
+                depth_changed = True
+
+        if depth_changed:
+            self.layout_version += 1
+            print(f"[SelectionState] Updated site idx={entity_index} (depths changed)")
+        else:
+            print(f"[SelectionState] Updated site idx={entity_index}")
+        self._bump_version()
+        return True
+
+    def _reconcile_checked(self, site, old_depth_count: int):
+        """Prune checked keys that no longer map to valid depths on *site*.
+
+        ``old_depth_count`` is the number of finite depth cells the site held
+        before its depth set changed (must be captured before overwriting
+        ``site["depths"]``).  Recomputes ``_valid_count`` for the site after
+        the change, mirroring ``add_site``/``remove_site`` bookkeeping.
+        """
+        site_id = site["site_id"]
+        finite_depths = {
+            float(d) for d in np.asarray(site["depths"]).ravel() if np.isfinite(float(d))
+        }
+        for k in list(self._checked):
+            if k[0] == site_id and k[1] not in finite_depths:
+                self._checked.discard(k)
+                self._checked_count -= 1
+
+        self._valid_count += len(finite_depths) - old_depth_count
+
+    def _depth_count_for(self, site_id: str) -> int:
+        """Count of finite depth cells currently stored for *site_id*."""
+        for s in self._sites:
+            if s["site_id"] == site_id:
+                return sum(
+                    1 for d in np.asarray(s["depths"]).ravel() if np.isfinite(float(d))
+                )
+        return 0
+
     def clear(self):
         """Remove all sites and reset selection."""
         self._cancel_panel_bump(clear_loading=True)
@@ -269,6 +416,22 @@ class SelectionState(param.Parameterized):
         self.layout_version += 1
         self._bump_version(clear_loading=True)
         print("[SelectionState] Cleared all sites")
+
+    def restore_checked(self, saved: set[tuple[str, float]], *, bump_version: bool = True):
+        """Prune the checked set to the *saved* ``(site_id, depth)`` keys.
+
+        Called after a ``clear()`` + re-add cycle (e.g. a variable change) to
+        keep only the combinations that were checked before clearing.
+        Newly auto-checked depths that were not previously checked are
+        unchecked.  Saved combinations with no matching site/depth are
+        ignored.  Bumps *version* once if anything changed.
+        """
+        removals = list(self._checked - saved)
+        for key in removals:
+            self._checked.discard(key)
+            self._checked_count -= 1
+        if removals and bump_version:
+            self._bump_version()
 
     def select_all(self, bump_version: bool = True, bump_layout: bool = True):
         """Check every valid (site, depth) cell."""
@@ -371,6 +534,14 @@ class SelectionState(param.Parameterized):
                     combos.append((site["entity_index"], int(depth_idx)))
         return combos
 
+    def checked_combinations(self) -> set[tuple[str, float]]:
+        """Return a copy of the currently checked ``(site_id, depth)`` keys.
+
+        Used to capture the selection before a ``clear()`` + re-add cycle
+        (e.g. a variable change) so it can be restored afterwards.
+        """
+        return set(self._checked)
+
     @property
     def all_depths(self) -> list[float]:
         """Sorted union of every depth value present across all sites."""
@@ -382,7 +553,7 @@ class SelectionState(param.Parameterized):
 
 
 def resolve_available_dimensions(
-    endpoint_config: dict | None = None,
+    view_config: dict | None = None,
     group_path: str | None = None,
     schema_display: dict | None = None,
 ) -> dict[str, str]:
@@ -393,8 +564,8 @@ def resolve_available_dimensions(
 
     Parameters
     ----------
-    endpoint_config : dict, optional
-        Raw endpoint config dict (from ``data.client.get_endpoint()``).
+    view_config : dict, optional
+        Raw view config dict (from ``data.client.get_view()``).
     group_path : str, optional
         Current group path for field resolution.
     schema_display : dict, optional
@@ -409,10 +580,10 @@ def resolve_available_dimensions(
 
     EXCLUDED = {"lat", "lon", "time", "x", "y", "z"}
 
-    if endpoint_config is None:
+    if view_config is None:
         return {"Site": "entity", "Depth": "vertical"}
 
-    schema_config = endpoint_config.get("schema", {})
+    schema_config = view_config.get("schema", {})
     resolved = _resolve_fields_for_group_raw(schema_config, group_path or "/")
 
     display = schema_display or {}
@@ -466,6 +637,7 @@ function(cell, formatterParams, onRendered) {
                 if (
                     rowData._row_key !== "All" &&
                     rowData["__valid_" + field] === true &&
+                    rowData["__nan_" + field] !== true &&
                     rowData[field] !== true
                 ) {
                     targetValue = true;
@@ -479,7 +651,8 @@ function(cell, formatterParams, onRendered) {
 
                 if (
                     rowData._row_key === "All" ||
-                    rowData["__valid_" + field] !== true
+                    rowData["__valid_" + field] !== true ||
+                    rowData["__nan_" + field] === true
                 ) {
                     continue;
                 }
@@ -499,6 +672,21 @@ function(cell, formatterParams, onRendered) {
     }
 
     const value = cell.getValue();
+
+    // All-NaN cells: gray background, no interaction.
+    if (value === "__nan_true" || value === "__nan_false") {
+        const element = document.createElement("span");
+        element.innerHTML = value === "__nan_true" ? "&#10003;" : "&#10007;";
+        element.style.color = "#64748b";
+        element.style.opacity = "0.5";
+        element.style.display = "flex";
+        element.style.alignItems = "center";
+        element.style.justifyContent = "center";
+        element.style.width = "100%";
+        element.style.height = "100%";
+        cell.getElement().style.background = "#374151";
+        return element;
+    }
 
     // Invalid cells remain empty and non-clickable.
     if (value !== true && value !== false) {
@@ -584,6 +772,7 @@ function(cell, formatterParams, onRendered) {
                 for (const field of selectionFields) {
                     if (
                         rowData["__valid_" + field] === true &&
+                        rowData["__nan_" + field] !== true &&
                         rowData[field] !== true
                     ) {
                         targetValue = true;
@@ -600,7 +789,7 @@ function(cell, formatterParams, onRendered) {
                 }
 
                 for (const field of selectionFields) {
-                    if (rowData["__valid_" + field] !== true) {
+                    if (rowData["__valid_" + field] !== true || rowData["__nan_" + field] === true) {
                         continue;
                     }
 
@@ -624,6 +813,7 @@ function(cell, formatterParams, onRendered) {
         for (const field of selectionFields) {
             if (
                 clickedData["__valid_" + field] === true &&
+                clickedData["__nan_" + field] !== true &&
                 clickedData[field] !== true
             ) {
                 targetValue = true;
@@ -632,7 +822,7 @@ function(cell, formatterParams, onRendered) {
         }
 
         for (const field of selectionFields) {
-            if (clickedData["__valid_" + field] !== true) {
+            if (clickedData["__valid_" + field] !== true || clickedData["__nan_" + field] === true) {
                 continue;
             }
 
@@ -657,7 +847,7 @@ def _hidden_columns(df: pd.DataFrame, row_dim: str) -> list[str]:
     hidden = [
         c
         for c in df.columns
-        if c.startswith("__valid_") or c in ("entity_index", "_row_key")
+        if c.startswith("__valid_") or c.startswith("__nan_") or c in ("entity_index", "_row_key")
     ]
     if row_dim != "entity":
         hidden.append("_actions")
@@ -727,6 +917,7 @@ def build_assignment_matrix(
             col_s = str(col_key)
             header_row[col_s] = None
             header_row[f"__valid_{col_s}"] = False
+            header_row[f"__nan_{col_s}"] = False
         rows.append(header_row)
 
         for row_key in row_keys:
@@ -743,11 +934,20 @@ def build_assignment_matrix(
                 valid = selection_state.is_valid(row_key, col_key)
                 if valid:
                     checked = selection_state.is_checked(row_key, col_key)
-                    row[col_s] = bool(checked)
+                    if row_dim == "entity":
+                        is_nan = selection_state.site_depth_all_nan(str(row_key), col_key)
+                    else:
+                        is_nan = selection_state.site_depth_all_nan(str(col_key), row_key)
+                    if is_nan:
+                        row[col_s] = "__nan_true" if checked else "__nan_false"
+                    else:
+                        row[col_s] = bool(checked)
                     row[f"__valid_{col_s}"] = True
+                    row[f"__nan_{col_s}"] = is_nan
                 else:
                     row[col_s] = None
                     row[f"__valid_{col_s}"] = False
+                    row[f"__nan_{col_s}"] = False
             rows.append(row)
 
         df = pd.DataFrame(rows)
@@ -757,7 +957,7 @@ def build_assignment_matrix(
         editors: dict = {
             "_row_label": None,
             "_actions": None,
-            **{col: {"type": "tickCross"} for col in selection_cols},
+            **{col: {"type": "tickCross", "showList": False} for col in selection_cols},
         }
 
         formatters: dict = {
@@ -784,7 +984,7 @@ def build_plot_selection_panel(
     Parameters
     ----------
     state : SelectionState, optional
-        Reuse an existing state instance (e.g. when switching endpoints).
+        Reuse an existing state instance (e.g. when switching views).
         If omitted a fresh state is created.
     available_dims : dict, optional
         ``{display_label: dim_key}`` from ``resolve_available_dimensions()``.
@@ -843,8 +1043,7 @@ def build_plot_selection_panel(
         frozen_columns=["_actions", "_row_label"],
         selectable=False,
         show_index=False,
-        max_height=400,
-        sizing_mode="stretch_width",
+        sizing_mode="stretch_both",
         layout="fit_data_table",
         theme="midnight",
         sortable=False,
@@ -1074,7 +1273,7 @@ def build_plot_selection_panel(
     panel = pn.Column(
         control_bar,
         table,
-        sizing_mode="stretch_width",
+        sizing_mode="stretch_both",
     )
 
     state._panel_schedule_bump = _schedule_bump

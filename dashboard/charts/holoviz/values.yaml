@@ -4,7 +4,7 @@ registry:
 frontend:
   name: holoviz-frontend
   replicaCount: 1
-  endpointName: bukov_endpoint
+  viewName: bukov_endpoint
   cacheDir: /tmp/zf_tiles
   image:
     name: jbrezmorf/zarr-fuse-holoviz-frontend
@@ -21,7 +21,7 @@ frontend:
       name: http
 
   s3:
-    endpointUrl: "https://s3.cl4.du.cesnet.cz"
+    endpointUrl: "https://s3.cl2.du.cesnet.cz"
     secrets:
       accessKey: "your-access-key"
       secretKey: "your-secret-key"

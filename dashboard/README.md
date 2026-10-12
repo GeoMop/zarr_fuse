@@ -1,6 +1,6 @@
 # HoloViz Dashboard
 
-Panel + HoloViews dashboard for Zarr Fuse endpoints configured via YAML and environment variables.
+Panel + HoloViews dashboard for Zarr Fuse views configured via YAML and environment variables.
 
 ## Installation
 
@@ -22,18 +22,17 @@ pip install zarr_fuse.dashboard
 ## Configuration
 
 The dashboard is configured via:
-1. **YAML endpoints file** (`endpoints.yaml`) - defines data sources
+1. **YAML views file** (`zf_view.yaml`) - defines data sources
 2. **Environment variables** - runtime config and S3 credentials
 
-### Required Environment Variables
+### Configuration and Environment Variables
 
 ```bash
-# Required: Which endpoint to load from endpoints.yaml
-HV_DASHBOARD_ENDPOINT=bukov_endpoint
+# The default view is configured in the _dashboard.default_view key
+# of zf_view.yaml.
 
-# Optional: Path to your endpoints.yaml file
-# Default: packaged config/endpoints.yaml
-ENDPOINTS_PATH=/path/to/your/endpoints.yaml
+# Optional: Explicit path to your zf_view.yaml file
+ZF_VIEW_PATH=/path/to/your/zf_view.yaml
 
 # S3 credentials (if using S3 data sources)
 ZF_S3_ACCESS_KEY=your_access_key
@@ -58,9 +57,6 @@ From dashboard folder (monorepo):
 cp .env.example .env
 # Edit .env and set ZF_S3_* values
 
-# Set which endpoint to use
-export HV_DASHBOARD_ENDPOINT=bukov_endpoint
-
 # Start dashboard
 zf-dashboard
 ```
@@ -73,21 +69,20 @@ zf-dashboard
 
 ## Using Custom Data Sources
 
-For a new project with your own data, provide your own `endpoints.yaml`:
+For a new project with your own data, provide your own `zf_view.yaml`:
 
 ```bash
 # Point to your config
-export ENDPOINTS_PATH=/path/to/my_project/config/endpoints.yaml
-export HV_DASHBOARD_ENDPOINT=my_endpoint
+export ZF_VIEW_PATH=/path/to/my_project/config/zf_view.yaml
 
 # Start dashboard
 zf-dashboard
 ```
 
-Your `endpoints.yaml` should follow this structure:
+Your `zf_view.yaml` should follow this structure:
 
 ```yaml
-my_endpoint:
+my_view:
   description: "My data source"
   version: "1.0.0"
   
@@ -106,12 +101,8 @@ my_endpoint:
       entity: "station"
   
   defaults:
-    metric: "temperature"
+    display_variable: "temperature"
     group_path: "/"
-  
-  labels:
-    metric: "Temperature (°C)"
-    depth_unit: "meters"
 ```
 
 ## Environment Variables (.env)
@@ -127,37 +118,73 @@ The dashboard uses [python-dotenv](https://pypi.org/project/python-dotenv/) to a
 
 ## Configuration Files
 
-- `config/endpoints.yaml` - Endpoint definitions (packaged default)
+- `config/zf_view.yaml` - View definitions (packaged default)
 - `config.py` - Config parsing and validation logic
-- `schemas/` - Zarr schema files referenced in endpoints.yaml
+- `schemas/` - Zarr schema files referenced in zf_view.yaml
 - `.env.example` - Template for environment variables
 
 ## Further Docs
 
 The detailed guides live in [docs/](docs):
 
-- [Quick Start](docs/QUICKSTART.md)
-- [Template Files](docs/TEMPLATE.md)
-- [Workflow](docs/WORKFLOW.md)
+- [New Project Setup (Templates + Workflow)](docs/TEMPLATE.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Config Packaging](docs/CONFIG_PACKAGING.md)
-- [Refactor Notes](docs/REFACTOR_NOTES.md)
 - [Tile Pyramid Guide](docs/tile_pyramid_README.md)
 - [Docs Index](docs/DOCS_INDEX.md)
 
 ## Building Tiles (Optional)
 
-For map overlay support, tiles can be pre-built:
+For map overlay support, tiles can be pre-built with `scripts/build_overlay_tiles.py`.
+Build parameters (paths, zoom range, CRS, resampling, S3 target) come from the
+`tile_build` section of the selected view:
 
 ```yaml
 tile_build:
-  enabled: true
   source_image: "my_overlay.png"
   georef_file: "my_georef.json"
-  tiles_dir: "config/tiles"
+  vrt_file: "tiles/source_gcps.vrt"
+  warped_tif: "tiles/source_3857.tif"
+  rgba_vrt: "tiles/source_3857_rgba.vrt"
+  tiles_dir: "tiles"
+  min_zoom: 0              # default
+  max_zoom: 20             # default
+  target_srs: "EPSG:3857"  # default
+  gcp_srs: "EPSG:4326"     # default
+  resampling: "near"       # default
+  tile_resampling: "average"
+  s3:
+    bucket: "my-bucket"
+    prefix: "overlays/my-project/"
 ```
 
+Insert the `tile_build` block above to build and upload tiles whenever the S3
+prefix does not yet contain any (ensure-semantics; `--force` rebuilds).
 See [docs/tile_pyramid_README.md](docs/tile_pyramid_README.md) for details.
+
+## Scripts
+
+Developer utilities in [scripts/](scripts). All scripts read `ZF_S3_*`
+credentials from the general environment (filled from the gitignored
+`scripts/.env` when present); their module docstrings carry full usage:
+
+- `start_dashboard.ps1` - Windows: start the dashboard from the repository root
+  via `python -m dashboard.serve_dashboard`; alternative to `zf-dashboard`.
+- `check_view_stores.py` - Validate the views in `zf_view.yaml` and their data
+  stores: reachability, group paths, expected variables/coordinates, and finite
+  sample values.
+- `check_s3_bucket_access.py` - Interactive S3 access tool: set credentials,
+  full bucket scan, access check, inspect access policy.
+- `scan_store_health.py` - `df.info()`-style health report for a
+  schema-described store: dtype, dims, shape, size, missing counts per
+  coordinate and data variable.
+- `build_overlay_tiles.py` - Ensure overlay tiles exist on S3: build (GDAL
+  VRT/warp/RGBA/gdal2tiles) and upload as one operation; parameters come from
+  the `tile_build` section of the selected view; supports `--force`,
+  `--dry-run`, `--delete`.
+- `setup_gdal_env.ps1` / `setup_gdal_env.sh` - Create a conda `gdal-test`
+  environment (conda-forge only) with GDAL, required by
+  `build_overlay_tiles.py` (Windows / Linux-macOS).
 
 ## File Organization
 
@@ -181,11 +208,8 @@ See [docs/tile_pyramid_README.md](docs/tile_pyramid_README.md) for details.
 
 ## Troubleshooting
 
-### "ENDPOINTS_PATH not found"
-Set `ENDPOINTS_PATH` env var pointing to your `endpoints.yaml` file.
-
-### "HV_DASHBOARD_ENDPOINT is required"
-Set `HV_DASHBOARD_ENDPOINT` env var to match an endpoint name in your `endpoints.yaml`.
+### "ZF_VIEW_PATH not found"
+Set `ZF_VIEW_PATH` env var pointing to your `zf_view.yaml` file.
 
 ### S3 connection fails
 Verify `ZF_S3_ACCESS_KEY`, `ZF_S3_SECRET_KEY`, and `ZF_S3_ENDPOINT_URL` are set correctly.

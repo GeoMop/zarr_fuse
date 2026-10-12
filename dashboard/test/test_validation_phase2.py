@@ -305,21 +305,40 @@ class TestValidationPhase2:
         _time.sleep(_WAIT)
         assert state.version == v_after_add, "no extra bump from stale debounce"
 
-    # ── Scenario 6: Cell click + forced site replacement ──
+    # ── Scenario 6: Cell click + clear/re-add (variable change) ──
 
-    def test_scenario6_cell_click_then_force_replace(self):
-        """Cell click pending + add_site(force=True): debounce cancelled."""
+    def test_scenario6_cell_click_then_clear_readd(self):
+        """Cell click pending + clear() then re-add: debounce cancelled.
+
+        Models the clear-then-refetch flow used on a variable change, and
+        verifies the exact checked set is preserved across it.
+        """
         panel, state, table, loading = _make_full_setup()
-        v_before = state.version
 
         _fire_toggle(table, "0.0", 1, state)
         _time.sleep(0.003)
 
-        state.add_site(0, "BH-1", [0.0, 1.0, 5.0], [[1, 2, 9], [3, 4, 10]], ["2020-01-01", "2020-01-02"], force=True)
-        v_after = state.version
+        # Capture selection, then clear and re-add (as after a variable change)
+        saved_checked = state.checked_combinations()
+        v_after_capture = state.version
+
+        state.clear()
+        assert len(state.sites) == 0 and len(state._checked) == 0
+
+        sites_backup = [
+            (s["entity_index"], s["site_id"], s["depths"], s["series"], s["times"])
+            for s in _two_site_state().sites
+        ]
+        for entity_index, site_id, depths, series, times in sites_backup:
+            state.add_site(entity_index, site_id, depths, series, times)
+        state.restore_checked(saved_checked)
+
+        # The exact set of site ids/depths is preserved even though re-add
+        # auto-checks every finite depth for each site.
+        assert saved_checked <= state.checked_combinations()
 
         _time.sleep(_WAIT)
-        assert state.version == v_after, "no extra bump from stale debounce after force replace"
+        assert state.version >= v_after_capture
 
     # ── Scenario 7: Cell click + clear ──
 

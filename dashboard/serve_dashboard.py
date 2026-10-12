@@ -1,14 +1,13 @@
 import os
 
-from dashboard.config import load_environment_from_config, resolve_endpoints_path
+from dashboard.config import find_view_file, load_environment_from_config
 
 # Bootstrap env loading before importing dashboard modules that read env vars at import time.
-load_environment_from_config(resolve_endpoints_path())
+load_environment_from_config(find_view_file())
 
 # Backward-compatible mapping: if legacy ZF_ vars are present but S3_ are not, set them
 os.environ.setdefault("S3_ACCESS_KEY", os.getenv("ZF_S3_ACCESS_KEY"))
 os.environ.setdefault("S3_SECRET_KEY", os.getenv("ZF_S3_SECRET_KEY"))
-os.environ.setdefault("S3_ENDPOINT_URL", os.getenv("ZF_S3_ENDPOINT_URL"))
 
 import panel as pn
 from dashboard.composed import build_dashboard
@@ -32,7 +31,7 @@ def main() -> None:
     ]
     
     pn.serve(
-        {"/": build_dashboard, "/app": build_dashboard},
+        {"/": build_dashboard},
         address=bind_address,
         port=bind_port,
         show=False,
