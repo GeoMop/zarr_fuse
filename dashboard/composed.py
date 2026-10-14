@@ -1,5 +1,3 @@
-import time
-
 import holoviews as hv
 import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
@@ -9,7 +7,9 @@ from dashboard.config import find_view_file, get_default_endpoint_name, load_vie
 from dashboard.data import load_data
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
+from dashboard.perf_summary import begin, end, measure_operation
 from dashboard.plot_selection import build_plot_selection_panel, resolve_available_dimensions
+from dashboard.profiling import operation, session, time_stage
 from dashboard.sidebar import _flatten_nodes, build_sidebar
 
 JS_FILES = {
@@ -35,13 +35,23 @@ hv.renderer("bokeh").theme = "dark_minimal"
 
 
 def build_dashboard():
-    start_total = time.perf_counter()
+    _build_stage = time_stage("build_dashboard")
 
     session_ctx = pn.state.curdoc.session_context if pn.state.curdoc and pn.state.curdoc.session_context else None
     session_id = session_ctx.id if session_ctx else "no-session"
+    # Manual scopes (no re-indentation of the whole body): every timer created
+    # below inherits the session and operation tags.
+    _session_scope = session(session_id)
+    _session_scope.__enter__()
+    _load_op = operation("dashboard.initial_load", session=session_id)
+    _load_scope = _load_op.activate()
+    _load_scope.__enter__()
+    _summary = begin("dashboard.initial_load")
     print(f"[session] build_dashboard started session_id={session_id}")
 
     def _on_session_destroyed(session_context):
+        # Idempotent: finishes an initial_load left open by a failed build.
+        _load_op.finish(status="error")
         sid = session_context.id if session_context is not None else session_id
         print(f"[session] session destroyed session_id={sid}")
 
@@ -172,9 +182,8 @@ def build_dashboard():
         nonlocal _current_var_label
         try:
             print(f"[variables] Loading for view={view_name}, group={group_path}")
-            t0 = time.perf_counter()
-            variables = data.client.get_variables(view_name, group_path)
-            print(f"[timing] get_variables: {time.perf_counter() - t0:.3f}s")
+            with time_stage("get_variables", view=view_name, group=group_path):
+                variables = data.client.get_variables(view_name, group_path)
             print(f"[variables] Found: {len(variables)} variables")
 
             if variables:
@@ -229,32 +238,36 @@ def build_dashboard():
             plot_var_selector.options = [display_label]
             plot_var_selector.value = display_label
 
-            def _run_refresh():
-                try:
-                    # Refresh each site's data with the current variable first,
-                    # then rebuild the plot closures so the freshly-built
-                    # dynamic plots render already-updated data on their first
-                    # render.  The map and plot-selection table are not
-                    # rerendered (their content is variable-independent).
-                    _refetch_sites()
-                    refresh_views(rebuild_map=False)
-                    plot_var_selector.value = display_label
-                    _fetch_and_show_metadata(var_name)
-                except Exception as e:
-                    import traceback; traceback.print_exc()
-                    plot_var_selector.options = []
-                    rendering_status.object = f"⚠️ Render error: {str(e)[:80]}"
-                    rendering_status.visible = True
-                    pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
-                    print(f"[variables] Error viewing {var_name}: {e}")
-                finally:
-                    loading_indicator.visible = False
+            _switch_op = operation("variable.switch", variable=var_name)
 
+            def _run_refresh():
+                with measure_operation("variable.switch", variable=var_name):
+                    try:
+                        # Refresh each site's data with the current variable first,
+                        # then rebuild the plot closures so the freshly-built
+                        # dynamic plots render already-updated data on their first
+                        # render.  The map and plot-selection table are not
+                        # rerendered (their content is variable-independent).
+                        _refetch_sites()
+                        refresh_views(rebuild_map=False)
+                        plot_var_selector.value = display_label
+                        _fetch_and_show_metadata(var_name)
+                    except Exception as e:
+                        import traceback; traceback.print_exc()
+                        plot_var_selector.options = []
+                        rendering_status.object = f"⚠️ Render error: {str(e)[:80]}"
+                        rendering_status.visible = True
+                        pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
+                        print(f"[variables] Error viewing {var_name}: {e}")
+                    finally:
+                        loading_indicator.visible = False
+
+            _wrapped = _switch_op.wrap(_run_refresh, finish=True)
             doc = pn.state.curdoc
             if doc is not None:
-                doc.add_next_tick_callback(_run_refresh)
+                doc.add_next_tick_callback(_wrapped)
             else:
-                _run_refresh()
+                _wrapped()
 
     def _refetch_sites():
         """Re-fetch every registered site with the current variable, in place.
@@ -310,31 +323,25 @@ def build_dashboard():
 
     def _refresh_sidebar_for_view(selected_view: str):
         nonlocal views, view, structure
-        print(f"[timing] _refresh_sidebar: start for {selected_view}")
+        with time_stage("_refresh_sidebar", view=selected_view):
+            views = data.client.get_views()
+            view = views.get(selected_view) or data.client.get_view(selected_view)
+            structure = data.client.get_structure(selected_view)
 
-        views = data.client.get_views()
-        print(f"[timing] _refresh_sidebar: get_views done")
-        view = views.get(selected_view) or data.client.get_view(selected_view)
-        structure = data.client.get_structure(selected_view)
-        print(f"[timing] _refresh_sidebar: get_structure done")
+            node_items = _flatten_nodes(structure)
+            node_options = {label: path for label, path in node_items}
+            node_select.options = node_options
+            node_select.value = node_items[0][1] if node_items else "/"
 
-        node_items = _flatten_nodes(structure)
-        node_options = {label: path for label, path in node_items}
-        node_select.options = node_options
-        node_select.value = node_items[0][1] if node_items else "/"
-
-        store_info.object = (
-            "<div style='background: #1e293b; padding: 12px; border-radius: 8px; margin: 8px 0;"
-            " border-left: 3px solid #3b82f6;'>"
-            "<div style='font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 600;'>"
-            "STORE URI</div>"
-            f"<div style='font-size: 12px; color: #e2e8f0; font-family: monospace;'>{view['source']['uri']}</div>"
-            "</div>"
-        )
-        print(f"[timing] _refresh_sidebar: about to populate variables")
-
-        _populate_variable_selector(selected_view, data.group_path)
-        print(f"[timing] _refresh_sidebar: done")
+            store_info.object = (
+                "<div style='background: #1e293b; padding: 12px; border-radius: 8px; margin: 8px 0;"
+                " border-left: 3px solid #3b82f6;'>"
+                "<div style='font-size: 11px; color: #94a3b8; margin-bottom: 4px; font-weight: 600;'>"
+                "STORE URI</div>"
+                f"<div style='font-size: 12px; color: #e2e8f0; font-family: monospace;'>{view['source']['uri']}</div>"
+                "</div>"
+            )
+            _populate_variable_selector(selected_view, data.group_path)
 
     def _switch_view(selected_view: str):
         nonlocal data, view_name
@@ -349,11 +356,9 @@ def build_dashboard():
         data.client.clear_cache()
         
         selection_state.clear()
-        print(f"[timing] _switch_view: starting refresh for {selected_view}")
-        _refresh_sidebar_for_view(selected_view)
-        print(f"[timing] _switch_view: calling refresh_views")
-        refresh_views()
-        print(f"[timing] _switch_view: done")
+        with time_stage("_switch_view", view=selected_view):
+            _refresh_sidebar_for_view(selected_view)
+            refresh_views()
 
     def update_data_warnings(state):
         reason = (state or {}).get("data_error_reason")
@@ -417,52 +422,52 @@ def build_dashboard():
     bottom_right = pn.pane.HoloViews(line_right, sizing_mode="stretch_both", linked_axes=False)
 
     def refresh_views(rebuild_map: bool = True):
-        print(f"[timing] refresh_views: start building map_view")
-        if rebuild_map:
-            new_map_view, new_map_state = build_map_view(data, tap_stream)
-            print(f"[timing] refresh_views: map_view done, building timeseries")
-            update_data_warnings(new_map_state)
-            map_state.clear()
-            map_state.update(new_map_state)
-        else:
-            # Reuse the existing map: its overlay tiles and point positions are
-            # variable-independent, so a variable change does not require a map
-            # rebuild (only the timeseries plots need to redraw).
-            new_map_state = map_state
+        with time_stage("refresh_views", rebuild_map=rebuild_map):
+            if rebuild_map:
+                new_map_view, new_map_state = build_map_view(data, tap_stream)
+                update_data_warnings(new_map_state)
+                map_state.clear()
+                map_state.update(new_map_state)
+            else:
+                # Reuse the existing map: its overlay tiles and point positions are
+                # variable-independent, so a variable change does not require a map
+                # rebuild (only the timeseries plots need to redraw).
+                new_map_state = map_state
 
-        new_line_left, new_line_mid, new_line_right, new_on_map_tap, new_fetch_site = build_timeseries_views(
-            data,
-            new_map_state,
-            selection_state=selection_state,
-            render_spinner=render_spinner,
-        )
-        print(f"[timing] refresh_views: timeseries done, updating panes")
+            new_line_left, new_line_mid, new_line_right, new_on_map_tap, new_fetch_site = build_timeseries_views(
+                data,
+                new_map_state,
+                selection_state=selection_state,
+                render_spinner=render_spinner,
+            )
 
-        map_handlers["on_map_tap"] = new_on_map_tap
-        map_handlers["fetch_site"] = new_fetch_site
-        if rebuild_map:
-            top_left.object = new_map_view
-        bottom_left.object = new_line_left
-        bottom_mid.object = new_line_mid
-        bottom_right.object = new_line_right
-
-        print(f"[timing] refresh_views: done")
+            map_handlers["on_map_tap"] = new_on_map_tap
+            map_handlers["fetch_site"] = new_fetch_site
+            if rebuild_map:
+                top_left.object = new_map_view
+            bottom_left.object = new_line_left
+            bottom_mid.object = new_line_mid
+            bottom_right.object = new_line_right
 
     def on_store_change(event):
         if event.new and event.new != view_name:
             loading_indicator.visible = True
 
-            def _run_switch():
-                try:
-                    _switch_view(event.new)
-                finally:
-                    loading_indicator.visible = False
+            _switch_op = operation("view.switch", view=event.new)
 
+            def _run_switch():
+                with measure_operation("view.switch", view=event.new):
+                    try:
+                        _switch_view(event.new)
+                    finally:
+                        loading_indicator.visible = False
+
+            _wrapped = _switch_op.wrap(_run_switch, finish=True)
             doc = pn.state.curdoc
             if doc is not None:
-                doc.add_next_tick_callback(_run_switch)
+                doc.add_next_tick_callback(_wrapped)
             else:
-                _run_switch()
+                _wrapped()
 
     def on_node_change(event):
         if event.new:
@@ -470,18 +475,22 @@ def build_dashboard():
             selection_state.clear()
             loading_indicator.visible = True
 
-            def _run_refresh():
-                try:
-                    _populate_variable_selector(data.view_name, data.group_path)
-                    refresh_views()
-                finally:
-                    loading_indicator.visible = False
+            _switch_op = operation("group.switch", group=event.new)
 
+            def _run_refresh():
+                with measure_operation("group.switch", group=event.new):
+                    try:
+                        _populate_variable_selector(data.view_name, data.group_path)
+                        refresh_views()
+                    finally:
+                        loading_indicator.visible = False
+
+            _wrapped = _switch_op.wrap(_run_refresh, finish=True)
             doc = pn.state.curdoc
             if doc is not None:
-                doc.add_next_tick_callback(_run_refresh)
+                doc.add_next_tick_callback(_wrapped)
             else:
-                _run_refresh()
+                _wrapped()
 
     def on_reload(_event=None):
         """Re-read the current view / group / variable from the store.
@@ -498,31 +507,40 @@ def build_dashboard():
 
         loading_indicator.visible = True
 
-        def _run_reload():
-            try:
-                # Drop cached map/timeseries payloads; the zarr nodes reopen
-                # their dataset lazily so values are re-read from the store.
-                data.client.clear_cache()
-                if data.display_variable:
-                    # Refresh each site in place so the table position and the
-                    # checked depths survive the reload.
-                    _refetch_sites()
-                refresh_views(rebuild_map=True)
-            except Exception as exc:  # noqa: BLE001 - surface any reload failure
-                import traceback
-                traceback.print_exc()
-                rendering_status.object = f"⚠️ Reload failed: {str(exc)[:80]}"
-                rendering_status.visible = True
-                pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
-                print(f"[reload] ERROR: {exc}")
-            finally:
-                loading_indicator.visible = False
+        _reload_op = operation(
+            "data.reload",
+            view=view_name,
+            group=data.group_path,
+            variable=data.display_variable,
+        )
 
+        def _run_reload():
+            with measure_operation("data.reload", view=view_name):
+                try:
+                    # Drop cached map/timeseries payloads; the zarr nodes reopen
+                    # their dataset lazily so values are re-read from the store.
+                    data.client.clear_cache()
+                    if data.display_variable:
+                        # Refresh each site in place so the table position and the
+                        # checked depths survive the reload.
+                        _refetch_sites()
+                    refresh_views(rebuild_map=True)
+                except Exception as exc:  # noqa: BLE001 - surface any reload failure
+                    import traceback
+                    traceback.print_exc()
+                    rendering_status.object = f"⚠️ Reload failed: {str(exc)[:80]}"
+                    rendering_status.visible = True
+                    pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
+                    print(f"[reload] ERROR: {exc}")
+                finally:
+                    loading_indicator.visible = False
+
+        _wrapped = _reload_op.wrap(_run_reload, finish=True)
         doc = pn.state.curdoc
         if doc is not None:
-            doc.add_next_tick_callback(_run_reload)
+            doc.add_next_tick_callback(_wrapped)
         else:
-            _run_reload()
+            _wrapped()
 
     node_select.param.watch(on_node_change, ["value"])
     store_selector.param.watch(on_store_change, ["value"])
@@ -677,5 +695,10 @@ myLayout.init();
     tmpl.add_panel("bottom_mid", bottom_mid)
     tmpl.add_panel("bottom_right", bottom_right)
 
-    print(f"[timing] build_dashboard: {time.perf_counter() - start_total:.3f}s")
+    _build_stage.log()
+    if _summary is not None:
+        end()
+    _load_op.finish(view=view_name, group=data.group_path)
+    _session_scope.__exit__(None, None, None)
+    _load_scope.__exit__(None, None, None)
     return tmpl
