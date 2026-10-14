@@ -2,13 +2,13 @@ import holoviews as hv
 import numpy as np
 import pandas as pd
 import panel as pn
-import time
 
 from holoviews import streams
 
 from dashboard.config import _resolve_fields_for_group_raw
-
-_perf_plot_redraws = 0
+from dashboard.debug_log import debug, debug_enabled
+from dashboard.perf_summary import Timer, count, measure_operation, stage
+from dashboard.profiling import operation, time_stage
 
 
 def _resolve_marker_window(x_range, xlim, times):
@@ -68,7 +68,7 @@ def _resolve_tap_targets(x, y, clusters, all_meta, nearest_idx, min_dist, thresh
 
 
 def build_timeseries_views(data, map_state, selection_state, render_spinner=None):
-    start_total = time.perf_counter()
+    _build_stage = time_stage("build_timeseries_views")
     view_config = data.client.get_view(data.view_name)
     defaults_config = view_config["defaults"]
     default_site_name = defaults_config.get("default_site")
@@ -120,7 +120,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         variable is selected or the fetch failed (callers can use this to
         report per-site failures without leaving stale data behind).
         """
-        start = time.perf_counter()
+        _timer = Timer("fetch_timeseries")
         print(f"[fetch_ts] Called with lat={lat:.4f}, lon={lon:.4f}, marker_meta={marker_meta}")
         if not data.display_variable:
             print(f"[fetch_ts] No variable selected — skipping fetch")
@@ -141,7 +141,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         if fig.get("status") == "error":
             reason = fig.get("reason", "Failed to load timeseries")
             print(f"[fetch_ts] Error: {reason}")
-            print(f"[timing] timeseries fetch failed: {time.perf_counter() - start:.3f}s")
+            _timer.stop()
+            count("fetch_timeseries.error")
             return None
 
         times = pd.to_datetime(fig.get("times", []))
@@ -151,39 +152,41 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         borehole_name = fig.get("borehole_name")
 
         site_id = borehole_name if borehole_name else f"{entity_label}_{entity_index}"
-        exists = any(s["entity_index"] == entity_index for s in selection_state.sites)
-        if exists:
-            # In-place refresh on a variable change: preserve identity, checked
-            # depths and table position.  If the new variable yields no series,
-            # blank the site (empty depths) so no stale old-variable data is
-            # drawn, and report it as no-data via the None return.
-            if not series:
+        with stage("selection.update"):
+            exists = any(s["entity_index"] == entity_index for s in selection_state.sites)
+            if exists:
+                # In-place refresh on a variable change: preserve identity, checked
+                # depths and table position.  If the new variable yields no series,
+                # blank the site (empty depths) so no stale old-variable data is
+                # drawn, and report it as no-data via the None return.
+                if not series:
+                    selection_state.update_site_data(
+                        entity_index,
+                        series=[],
+                        times=pd.to_datetime([]),
+                        depths=np.array([]),
+                    )
+                    print(f"[plot_selection] Site blanked (no data for variable): {site_id}")
+                    _timer.stop()
+                    count("fetch_timeseries.blank")
+                    return None
                 selection_state.update_site_data(
                     entity_index,
-                    series=[],
-                    times=pd.to_datetime([]),
-                    depths=np.array([]),
+                    series=series,
+                    times=times,
+                    depths=depths,
                 )
-                print(f"[plot_selection] Site blanked (no data for variable): {site_id}")
-                print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
-                return None
-            selection_state.update_site_data(
-                entity_index,
-                series=series,
-                times=times,
-                depths=depths,
-            )
-            print(f"[plot_selection] Site updated: {site_id}")
-        else:
-            selection_state.add_site(
-                entity_index=entity_index,
-                site_id=site_id,
-                depths=depths,
-                series=series,
-                times=times,
-            )
-            print(f"[plot_selection] Site added: {site_id}")
-        print(f"[timing] timeseries fetch+state: {time.perf_counter() - start:.3f}s")
+                print(f"[plot_selection] Site updated: {site_id}")
+            else:
+                selection_state.add_site(
+                    entity_index=entity_index,
+                    site_id=site_id,
+                    depths=depths,
+                    series=series,
+                    times=times,
+                )
+                print(f"[plot_selection] Site added: {site_id}")
+        _timer.stop()
         return entity_index
 
     def build_timeseries_overlay(view="left"):
@@ -235,7 +238,11 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             key = (entity_idx, depth_idx)
             site = site_lookup.get(entity_idx)
             if site is None or depth_idx >= len(site["series"]):
-                print(f"[timeseries] SKIP combo entity={entity_idx} depth_idx={depth_idx}: site=None or series too short")
+                debug(
+                    "[timeseries] SKIP combo entity=%s depth_idx=%s: site=None or series too short",
+                    entity_idx,
+                    depth_idx,
+                )
                 continue
             depths_arr = np.asarray(site["depths"]).ravel()
             depth_val = depths_arr[depth_idx] if depth_idx < len(depths_arr) else depth_idx
@@ -267,11 +274,11 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
                 meta_cache[key] = meta
 
         if not cache:
-            print("[timeseries] No curves generated — returning empty overlay")
+            debug("[timeseries] No curves generated — returning empty overlay")
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
 
-        print(f"[timeseries] Returning overlay with {len(cache)} curves")
+        debug("[timeseries] Returning overlay with %s curves", len(cache))
         return hv.Overlay(list(cache.values()))
 
     def build_marker_overlay(view="left", x_range=None, xlim=None):
@@ -364,17 +371,18 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
     def update_center_from_tap(event):
         if event.new is not None:
             nonlocal _center_time
-            _center_time = pd.to_datetime(event.new)
-            if render_spinner is not None:
-                render_spinner.visible = True
-            center_stream.event(center=_center_time)
-            if render_spinner is not None:
-                try:
-                    pn.state.curdoc.add_timeout_callback(
-                        lambda: setattr(render_spinner, 'visible', False), 500
-                    )
-                except Exception:
-                    pass
+            with measure_operation("center.update"):
+                _center_time = pd.to_datetime(event.new)
+                if render_spinner is not None:
+                    render_spinner.visible = True
+                center_stream.event(center=_center_time)
+                if render_spinner is not None:
+                    try:
+                        pn.state.curdoc.add_timeout_callback(
+                            lambda: setattr(render_spinner, 'visible', False), 500
+                        )
+                    except Exception:
+                        pass
 
     def _make_yrange_hook(ylim):
         def _hook(plot, element):
@@ -446,9 +454,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         nonlocal _right_ylim_cache, _right_ylim_key
         nonlocal _overlay_cache, _overlay_version
         nonlocal _marker_state
-        global _perf_plot_redraws
-        t_view = time.perf_counter()
-        _perf_plot_redraws += 1
+        _view_timer = Timer("create_timeseries_view")
+        count("plot.redraws")
         if selection_state is None:
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
@@ -490,8 +497,9 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             ylim = _right_ylim_cache
 
         if _overlay_version != selection_state.version:
-            _overlay_cache["left"] = build_timeseries_overlay(view="left")
-            _overlay_cache["full"] = build_timeseries_overlay(view="full")
+            with stage("ts.overlay"):
+                _overlay_cache["left"] = build_timeseries_overlay(view="left")
+                _overlay_cache["full"] = build_timeseries_overlay(view="full")
             _overlay_version = selection_state.version
         overlay = _overlay_cache["left"] if view == "left" else _overlay_cache["full"]
         marker_window = None
@@ -503,14 +511,23 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         elif x_range is not None and x_range != _marker_adapt[1]:
             _marker_adapt[1] = x_range
             marker_window = x_range
-        overlay = overlay * build_marker_overlay(view=view, x_range=marker_window, xlim=xlim)
+        with stage("ts.markers"):
+            overlay = overlay * build_marker_overlay(view=view, x_range=marker_window, xlim=xlim)
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
-        n_visible = int(np.sum((times >= xlim[0]) & (times <= xlim[1])))
-        print(f"[ylim] view={view} xlim=({xlim[0]}, {xlim[1]}) n_visible={n_visible} ylim={ylim}")
+        if debug_enabled():
+            n_visible = int(np.sum((times >= xlim[0]) & (times <= xlim[1])))
+            debug(
+                "[ylim] view=%s xlim=(%s, %s) n_visible=%s ylim=%s",
+                view,
+                xlim[0],
+                xlim[1],
+                n_visible,
+                ylim,
+            )
         if ylim is None:
             full_xlim = (times.min(), times.max())
             ylim = _compute_ylim(times, selected_combos, full_xlim)
-            print(f"[ylim] fallback to full range: {ylim}")
+            debug("[ylim] fallback to full range: %s", ylim)
         full_bounds = (times.min(), times.max())
         max_interval_ms = None
         if view == "mid":
@@ -537,9 +554,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
 
         n_sites = len(selection_state.sites)
         site_label = "1 site" if n_sites == 1 else f"{n_sites} sites"
-        elapsed = (time.perf_counter() - t_view) * 1000
-        print(f"[perf] create_timeseries_view(view={view}) #{_perf_plot_redraws}: {elapsed:.1f}ms "
-              f"version={selection_state.version}")
+        _view_timer.stop()
         return overlay.opts(
             responsive=True,
             title=f"{metric_label} over Time ({site_label})",
@@ -597,7 +612,7 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         place so the plots update as each borehole's data arrives.  Returns
         the resolved ``entity_index`` on success or ``None`` on failure.
         """
-        start = time.perf_counter()
+        _timer = Timer("fill_registered_site")
         print(f"[fill_ts] Filling registered idx={entity_index}")
         if not data.display_variable:
             print(f"[fill_ts] No variable selected — skipping fill")
@@ -613,7 +628,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         if fig.get("status") == "error":
             reason = fig.get("reason", "Failed to load timeseries")
             print(f"[fill_ts] Error: {reason}")
-            print(f"[timing] timeseries fill failed: {time.perf_counter() - start:.3f}s")
+            _timer.stop()
+            count("fill_registered_site.error")
             return None
 
         times = pd.to_datetime(fig.get("times", []))
@@ -622,19 +638,21 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         resolved_index = int(fig.get("borehole_index", entity_index))
         if not series:
             print(f"[fill_ts] No data for idx={resolved_index} — leaving row registered")
-            print(f"[timing] timeseries fill failed: {time.perf_counter() - start:.3f}s")
+            _timer.stop()
+            count("fill_registered_site.no_data")
             return None
         if resolved_index != entity_index:
             print(f"[fill_ts] WARNING: resolved idx={resolved_index} != registered "
                   f"idx={entity_index} — filling the registered row")
-        selection_state.fill_site(
-            entity_index,
-            series=series,
-            times=times,
-            depths=depths,
-        )
+        with stage("selection.update"):
+            selection_state.fill_site(
+                entity_index,
+                series=series,
+                times=times,
+                depths=depths,
+            )
         print(f"[plot_selection] Site filled: {entity_label}_{resolved_index}")
-        print(f"[timing] timeseries fill+state: {time.perf_counter() - start:.3f}s")
+        _timer.stop()
         return resolved_index
 
     def on_map_tap(x, y, loading=None):
@@ -705,31 +723,37 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
                 sid = meta_for_eidx.get(eidx) or f"{entity_label}_{eidx}"
             selection_state.register_site(eidx, sid)
 
-        def _do_deferred_fetch():
-            resolved_index = None
-            try:
-                for target in targets:
-                    eidx = int(target["entity_index"])
-                    resolved = _fill_registered_site(eidx)
-                    if resolved is None:
-                        continue
-                    if resolved_index is None:
-                        resolved_index = resolved
-                if resolved_index is not None:
-                    borehole_stream.event(borehole_index=resolved_index)
-                return resolved_index
-            finally:
-                if loading is not None:
-                    loading.visible = False
+        _select_op = operation("borehole.select", site=entity_label, count=len(targets))
 
+        def _do_deferred_fetch():
+            with measure_operation("borehole.select", site=entity_label, sites=len(targets)):
+                resolved_index = None
+                try:
+                    for target in targets:
+                        eidx = int(target["entity_index"])
+                        resolved = _fill_registered_site(eidx)
+                        if resolved is None:
+                            continue
+                        if resolved_index is None:
+                            resolved_index = resolved
+                    if resolved_index is not None:
+                        borehole_stream.event(borehole_index=resolved_index)
+                    return resolved_index
+                finally:
+                    if loading is not None:
+                        loading.visible = False
+
+        _wrapped = _select_op.wrap(_do_deferred_fetch, finish=True)
         doc = pn.state.curdoc
         if doc is not None:
             # Small timeout (same trick as on_tap_event): the deferred fetch
             # runs after the current callback yields, so the table row flush
             # reaches the frontend before the blocking per-site fetches start.
-            doc.add_timeout_callback(_do_deferred_fetch, 100)
+            # op.wrap reactivates borehole.select + current session in the
+            # timeout thread so the op spans scheduling delay + all fetches.
+            doc.add_timeout_callback(_wrapped, 100)
         else:
-            _do_deferred_fetch()
+            _wrapped()
 
         return int(targets[0]["entity_index"]) if targets else None
 
@@ -743,5 +767,5 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         """
         return _fetch_timeseries(0.0, 0.0, {"entity_index": int(entity_index)})
 
-    print(f"[timing] build_timeseries_views: {time.perf_counter() - start_total:.3f}s")
+    _build_stage.log()
     return line_left, line_mid, line_right, on_map_tap, fetch_site_entity
