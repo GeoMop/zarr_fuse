@@ -736,9 +736,11 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
                             continue
                         if resolved_index is None:
                             resolved_index = resolved
-                    if resolved_index is not None:
-                        with stage("borehole.stream_event"):
-                            borehole_stream.event(borehole_index=resolved_index)
+                    # No borehole_stream.event() here: every successful fill
+                    # bumps selection_state.version, which already refreshes
+                    # all three DynamicMaps. The stream event would only fire
+                    # a second, identical redraw (borehole_index is unused by
+                    # the plotting callbacks).
                     return resolved_index
                 finally:
                     if loading is not None:

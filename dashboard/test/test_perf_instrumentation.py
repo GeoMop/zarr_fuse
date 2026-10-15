@@ -5,8 +5,10 @@ bottleneck inside ``borehole.select``:
 
 * ``fill_site.layout_notify`` / ``fill_site.version_notify`` in
   ``SelectionState.fill_site`` (``dashboard/plot_selection.py``),
-* ``borehole.stream_event`` around ``borehole_stream.event(...)`` in
-  ``_do_deferred_fetch`` (``dashboard/multi_time_views.py``),
+* the single-refresh guarantee of ``_do_deferred_fetch``
+  (``dashboard/multi_time_views.py``): a successful fill refreshes the three
+  timeseries DynamicMaps through the ``version`` subscription only, so no
+  ``borehole_stream.event()`` is emitted there,
 * the enlarged ``_MAX_STAGE_LINES`` stage budget of the operation summary.
 
 The tests assert both sides of the instrumentation contract: the stages are
@@ -36,7 +38,6 @@ EXPECTED_BOREHOLE_SELECT_STAGES = [
     "fill_site.version_notify",
     "table.rebuild",
     "create_timeseries_view",
-    "borehole.stream_event",
 ]
 
 
@@ -189,7 +190,7 @@ class TestFillSiteNotifyStages:
 
 
 class TestBoreholeSelectPipeline:
-    """The deferred ``borehole.select`` flow must expose every new stage."""
+    """The deferred ``borehole.select`` flow must expose its stages once."""
 
     def _build_views(self):
         class _FakeClient:
@@ -263,9 +264,34 @@ class TestBoreholeSelectPipeline:
         assert counts.get("selection.update") == 1
         assert counts.get("fill_site.layout_notify") == 1
         assert counts.get("fill_site.version_notify") == 1
-        assert counts.get("borehole.stream_event") == 1
+        assert "borehole.stream_event" not in counts, "redundant second refresh removed"
         summaries = [line for line in perf_log if line.startswith("event=op.summary ")]
         assert len(summaries) == 1 and "operation=borehole.select" in summaries[0]
+
+    def test_map_tap_refreshes_via_version_not_borehole_stream(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A successful fill must not fire a second, redundant stream refresh.
+
+        ``_fill_registered_site`` bumps ``SelectionState.version``, which the
+        three timeseries DynamicMaps already subscribe to; the removed
+        ``borehole_stream.event()`` used to trigger an identical second
+        redraw of all three plots.
+        """
+        monkeypatch.setattr(profiling, "_ENABLED", False)
+        _data, _map_state, state, views = self._build_views()
+        line_left, _mid, _right, on_map_tap, _fetch_site = views
+
+        stream = next(s for s in line_left.streams if hasattr(s, "borehole_index"))
+        events: list[dict] = []
+        stream.add_subscriber(lambda **kwargs: events.append(kwargs))
+        version_before = state.version
+
+        selected = on_map_tap(x=11.0, y=47.0)
+
+        assert selected == 7
+        assert state.version > version_before, "version subscription drives the refresh"
+        assert events == [], f"borehole_stream fired redundantly: {events}"
 
     def test_map_tap_without_profiling_still_selects(self, monkeypatch) -> None:
         monkeypatch.setattr(profiling, "_ENABLED", False)
