@@ -737,7 +737,8 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
                         if resolved_index is None:
                             resolved_index = resolved
                     if resolved_index is not None:
-                        borehole_stream.event(borehole_index=resolved_index)
+                        with stage("borehole.stream_event"):
+                            borehole_stream.event(borehole_index=resolved_index)
                     return resolved_index
                 finally:
                     if loading is not None:

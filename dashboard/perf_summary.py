@@ -35,7 +35,7 @@ from typing import Any
 from dashboard.profiling import log_event, profiling_enabled
 
 # Keep one operation's output bounded (target: a handful of records per operation).
-_MAX_STAGE_LINES = 8
+_MAX_STAGE_LINES = 16
 _MAX_COUNTERS = 12
 
 _local = threading.local()

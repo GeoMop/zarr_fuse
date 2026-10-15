@@ -11,7 +11,7 @@ import panel as pn
 import param
 from panel.io.model import JSCode
 
-from dashboard.perf_summary import add_stage, count, measure_operation
+from dashboard.perf_summary import add_stage, count, measure_operation, stage
 from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_SVG
 from dashboard.profiling import log_message, profiling_enabled
 
@@ -304,6 +304,10 @@ class SelectionState(param.Parameterized):
         mirroring ``add_site`` bookkeeping without rebuilding the table for a
         brand-new row.  Bumps *version* (redraw plots) and, when the depth set
         changes, *layout_version* (adds the depth columns to the table).
+        Each of the two notifications is timed separately on the active
+        operation summary (``fill_site.layout_notify``,
+        ``fill_site.version_notify``) so synchronous Panel/Param callbacks
+        can be attributed to the right counter.
 
         Returns ``False`` when no site with *entity_index* is registered (the
         caller should ``register_site`` then ``fill_site`` instead).
@@ -337,11 +341,13 @@ class SelectionState(param.Parameterized):
                 self._checked_count += 1
 
         if depth_changed:
-            self.layout_version += 1
+            with stage("fill_site.layout_notify"):
+                self.layout_version += 1
             print(f"[SelectionState] Filled site idx={entity_index} (depths changed)")
         else:
             print(f"[SelectionState] Filled site idx={entity_index}")
-        self._bump_version()
+        with stage("fill_site.version_notify"):
+            self._bump_version()
         return True
 
     def update_site_data(self, entity_index, series, times, depths=None) -> bool:
