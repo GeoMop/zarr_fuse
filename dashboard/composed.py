@@ -1,3 +1,5 @@
+import asyncio
+
 import holoviews as hv
 import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
@@ -32,6 +34,63 @@ pn.config.reconnect = True
 pn.config.notifications = True
 hv.extension("bokeh")
 hv.renderer("bokeh").theme = "dark_minimal"
+
+_POPULATE_PAUSE = 0.05
+
+
+def _placeholder_root(sizing_mode: str, label: str) -> pn.Column:
+    """Create an empty layout root that shows a spinner until it is populated.
+
+    The root must be a ``pn.Column`` (not a ``pn.pane.HoloViews``): only
+    components carry Panel's ``loading`` CSS, which is what renders the spinner
+    inside the already-served GoldenLayout window.
+    """
+    return pn.Column(
+        pn.Row(
+            pn.indicators.LoadingSpinner(value=True, color="light", bgcolor="dark", size=32),
+            pn.pane.Markdown(label, styles={"color": "#dbeafe"}),
+            align="center",
+            sizing_mode=sizing_mode,
+        ),
+        sizing_mode=sizing_mode,
+        loading=True,
+    )
+
+
+def _set_root(root: pn.Column, content: object) -> None:
+    """Replace a skeleton root's spinner with its real content."""
+    root.objects = [content]
+    root.loading = False
+
+
+def _report_error(label: str, exc: BaseException) -> None:
+    """Print one traceback for a populate phase that failed."""
+    import traceback
+
+    traceback.print_exc()
+    print(f"[populate] {label} failed: {exc}")
+
+
+def _set_root_error(root: pn.Column, label: str, exc: BaseException) -> None:
+    """Show a populate failure inside the pane it belongs to."""
+    _set_root(
+        root,
+        pn.pane.Alert(
+            f"⚠️ {label} failed: {str(exc)[:120]}",
+            alert_type="danger",
+            sizing_mode="stretch_width",
+        ),
+    )
+
+
+def _map_pane(content: object) -> pn.pane.HoloViews:
+    """Wrap a map element in the pane used by the map window."""
+    return pn.pane.HoloViews(content, sizing_mode="stretch_both")
+
+
+def _line_pane(content: object) -> pn.pane.HoloViews:
+    """Wrap a timeseries element in the pane used by the timeseries windows."""
+    return pn.pane.HoloViews(content, sizing_mode="stretch_both", linked_axes=False)
 
 
 def build_dashboard():
@@ -76,7 +135,7 @@ def build_dashboard():
 
     views = data.client.get_views()
     view = views.get(view_name) or data.client.get_view(view_name)
-    structure = data.client.get_structure(view_name)
+    structure: dict | None = None
 
     loading_indicator = pn.Row(
         pn.indicators.LoadingSpinner(value=True, color='light', bgcolor='dark', size=32),
@@ -103,22 +162,15 @@ def build_dashboard():
         sizing_mode="stretch_width",
     )
     table_loading = pn.Row(visible=False)
-    (
-        controller,
-        store_selector,
-        node_select,
-        variable_selector,
-        variable_metadata,
-        node_hint,
-        store_info,
-        reload_button,
-    ) = build_sidebar(
-        view_name, view, structure, views=views,
-        loading_indicator=loading_indicator, timeseries_loading=timeseries_loading,
-        render_spinner=render_spinner, rendering_status=rendering_status,
-        table_loading=table_loading,
-    )
-    data.group_path = node_select.value
+
+    controller = _placeholder_root("stretch_width", "Loading dataset structure...")
+    store_selector = None
+    node_select = None
+    variable_selector = None
+    variable_metadata = None
+    node_hint = None
+    store_info = None
+    reload_button = None
 
     # ── Variable dropdown for the plot selection panel ──────────────
     plot_var_selector = pn.widgets.Select(
@@ -129,29 +181,16 @@ def build_dashboard():
     )
 
     # ── Table-style plot selection ──────────────────────────────────
-    view_cfg = data.client.get_view(view_name)
-    schema_display_tbl = view_cfg.get("schema_display", {})
-
+    # Built in _populate(): it depends on data.group_path, which is read from
+    # the store structure.
     selection_state = None  # created by build_plot_selection_panel
-    available_dims = resolve_available_dimensions(
-        view_config=view_cfg,
-        group_path=data.group_path,
-        schema_display=schema_display_tbl,
-    )
-
-    panel_table, selection_state = build_plot_selection_panel(
-        state=selection_state,
-        available_dims=available_dims,
-        plot_var_selector=plot_var_selector,
-        table_loading=table_loading,
-    )
     # ────────────────────────────────────────────────────────────────
 
     tap_stream = streams.Tap(x=None, y=None)
 
-    map_handlers = {"on_map_tap": lambda *_: None}
+    map_handlers = {"on_map_tap": lambda *_, **__: None}
 
-    map_view, map_state = build_map_view(data, tap_stream)
+    map_view, map_state = None, None
 
     _current_var_label: str | None = None
 
@@ -317,10 +356,6 @@ def build_dashboard():
             var_name = selected_label.split(" (")[0] if " (" in selected_label else selected_label
             _select_variable(var_name, label=selected_label)
 
-    variable_selector.param.watch(on_variable_change, ["value"])
-
-    _populate_variable_selector(view_name, data.group_path)
-
     def _refresh_sidebar_for_view(selected_view: str):
         nonlocal views, view, structure
         with time_stage("_refresh_sidebar", view=selected_view):
@@ -376,17 +411,6 @@ def build_dashboard():
         node_hint.object = ""
         node_hint.visible = False
 
-    update_data_warnings(map_state)
-
-    line_left, line_mid, line_right, on_map_tap, fetch_site_entity = build_timeseries_views(
-        data,
-        map_state,
-        selection_state=selection_state,
-        render_spinner=render_spinner,
-    )
-    map_handlers["on_map_tap"] = on_map_tap
-    map_handlers["fetch_site"] = fetch_site_entity
-
     def on_tap_event(*_):
         if timeseries_loading.visible:
             return  # debounce — already loading
@@ -409,17 +433,11 @@ def build_dashboard():
         else:
             _do_tap()
 
-    tap_stream.param.watch(on_tap_event, ["x", "y"])
-    map_handlers["on_map_tap"](tap_stream.x, tap_stream.y)
-
-    top_left = pn.pane.HoloViews(map_view, sizing_mode="stretch_both")
-    top_right = pn.Column(
-        panel_table,
-        sizing_mode="stretch_both",
-    )
-    bottom_left = pn.pane.HoloViews(line_left, sizing_mode="stretch_both", linked_axes=False)
-    bottom_mid = pn.pane.HoloViews(line_mid, sizing_mode="stretch_both", linked_axes=False)
-    bottom_right = pn.pane.HoloViews(line_right, sizing_mode="stretch_both", linked_axes=False)
+    top_left = _placeholder_root("stretch_both", "Loading map view...")
+    top_right = _placeholder_root("stretch_both", "Loading plot selection...")
+    bottom_left = _placeholder_root("stretch_both", "Loading year timeseries...")
+    bottom_mid = _placeholder_root("stretch_both", "Loading month timeseries...")
+    bottom_right = _placeholder_root("stretch_both", "Loading day timeseries...")
 
     def refresh_views(rebuild_map: bool = True):
         with time_stage("refresh_views", rebuild_map=rebuild_map):
@@ -444,10 +462,10 @@ def build_dashboard():
             map_handlers["on_map_tap"] = new_on_map_tap
             map_handlers["fetch_site"] = new_fetch_site
             if rebuild_map:
-                top_left.object = new_map_view
-            bottom_left.object = new_line_left
-            bottom_mid.object = new_line_mid
-            bottom_right.object = new_line_right
+                _set_root(top_left, _map_pane(new_map_view))
+            _set_root(bottom_left, _line_pane(new_line_left))
+            _set_root(bottom_mid, _line_pane(new_line_mid))
+            _set_root(bottom_right, _line_pane(new_line_right))
 
     def on_store_change(event):
         if event.new and event.new != view_name:
@@ -542,9 +560,144 @@ def build_dashboard():
         else:
             _wrapped()
 
-    node_select.param.watch(on_node_change, ["value"])
-    store_selector.param.watch(on_store_change, ["value"])
-    reload_button.on_click(on_reload)
+    async def _populate() -> None:
+        """Fill the skeleton roots one pane at a time, in dependency order.
+
+        The first phase performs the only store round-trip of the initial load.
+        Every later phase is local work, and the pause after each phase gives
+        the browser time to show the pane that was just filled.
+        """
+        nonlocal structure, store_selector, node_select, variable_selector
+        nonlocal variable_metadata, node_hint, store_info, reload_button
+        nonlocal selection_state, map_view, map_state
+
+        with _load_op.activate():
+            _populate_stage = time_stage("populate_dashboard")
+            _status = "error"
+            try:
+                print(f"[populate] start session_id={session_id}")
+
+                # Phase 1: opens the store; the sidebar needs its structure.
+                try:
+                    structure = await asyncio.to_thread(
+                        data.client.get_structure, view_name
+                    )
+                except Exception as exc:
+                    _report_error("Data structure", exc)
+                    _set_root_error(controller, "Data structure", exc)
+                    return
+                await asyncio.sleep(_POPULATE_PAUSE)
+
+                # Phase 2: sidebar, then the group path taken from the tree.
+                try:
+                    (
+                        controller_content,
+                        store_selector,
+                        node_select,
+                        variable_selector,
+                        variable_metadata,
+                        node_hint,
+                        store_info,
+                        reload_button,
+                    ) = build_sidebar(
+                        view_name, view, structure, views=views,
+                        loading_indicator=loading_indicator,
+                        timeseries_loading=timeseries_loading,
+                        render_spinner=render_spinner,
+                        rendering_status=rendering_status,
+                        table_loading=table_loading,
+                    )
+                except Exception as exc:
+                    _report_error("Dataset panel", exc)
+                    _set_root_error(controller, "Dataset panel", exc)
+                    return
+                controller.objects = controller_content.objects
+                controller.styles = dict(controller_content.styles)
+                controller.loading = False
+                data.group_path = node_select.value
+                await asyncio.sleep(_POPULATE_PAUSE)
+
+                # Phase 3: plot selection table (depends on data.group_path).
+                try:
+                    view_cfg = data.client.get_view(view_name)
+                    available_dims = resolve_available_dimensions(
+                        view_config=view_cfg,
+                        group_path=data.group_path,
+                        schema_display=view_cfg.get("schema_display", {}),
+                    )
+                    panel_table, selection_state = build_plot_selection_panel(
+                        state=selection_state,
+                        available_dims=available_dims,
+                        plot_var_selector=plot_var_selector,
+                        table_loading=table_loading,
+                    )
+                except Exception as exc:
+                    _report_error("Plot selection", exc)
+                    _set_root_error(top_right, "Plot selection", exc)
+                else:
+                    _set_root(top_right, panel_table)
+                await asyncio.sleep(_POPULATE_PAUSE)
+
+                # Phase 4: map, the heaviest read after the structure.
+                try:
+                    map_view, map_state = await asyncio.to_thread(
+                        build_map_view, data, tap_stream
+                    )
+                except Exception as exc:
+                    _report_error("Map view", exc)
+                    map_state = {}
+                    _set_root_error(top_left, "Map view", exc)
+                else:
+                    _set_root(top_left, _map_pane(map_view))
+                    update_data_warnings(map_state)
+                await asyncio.sleep(_POPULATE_PAUSE)
+
+                # Phase 5: variables; assigning the value triggers on_variable_change.
+                variable_selector.param.watch(on_variable_change, ["value"])
+                _populate_variable_selector(view_name, data.group_path)
+                await asyncio.sleep(_POPULATE_PAUSE)
+
+                # Phase 6: timeseries panes, then the default site fetch.
+                try:
+                    line_left, line_mid, line_right, on_map_tap, fetch_site_entity = (
+                        build_timeseries_views(
+                            data,
+                            map_state,
+                            selection_state=selection_state,
+                            render_spinner=render_spinner,
+                        )
+                    )
+                except Exception as exc:
+                    _report_error("Timeseries", exc)
+                    for pane_root in (bottom_left, bottom_mid, bottom_right):
+                        _set_root_error(pane_root, "Timeseries", exc)
+                else:
+                    map_handlers["on_map_tap"] = on_map_tap
+                    map_handlers["fetch_site"] = fetch_site_entity
+                    _set_root(bottom_left, _line_pane(line_left))
+                    _set_root(bottom_mid, _line_pane(line_mid))
+                    _set_root(bottom_right, _line_pane(line_right))
+
+                tap_stream.param.watch(on_tap_event, ["x", "y"])
+                await asyncio.sleep(_POPULATE_PAUSE)
+                map_handlers["on_map_tap"](tap_stream.x, tap_stream.y)
+
+                # Phase 7: user actions go live only once everything is built.
+                node_select.param.watch(on_node_change, ["value"])
+                store_selector.param.watch(on_store_change, ["value"])
+                reload_button.on_click(on_reload)
+
+                _status = "ok"
+            except Exception as exc:
+                _report_error("Population", exc)
+                rendering_status.object = f"⚠️ Render error: {str(exc)[:80]}"
+                rendering_status.visible = True
+            finally:
+                _populate_stage.log(status=_status)
+                _load_op.finish(status=_status, view=view_name, group=data.group_path)
+                if _summary is not None:
+                    end()
+                print(f"[populate] finished status={_status} session_id={session_id}")
 
     template = """
 {%% extends base %%}
@@ -696,9 +849,11 @@ myLayout.init();
     tmpl.add_panel("bottom_right", bottom_right)
 
     _build_stage.log()
-    if _summary is not None:
-        end()
-    _load_op.finish(view=view_name, group=data.group_path)
+    # The contextvars tokens belong to this frame, so the scopes are closed here;
+    # _populate() re-activates the operation itself and finishes it when done.
     _session_scope.__exit__(None, None, None)
     _load_scope.__exit__(None, None, None)
+
+    pn.state.onload(_populate)
+    print(f"[session] build_dashboard ready session_id={session_id}")
     return tmpl
