@@ -207,6 +207,25 @@ jobs:
       - name: Set context
         run: kubectl config set-context --current --namespace="${{ inputs.namespace }}"
 
+      # Fail fast: without the Secret the pod never starts and the atomic upgrade times out.
+      - name: Check S3 secret
+        run: |
+          kubectl get secret "${{ inputs.s3-secret-name }}" > /dev/null || {
+            echo "::error::Secret '${{ inputs.s3-secret-name }}' is missing in namespace '${{ inputs.namespace }}'," \
+              "create it as described in dashboard/charts/holoviz/README.md."
+            exit 1
+          }
+
+      # Chart 0.2.x named the Ingress holoviz-ingress. The ingress-nginx admission webhook rejects the renamed
+      # Ingress while the old one claims the same host. Drop this step once no release runs chart 0.2.x.
+      - name: Remove chart 0.2.x Ingress
+        run: |
+          OWNER=$(kubectl get ingress holoviz-ingress --ignore-not-found \
+            -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}')
+          if [ "$OWNER" = "${{ inputs.release-name }}" ]; then
+            kubectl delete ingress holoviz-ingress
+          fi
+
       - name: Deploy app
         run: |
           helm upgrade ${{ inputs.release-name }} holoviz \

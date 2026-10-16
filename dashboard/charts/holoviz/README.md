@@ -54,16 +54,29 @@ The dashboard is served at `https://zarr-fuse-<release>.dyn.cloud.e-infra.cz`.
 
 ## Upgrading from chart 0.2.x
 
-Chart 0.2.x used fixed names (`holoviz-frontend`, `holoviz-ingress`). The new Ingress claims the same host, and the
-ingress-nginx admission webhook rejects a second Ingress for a host, so delete the old one right before the first
-upgrade:
+Chart 0.2.x used fixed names (`holoviz-frontend`, `holoviz-ingress`) and created the S3 Secret
+`holoviz-frontend-secrets` itself. Before the first upgrade:
 
-```bash
-kubectl -n "$NAMESPACE" delete ingress holoviz-ingress
-```
+1. Create the S3 Secret from the prerequisites. The old Secret has the same keys and the upgrade deletes it, so copy it
+   first:
 
-The old Deployment, Service and Secret are removed by the upgrade itself. The ConfigMap the old workflow created with
-`kubectl` (`dashboard-config` or `holoviz-dashboard-config`) is no longer used and can be deleted.
+   ```bash
+   kubectl -n "$NAMESPACE" get secret holoviz-frontend-secrets -o json \
+     | jq '{apiVersion, kind, type, data, metadata: {name: "zarr-fuse-s3"}}' \
+     | kubectl -n "$NAMESPACE" create -f -
+   ```
+
+2. Delete the old Ingress. The new Ingress claims the same host, and the ingress-nginx admission webhook rejects a
+   second Ingress for a host. The GitHub workflow does this step itself.
+
+   ```bash
+   kubectl -n "$NAMESPACE" delete ingress holoviz-ingress
+   ```
+
+The old Deployment, Service and Secret are removed by the upgrade itself. A failed first upgrade cannot be rolled back
+(`no Secret with the name "holoviz-frontend-secrets" found`); fix the cause and upgrade again. The ConfigMap the old
+workflow created with `kubectl` (`dashboard-config` or `holoviz-dashboard-config`) is no longer used and can be
+deleted.
 
 ## Troubleshooting
 
