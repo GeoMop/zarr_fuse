@@ -2,6 +2,7 @@ import logging
 import math
 import os
 import time
+from urllib.parse import urlencode
 
 import cartopy.crs as ccrs
 import geoviews as gv
@@ -143,6 +144,10 @@ def _load_overlay(view_config):
     if not tile_url:
         logger.info("No overlay tile URL configured.")
         return None
+
+    if tile_url.startswith("/tiles/") and view_config.get("name"):
+        separator = "&" if "?" in tile_url else "?"
+        tile_url = f"{tile_url}{separator}{urlencode({'view': view_config['name']})}"
 
     logger.info("Using tiled overlay: %s", tile_url)
     return gv.WMTS(tile_url).opts(alpha=0.9)

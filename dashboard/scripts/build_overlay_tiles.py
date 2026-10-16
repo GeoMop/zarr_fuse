@@ -25,14 +25,19 @@ All parameters are wired to the project configuration:
   entry point (``find_view_file``, as used by composed.py): ``--view-path``
   flag, then ``ZF_VIEW_PATH`` env, then an upward search from the current
   directory;
-- the view is selected via ``--view`` / ``HV_DASHBOARD_VIEW``, falling back to
-  ``_dashboard.default_endpoint``;
-- build parameters (paths, zoom range, CRS, resampling, S3 bucket/prefix)
+- the view is selected from ``_dashboard.default_view`` in ``zf_view.yaml``;
+- build parameters (source paths, zoom range, resampling, S3 bucket/prefix)
   come exclusively from the ``tile_build`` section of the selected view;
-- generic processing defaults (zoom range, CRS values, resampling) are owned
+- generic processing defaults (zoom range, GCP CRS, resampling) are owned
   by the config layer (``TileBuildConfig`` in ``dashboard/config.py``); the
-  S3 bucket/prefix target must be configured explicitly in zf_view.yaml
-  (``tile_build.s3``);
+  S3 publish target must be configured explicitly in zf_view.yaml
+  (``tile_build.target_url``, e.g. ``s3://bucket/prefix/``);
+- the target CRS (``TARGET_SRS``) and every intermediate path (GCP VRT,
+  warped GeoTIFF, RGBA VRT, tile tree) are implementation details owned by
+  this script: intermediates are written to the stable work directory
+  ``<base_dir>/workdir/tile_build/<view_name>/`` (``base_dir`` is the
+  directory above the config's directory), so an interrupted run can resume
+  and ``--no-cleanup`` output stays inspectable;
 - credentials come from the general environment (``ZF_S3_ACCESS_KEY``,
   ``ZF_S3_SECRET_KEY``), filled from the ``_dashboard.env_file`` referenced by
   zf_view.yaml;
@@ -40,18 +45,18 @@ All parameters are wired to the project configuration:
 
 Local pipeline:
 
-1. gdal_translate -of VRT -a_srs <gcp_srs> -gcp ... <image> <vrt>
-2. gdalwarp -t_srs <target_srs> -r <resampling> -dstalpha ... <vrt> <tif>
-3. gdal_translate -of VRT -expand rgba <tif> <rgba_vrt>
-4. gdal2tiles --xyz -z <min>-<max> <rgba_vrt> <tiles_dir>
+1. gdal_translate -of VRT -a_srs <gcp_srs> -gcp ... <image> <work>/source_gcps.vrt
+2. gdalwarp -t_srs EPSG:3857 -r <warp_resampling> -dstalpha ... <vrt> <work>/source_3857.tif
+3. gdal_translate -of VRT -expand rgba <tif> <work>/source_3857_rgba.vrt
+4. gdal2tiles --xyz -z <min>-<max> <rgba_vrt> <work>/tiles
 5. upload tiles to s3://<bucket>/<prefix><z/x/y>.png
 
 Steps whose outputs already exist locally are skipped unless ``--force`` is
 given, so an interrupted run can resume. Upload compares object sizes and
 transfers only changed files. After a successful upload the locally generated
-intermediates (VRTs, the warped GeoTIFF, and the tile tree) are removed so the
-workspace stays clean; the source inputs are never deleted. ``--no-cleanup``
-keeps the generated files for inspection.
+intermediates in the work directory are removed so the workspace stays clean;
+the source inputs are never deleted. ``--no-cleanup`` keeps the generated
+files for inspection.
 
 The preprocessing requires GDAL command line tools on PATH (gdal_translate,
 gdalwarp) and a working gdal2tiles (preferred: python module ``osgeo_utils``
@@ -94,10 +99,12 @@ if str(REPO_ROOT) not in sys.path:
 
 try:
     from dashboard.config import (
+        _resolve_env_file_path,
         find_view_file,
         get_default_endpoint_name,
         load_environment_from_config,
         load_view_config,
+        parse_s3_uri,
         schema_endpoint_url,
     )
 except ModuleNotFoundError as exc:
@@ -107,6 +114,25 @@ except ModuleNotFoundError as exc:
         "the missing dependency into the current environment, e.g.:\n"
         "  pip install pyyaml python-dotenv"
     )
+
+# Target CRS of the XYZ web-map tile pyramid; implementation constant, not configurable.
+TARGET_SRS = "EPSG:3857"
+
+WORK_VRT_NAME = "source_gcps.vrt"
+WORK_TIF_NAME = "source_3857.tif"
+WORK_RGBA_VRT_NAME = "source_3857_rgba.vrt"
+WORK_TILES_DIR_NAME = "tiles"
+
+
+def resolve_work_dir(base_dir: Path, view_name: str) -> Path:
+    """Return the stable work directory for a view's intermediate files.
+
+    A stable (non-temporary) location preserves the skip/resume behavior of
+    the individual build steps across runs and keeps ``--no-cleanup`` output
+    inspectable.
+    """
+    return (base_dir / "workdir" / "tile_build" / view_name).resolve()
+
 
 def _resolve_views_path(explicit: Optional[str]) -> tuple[Path, str]:
     """Locate zf_view.yaml: CLI flag, then the shared config finder.
@@ -184,13 +210,11 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description="Build overlay XYZ tiles from a georeferenced image and upload them to S3.",
+        allow_abbrev=False,
     )
     parser.add_argument("--view-path", default=None,
                         help="path to zf_view.yaml (default: ZF_VIEW_PATH env, "
                              "then upward search from the current directory)")
-    parser.add_argument("--view", default=None,
-                        help="view name in zf_view.yaml (default: HV_DASHBOARD_VIEW "
-                             "env, then _dashboard.default_endpoint)")
     parser.add_argument("--force", action="store_true",
                         help="full redo: bypass the S3 existence short-circuit "
                              "and rebuild all local steps even if outputs exist")
@@ -202,7 +226,7 @@ def _parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                              "successful upload (default: remove them)")
     parser.add_argument("--delete", action="store_true",
                         help="delete every object under the configured "
-                             "tile_build.s3 prefix instead of building/uploading")
+                             "tile_build.target_url prefix instead of building/uploading")
     parser.add_argument("--yes", action="store_true",
                         help="confirm destructive operations; required with --delete")
     return parser.parse_args(argv)
@@ -365,27 +389,27 @@ def _s3_client(upload_config: dict[str, Optional[str]]):
     )
 
 
-def tiles_exist_on_s3(s3, bucket: str, prefix: str) -> bool:
-    """Return True if any object exists under bucket/prefix.
+def _completion_key(prefix: str) -> str:
+    normalized_prefix = prefix.strip("/")
+    return f"{normalized_prefix}/.zarr-fuse-complete" if normalized_prefix else ".zarr-fuse-complete"
 
-    This is the tile-system presence test: a non-empty prefix means the tile
-    pyramid was already built and published, so nothing needs to be redone.
-    """
+
+def tiles_exist_on_s3(s3, bucket: str, prefix: str) -> bool:
+    """Return True only when a completed tile upload marker exists."""
     from botocore.exceptions import ClientError
 
     normalized_prefix = prefix.strip("/")
     try:
-        response = s3.list_objects_v2(
-            Bucket=bucket,
-            Prefix=normalized_prefix,
-            MaxKeys=1,
-        )
+        s3.head_object(Bucket=bucket, Key=_completion_key(normalized_prefix))
     except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in {"404", "NoSuchKey", "NotFound"}:
+            return False
         raise SystemExit(
             f"ERROR: S3 existence check failed on s3://{bucket}/{normalized_prefix} "
             f"({exc}). Check credentials and endpoint."
         )
-    return int(response.get("KeyCount", 0)) > 0
+    return True
 
 
 def upload_tiles(tiles_dir: Path, s3, bucket: str, prefix: str) -> tuple[int, int]:
@@ -450,10 +474,11 @@ def run_delete(s3, bucket: str, prefix: str, dry_run: bool, yes: bool) -> int:
     from botocore.exceptions import ClientError
 
     normalized_prefix = prefix.strip("/")
+    s3_prefix = f"{normalized_prefix}/" if normalized_prefix else ""
     keys: list[str] = []
     try:
         paginator = s3.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=bucket, Prefix=normalized_prefix):
+        for page in paginator.paginate(Bucket=bucket, Prefix=s3_prefix):
             keys.extend(obj["Key"] for obj in page.get("Contents", []))
     except ClientError as exc:
         raise SystemExit(
@@ -498,7 +523,7 @@ def run_delete(s3, bucket: str, prefix: str, dry_run: bool, yes: bool) -> int:
 
     left = 0
     for page in s3.get_paginator("list_objects_v2").paginate(
-        Bucket=bucket, Prefix=normalized_prefix
+        Bucket=bucket, Prefix=s3_prefix
     ):
         left += len(page.get("Contents", []))
     if left:
@@ -533,19 +558,16 @@ def _run_delete(args: argparse.Namespace, views_path: Path, views_src: str,
     print(f"endpoint       : {endpoint_url or '(AWS default)'}")
     print()
 
-    missing_s3 = [
-        name for name, val in (("tile_build.s3.bucket", bucket),
-                               ("tile_build.s3.prefix", prefix)) if not val
-    ]
-    if missing_s3:
+    if bucket is None or not prefix:
         raise SystemExit(
-            "ERROR: S3 target not configured: set " + " and ".join(missing_s3)
-            + " in zf_view.yaml."
+            "ERROR: S3 target not configured: set tile_build.target_url "
+            "(s3://bucket/prefix/) in zf_view.yaml."
         )
     if not normalized_prefix:
         raise SystemExit(
             "ERROR: refusing to delete with an empty prefix: this would target "
-            "the whole bucket. Configure tile_build.s3.prefix in zf_view.yaml."
+            "the whole bucket. Configure a prefixed tile_build.target_url in "
+            "zf_view.yaml."
         )
 
     assert bucket is not None
@@ -567,20 +589,23 @@ def main(argv: Optional[list[str]] = None) -> None:
     views_path, views_src = _resolve_views_path(args.view_path)
     load_environment_from_config(views_path)
 
-    view_name = args.view or os.getenv("HV_DASHBOARD_VIEW") \
-        or get_default_endpoint_name(views_path)
+    view_name = get_default_endpoint_name(views_path)
     if not view_name:
         raise SystemExit(
-            "ERROR: no view selected. Pass --view, set HV_DASHBOARD_VIEW, "
-            "or configure _dashboard.default_endpoint in zf_view.yaml."
+            "ERROR: no default view configured. Set _dashboard.default_view "
+            "in zf_view.yaml."
         )
 
     view = load_view_config(views_path, view_name)
     tile_build = view.tile_build
     base_dir = views_path.parent.parent
 
-    bucket = tile_build.s3.bucket
-    prefix = tile_build.s3.prefix
+    bucket: Optional[str] = None
+    prefix: Optional[str] = None
+    if tile_build.target_url is not None:
+        parsed_target = parse_s3_uri(str(tile_build.target_url))
+        assert parsed_target is not None  # validated when the config was loaded
+        bucket, prefix = parsed_target
     endpoint_url = schema_endpoint_url(views_path, view_name)
 
     if args.delete:
@@ -588,35 +613,36 @@ def main(argv: Optional[list[str]] = None) -> None:
                     endpoint_url)
         return
 
-    def _cfg_path(raw: Any) -> Optional[Path]:
-        if raw is None:
-            return None
-        path = Path(str(raw)).expanduser()
-        if not path.is_absolute():
-            path = base_dir / path
-        return path.resolve()
-
-    image_path = _cfg_path(tile_build.source_image)
-    georef_path = _cfg_path(tile_build.georef_file)
-    vrt_path = _cfg_path(tile_build.vrt_file)
-    tif_path = _cfg_path(tile_build.warped_tif)
-    rgba_vrt_path = _cfg_path(tile_build.rgba_vrt)
-    tiles_dir = _cfg_path(tile_build.tiles_dir)
-    if not all([image_path, georef_path, vrt_path, tif_path, rgba_vrt_path, tiles_dir]):
+    image_path = (
+        _resolve_env_file_path(views_path, str(tile_build.source_image))
+        if tile_build.source_image is not None
+        else None
+    )
+    georef_path = (
+        _resolve_env_file_path(views_path, str(tile_build.georef_file))
+        if tile_build.georef_file is not None
+        else None
+    )
+    if not all([image_path, georef_path]):
         raise SystemExit(
             f"ERROR: view '{view_name}' is missing required tile_build paths "
-            "(source_image, georef_file, vrt_file, warped_tif, rgba_vrt, tiles_dir)."
+            "(source_image, georef_file)."
         )
 
+    work_dir = resolve_work_dir(base_dir, view_name)
+    vrt_path = work_dir / WORK_VRT_NAME
+    tif_path = work_dir / WORK_TIF_NAME
+    rgba_vrt_path = work_dir / WORK_RGBA_VRT_NAME
+    tiles_dir = work_dir / WORK_TILES_DIR_NAME
+
     if not args.dry_run:
-        for out in (vrt_path, tif_path, rgba_vrt_path, tiles_dir):
-            out.parent.mkdir(parents=True, exist_ok=True)
+        work_dir.mkdir(parents=True, exist_ok=True)
 
     min_zoom = tile_build.min_zoom
     max_zoom = tile_build.max_zoom
     gcp_srs = tile_build.gcp_srs
-    target_srs = tile_build.target_srs
-    resampling = tile_build.resampling
+    target_srs = TARGET_SRS
+    resampling = tile_build.warp_resampling
     tile_resampling = tile_build.tile_resampling or resampling
 
     assert image_path is not None and georef_path is not None
@@ -630,10 +656,11 @@ def main(argv: Optional[list[str]] = None) -> None:
     print(f"View           : {view_name}")
     print(f"source_image   : {image_path}")
     print(f"georef_file    : {georef_path}")
+    print(f"work_dir       : {work_dir}")
     print(f"zoom range     : {min_zoom}-{max_zoom}")
     print(f"gcp_srs        : {gcp_srs}")
     print(f"target_srs     : {target_srs}")
-    print(f"resampling     : {resampling}")
+    print(f"warp resampl.  : {resampling}")
     print(f"tile resampl.  : {tile_resampling}")
     if bucket is not None or prefix is not None:
         s3_desc = f"{bucket or '(unset)'}/{(prefix or '').strip('/')}"
@@ -650,14 +677,10 @@ def main(argv: Optional[list[str]] = None) -> None:
     normalized_prefix = (prefix or "").strip("/")
     target_desc = f"s3://{bucket or '(unset)'}/{normalized_prefix}"
     if not offline:
-        missing_s3 = [
-            name for name, val in (("tile_build.s3.bucket", bucket),
-                                   ("tile_build.s3.prefix", prefix)) if not val
-        ]
-        if missing_s3:
+        if bucket is None or not prefix:
             raise SystemExit(
-                "ERROR: S3 target not configured: set " + " and ".join(missing_s3)
-                + " in zf_view.yaml."
+                "ERROR: S3 target not configured: set tile_build.target_url "
+                "(s3://bucket/prefix/) in zf_view.yaml."
             )
         upload_config = resolve_upload_config(endpoint_url)
         s3 = _s3_client(upload_config)
@@ -692,9 +715,6 @@ def main(argv: Optional[list[str]] = None) -> None:
                            tile_resampling, args.force, args.dry_run):
         executed.append("tiles")
 
-    assert tiles_dir is not None
-    assert vrt_path is not None and tif_path is not None and rgba_vrt_path is not None
-
     if offline:
         tile_count = len(collect_tile_files(tiles_dir)) if tiles_dir.is_dir() else 0
         print(f"\n[6/6] dry-run: would upload up to {tile_count} PNG files to {target_desc}")
@@ -702,6 +722,11 @@ def main(argv: Optional[list[str]] = None) -> None:
         print("\n[6/6] uploading tiles")
         assert bucket is not None
         uploaded, unchanged = upload_tiles(tiles_dir, s3, str(bucket), normalized_prefix)
+        s3.put_object(
+            Bucket=str(bucket),
+            Key=_completion_key(normalized_prefix),
+            Body=b"",
+        )
         print(f"Tiles uploaded: {uploaded}, unchanged/skipped: {unchanged}")
         if args.no_cleanup:
             print("--no-cleanup: keeping locally generated tiles as-is")

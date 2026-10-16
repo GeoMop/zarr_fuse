@@ -6,7 +6,6 @@ on:
       - dashboard-main
     paths:
       - dashboard/**
-      - app/databuk/config/**
 jobs:
   build-and-deploy:
     uses: ./.github/workflows/dashboard-reusable-workflow.yaml

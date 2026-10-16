@@ -92,12 +92,14 @@ cp /path/to/dashboard/.env.example .env
 Edit `.env` with your configuration:
 
 ```bash
-HV_DASHBOARD_VIEW=my_view
 ZF_VIEW_PATH=/path/to/my-dashboard-project/config/zf_view.yaml
 ZF_S3_ACCESS_KEY=your_key
 ZF_S3_SECRET_KEY=your_secret
 ZF_S3_ENDPOINT_URL=https://s3.example.com
 ```
+
+The view to load is picked from the `_dashboard.default_view` key of
+`zf_view.yaml`, not from an environment variable.
 
 6. **Run the dashboard:**
 
@@ -111,7 +113,6 @@ The dashboard will open at `http://localhost:5006`.
 
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `HV_DASHBOARD_VIEW` | ✓ | - | View name from zf_view.yaml to load |
 | `ZF_VIEW_PATH` | | config/zf_view.yaml | Path to your zf_view.yaml file |
 | `ZF_S3_ACCESS_KEY` | ✓ if S3 | - | AWS/S3 access key |
 | `ZF_S3_SECRET_KEY` | ✓ if S3 | - | AWS/S3 secret key |
@@ -122,11 +123,17 @@ The dashboard will open at `http://localhost:5006`.
 | `TILE_PREFIX` | | test_tiles/ | S3 prefix for tiles |
 | `ZF_CACHE_DIR` | | system temp dir | Cache directory for tile URLs |
 
+The view loaded at startup is not an env var: it is set by the
+`_dashboard.default_view` key in `zf_view.yaml` (falls back to the first view).
+
 ## Using Multiple Views
 
 You can define multiple views in `config/zf_view.yaml`:
 
 ```yaml
+_dashboard:
+  default_view: "dataset_a"   # The view loaded at startup
+
 dataset_a:
   source:
     uri: "s3://bucket-a/store.zarr"
@@ -142,12 +149,9 @@ dataset_b:
   # ... rest of config
 ```
 
-Then choose which one to load:
-
-```bash
-export HV_DASHBOARD_VIEW=dataset_a
-zf-dashboard
-```
+Edit `_dashboard.default_view` in `config/zf_view.yaml` (to `dataset_a`,
+`dataset_b`, etc.) to choose the startup view. The dashboard falls back to the
+first view in the file if the key is absent or names an unknown view.
 
 Or start with a different view without restarting:
 - Use the "Node Select" dropdown in the dashboard sidebar
@@ -163,13 +167,13 @@ export ZF_VIEW_PATH=/path/to/my-dashboard-project/config/zf_view.yaml
 zf-dashboard
 ```
 
-### "HV_DASHBOARD_VIEW is required"
+### The wrong view loads at startup
 
-**Solution:** Set the environment variable:
+The startup view is set by `_dashboard.default_view` in `zf_view.yaml`:
 
 ```bash
-export HV_DASHBOARD_VIEW=my_view
-zf-dashboard
+# Check the key exists and names an existing view:
+grep -A1 _dashboard config/zf_view.yaml
 ```
 
 ### S3 connection fails silently

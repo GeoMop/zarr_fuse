@@ -25,14 +25,13 @@ The dashboard is configured via:
 1. **YAML views file** (`zf_view.yaml`) - defines data sources
 2. **Environment variables** - runtime config and S3 credentials
 
-### Required Environment Variables
+### Configuration and Environment Variables
 
 ```bash
-# Required: Which view to load from zf_view.yaml
-HV_DASHBOARD_VIEW=bukov_endpoint
+# The default view is configured in the _dashboard.default_view key
+# of zf_view.yaml.
 
-# Optional: Path to your zf_view.yaml file
-# Default: packaged config/zf_view.yaml
+# Optional: Explicit path to your zf_view.yaml file
 ZF_VIEW_PATH=/path/to/your/zf_view.yaml
 
 # S3 credentials (if using S3 data sources)
@@ -58,9 +57,6 @@ From dashboard folder (monorepo):
 cp .env.example .env
 # Edit .env and set ZF_S3_* values
 
-# Set which view to use
-export HV_DASHBOARD_VIEW=bukov_endpoint
-
 # Start dashboard
 zf-dashboard
 ```
@@ -78,7 +74,6 @@ For a new project with your own data, provide your own `zf_view.yaml`:
 ```bash
 # Point to your config
 export ZF_VIEW_PATH=/path/to/my_project/config/zf_view.yaml
-export HV_DASHBOARD_VIEW=my_view
 
 # Start dashboard
 zf-dashboard
@@ -135,34 +130,34 @@ The detailed guides live in [docs/](docs):
 - [New Project Setup (Templates + Workflow)](docs/TEMPLATE.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Config Packaging](docs/CONFIG_PACKAGING.md)
-- [Refactor Notes](docs/REFACTOR_NOTES.md)
 - [Tile Pyramid Guide](docs/tile_pyramid_README.md)
 - [Docs Index](docs/DOCS_INDEX.md)
 
 ## Building Tiles (Optional)
 
 For map overlay support, tiles can be pre-built with `scripts/build_overlay_tiles.py`.
-Build parameters (paths, zoom range, CRS, resampling, S3 target) come from the
+Build parameters (source paths, zoom range, resampling, S3 target) come from the
 `tile_build` section of the selected view:
 
 ```yaml
 tile_build:
   source_image: "my_overlay.png"
   georef_file: "my_georef.json"
-  vrt_file: "tiles/source_gcps.vrt"
-  warped_tif: "tiles/source_3857.tif"
-  rgba_vrt: "tiles/source_3857_rgba.vrt"
-  tiles_dir: "tiles"
+  gcp_srs: "EPSG:4326"     # default: CRS of the georef control points
   min_zoom: 0              # default
   max_zoom: 20             # default
-  target_srs: "EPSG:3857"  # default
-  gcp_srs: "EPSG:4326"     # default
-  resampling: "near"       # default
+  warp_resampling: "near"  # default: reprojection (gdalwarp) resampling
   tile_resampling: "average"
   s3:
     bucket: "my-bucket"
     prefix: "overlays/my-project/"
 ```
+
+Relative paths resolve against `base_dir`, the directory above the config's directory
+(`zf_view.yaml.parent.parent`). The section is validated strictly: unknown or removed keys
+(for example `vrt_file`, `warped_tif`, `rgba_vrt`, `tiles_dir`, `target_srs`, `resampling`)
+raise a `ValueError` naming them. Intermediate rasters and the target CRS (EPSG:3857) are
+internal to the build script; it writes them under `workdir/tile_build/<view_name>/`.
 
 Insert the `tile_build` block above to build and upload tiles whenever the S3
 prefix does not yet contain any (ensure-semantics; `--force` rebuilds).
@@ -191,8 +186,6 @@ credentials from the general environment (filled from the gitignored
 - `setup_gdal_env.ps1` / `setup_gdal_env.sh` - Create a conda `gdal-test`
   environment (conda-forge only) with GDAL, required by
   `build_overlay_tiles.py` (Windows / Linux-macOS).
-- `prepare_bukov_gcps.py` - Legacy Bukov GCP VRT preparation; superseded by
-  `build_overlay_tiles.py`, kept for reference.
 
 ## File Organization
 
@@ -218,9 +211,6 @@ credentials from the general environment (filled from the gitignored
 
 ### "ZF_VIEW_PATH not found"
 Set `ZF_VIEW_PATH` env var pointing to your `zf_view.yaml` file.
-
-### "HV_DASHBOARD_VIEW is required"
-Set `HV_DASHBOARD_VIEW` env var to match a view name in your `zf_view.yaml`.
 
 ### S3 connection fails
 Verify `ZF_S3_ACCESS_KEY`, `ZF_S3_SECRET_KEY`, and `ZF_S3_ENDPOINT_URL` are set correctly.

@@ -135,18 +135,20 @@ The dashboard itself does not need GDAL at runtime if it only consumes already g
 
 ## Preprocessing steps used in this project
 
-### 1. Create a GCP-based VRT
-A script reads the georeference file and attaches control points to the source image.
+### 1. Build the overlay tile pipeline
+`build_overlay_tiles.py` reads the selected view's `tile_build` configuration,
+attaches the configured control points, creates the intermediate raster files under
+`workdir/tile_build/<view_name>/` (relative to `zf_view.yaml.parent.parent`),
+generates the XYZ tile pyramid, and uploads it to the configured S3 prefix.
+The target CRS is fixed to EPSG:3857 (XYZ web-map tiles) and is not configurable.
 
-Example:
+Preview the configured pipeline with:
 
 ```powershell
-python .\dashboard\scripts\prepare_bukov_gcps.py
+python .\dashboard\scripts\build_overlay_tiles.py --dry-run
 ```
 
-This creates a file such as:
-
-- `bukov_gcps.vrt`
+Use the configured view file and S3 credentials for a real build.
 
 ### 2. Warp to Web Mercator
 The GCP VRT is warped into EPSG:3857.
@@ -342,20 +344,15 @@ Keep in version control:
 - preprocessing scripts
 - view-specific configuration
 
-Usually ignore generated outputs such as:
+Usually ignore generated outputs. The build script keeps every intermediate
+(GCP VRT, warped GeoTIFF, RGBA VRT, tile tree) under a single work directory:
 
-- `tiles/`
-- `*_gcps.vrt`
-- `*_3857.tif`
-- `*_3857_rgba.vrt`
+- `workdir/tile_build/<view_name>/`
 
-Example `.gitignore` entries:
+Example `.gitignore` entry (already covered by the repository `.gitignore`):
 
 ```gitignore
-dashboard/config/**/tiles/
-dashboard/config/**/*_gcps.vrt
-dashboard/config/**/*_3857.tif
-dashboard/config/**/*_3857_rgba.vrt
+workdir/
 ```
 
 ---

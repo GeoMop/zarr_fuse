@@ -43,7 +43,7 @@ on:
         description: Path to the directory containing configuration files
         required: false
         type: string
-        default: app/databuk/inputs
+        default: dashboard/test_deployment/databuk/inputs
       extra-helm-args:
         description: Extra Helm arguments to pass during deployment
         required: false

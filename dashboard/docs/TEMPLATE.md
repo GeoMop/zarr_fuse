@@ -108,9 +108,6 @@ Copy the files below as starting points and customize for your data.
 ```bash
 # .env - Environment Configuration (DO NOT commit this file)
 
-# REQUIRED: Your view name (must match zf_view.yaml key)
-HV_DASHBOARD_VIEW=my_view
-
 # REQUIRED: Absolute path to your zf_view.yaml
 ZF_VIEW_PATH=/absolute/path/to/my-data-dashboard/config/zf_view.yaml
 
@@ -129,15 +126,19 @@ TILE_PREFIX=my_tiles/
 # ZF_CACHE_DIR=/tmp/zf_tiles
 ```
 
-> For local Zarr files you don't need the S3 vars. Just set `HV_DASHBOARD_VIEW` and
-> `ZF_VIEW_PATH`.
+> For local Zarr files you don't need the S3 vars. Just set `ZF_VIEW_PATH`.
+> The view to load is chosen by `_dashboard.default_view` in your `zf_view.yaml`.
 
 ### File 2: `config/zf_view.yaml`
 
 ```yaml
 # config/zf_view.yaml - Define your data sources
 
-# The key (e.g., "my_view") is what you put in HV_DASHBOARD_VIEW
+# Which view is loaded at startup (must match a view key below)
+_dashboard:
+  default_view: "my_view"
+
+# The view keys (e.g., "my_view") are the dataset names shown in the dashboard
 my_view:
   description: "My Scientific Dataset"
   version: "1.0.0"
@@ -261,7 +262,6 @@ pip install zarr-fuse>=0.2.0 zarr_fuse.dashboard
 
 # 3. Create .env (replace the absolute path with YOUR project path)
 cat > .env << 'EOF'
-HV_DASHBOARD_VIEW=my_view
 ZF_VIEW_PATH=/absolute/path/to/my-data-dashboard/config/zf_view.yaml
 ZF_S3_ACCESS_KEY=your_key
 ZF_S3_SECRET_KEY=your_secret
@@ -288,7 +288,7 @@ Before running, verify:
 - [ ] `config/zf_view.yaml` exists and has the correct `uri` pointing to your data
 - [ ] `schemas/my_schema.yaml` exists and describes your Zarr structure
 - [ ] `.env` has the correct `ZF_VIEW_PATH`
-- [ ] `.env` has `HV_DASHBOARD_VIEW` matching the zf_view.yaml key
+- [ ] `zf_view.yaml` sets `_dashboard.default_view` to an existing view key
 - [ ] S3 credentials set (if using S3)
 - [ ] Virtual environment activated
 - [ ] Both packages installed: `pip list | grep zarr`
@@ -356,7 +356,6 @@ zf-dashboard
 **For quick testing without `.env`**, set the vars explicitly:
 
 ```bash
-export HV_DASHBOARD_VIEW=my_view
 export ZF_VIEW_PATH=/absolute/path/to/my-data-dashboard/config/zf_view.yaml
 zf-dashboard
 ```
@@ -438,17 +437,18 @@ schema:
    "
    ```
 
-### "HV_DASHBOARD_VIEW is required"
+### The wrong view loads at startup
 
-The view name in `.env` must match the key in zf_view.yaml:
+The startup view is set by `_dashboard.default_view` in zf_view.yaml; if it is
+missing, the dashboard falls back to the first view defined in the file:
 
 ```yaml
-my_view:            # <-- This must match HV_DASHBOARD_VIEW
-  source: ...
-```
+# config/zf_view.yaml
+_dashboard:
+  default_view: my_view    # <-- The view loaded at startup
 
-```bash
-export HV_DASHBOARD_VIEW=my_view   # Must match!
+my_view:                   # <-- "default_view" must name an existing key
+  source: ...
 ```
 
 ### "Variable 'temperature' not found"
@@ -540,7 +540,6 @@ pip install gunicorn
 gunicorn --worker-class gthread --workers 1 --threads 4 \
   --bind 0.0.0.0:5006 \
   --env ZF_VIEW_PATH=/path/config/zf_view.yaml \
-  --env HV_DASHBOARD_VIEW=my_view \
   'dashboard.composed:build_dashboard'
 ```
 
@@ -559,7 +558,6 @@ COPY config/ /ui/config/
 COPY schemas/ /ui/schemas/
 
 # Set required env vars
-ENV HV_DASHBOARD_VIEW=my_view
 ENV ZF_VIEW_PATH=/ui/config/zf_view.yaml
 
 # Run dashboard
@@ -602,9 +600,9 @@ my-data-dashboard/
 ## Quick Reference: Environment Variables
 
 ```bash
-# Required
-HV_DASHBOARD_VIEW=my_view
-ZF_VIEW_PATH=/path/to/zf_view.yaml
+# Config
+ZF_VIEW_PATH=/path/to/zf_view.yaml   # The view to load comes from
+                                     # _dashboard.default_view in that file
 
 # S3 (if using)
 ZF_S3_ACCESS_KEY=xxx

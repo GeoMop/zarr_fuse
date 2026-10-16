@@ -24,8 +24,9 @@ Copy `zf_view.yaml` and the schemas into the chart's `config/` directory (git-ig
 
 ```bash
 CHART=dashboard/charts/holoviz
+VIEW_CONFIG=dashboard/test_deployment/databuk/config
 mkdir -p "$CHART/config"
-cp app/databuk/config/zf_view.yaml app/databuk/config/schemas/*.yaml "$CHART/config/"
+cp "$VIEW_CONFIG/zf_view.yaml" "$VIEW_CONFIG"/schemas/*.yaml "$CHART/config/"
 
 helm upgrade "$RELEASE" "$CHART" \
   --install --atomic --timeout 10m --namespace "$NAMESPACE" \

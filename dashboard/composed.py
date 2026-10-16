@@ -290,7 +290,13 @@ def build_dashboard():
             f"({', '.join(failed)})"
         )
         rendering_status.visible = True
-        pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
+        doc = pn.state.curdoc
+        if doc is not None:
+            doc.add_timeout_callback(
+                lambda: setattr(rendering_status, "visible", False), 5000
+            )
+        else:
+            rendering_status.visible = False
 
     def on_variable_change(event):
         selected_label = event.new

@@ -43,6 +43,13 @@ from dashboard.config import load_views
 from dashboard.data import LocalClient
 
 
+# Standalone configuration: set the paths below or pass the corresponding CLI options.
+# Required environment variables for S3 views: ZF_S3_ACCESS_KEY,
+# ZF_S3_SECRET_KEY, and ZF_S3_ENDPOINT_URL (S3_* aliases are also accepted).
+VIEWS_PATH = ""
+ENV_FILE_PATH = ""
+
+
 def list_group_paths(structure: dict, prefix: str = "") -> list[str]:
     paths: list[str] = []
     path = structure.get("path") or "/"
@@ -193,14 +200,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Check view store reachability and print group structure."
     )
-    parser.add_argument(
-        "--views",
-        default="app/databuk/config/zf_view.yaml",
-        help="Path to zf_view.yaml",
-    )
+    parser.add_argument("--views", default=VIEWS_PATH, help="Path to zf_view.yaml")
     parser.add_argument(
         "--env-file",
-        default="dashboard/scripts/.env",
+        default=ENV_FILE_PATH,
         help="Path to .env file with S3 credentials",
     )
     parser.add_argument(
@@ -225,7 +228,10 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    load_dotenv(args.env_file)
+    if not args.views:
+        parser.error("Set VIEWS_PATH at the top of this script or pass --views <path>.")
+    if args.env_file:
+        load_dotenv(args.env_file)
     if args.full_report:
         print_credential_status()
 

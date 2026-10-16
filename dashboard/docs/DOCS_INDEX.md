@@ -34,15 +34,6 @@ Technical details about:
 - Required directory structure
 - Testing the package installation
 
-### 🔧 **Developer refactor details?**
-→ Read **[REFACTOR_NOTES.md](REFACTOR_NOTES.md)**
-
-Summary of all changes made for plug-and-play:
-- Files modified
-- Fixes applied
-- Backward compatibility notes
-- Testing checklist
-
 ---
 
 ## Quick Decision Tree
@@ -59,8 +50,6 @@ Do you want to...
 ├─ Understand the configuration?
 │  └─→ CONFIG_PACKAGING.md
 │
-└─ Understand the refactor?
-   └─→ REFACTOR_NOTES.md
 ```
 
 ---
@@ -101,13 +90,6 @@ Technical packaging details. Read this for:
 - Directory structure requirements
 - Installation verification
 
-### REFACTOR_NOTES.md
-Technical refactor summary. Read this for:
-- All changes made
-- Files modified
-- Improvements summary
-- Testing checklist
-
 ---
 
 ## Getting Help
@@ -139,7 +121,6 @@ dashboard/
 ├── TEMPLATE.md                  ← START HERE for new projects ⭐ (templates + workflow)
 ├── DEPLOYMENT.md                ← Production setup
 ├── CONFIG_PACKAGING.md          ← Technical details
-├── REFACTOR_NOTES.md           ← What changed
 ├── .env.example                ← Env var template
 ├── pyproject.toml              ← Package metadata
 ├── config/
@@ -170,7 +151,6 @@ dashboard/
 
 4. **Advanced?** Read:
    - CONFIG_PACKAGING.md (understand packaging)
-   - REFACTOR_NOTES.md (understand changes)
 
 ---
 
@@ -209,7 +189,6 @@ That's it! For details, see TEMPLATE.md
 | TEMPLATE.md | New project setup: templates + workflow (QUICKSTART + WORKFLOW merged) | Refactor v2 |
 | DEPLOYMENT.md | Production setup | Refactor v1 |
 | CONFIG_PACKAGING.md | Technical details | Refactor v2 |
-| REFACTOR_NOTES.md | Change summary | Refactor v2 |
 
 > QUICKSTART.md and WORKFLOW.md were merged into TEMPLATE.md (single new-project guide).
 

@@ -7,8 +7,8 @@ missing values (NaN / NaT / None / empty string).  The optional ``GROUP_PATH``
 constant lets you inspect a specific data group instead of the store root.
 
 S3 credentials are read from the ``ZF_S3_ACCESS_KEY`` / ``ZF_S3_SECRET_KEY`` /
-``ZF_S3_ENDPOINT_URL`` environment variables (with ``S3_*`` fallback) so they
-are not committed to the repository.
+``ZF_S3_ENDPOINT_URL`` environment variables so they are not committed to the
+repository.
 
 Configuration (fill in per project, no hardcoded store specifics):
     SCHEMA_PATH   - path to the zarr-fuse schema YAML for the store
@@ -42,27 +42,22 @@ if str(REPO_ROOT) not in sys.path:
 
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).with_name(".env"))
+# Standalone configuration: set the paths below or pass the corresponding CLI options.
+# Required environment variables: ZF_S3_ACCESS_KEY, ZF_S3_SECRET_KEY,
+# and ZF_S3_ENDPOINT_URL.
+SCHEMA_PATH = ""
+GROUP_PATH = ""
+ENV_FILE_PATH = ""
+
+if ENV_FILE_PATH:
+    load_dotenv(ENV_FILE_PATH)
 
 import zarr_fuse as zf
 
 
-
-SCHEMA_PATH = "dashboard/scripts/bukov_temperatures_schema.yaml"
-GROUP_PATH = "bukov"
-
-
-def _env(*names: str) -> str:
-    for name in names:
-        value = os.getenv(name)
-        if value:
-            return value
-    return ""
-
-
-S3_ACCESS_KEY = _env("ZF_S3_ACCESS_KEY", "S3_ACCESS_KEY")
-S3_SECRET_KEY = _env("ZF_S3_SECRET_KEY", "S3_SECRET_KEY")
-S3_ENDPOINT_URL = _env("ZF_S3_ENDPOINT_URL", "S3_ENDPOINT_URL")
+S3_ACCESS_KEY = os.getenv("ZF_S3_ACCESS_KEY", "")
+S3_SECRET_KEY = os.getenv("ZF_S3_SECRET_KEY", "")
+S3_ENDPOINT_URL = os.getenv("ZF_S3_ENDPOINT_URL", "")
 
 
 def _mask_secret(value: str | None) -> str:

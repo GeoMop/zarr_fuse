@@ -53,8 +53,8 @@ my_project/
 # Point to your custom config
 export ZF_VIEW_PATH=/my_project/config/zf_view.yaml
 
-# Activate a view
-export HV_DASHBOARD_VIEW=my_view
+# The view loaded at startup comes from _dashboard.default_view in
+# zf_view.yaml (not from an environment variable)
 
 # Optional: S3 credentials
 export ZF_S3_ACCESS_KEY=...
@@ -92,7 +92,6 @@ zf-dashboard
 
 # Or test with custom config
 export ZF_VIEW_PATH=/tmp/test_dashboard/config/zf_view.yaml
-export HV_DASHBOARD_VIEW=custom_view
 zf-dashboard
 ```
 

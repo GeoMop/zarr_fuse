@@ -277,19 +277,13 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
     def build_marker_overlay(view="left", x_range=None, xlim=None):
         n_markers = 5
 
-        if selection_state is None:
-            return hv.Overlay([])
         selected_combos = selection_state.get_selected_combinations()
-        if not selected_combos or not selection_state.sites:
-            return hv.Overlay([])
 
         site_lookup = {s["entity_index"]: s for s in selection_state.sites}
         times = next(
             (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
             None,
         )
-        if times is None or len(times) == 0:
-            return hv.Overlay([])
 
         window = _resolve_marker_window(x_range, xlim, times)
         if window is None:
@@ -332,8 +326,6 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             )
             scatters.append(scatter)
 
-        if not scatters:
-            return hv.Overlay([])
         return hv.Overlay(scatters)
 
     def clamp_range(center, span, times):
