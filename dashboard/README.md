@@ -93,6 +93,20 @@ Instrumented user operations: `dashboard.initial_load`, `borehole.select`,
 
 Nested durations are not additive: an inner span is part of the outer span.
 
+Progressive-load timing also covers the server-to-browser update and each
+window's model construction:
+
+```
+[perf] stage=pane.attach duration_ms=412.330 pane=bottom_left status=ok
+[perf] event=patch.send bytes=4194304 duration_ms=812.4 t=1712345678.9
+```
+
+`patch.send` reports one outgoing Bokeh `PATCH-DOC`: `bytes` is the total wire
+size (header + metadata + content) and `duration_ms` covers JSON serialization
+plus the websocket write; `t` is a wall-clock timestamp for correlating with
+browser timings. The probe is installed by `patch_probe.py` and is a no-op
+unless profiling is enabled.
+
 ### Debug diagnostics
 
 Repetitive diagnostic messages (the `[config]` loader/schema traces and the

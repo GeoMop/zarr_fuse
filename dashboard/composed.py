@@ -24,6 +24,7 @@ CSS_FILES = [
 ]
 
 pn.extension(
+    "tabulator",
     js_files=JS_FILES,
     css_files=CSS_FILES,
     design="material",
@@ -57,10 +58,15 @@ def _placeholder_root(sizing_mode: str, label: str) -> pn.Column:
     )
 
 
-def _set_root(root: pn.Column, content: object) -> None:
-    """Replace a skeleton root's spinner with its real content."""
-    root.objects = [content]
-    root.loading = False
+def _set_root(root: pn.Column, content: object, label: str = "") -> None:
+    """Replace a skeleton root's spinner with its real content.
+
+    ``label`` names the pane in the ``pane.attach`` stage record so the model
+    construction cost of each window can be attributed separately.
+    """
+    with time_stage("pane.attach", pane=label):
+        root.objects = [content]
+        root.loading = False
 
 
 def _report_error(label: str, exc: BaseException) -> None:
@@ -80,6 +86,7 @@ def _set_root_error(root: pn.Column, label: str, exc: BaseException) -> None:
             alert_type="danger",
             sizing_mode="stretch_width",
         ),
+        label=f"{label} (error)",
     )
 
 
@@ -193,6 +200,7 @@ def build_dashboard():
     map_view, map_state = None, None
 
     _current_var_label: str | None = None
+    _suppress_variable_change = False
 
     def _fetch_and_show_metadata(var_name: str):
         name_for_api = var_name
@@ -218,7 +226,7 @@ def build_dashboard():
             variable_metadata.visible = True
 
     def _populate_variable_selector(view_name: str, group_path: str):
-        nonlocal _current_var_label
+        nonlocal _current_var_label, _suppress_variable_change
         try:
             print(f"[variables] Loading for view={view_name}, group={group_path}")
             with time_stage("get_variables", view=view_name, group=group_path):
@@ -231,8 +239,6 @@ def build_dashboard():
                 for name, unit in variables.items():
                     print(f"[variables]   - {name}: unit={unit}")
 
-                variable_selector.options = var_options
-
                 view_cfg = load_view_config(views_path, view_name)
                 default_var = view_cfg.defaults.display_variable if view_cfg.defaults else None
 
@@ -241,19 +247,28 @@ def build_dashboard():
                 else:
                     var_label = var_options[0] if var_options else None
 
-                if var_label:
-                    var_name = var_label.split(" (")[0] if " (" in var_label else var_label
-                    _current_var_label = var_label
-                    variable_metadata.visible = False
-                    variable_selector.value = var_label
-                    plot_var_selector.options = [var_label]
-                    plot_var_selector.value = var_label
-                    _fetch_and_show_metadata(var_name)
-                else:
-                    variable_selector.value = None
-                    data.display_variable = ""
-                    variable_metadata.visible = False
-                    plot_var_selector.options = []
+                # Changing options/value would otherwise fire the watcher once
+                # for the first option and once for the default, rebuilding all
+                # panes twice before the first real render.
+                _suppress_variable_change = True
+                try:
+                    variable_selector.options = var_options
+                    if var_label:
+                        var_name = var_label.split(" (")[0] if " (" in var_label else var_label
+                        _current_var_label = var_label
+                        data.display_variable = var_name
+                        variable_metadata.visible = False
+                        variable_selector.value = var_label
+                        plot_var_selector.options = [var_label]
+                        plot_var_selector.value = var_label
+                        _fetch_and_show_metadata(var_name)
+                    else:
+                        variable_selector.value = None
+                        data.display_variable = ""
+                        variable_metadata.visible = False
+                        plot_var_selector.options = []
+                finally:
+                    _suppress_variable_change = False
 
                 print(f"[variables] Loaded {len(variables)} variables successfully")
             else:
@@ -351,6 +366,8 @@ def build_dashboard():
             rendering_status.visible = False
 
     def on_variable_change(event):
+        if _suppress_variable_change:
+            return
         selected_label = event.new
         if selected_label:
             var_name = selected_label.split(" (")[0] if " (" in selected_label else selected_label
@@ -462,10 +479,10 @@ def build_dashboard():
             map_handlers["on_map_tap"] = new_on_map_tap
             map_handlers["fetch_site"] = new_fetch_site
             if rebuild_map:
-                _set_root(top_left, _map_pane(new_map_view))
-            _set_root(bottom_left, _line_pane(new_line_left))
-            _set_root(bottom_mid, _line_pane(new_line_mid))
-            _set_root(bottom_right, _line_pane(new_line_right))
+                _set_root(top_left, _map_pane(new_map_view), label="top_left")
+            _set_root(bottom_left, _line_pane(new_line_left), label="bottom_left")
+            _set_root(bottom_mid, _line_pane(new_line_mid), label="bottom_mid")
+            _set_root(bottom_right, _line_pane(new_line_right), label="bottom_right")
 
     def on_store_change(event):
         if event.new and event.new != view_name:
@@ -579,9 +596,10 @@ def build_dashboard():
 
                 # Phase 1: opens the store; the sidebar needs its structure.
                 try:
-                    structure = await asyncio.to_thread(
-                        data.client.get_structure, view_name
-                    )
+                    with time_stage("get_structure", view=view_name):
+                        structure = await asyncio.to_thread(
+                            data.client.get_structure, view_name
+                        )
                 except Exception as exc:
                     _report_error("Data structure", exc)
                     _set_root_error(controller, "Data structure", exc)
@@ -611,9 +629,10 @@ def build_dashboard():
                     _report_error("Dataset panel", exc)
                     _set_root_error(controller, "Dataset panel", exc)
                     return
-                controller.objects = controller_content.objects
-                controller.styles = dict(controller_content.styles)
-                controller.loading = False
+                with time_stage("pane.attach", pane="controller"):
+                    controller.objects = controller_content.objects
+                    controller.styles = dict(controller_content.styles)
+                    controller.loading = False
                 data.group_path = node_select.value
                 await asyncio.sleep(_POPULATE_PAUSE)
 
@@ -625,17 +644,18 @@ def build_dashboard():
                         group_path=data.group_path,
                         schema_display=view_cfg.get("schema_display", {}),
                     )
-                    panel_table, selection_state = build_plot_selection_panel(
-                        state=selection_state,
-                        available_dims=available_dims,
-                        plot_var_selector=plot_var_selector,
-                        table_loading=table_loading,
-                    )
+                    with time_stage("build_plot_selection_panel", view=view_name):
+                        panel_table, selection_state = build_plot_selection_panel(
+                            state=selection_state,
+                            available_dims=available_dims,
+                            plot_var_selector=plot_var_selector,
+                            table_loading=table_loading,
+                        )
                 except Exception as exc:
                     _report_error("Plot selection", exc)
                     _set_root_error(top_right, "Plot selection", exc)
                 else:
-                    _set_root(top_right, panel_table)
+                    _set_root(top_right, panel_table, label="top_right")
                 await asyncio.sleep(_POPULATE_PAUSE)
 
                 # Phase 4: map, the heaviest read after the structure.
@@ -648,7 +668,7 @@ def build_dashboard():
                     map_state = {}
                     _set_root_error(top_left, "Map view", exc)
                 else:
-                    _set_root(top_left, _map_pane(map_view))
+                    _set_root(top_left, _map_pane(map_view), label="top_left")
                     update_data_warnings(map_state)
                 await asyncio.sleep(_POPULATE_PAUSE)
 
@@ -674,13 +694,16 @@ def build_dashboard():
                 else:
                     map_handlers["on_map_tap"] = on_map_tap
                     map_handlers["fetch_site"] = fetch_site_entity
-                    _set_root(bottom_left, _line_pane(line_left))
-                    _set_root(bottom_mid, _line_pane(line_mid))
-                    _set_root(bottom_right, _line_pane(line_right))
+                    # Select the initial site before the panes exist so the
+                    # overlay update cannot race the pane layout pass, which
+                    # left the Plot Selection Tabulator unlaid out.
+                    on_map_tap(tap_stream.x, tap_stream.y)
+                    _set_root(bottom_left, _line_pane(line_left), label="bottom_left")
+                    _set_root(bottom_mid, _line_pane(line_mid), label="bottom_mid")
+                    _set_root(bottom_right, _line_pane(line_right), label="bottom_right")
 
                 tap_stream.param.watch(on_tap_event, ["x", "y"])
                 await asyncio.sleep(_POPULATE_PAUSE)
-                map_handlers["on_map_tap"](tap_stream.x, tap_stream.y)
 
                 # Phase 7: user actions go live only once everything is built.
                 node_select.param.watch(on_node_change, ["value"])
