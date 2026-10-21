@@ -1,8 +1,10 @@
+nameOverride: ""
+fullnameOverride: ""
+
 registry:
   host: docker.io
 
 frontend:
-  name: holoviz-frontend
   replicaCount: 1
   viewName: bukov_endpoint
   cacheDir: /tmp/zf_tiles
@@ -21,10 +23,17 @@ frontend:
       name: http
 
   s3:
+    # Secret with ZF_S3_ACCESS_KEY, ZF_S3_SECRET_KEY and ZF_S3_ENDPOINT_URL, created outside Helm.
+    # When empty, the chart creates the Secret from endpointUrl and secrets.
+    existingSecret: ""
     endpointUrl: "https://s3.cl2.du.cesnet.cz"
     secrets:
-      accessKey: "your-access-key"
-      secretKey: "your-secret-key"
+      accessKey: ""
+      secretKey: ""
+
+  # Mount zf_view.yaml and the schemas copied into the chart's config/ directory.
+  config:
+    enabled: false
 
   extraEnv: []
 
