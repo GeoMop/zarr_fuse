@@ -14,20 +14,41 @@ from dashboard.profiling import operation, time_stage
 def _resolve_marker_window(x_range, xlim, times):
     """Resolve the (start, end) marker window for a timeseries view.
 
-    Prefers the live ``x_range`` (the current visible window reported by the
-    ``RangeX`` stream after pan/zoom) when it is valid, otherwise falls back
-    to the view-specific ``xlim``, and clamps the result to the data bounds.
-    Returns ``None`` when no usable window can be derived.
+    The marker window is the *intersection* of the view-specific ``xlim``
+    with the live ``x_range`` (the visible window reported by the ``RangeX``
+    stream after pan/zoom), clamped to the data bounds.
+
+    Intersecting instead of preferring the live range keeps the markers inside
+    the window the plot shows: on the initial render the plot range is
+    auto-computed from the whole series, and following it would spread the
+    markers over the entire data range, leaving them outside the narrower
+    month/day windows and therefore invisible.
+
+    When the live range does not overlap ``xlim`` at all (the user panned
+    outside the window) the live range is used as-is, so the markers stay
+    visible where the user is looking.  Returns ``None`` when no usable
+    window can be derived.
     """
     if times is None or len(times) == 0:
         return None
-    if x_range is not None and len(x_range) == 2 \
-            and not pd.isna(x_range[0]) and not pd.isna(x_range[1]):
-        start, end = x_range[0], x_range[1]
-    elif xlim is not None:
+    live = None
+    if x_range is not None and len(x_range) == 2:
+        try:
+            if not pd.isna(x_range[0]) and not pd.isna(x_range[1]):
+                live = (pd.Timestamp(x_range[0]), pd.Timestamp(x_range[1]))
+        except (TypeError, ValueError):
+            live = None
+    if live is None:
+        if xlim is None:
+            return None
         start, end = xlim[0], xlim[1]
     else:
-        return None
+        start, end = live
+        if xlim is not None:
+            overlap_start = max(start, xlim[0])
+            overlap_end = min(end, xlim[1])
+            if overlap_end > overlap_start:
+                start, end = overlap_start, overlap_end
     min_t, max_t = times.min(), times.max()
     start = max(start, min_t)
     end = min(end, max_t)
