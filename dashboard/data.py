@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -17,10 +16,7 @@ from dashboard.config import (
     read_variable_metadata,
     resolve_schema_fields,
 )
-
-
-def _timer_log(message: str, duration: float) -> None:
-    print(f"[timing] {message}: {duration:.3f}s")
+from dashboard.perf_summary import count, stage
 
 
 @dataclass
@@ -80,11 +76,13 @@ class LocalClient:
     def _open_node(self, view_name: Optional[str]) -> Any:
         handle = self._view_handle(view_name)
         if handle.name in self._nodes:
+            count("store.cache_hit")
             return self._nodes[handle.name]
 
-        schema = zf.schema.deserialize(handle.schema_path)
-        schema.ds.ATTRS["STORE_URL"] = handle.store_uri
-        node = zf.open_store(schema, MODE="r")
+        with stage("store.open"):
+            schema = zf.schema.deserialize(handle.schema_path)
+            schema.ds.ATTRS["STORE_URL"] = handle.store_uri
+            node = zf.open_store(schema, MODE="r")
         self._nodes[handle.name] = node
         return node
 
@@ -158,20 +156,29 @@ class LocalClient:
 
     def get_map_data(
         self,
-        view_name: Optional[str],
+        view_name: str | None,
         group_path: str,
-        variable: Optional[str] = None,
+        variable: str | None = None,
         time_index: int = 0,
         depth_index: int = 0,
-    ) -> Dict[str, Any]:
-        start = time.perf_counter()
-        
+    ) -> dict[str, Any]:
+        with stage("get_map_data"):
+            return self._get_map_data(view_name, group_path, variable, time_index, depth_index)
+
+    def _get_map_data(
+        self,
+        view_name: str | None,
+        group_path: str,
+        variable: str | None = None,
+        time_index: int = 0,
+        depth_index: int = 0,
+    ) -> dict[str, Any]:
         # Check cache first
         cache_key = f"{view_name}:{group_path}:{variable}:{time_index}:{depth_index}"
         if hasattr(self, '_map_data_cache') and cache_key in getattr(self, '_map_data_cache', {}):
             cached = self._map_data_cache[cache_key]
             print(f"[cache] get_map_data: cache hit for {variable}")
-            _timer_log("get_map_data (cached)", time.perf_counter() - start)
+            count("map.cache_hit")
             return cached
             
         view = self._view_config(view_name)
@@ -185,27 +192,24 @@ class LocalClient:
         entity_field = fields.entity if fields else None
 
         if not variable:
-            _timer_log("get_map_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": "No default display variable configured"}
 
         if not lat_field or not lon_field:
-            _timer_log("get_map_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": "lat/lon mapping is not configured"}
 
-        node = self._get_group(view_name, group_path)
-        ds = node.dataset
-        if variable not in ds:
-            _timer_log("get_map_data failed", time.perf_counter() - start)
-            return {"status": "error", "reason": f"Variable '{variable}' not found"}
+        with stage("map.read"):
+            node = self._get_group(view_name, group_path)
+            ds = node.dataset
+            if variable not in ds:
+                return {"status": "error", "reason": f"Variable '{variable}' not found"}
 
-        lat = ds.get(lat_field)
-        lon = ds.get(lon_field)
-        entity_var = ds.get(entity_field) if entity_field else None
-        if lat is None or lon is None:
-            _timer_log("get_map_data failed", time.perf_counter() - start)
-            return {"status": "error", "reason": f"{lat_field}/{lon_field} not found"}
+            lat = ds.get(lat_field)
+            lon = ds.get(lon_field)
+            entity_var = ds.get(entity_field) if entity_field else None
+            if lat is None or lon is None:
+                return {"status": "error", "reason": f"{lat_field}/{lon_field} not found"}
 
-        data_var_full = ds[variable]
+            data_var_full = ds[variable]
 
         def _isel_if_has_dim(array, dim_name: Optional[str], index: int):
             if dim_name and dim_name in array.dims:
@@ -387,53 +391,63 @@ class LocalClient:
 
         selected_time_index = time_index
         selected_depth_index = depth_index
-        sliced = _slice_map_arrays(selected_time_index, selected_depth_index)
+        with stage("map.convert"):
+            sliced = _slice_map_arrays(selected_time_index, selected_depth_index)
 
-        if sliced is None:
-            _timer_log("get_map_data failed", time.perf_counter() - start)
-            return {
-                "status": "error",
-                "reason": "Coordinate/value lengths do not match for selected map slice",
+            if sliced is None:
+                return {
+                    "status": "error",
+                    "reason": "Coordinate/value lengths do not match for selected map slice",
+                }
+
+            lats, lons, values, valid_count, entities, marker_meta, value_valid_mask = sliced
+
+            if valid_count == 0:
+                return {
+                    "status": "error",
+                    "reason": "No valid lat/lon points for selected map slice",
+                }
+
+            result = {
+                "status": "success",
+                "lat": _to_json_floats(lats),
+                "lon": _to_json_floats(lons),
+                "values": _to_json_floats(values),
+                "entities": entities.tolist() if entities is not None else None,
+                "marker_meta": marker_meta,
+                "has_value": value_valid_mask.tolist() if hasattr(value_valid_mask, "tolist") else [],
+                "variable": variable,
+                "time_index": selected_time_index,
+                "depth_index": selected_depth_index,
             }
-
-        lats, lons, values, valid_count, entities, marker_meta, value_valid_mask = sliced
-
-        if valid_count == 0:
-            _timer_log("get_map_data failed", time.perf_counter() - start)
-            return {
-                "status": "error",
-                "reason": "No valid lat/lon points for selected map slice",
-            }
-
-        result = {
-            "status": "success",
-            "lat": _to_json_floats(lats),
-            "lon": _to_json_floats(lons),
-            "values": _to_json_floats(values),
-            "entities": entities.tolist() if entities is not None else None,
-            "marker_meta": marker_meta,
-            "has_value": value_valid_mask.tolist() if hasattr(value_valid_mask, "tolist") else [],
-            "variable": variable,
-            "time_index": selected_time_index,
-            "depth_index": selected_depth_index,
-        }
         
         # Cache the result
         self._map_data_cache[cache_key] = result
-        _timer_log("get_map_data", time.perf_counter() - start)
         return result
 
     def get_timeseries_data(
         self,
-        view_name: Optional[str],
+        view_name: str | None,
         group_path: str,
         lat: float,
         lon: float,
-        variable: Optional[str] = None,
-        entity_index: Optional[int] = None,
-    ) -> Dict[str, Any]:
-        start = time.perf_counter()
-        
+        variable: str | None = None,
+        entity_index: int | None = None,
+    ) -> dict[str, Any]:
+        with stage("get_timeseries_data"):
+            return self._get_timeseries_data(
+                view_name, group_path, lat, lon, variable, entity_index
+            )
+
+    def _get_timeseries_data(
+        self,
+        view_name: str | None,
+        group_path: str,
+        lat: float,
+        lon: float,
+        variable: str | None = None,
+        entity_index: int | None = None,
+    ) -> dict[str, Any]:
         # Check cache first - using location as part of key since timeseries is location-specific
         # Use higher precision here so nearby boreholes do not collapse
         # to the same cache entry when coordinates differ only slightly.
@@ -441,7 +455,7 @@ class LocalClient:
         if cache_key in self._timeseries_cache:
             cached = self._timeseries_cache[cache_key]
             print(f"[cache] get_timeseries_data: cache hit for {variable}")
-            _timer_log("get_timeseries_data (cached)", time.perf_counter() - start)
+            count("timeseries.cache_hit")
             return cached
             
         view = self._view_config(view_name)
@@ -455,11 +469,9 @@ class LocalClient:
         entity_field = fields.entity if fields else None
 
         if not variable:
-            _timer_log("get_timeseries_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": "No default display variable configured"}
 
         if not lat_field or not lon_field or not time_field:
-            _timer_log("get_timeseries_data failed", time.perf_counter() - start)
             return {
                 "status": "error",
                 "reason": "lat/lon/time mapping is not fully configured for this group",
@@ -468,82 +480,81 @@ class LocalClient:
         node = self._get_group(view_name, group_path)
         ds = node.dataset
         if variable not in ds:
-            _timer_log("get_timeseries_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": f"Variable '{variable}' not found"}
 
         lat_var = ds.get(lat_field)
         lon_var = ds.get(lon_field)
         if lat_var is None or lon_var is None:
-            _timer_log("get_timeseries_data failed", time.perf_counter() - start)
             return {"status": "error", "reason": f"{lat_field}/{lon_field} not found"}
 
-        if time_field and time_field in lat_var.dims:
-            lat_var = lat_var.isel({time_field: 0})
-        if time_field and time_field in lon_var.dims:
-            lon_var = lon_var.isel({time_field: 0})
-        if depth_field and depth_field in lat_var.dims:
-            lat_var = lat_var.isel({depth_field: 0})
-        if depth_field and depth_field in lon_var.dims:
-            lon_var = lon_var.isel({depth_field: 0})
+        with stage("ts.coords"):
+            if time_field and time_field in lat_var.dims:
+                lat_var = lat_var.isel({time_field: 0})
+            if time_field and time_field in lon_var.dims:
+                lon_var = lon_var.isel({time_field: 0})
+            if depth_field and depth_field in lat_var.dims:
+                lat_var = lat_var.isel({depth_field: 0})
+            if depth_field and depth_field in lon_var.dims:
+                lon_var = lon_var.isel({depth_field: 0})
 
-        lats = np.array(lat_var.values, dtype=float).ravel()
-        lons = np.array(lon_var.values, dtype=float).ravel()
-        available_min = 0
-        available_max = max(len(lats) - 1, 0)
-        print(f"[fetch_ts][backend] Available entity index range: {available_min}..{available_max}")
-        idx: int
-        if entity_index is not None:
-            idx = int(entity_index)
-            print(f"[fetch_ts][backend] Using provided entity_index={idx}")
-        else:
-            dist = (lats - lat) ** 2 + (lons - lon) ** 2
-            idx = int(np.nanargmin(dist))
-            print(f"[fetch_ts][backend] Resolved nearest entity_index={idx}")
+            lats = np.array(lat_var.values, dtype=float).ravel()
+            lons = np.array(lon_var.values, dtype=float).ravel()
+            available_min = 0
+            available_max = max(len(lats) - 1, 0)
+            print(f"[fetch_ts][backend] Available entity index range: {available_min}..{available_max}")
+            idx: int
+            if entity_index is not None:
+                idx = int(entity_index)
+                print(f"[fetch_ts][backend] Using provided entity_index={idx}")
+            else:
+                dist = (lats - lat) ** 2 + (lons - lon) ** 2
+                idx = int(np.nanargmin(dist))
+                print(f"[fetch_ts][backend] Resolved nearest entity_index={idx}")
 
-        if idx < available_min or idx > available_max:
-            _timer_log("get_timeseries_data failed", time.perf_counter() - start)
-            return {
-                "status": "error",
-                "reason": f"entity_index {idx} is out of range for available entities {available_min}..{available_max}",
+            if idx < available_min or idx > available_max:
+                return {
+                    "status": "error",
+                    "reason": f"entity_index {idx} is out of range for available entities {available_min}..{available_max}",
+                }
+
+        with stage("ts.read"):
+            entity_names = None
+            if entity_field and entity_field in ds:
+                entity_arr = ds[entity_field]
+                entity_names = np.array(entity_arr.values, dtype=str).ravel()
+
+            data_var = ds[variable]
+            if entity_field and entity_field in data_var.dims:
+                data_var = data_var.isel({entity_field: idx})
+
+            times = ds[time_field]
+            time_values = pd.to_datetime(times.values).astype(str).tolist()
+
+            values = np.array(data_var.values, dtype=float)
+            if values.ndim == 1:
+                series = [_to_json_floats(values)]
+            else:
+                series = [_to_json_floats(values[:, i]) for i in range(values.shape[1])]
+
+            if depth_field and depth_field in ds:
+                depths = ds[depth_field]
+                depth_values = np.array(depths.values, dtype=float).tolist()
+            else:
+                depth_values = [np.nan] * max(len(series), 1)
+
+        with stage("ts.convert"):
+            result = {
+                "status": "success",
+                "times": time_values,
+                "depths": _to_json_floats(depth_values),
+                "series": series,
+                "variable": variable,
+                "borehole_index": idx,
+                "borehole_name": entity_names[idx] if entity_names is not None else None,
             }
-
-        entity_names = None
-        if entity_field and entity_field in ds:
-            entity_arr = ds[entity_field]
-            entity_names = np.array(entity_arr.values, dtype=str).ravel()
-
-        data_var = ds[variable]
-        if entity_field and entity_field in data_var.dims:
-            data_var = data_var.isel({entity_field: idx})
-
-        times = ds[time_field]
-        time_values = pd.to_datetime(times.values).astype(str).tolist()
-
-        values = np.array(data_var.values, dtype=float)
-        if values.ndim == 1:
-            series = [_to_json_floats(values)]
-        else:
-            series = [_to_json_floats(values[:, i]) for i in range(values.shape[1])]
-
-        if depth_field and depth_field in ds:
-            depths = ds[depth_field]
-            depth_values = np.array(depths.values, dtype=float).tolist()
-        else:
-            depth_values = [np.nan] * max(len(series), 1)
-
-        result = {
-            "status": "success",
-            "times": time_values,
-            "depths": _to_json_floats(depth_values),
-            "series": series,
-            "variable": variable,
-            "borehole_index": idx,
-            "borehole_name": entity_names[idx] if entity_names is not None else None,
-        }
         
         # Cache the result
         self._timeseries_cache[cache_key] = result
-        _timer_log("get_timeseries_data", time.perf_counter() - start)
         return result
 
 

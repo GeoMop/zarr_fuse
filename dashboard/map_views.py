@@ -1,7 +1,6 @@
 import logging
 import math
 import os
-import time
 from urllib.parse import urlencode
 
 import cartopy.crs as ccrs
@@ -12,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from dashboard.config import overlay_enabled, find_view_file
+from dashboard.profiling import time_stage
 from geoviews import tile_sources as gvts
 
 try:
@@ -154,7 +154,7 @@ def _load_overlay(view_config):
 
 
 def build_map_view(data, tap_stream):
-    start = time.perf_counter()
+    _stage = time_stage("build_map_view")
     base_map = gvts.OSM()
 
     view_config = data.client.get_view(data.view_name)
@@ -362,7 +362,7 @@ def build_map_view(data, tap_stream):
             axiswise=True,
         )
         result = map_view, map_state
-        print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
+        _stage.log()
         return result
 
     map_df = pd.DataFrame({
@@ -430,7 +430,7 @@ def build_map_view(data, tap_stream):
             axiswise=True,
         )
         result = map_view, map_state
-        print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
+        _stage.log()
         return result
 
     map_view = (base_map * map_points_dmap).opts(
@@ -440,5 +440,5 @@ def build_map_view(data, tap_stream):
         axiswise=True,
     )
     result = map_view, map_state
-    print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
+    _stage.log()
     return result
