@@ -40,11 +40,11 @@ _POPULATE_PAUSE = 0.05
 
 
 def _placeholder_root(sizing_mode: str, label: str) -> pn.Column:
-    """Create an empty layout root that shows a spinner until it is populated.
+    """Create an empty layout root that shows one spinner until it is populated.
 
-    The root must be a ``pn.Column`` (not a ``pn.pane.HoloViews``): only
-    components carry Panel's ``loading`` CSS, which is what renders the spinner
-    inside the already-served GoldenLayout window.
+    The spinner is the explicit ``LoadingSpinner`` next to the per-window label;
+    ``loading=True`` is deliberately not used here so a window does not show a
+    second, unlabelled Panel overlay spinner on top of it.
     """
     return pn.Column(
         pn.Row(
@@ -54,7 +54,6 @@ def _placeholder_root(sizing_mode: str, label: str) -> pn.Column:
             sizing_mode=sizing_mode,
         ),
         sizing_mode=sizing_mode,
-        loading=True,
     )
 
 
@@ -66,7 +65,6 @@ def _set_root(root: pn.Column, content: object, label: str = "") -> None:
     """
     with time_stage("pane.attach", pane=label):
         root.objects = [content]
-        root.loading = False
 
 
 def _report_error(label: str, exc: BaseException) -> None:
@@ -632,7 +630,6 @@ def build_dashboard():
                 with time_stage("pane.attach", pane="controller"):
                     controller.objects = controller_content.objects
                     controller.styles = dict(controller_content.styles)
-                    controller.loading = False
                 data.group_path = node_select.value
                 await asyncio.sleep(_POPULATE_PAUSE)
 
