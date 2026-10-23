@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jupyter-test
+  annotations:
+    kubernetes.io/tls-acme: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - jupyter-test.dyn.cloud.e-infra.cz
+      secretName: jupyter-test-dyn-cloud-e-infra-cz-tls
+  rules:
+    - host: jupyter-test.dyn.cloud.e-infra.cz
+      http:
+        paths:
+        - backend:
+            service:
+              name: jupyter-test
+              port:
+                number: {{ .Values.app.externalPort }}
+          pathType: ImplementationSpecific
