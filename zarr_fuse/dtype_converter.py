@@ -331,6 +331,7 @@ def to_typed_array(x: Any, target_dtype: Optional[np.dtype], ctx:'SchemaCtx', na
 
     trim_mask = _trim_change_mask(arr, out)
     trimmed_values = arr[trim_mask]
-    ctx.warning(TrimmedArrayWarning(trimmed_values))
+    if trimmed_values.size > 0:
+        ctx.warning(TrimmedArrayWarning(trimmed_values))
 
     return out
