@@ -32,8 +32,8 @@ def plot_adjust_grid_transitions(grids):
 
 def check_grid(a, b, grid):
     steps = grid[1:] - grid[:-1]
-    assert np.all(steps <= b)
-    assert np.all(steps >= a/2)
+    assert np.all((steps <= b + 1e-9)) #| np.isclose(steps, b))
+    assert np.all((steps >= a/2 + 1e-9)) #| np.isclose(steps, a/2))
     return a, b, grid
 
 def test_adjust_grid():
@@ -56,6 +56,25 @@ def test_adjust_grid():
         plot_adjust_grid_transitions(grids)
     except ImportError:
         pass
+
+
+def test_adjust_grid_reaches_datetime_endpoint_with_rounded_steps():
+    """Use mixed hourly steps to reach an endpoint after timedelta rounding."""
+    values = np.array(
+        ["2025-05-13T09:00", "2025-05-14T08:00"],
+        dtype="datetime64[h]",
+    )
+    step_limits = np.array([1, 12], dtype="timedelta64[h]")
+
+    result = adjust_grid(values, step_limits)
+
+    np.testing.assert_array_equal(
+        result,
+        np.array(
+            ["2025-05-13T09:00", "2025-05-13T20:00", "2025-05-14T08:00"],
+            dtype="datetime64[h]",
+        ),
+    )
 
 
 

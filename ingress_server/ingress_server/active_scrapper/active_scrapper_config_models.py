@@ -125,6 +125,7 @@ class ActiveScrapperConfig(BaseModel):
                 "schema_path": data.get("schema_path"),
                 "extract_fn": data.get("extract_fn"),
                 "fn_module": data.get("fn_module"),
+                "time_like_coord": data.get("time_like_coord"),
             },
         }
 

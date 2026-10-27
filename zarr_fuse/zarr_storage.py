@@ -26,7 +26,11 @@ from . import zarr_schema, units
 from .schema_ctx import RaisingLogger
 from .dtype_converter import to_typed_array, TrimmedArrayWarning
 from .logger import get_logger
-from .interpolate import interpolate_ds, check_sorted_coord_values
+from .interpolate import (
+    check_sorted_coord_values,
+    interpolate_ds,
+    normalize_update_coords,
+)
 from .zarr_schema import DatasetSchema, NodeSchema
 from .tools import recursive_update
 """
@@ -649,6 +653,14 @@ class Node:
         """
         pass
 
+    def _merge_and_check_coords(self, ds: xr.Dataset) -> xr.Dataset:
+        """Merge an update and report duplicate coordinates in the stored dataset."""
+        written_ds, _ = self.merge_ds(ds)
+        duplicate_coords = check_unique_coords(written_ds, self.logger)
+        if duplicate_coords:
+            self.logger.error(duplicate_coords)
+        return written_ds
+
     def update(self, polars_df):
         """
         Atomically update this node's dataset using a Polars DataFrame.
@@ -671,12 +683,7 @@ class Node:
             if (ds[k] != ds[k]).any():
                 raise ValueError(f"Coordinate '{k}' contains NaN/NaT values, which are not allowed.")
 
-        written_ds, merged_coords = self.merge_ds(ds)
-        # check unique coordsregion="auto",
-        dup_dict = check_unique_coords(written_ds, self.logger)
-        if  dup_dict:
-            self.logger.error(dup_dict)
-        #return written_ds
+        self._merge_and_check_coords(ds)
 
     def update_dense(self, vars):
         # TODO:
@@ -689,12 +696,7 @@ class Node:
         #         vars[coord_name] = self.dataset[coord_name].values()
 
         ds = dataset_from_np(self.schema, vars)
-        written_ds, merged_coords = self.merge_ds(ds)
-        # check unique coordsregion="auto",
-        dup_dict = check_unique_coords(written_ds, self.logger)
-        if dup_dict:
-            self.logger.error(dup_dict)
-        #return written_ds
+        self._merge_and_check_coords(ds)
 
     def _validate_ds_against_schema(self, ds: xr.Dataset):
         """
@@ -782,15 +784,7 @@ class Node:
         # Validate compatibility with the current node schema
         self._validate_ds_against_schema(ds)
 
-        # Merge/write to the store using existing logic
-        written_ds, merged_coords = self.merge_ds(ds)
-
-        # Optional: still check for duplicated coordinates and log them
-        dup_dict = check_unique_coords(written_ds, self.logger)
-        if dup_dict:
-            self.logger.error(dup_dict)
-
-        return written_ds
+        return self._merge_and_check_coords(ds)
 
 
     def _init_empty_grup(self, ds):    # open (or create) the root Zarr group in “write” mode
@@ -854,71 +848,45 @@ class Node:
 
     def merge_ds(self, ds_update: xr.Dataset) -> xr.Dataset:
         """
-        Merge xarray dataset `ds_update` into the node dataset in the zarr storage.
-        The `ds_update` must be subarray of the storage dataset.
+        Merge an update into the node dataset in Zarr storage.
 
-        This function works in two phases:
+        ``interpolate_ds`` first validates and transforms all coordinates and
+        returns the overlap/extension split index for every dimension. This
+        method then writes the transformed update in two phases.
 
         Phase 1 (Dive):
-          For each dimension in dims_order (in order):
-            - Split ds_update along that dimension into:
-                • overlap: coordinate values that already exist in the store.
-                • extension: new coordinate values.
-            - Save the extension subset (per dimension) for later appending.
-            - For subsequent dimensions, keep only the overlapping portion.
+          - Process dimensions in interpolation order.
+          - Save a disjoint extension slab for each dimension.
+          - Reduce the remaining dataset to the overlap on that dimension.
+          - Write the final all-dimension overlap into the existing region.
 
         Phase 2 (Upward):
-          - Write the final overlapping subset using region="auto".
-          - Then, in reverse order, for each dimension that had an extension:
-                • Reindex the corresponding extension subset so that for all dimensions
-                  except the current one the coordinate values come from the store.
-                • Append that reindexed subset along the current dimension.
-                • Update the merged coordinate for that dimension.
-
-        Modular updating mechanism:
-        - interpolate step: interpolate updating DF coords to existing coords
-          (postponed), regularize or constrain coord step etc.
-          each coord interpolates independently, according to their order in the var list
-          Coord interpolator is a (sparse) matrix mapping values in updating coords to existing coords.
-        - appendable: True (default) / False [ Set to False to disallow new coord values after first update (creation)]
-          Only for check purposes, no effect on resulting values.
-        - sorted: [list of vars to sort by], [] do not sort, None (default) (automatic, sort by itself for scalar coords, unsorted for composed)
-          Sorted coords imply merge of the values leading to larger overlap/overwrite region.
+          - Process the disjoint extension slabs in reverse dimension order.
+          - Detect an extension from the size of its own dimension, regardless
+            of empty dimensions left by earlier dive steps.
+          - Reindex every other dimension to the coordinate range currently
+            materialized in the store. This expands empty dimensions with
+            missing values and makes the slab rectangular before appending it.
+          - Append along the extending dimension and update ``merged_coords``.
 
         Parameters
         ----------
-        zarr_path : str
-            Path to the existing Zarr store.
         ds_update : xr.Dataset
-            The dataset to update. Its coordinate values in one or more dimensions may be new.
-        dims_order : list of str, optional
-            The list of dimensions to process (in order). If None, defaults to list(ds_update.dims).
+            Dataset conforming to the node schema. Its coordinates may overlap
+            existing values or extend one or more dimensions.
 
-        Returns: (updated DataSet after write, merged_coords)
-        Are merged_coords still necessary?
-
-        New procedure:
-        1. interpolate ds_new, using ds_existing coords (replaces Phase 1)
-            a) each coord detemine overlap range (indices)
-            b) detemine extended coords (no insertions) variants: None, all new, limited step, fixed step
-        2. interpolate overlap, write it.
-
-           However interpolation of whole ds_new should rather be done as we possibly change the new coords as well.
-
-           interpolate variables to sorted coords (interpolation of unsorted but sparse coords possible in future
-               Due to nans this could be problematic without having also existing data.
-               The interpolation takes place only in the overlaping part, that is intersection of overlaps in all dimensions.
-
-        3. write extended / interpolated parts (Phase 2)
+        Returns
+        -------
+        tuple[xr.Dataset, dict[str, np.ndarray]]
+            Last written slab and the coordinates materialized for each
+            dimension after the merge.
         """
+        ds_update = normalize_update_coords(ds_update, self.schema.COORDS)
         ds_existing = self.dataset
         last_written_ds = ds_existing
 
         # --- Phase 1: Dive (split by dimension) ---
-        # We create a dict to hold the extension subset for each dimension.
-        if ds_existing.attrs.get('__empty__', False):
-            ds_update.attrs.pop('__empty__', None)
-            return self.write_ds(ds_update, mode="a"), {}
+        # Store one disjoint extension slab per dimension.
         if ds_existing.attrs.get('__empty__', False):
             ds_update.attrs.pop('__empty__', None)
             return self.write_ds(ds_update, mode="a"), {}
@@ -930,19 +898,22 @@ class Node:
 
         ds_extend_dict = {}
         ds_overlap = ds_update.copy()
-        dims_order = tuple(ds_update.coords.keys())
+        # Reconstruct the partition in the same order used to create it. Xarray
+        # may reorder dataset coordinates during interpolation.
+        dims_order = tuple(dim for dim, _ in split_indices)
         for dim, idx in split_indices:
             ds_extend_dict[dim] = ds_overlap.isel({dim: slice(idx, None)})
             ds_overlap = ds_overlap.isel({dim: slice(0, idx)})
 
-        # At this point, ds_overlap covers only the coordinates that already exist in the store
-        # in every dimension in dims_order. Write these (overlapping) data using region="auto".
+        # ds_overlap now contains only coordinates that already exist in every
+        # dimension. Write this intersection into the existing region.
         update_overlap_size = np.prod(list(ds_overlap.sizes.values()))
         if update_overlap_size > 0:
+            ds_overlap = self.schema.fill_missing(ds_overlap, ds_existing).compute()
             last_written_ds = self.write_ds(ds_overlap, mode="r+", region="auto")
 
         # --- Phase 2: Upward (process extension subsets in reverse order) ---
-        # We also update a merged_coords dict from the store.
+        # Track the coordinate ranges currently materialized in the store.
         merged_coords = {d: ds_existing[d].values for d in ds_existing.dims}
 
         # Loop upward in reverse order over dims_order.
@@ -952,16 +923,17 @@ class Node:
             dim_coord = ds_extend_dict[dim]
             if dim_coord is None:
                 continue  # No new coordinates along this dimension.
-            extension_size = int(np.prod(list(dim_coord.sizes.values())))
-            if extension_size == 0:
+            # Other dimensions may be empty because of the disjoint dive. Only
+            # the dimension appended by this pass determines whether it extends.
+            if dim_coord.sizes[dim] == 0:
                 continue
 
-            # For all dimensions other than dim, reindex ds_ext so that the coordinate arrays
-            # come from the store (i.e. the full arrays). This ensures consistency.
-            # (This constructs an indexers dict using the existing merged coordinates.)
+            # Expand all other dimensions to their currently materialized
+            # coordinate ranges, inserting missing values where the slab is empty.
             indexers = {d: merged_coords[d] for d in dim_coord.dims if d != dim}
-            na_value = ds_update.attrs.get('na_value', np.nan)
-            ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=na_value)
+            na_values = self.schema.na_values(dim_coord.data_vars)
+            ds_ext_reindexed = dim_coord.reindex(indexers, fill_value=na_values)
+            ds_ext_reindexed = self.schema.fill_missing(ds_ext_reindexed, ds_existing).compute()
 
             # Append the extension subset along the current dimension.
             last_written_ds = self.write_ds(ds_ext_reindexed, mode="a", append_dim=dim)
@@ -971,24 +943,6 @@ class Node:
             merged_coords[dim] = np.concatenate([merged_coords[dim], new_coords_for_dim])
 
         return last_written_ds, merged_coords
-
-    """
-    Good, now how to extend the code to two and more dimensions?
-I need something like:
-
-split_dict = {}
-dim_order = list(ds_zarr.coords.keys())
-for dim in dim_order:
-    n, merged_new_coords = merge_coords(dim, new_ds.coords[dim])
-    l_overlap = len(ds_zar.coords[dim]) - N
-    split_dict[dim] = (n,     l_overlap, merged_new_coords)
-
-dim = dim_order[0]
-` pad ds_zarr by Nans over [0:N] in 'dim', adding len(new_coords) - l_overlap for each d > dim'
-N, L, coords = slpit_dir[dim]
-ds_zarr_tail = ds_zarr.isel({dim: slice(N, None)}).copy()
-ds_update.combine_first(ds_zarr_tail).sortby(dim)
-    """
 
     # def read_df(self, var_name, *args, **kwargs):
     #     """
@@ -1301,60 +1255,6 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
 
     TODO: Review and simplify for clearly separated vars and coords.
     """
-    # # 1. DF -> dict of 1d arrays,
-    # data_vars = {
-    #     k: get_df_col(df, var, logger)
-    #     for k, var in schema.VARS.items()
-    # }
-    # # 2. apply hash of tuple coords, input Dict: ds_name : [df_cols]
-    # for k, c in schema.COORDS.items():
-    #
-    #     if (c.composed is not None) and (len(c.composed) > 1):
-    #         # hash tuple coords
-    #         tuple_list = zip( *(data_vars[c] for c in c.composed) )
-    #         hash_list = [hash(tuple(t)) for t in tuple_list]
-    #         data_vars[k] = np.array(hash_list, dtype=np.int64)
-    #         #print("Composed coord:", k)
-    #         #print(data_vars[k])
-    #
-    #     else:
-    #         # mix vars and coord to be backward compatible with remaining code
-    #         col = get_df_col(df, c, logger)
-    #         data_vars[k] = col
-    #         #print("1D coord:", k)
-    #         #print(data_vars[k])
-    #
-    # # 3. Extract coords
-    # idx_list = []
-    # coords_dict = {}
-    # dims = list(schema.COORDS.keys())
-    # # Loop over each dimension in the original dataset.
-    # valid_rows = np.ones_like(len(df), dtype=bool)
-    # for d in dims:
-    #     # Get the name(s) of the column(s) in df corresponding to this dimension.
-    #     df_coord_array = data_vars[d]
-    #     # Get the coordinate values from the dataset (assumed to be in desired order).
-    #     #print(d)
-    #     #print(df_coord_array)
-    #     coords = np.unique(df_coord_array)
-    #     coords = coords[schema.COORDS[d].valid_mask(coords)]
-    #     coords = np.sort(coords)
-    #     # TODO: filter rows with NA coords first; follow with refactoring pivot_nd into distinguished steps
-    #     # preparation to separation into tasks
-    #     # In order to avoid special hash returning NA for composed coords with on NA value
-    #
-    #     coords_dict[d] = coords  # will be used as the coordinate values for this dim.
-    #     #coord_sizes[d].append(len(coords))
-    #     # Map each row’s coordinate (from df) to its index in the common_coords.
-    #     # (This works as long as common_coords is sorted. In many cases ds coordinates are already sorted.)
-    #     final_idx = np.searchsorted(coords, df_coord_array)
-    #     valid_rows = valid_rows & (coords[final_idx] == df_coord_array)
-    #     idx_list.append(final_idx)
-    # coord_sizes = [len(coords_dict[d]) for d in dims]
-    # # multiindex for each df row, but flattend, so it actually index result_nd_array.flat[..]
-    # df_multi_idx = np.ravel_multi_index([idx[valid_rows] for idx in idx_list], dims=coord_sizes)  #
-    # coords_dict = Node._create_coords(schema.COORDS, coords_dict)
-
     df_multi_idx, coords_dict, var_data = coerce_df(schema, df, logger)
     coord_sizes = {c: len(v) for c, v in coords_dict.items()}
 
@@ -1397,47 +1297,3 @@ def pivot_nd(schema:zarr_schema.DatasetSchema, df: pl.DataFrame, logger):
     attrs['__structure__'] = zarr_schema.serialize(schema)
     ds_out = xr.Dataset(data_vars=data_vars, coords=coords_dict, attrs=attrs)
     return ds_out
-
-#
-#
-# def read(zarr_path: Path, time_stamp_slice, locations):
-#     """
-#     Read a subset of the data for a given time slice and a list of locations.
-#
-#     - time_stamp_slice: a tuple (start, end)
-#     - locations: list of location codes.
-#
-#     Returns a Polars DataFrame with columns: time_stamp, location, and each data variable.
-#     For each (time_stamp, location) pair in the slice, the stored value is returned.
-#     """
-#     ds = xr.open_zarr(str(zarr_path), chunks=None)
-#     time_col = "time_stamp"
-#     loc_col = "location"
-#
-#     time_coords = ds.coords[time_col].values
-#     start, end = time_stamp_slice
-#     mask = (time_coords >= start) & (time_coords <= end)
-#     sel_time_idx = np.where(mask)[0]
-#     sel_times = time_coords[sel_time_idx]
-#
-#     # Get the location map and select the slots corresponding to requested locations.
-#     loc_map = json.loads(ds.attrs.get("location_map", "{}"))
-#     selected_locs = {loc: loc_map[str(loc)] for loc in locations if str(loc) in loc_map}
-#
-#     data_cols = [col for col in ds.data_vars if col not in [time_col, loc_col]]
-#     out_time = []
-#     out_loc = []
-#     out_data = {col: [] for col in data_cols}
-#
-#     for t_idx in sel_time_idx:
-#         for loc, slot in selected_locs.items():
-#             out_time.append(time_coords[t_idx])
-#             out_loc.append(loc)
-#             for col in data_cols:
-#                 val = ds[col].values[t_idx, slot]
-#                 out_data[col].append(val)
-#     ds.close()
-#
-#     data_dict = {time_col: out_time, loc_col: out_loc}
-#     data_dict.update(out_data)
-#     return pl.DataFrame(data_dict)

@@ -1,3 +1,6 @@
+{{- if and (not .Values.persistence.enabled) (not (hasPrefix "s3://" .Values.deployment.queue.path)) }}
+{{- fail "persistence.enabled=false requires deployment.queue.path to be an s3:// URL (readOnlyRootFilesystem forbids a local queue without a PVC)" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -21,9 +24,11 @@ spec:
       volumes:
         - name: ingress-server-tmp
           emptyDir: {}
+        {{- if .Values.persistence.enabled }}
         - name: ingress-server-queue
           persistentVolumeClaim:
             claimName: "{{ .Values.app.name }}-queue-pvc"
+        {{- end }}
       containers:
         - name: {{ .Values.app.name }}
           image: "{{ .Values.registry.host }}/{{ .Values.image.name }}:{{ .Values.image.tag }}"
@@ -41,8 +46,10 @@ spec:
           volumeMounts:
             - name: ingress-server-tmp
               mountPath: /tmp
+            {{- if .Values.persistence.enabled }}
             - name: ingress-server-queue
               mountPath: {{ .Values.deployment.queue.path | quote }}
+            {{- end }}
           startupProbe:
             httpGet:
               path: /health

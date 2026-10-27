@@ -119,7 +119,9 @@ PINT_UNIT_TO_DATETIME_TICK = {
 }
 
 
-class NoneUnit(ureg.Unit):
+class NoneUnit(Unit):
+    """Dimensionless unit with schema serialization specialized to ``None``."""
+
     def __init__(self):
         super().__init__('')  # dimensionless
 
@@ -140,16 +142,6 @@ class NoneUnit(ureg.Unit):
 
     def delta_unit(self):
         return DeltaUnit('')
-
-    def delta_array(self, values, from_unit, dtype):
-        assert isinstance(from_unit, DeltaUnit)
-        return Quantity(values, from_unit).to(self.delta_unit()).magnitude
-
-    def delta_dtype(self, dtype):
-        return dtype
-
-    def get_encoding(self):
-        return {}
 
 
 class Quantity(ureg.Quantity):

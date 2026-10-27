@@ -8,6 +8,7 @@ import pandas
 import yaml
 import attrs
 import numpy as np
+import xarray as xr
 from pathlib import Path
 
 from . import __version__
@@ -222,7 +223,6 @@ class IntervalRange(Interval):
 
     def decode(self, codes: np.ndarray) -> np.ndarray:
         # codes_to_labels has NaN at index 0; shift codes by +1 and index
-        c = np.asarray(codes, dtype=np.int64)
         return codes
 
 
@@ -283,6 +283,14 @@ class Variable(AddressMixin):
             return (array != na_array) & (array == array)
         else:
             return array != self.na_value
+
+    def fill_missing(
+            self,
+            array: xr.DataArray,
+            fallback: xr.DataArray,
+    ) -> xr.DataArray:
+        """Replace schema-defined missing values with aligned fallback data."""
+        return array.where(self.valid_mask(array), fallback)
 
     def _zarr_keys(self):
         return ['unit', 'type', 'range', 'description', 'df_col', 'source_unit']
@@ -346,11 +354,8 @@ class Variable(AddressMixin):
             # DateTime specialization
             quantity = units._create_dt_quantity(values, from_unit, log=self._address)
         else:
-            try:
-                if dtype is not None:
-                    values = to_typed_array(values, dtype, self._address)
-            except ValueError:
-                raise ValueError(f"Variable '{self.name}' has values not-convertible to the type: {dtype}.")
+            if dtype is not None:
+                values = to_typed_array(values, dtype, self._address, na_value=self.na_value)
 
             # Pint specialization when a unit string is provided
             assert isinstance(from_unit, (units.Unit, units.NoneUnit))
@@ -490,6 +495,26 @@ class DatasetSchema(AddressMixin):
         return {var.df_col: var.name
                 for var in chain(self.COORDS.values(), self.VARS.values())
                 }
+
+    def na_values(self, variable_names: Iterable[str]) -> Dict[str, Any]:
+        """Return the configured missing-value sentinel for each variable."""
+        return {name: self.VARS[name].na_value for name in variable_names}
+
+    def fill_missing(
+            self,
+            dataset: xr.Dataset,
+            fallback: xr.Dataset,
+    ) -> xr.Dataset:
+        """Fill schema-defined missing values from a coordinate-aligned dataset."""
+        result = dataset.copy()
+        for name, array in dataset.data_vars.items():
+            variable = self.VARS[name]
+            fallback_array = fallback[name].reindex_like(
+                array,
+                fill_value=variable.na_value,
+            )
+            result[name] = variable.fill_missing(array, fallback_array)
+        return result
 
     def zarr_attrs(self):
         attrs = { k:convert_value(v) for k,v in self.ATTRS.items()}

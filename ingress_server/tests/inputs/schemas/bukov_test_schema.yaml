@@ -1,0 +1,65 @@
+# Test bukov schema using a local zarr store.
+# STORE_URL is intentionally absent — pass it via open_store_kwargs so tests
+# can redirect the store to a tmp_path without touching this file.
+
+bukov:
+    VARS:
+        rock_temp:
+            unit: "degC"
+            description: "Temperature in degC"
+            df_col: "rock_temp"
+            coords: ["date_time", "borehole", "depth"]
+
+        air_humidity:
+            unit: "%"
+            description: "Air humidity (in percents)."
+            df_col: "air_humidity"
+            coords: ["date_time", "borehole", "depth"]
+
+        air_temp:
+            unit: "degC"
+            description: "Air temperature in degC"
+            df_col: "air_temp"
+            coords: ["date_time", "borehole", "depth"]
+
+        longitude:
+            unit: "deg"
+            description: "Signed Earth longitude."
+            coords: "borehole"
+
+        latitude:
+            unit: "deg"
+            description: "Signed Earth latitude."
+            coords: "borehole"
+
+        borehole_project_id:
+            type: "str[8]"
+            description: "Short borehole designation used within the project."
+            coords: "borehole"
+
+    COORDS:
+        date_time:
+            unit: { tick: "s", tz: "UTC" }
+            description: "Time coordinate, UTC time zone, 30 min resolution"
+            source_unit: { tick: "s", tz: "UTC" }
+            df_col: "date_time"
+            chunk_size: 1024
+            step_limits: [15, 61, "minute"]
+
+        borehole:
+            type: "str[128]"
+            unit: ""
+            description: "Site/borehole name."
+            df_col: "borehole"
+            sorted: False
+            chunk_size: 64
+
+        depth:
+            type: "float"
+            unit: "meter"
+            description: "Relative position of the sensor in the borehole."
+            df_col: "depth"
+            chunk_size: 64
+
+    ATTRS:
+        description: "Bukov temperature monitoring — test schema for local zarr store."
