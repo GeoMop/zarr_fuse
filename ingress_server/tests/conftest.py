@@ -43,3 +43,8 @@ def s3_queue_config(load_repo_secret_env, monkeypatch) -> dict:
         "bucket_name": os.getenv("ZF_S3_BUCKET_NAME", "test-zarr-storage"),
         "endpoint_url": endpoint_url,
     }
+
+
+@pytest.fixture(autouse=True)
+def isolated_queue_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("QUEUE_DIR_PATH", str(tmp_path / "config_queue"))

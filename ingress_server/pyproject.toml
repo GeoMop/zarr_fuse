@@ -54,5 +54,8 @@ dev = ["pytest==9.0.2"]
 [tool.setuptools.packages.find]
 where = ["."]
 
+[tool.setuptools.package-data]
+ingress_server = ["*.yaml"]
+
 [project.scripts]
 ingress_server = "ingress_server.main:main"

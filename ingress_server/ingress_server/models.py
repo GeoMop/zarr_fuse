@@ -89,6 +89,10 @@ class MetadataModel(BaseModel):
     )
     dataframe_row: dict | None
     target_node: str | None = None
+    sha256: str | None = Field(
+        default=None,
+        description="SHA-256 hex digest of the payload, computed at receipt",
+    )
 
     def resolve_schema_path(self, config_dir: Path) -> Path:
         return resolve_path(self.schema_path, config_dir)

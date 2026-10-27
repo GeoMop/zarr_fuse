@@ -163,12 +163,23 @@ class QueueStorage:
         Payload refs in the accepted queue, sorted by the item name, i.e. by
         the endpoint first and by the receipt time second.
         """
-        names = [
-            name
-            for name in self._item_names(ACCEPTED)
-            if not name.endswith((META_SUFFIX, TMP_SUFFIX))
-        ]
-        return [FileRef(f"{ACCEPTED}/{name}") for name in sorted(names)]
+        return self.scan_accepted()[0]
+
+    def scan_accepted(self) -> tuple[list[FileRef], set[FileRef]]:
+        """Payload refs in the accepted queue and the subset of them that has a sidecar."""
+        names = self._item_names(ACCEPTED)
+        name_set = set(names)
+
+        payloads = sorted(
+            name for name in names if not name.endswith((META_SUFFIX, TMP_SUFFIX))
+        )
+        refs = [FileRef(f"{ACCEPTED}/{name}") for name in payloads]
+        with_meta = {
+            FileRef(f"{ACCEPTED}/{name}")
+            for name in payloads
+            if name + META_SUFFIX in name_set
+        }
+        return refs, with_meta
 
     def read_bytes(self, ref: FileRef) -> bytes:
         return self.fs.cat_file(self._abs(ref))
@@ -176,10 +187,19 @@ class QueueStorage:
     def read_meta_text(self, ref: FileRef) -> str:
         return self.fs.cat_file(self._abs(self.meta_ref(ref))).decode("utf-8")
 
+    def find_item(self, name: str) -> FileRef | None:
+        for queue_name in QUEUE_NAMES:
+            ref = FileRef(f"{queue_name}/{name}")
+            if self.fs.exists(self._abs(ref)):
+                return ref
+        return None
+
     def move(self, ref: FileRef, dest_queue: str) -> FileRef:
         """Move a payload and its metadata from accepted/ to success/ or failed/."""
-        dest = self.dest_ref(ref, dest_queue)
+        return self.relocate(ref, self.dest_ref(ref, dest_queue))
 
+    def relocate(self, ref: FileRef, dest: FileRef) -> FileRef:
+        """Move a payload and its metadata between any two queues."""
         # Payload first, see the module docstring.
         self.fs.mv(self._abs(ref), self._abs(dest))
 
