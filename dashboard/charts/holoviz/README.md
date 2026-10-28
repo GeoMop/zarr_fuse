@@ -12,8 +12,8 @@ Resources are named after the release (`<release>-holoviz`, or just `<release>` 
 
 ## Deploy
 
-Copy `zf_view.yaml` and the schemas into the chart's `config/` directory (git-ignored); they are mounted at
-`/opt/dashboard/config`.
+Copy `zf_view.yaml` and the schemas named by its `source.schema_path` entries into the chart's `config/` directory
+(git-ignored); they are mounted at `/opt/dashboard/config`.
 
 ```bash
 CHART=dashboard/charts/holoviz
@@ -37,7 +37,6 @@ The dashboard is served at `https://zarr-fuse-<release>.dyn.cloud.e-infra.cz`.
 |-----|---------|---------|
 | `frontend.image.name` | `jbrezmorf/zarr-fuse-holoviz-frontend` | Frontend image |
 | `frontend.image.tag` | `latest` | Image tag, set by CI |
-| `frontend.viewName` | `bukov_endpoint` | View from `zf_view.yaml` to serve |
 | `frontend.s3.endpointUrl` | `https://s3.cl2.du.cesnet.cz` | S3 endpoint |
 | `frontend.s3.secrets.accessKey`, `frontend.s3.secrets.secretKey` | `""` | S3 credentials for the chart's Secret |
 | `frontend.s3.existingSecret` | `""` | Optional Secret with the `ZF_S3_*` keys, used instead of the chart's Secret |
@@ -80,8 +79,9 @@ helm -n "$NAMESPACE" rollback "$RELEASE" <REVISION>
 
 ## GitHub Actions
 
-`.github/workflows/dashboard-reusable-workflow.yaml` builds the image, copies the view configuration from the caller
-repository into `config/` and runs the `helm upgrade` above. It is called by `holoviz-dashboard-pull-request.yaml`
+`.github/workflows/dashboard-reusable-workflow.yaml` builds the image, copies `zf_view.yaml` and the schemas named by
+its `source.schema_path` entries from the caller repository into `config/` and runs the `helm upgrade` above. The
+default view is `_dashboard.default_view` in `zf_view.yaml`. It is called by `holoviz-dashboard-pull-request.yaml`
 (release `holoviz-development`), `dashboard-push-main.yaml` (release `dashboard`) and other repositories:
 
 ```yaml
@@ -93,7 +93,6 @@ jobs:
       namespace: <namespace>
       release-name: <release>
       views-path: <path to zf_view.yaml>
-      schemas-path: <schemas directory>
       zarr-fuse-ref: <ref>
     secrets:
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
