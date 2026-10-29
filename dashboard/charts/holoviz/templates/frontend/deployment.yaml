@@ -42,8 +42,6 @@ spec:
             - secretRef:
                 name: {{ include "holoviz.s3SecretName" . }}
           env:
-            - name: HV_DASHBOARD_VIEW
-              value: {{ .Values.frontend.viewName | quote }}
             - name: BOKEH_ALLOW_WS_ORIGIN
               value: {{ include "holoviz.host" . | quote }}
             - name: ZF_CACHE_DIR
