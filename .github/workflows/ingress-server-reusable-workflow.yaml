@@ -43,7 +43,7 @@ on:
         description: Path to the directory containing configuration files
         required: false
         type: string
-        default: app/databuk/inputs
+        default: dashboard/test_deployment/databuk/inputs
       schemas-dir-path:
         description: Optional directory with schemas, copied into the configuration as schemas/
         required: false

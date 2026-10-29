@@ -178,11 +178,11 @@ class LocalClient:
         fields = resolve_schema_fields(view.schema, group_path)
 
         variable = variable or view.defaults.display_variable
-        lat_field = fields.lat
-        lon_field = fields.lon
-        time_field = fields.time
-        depth_field = fields.vertical
-        entity_field = fields.entity
+        lat_field = fields.lat if fields else None
+        lon_field = fields.lon if fields else None
+        time_field = fields.time if fields else None
+        depth_field = fields.vertical if fields else None
+        entity_field = fields.entity if fields else None
 
         if not variable:
             _timer_log("get_map_data failed", time.perf_counter() - start)
@@ -448,11 +448,11 @@ class LocalClient:
         fields = resolve_schema_fields(view.schema, group_path)
 
         variable = variable or view.defaults.display_variable
-        lat_field = fields.lat
-        lon_field = fields.lon
-        time_field = fields.time
-        depth_field = fields.vertical
-        entity_field = fields.entity
+        lat_field = fields.lat if fields else None
+        lon_field = fields.lon if fields else None
+        time_field = fields.time if fields else None
+        depth_field = fields.vertical if fields else None
+        entity_field = fields.entity if fields else None
 
         if not variable:
             _timer_log("get_timeseries_data failed", time.perf_counter() - start)

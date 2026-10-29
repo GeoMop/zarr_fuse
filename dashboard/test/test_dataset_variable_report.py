@@ -37,8 +37,8 @@ def _resolve_views_path() -> Path | None:
     candidates = [
         repo_root / "dashboard" / "config" / "zf_view.yaml",
         repo_root / "config" / "zf_view.yaml",
-        repo_root / "app" / "databuk" / "config" / "zf_view.yaml",
-        repo_root / "app" / "databuk" / "dashboard" / "backend" / "config" / "zf_view.yaml",
+        repo_root / "dashboard" / "test_deployment" / "databuk" / "config" / "zf_view.yaml",
+        repo_root / "dashboard" / "test_deployment" / "databuk" / "dashboard" / "backend" / "config" / "zf_view.yaml",
     ]
     for candidate in candidates:
         if candidate.exists():
