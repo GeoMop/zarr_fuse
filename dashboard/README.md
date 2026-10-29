@@ -47,7 +47,85 @@ SERVE_PORT=5006           # default: 5006
 TILE_BUCKET=my-bucket           # default: app-databuk-test-service
 TILE_PREFIX=my_tiles/           # default: test_tiles/
 ZF_CACHE_DIR=/tmp/zf_tiles      # default: system temp dir
+
+# Optional: performance profiling
+DASHBOARD_PROFILE=1             # enables structured timing output via
+                                # logging.getLogger("dashboard.performance")
+
+# Optional: verbose diagnostics (disabled by default)
+DASHBOARD_DEBUG=1               # enables [config]/[timeseries]/[ylim] records
+                                # via logging.getLogger("dashboard.debug")
 ```
+
+### Performance profiling
+
+Set `DASHBOARD_PROFILE=1` (before launching the server) to emit records through
+`logging.getLogger("dashboard.performance")`. Output has two layers.
+
+Major, once-per-operation phases use `stage=` records (milliseconds and an
+outcome `status=ok` / `status=error`):
+
+```
+[perf] stage=borehole.select duration_ms=1450.210 site=L5-42L op=42 session=s-9 status=ok
+[perf] stage=refresh_views duration_ms=640.200 rebuild_map=True op=42 status=ok
+```
+
+Fine-grained probes that run many times per operation (per site, per entity,
+per plot redraw, per config/schema read) are aggregated into one summary per
+user operation, capped to a handful of records. `op.stage` lines carry
+`count=`, `total_ms=` (sum) and `max_ms=`:
+
+```
+[perf] event=op.summary op=42 session=s-9 operation=borehole.select sites=3 total_ms=1450.2
+[perf] event=op.stage op=42 stage=ts.read count=3 total_ms=912.4 max_ms=501.2
+[perf] event=op.counters op=42 plot.redraws=6 store.cache_hit=3 config.cache_hit=5
+```
+
+Hot-path probes never log on their own; outside an active operation they record
+nothing, and when profiling is disabled they read no clocks. Probes are wired
+through `perf_summary.py` (which leaves `profiling.py` untouched).
+
+User-triggered operations group everything under one `op=<n>` id; a session
+block (or `op.wrap` restoring deferred callbacks) adds `session=<id>`.
+Instrumented user operations: `dashboard.initial_load`, `borehole.select`,
+`variable.switch`, `view.switch`, `group.switch`, `data.reload`,
+`selection.edit`, `center.update`.
+
+Nested durations are not additive: an inner span is part of the outer span.
+
+Progressive-load timing also covers the server-to-browser update and each
+window's model construction:
+
+```
+[perf] stage=pane.attach duration_ms=412.330 pane=bottom_left status=ok
+[perf] event=patch.send bytes=4194304 duration_ms=812.4 t=1712345678.9
+```
+
+`patch.send` reports one outgoing Bokeh `PATCH-DOC`: `bytes` is the total wire
+size (header + metadata + content) and `duration_ms` covers JSON serialization
+plus the websocket write; `t` is a wall-clock timestamp for correlating with
+browser timings. The probe is installed by `patch_probe.py` and is a no-op
+unless profiling is enabled.
+
+### Debug diagnostics
+
+Repetitive diagnostic messages (the `[config]` loader/schema traces and the
+`[timeseries]`/`[ylim]` plot traces) are sent through
+`logging.getLogger("dashboard.debug")` at `DEBUG` level. They are disabled by
+default; set `DASHBOARD_DEBUG=1` (before launching the server) to print them:
+
+```
+[config] load_views: config_path=... base_dir=...
+[timeseries] Returning overlay with 6 curves
+[ylim] view=left xlim=(..., ...) n_visible=42 ylim=(...)
+```
+
+Messages use lazy `%`-formatting and any expensive preparation (filesystem
+checks, `numpy` reductions) is skipped while debugging is disabled, so the
+disabled path stays cheap. This layer is independent of `DASHBOARD_PROFILE`.
+
+Other diagnostic `[map]`/`[fetch_ts]`/`[fill_ts]`/`[variables]`/`[cache]` prints
+remain unconditional `print()` output and are not part of either stream.
 
 ### Quick Start (Using default Bukov config)
 
@@ -192,6 +270,9 @@ credentials from the general environment (filled from the gitignored
 - `app.py` - Main Panel app (called by `zf-dashboard`)
 - `composed.py` - Dashboard layout and widget wiring
 - `data.py` - Zarr Fuse data loading helpers
+- `profiling.py` - Configurable performance instrumentation (`DASHBOARD_PROFILE`)
+- `perf_summary.py` - Per-operation aggregation of fine-grained perf probes
+- `debug_log.py` - Opt-in `DEBUG` diagnostics (`DASHBOARD_DEBUG`)
 - `map_views.py` - Geographic map visualizations
 - `multi_time_views.py` - Time-series plots
 - `sidebar.py` - Sidebar controls and depth selector
