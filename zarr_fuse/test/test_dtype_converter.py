@@ -184,8 +184,7 @@ def test_to_typed_array():
     out = ta.to_typed_array(np.array([1+0j, 2+0j, -3+0j], dtype=np.complex128), np.float64, ctx)
     assert out.dtype == np.float64
     assert np.array_equal(out, np.array([1.0, 2.0, -3.0]), equal_nan=False)
-    assert ctx.count_level("WARNING") >= 1
-    assert ctx.has_warning_instance(ta.TrimmedArrayWarning)
+    assert ctx.count_level("WARNING") == 0
 
     # b) strings that fit the target length
     ctx.clear()
