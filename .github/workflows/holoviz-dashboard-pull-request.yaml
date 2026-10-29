@@ -19,6 +19,7 @@ jobs:
       tag: generate
       namespace: zarr-fuse-dashboard-development
       release-name: holoviz-development
+      views-path: dashboard/test_deployment/databuk/config/zf_view.yaml
       zarr-fuse-ref: ${{ github.head_ref || github.ref_name }}
     secrets:
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}

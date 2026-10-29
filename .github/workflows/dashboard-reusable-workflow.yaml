@@ -25,11 +25,6 @@ on:
         description: The Helm release name to use
         required: false
         type: string
-      view-name:
-        description: The view from zf_view.yaml to serve
-        required: false
-        type: string
-        default: bukov_endpoint
       docker-repository:
         description: The Docker repository to use
         required: false
@@ -41,15 +36,9 @@ on:
         type: string
         default: docker.io
       views-path:
-        description: Path to zf_view.yaml in the caller repository
-        required: false
+        description: Path to zf_view.yaml in the caller repository; its source.schema_path entries name the schemas
+        required: true
         type: string
-        default: dashboard/test_deployment/databuk/config/zf_view.yaml
-      schemas-path:
-        description: Path to the schemas directory in the caller repository
-        required: false
-        type: string
-        default: dashboard/test_deployment/databuk/config/schemas
       extra-helm-args:
         description: Extra Helm arguments to pass during deployment
         required: false
@@ -103,23 +92,19 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Copy configuration files
+        shell: bash
         run: |
           VIEWS_FILE="${{ inputs.views-path }}"
-          SCHEMAS_DIR="${{ inputs.schemas-path }}"
-          DEST_DIR="ci-config"
+          # As in the dashboard, schema_path is relative to the parent of zf_view.yaml's directory.
+          # The pod finds the schemas by file name, so they are copied flat.
+          BASE_DIR="$(dirname "$(dirname "$VIEWS_FILE")")"
 
-          if [[ ! -f "$VIEWS_FILE" ]]; then
-            echo "Views file '$VIEWS_FILE' does not exist."
-            exit 1
-          fi
-          if [[ ! -d "$SCHEMAS_DIR" ]]; then
-            echo "Schemas directory '$SCHEMAS_DIR' does not exist."
-            exit 1
-          fi
+          mkdir -p ci-config
+          cp "$VIEWS_FILE" ci-config/zf_view.yaml
+          yq '.[].source.schema_path | select(. != null)' "$VIEWS_FILE" | while read -r SCHEMA; do
+            cp "$BASE_DIR/$SCHEMA" ci-config/
+          done
 
-          mkdir -p "$DEST_DIR"
-          cp "$VIEWS_FILE" "$DEST_DIR"/zf_view.yaml
-          cp "$SCHEMAS_DIR"/*.yaml "$DEST_DIR"/
       - name: Upload configuration files as artifact
         uses: actions/upload-artifact@v6
         with:
@@ -225,7 +210,6 @@ jobs:
           --set registry.host="${{ inputs.docker-registry }}" \
           --set frontend.image.name="${{ inputs.docker-repository }}" \
           --set frontend.image.tag="${{ needs.get-version-tag.outputs.version-tag }}" \
-          --set frontend.viewName="${{ inputs.view-name }}" \
           --set frontend.s3.secrets.accessKey="${{ secrets.S3_ACCESS_KEY }}" \
           --set frontend.s3.secrets.secretKey="${{ secrets.S3_SECRET_KEY }}" \
           --set frontend.config.enabled=true \
