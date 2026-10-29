@@ -92,33 +92,19 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Copy configuration files
+        shell: bash
         run: |
           VIEWS_FILE="${{ inputs.views-path }}"
-          DEST_DIR="ci-config"
-
-          if [[ ! -f "$VIEWS_FILE" ]]; then
-            echo "Views file '$VIEWS_FILE' does not exist."
-            exit 1
-          fi
-
-          mkdir -p "$DEST_DIR"
-          cp "$VIEWS_FILE" "$DEST_DIR"/zf_view.yaml
-
-          # schema_path is relative to the directory above zf_view.yaml's, as in the dashboard.
-          # The pod looks the schemas up by file name in SCHEMAS_PATH.
+          # As in the dashboard, schema_path is relative to the parent of zf_view.yaml's directory.
+          # The pod finds the schemas by file name, so they are copied flat.
           BASE_DIR="$(dirname "$(dirname "$VIEWS_FILE")")"
-          SCHEMAS="$(yq '.[] | select(tag == "!!map") | .source.schema_path | select(. != null)' "$VIEWS_FILE")"
-          if [[ -z "$SCHEMAS" ]]; then
-            echo "Views file '$VIEWS_FILE' names no source.schema_path."
-            exit 1
-          fi
-          while read -r SCHEMA; do
-            if [[ ! -f "$BASE_DIR/$SCHEMA" ]]; then
-              echo "Schema '$SCHEMA' from '$VIEWS_FILE' does not exist in '$BASE_DIR'."
-              exit 1
-            fi
-            cp "$BASE_DIR/$SCHEMA" "$DEST_DIR"/
-          done <<< "$SCHEMAS"
+
+          mkdir -p ci-config
+          cp "$VIEWS_FILE" ci-config/zf_view.yaml
+          yq '.[].source.schema_path | select(. != null)' "$VIEWS_FILE" | while read -r SCHEMA; do
+            cp "$BASE_DIR/$SCHEMA" ci-config/
+          done
+
       - name: Upload configuration files as artifact
         uses: actions/upload-artifact@v6
         with:
