@@ -185,7 +185,8 @@ The worker records each received payload in the manifest, an auxiliary zarr-fuse
 entry is keyed by the receipt time and holds the item file name, its source, the SHA-256 digest of the payload,
 the processing state (`accepted`, `success`, `failed`), the failure reason, the data time range (minimum and
 maximum of `time_like_coord`) and the item metadata. When the metadata JSON is longer than the manifest variable
-(2048 characters), the manifest keeps it without the `dataframe_row` of an active scrapper.
+(2048 characters), it is left empty and the worker reads the `.meta.json` sidecar instead. The schema is in
+`ingress_server/manifest.yaml`; at startup the server checks that it defines exactly the variables the code writes.
 
 The manifest is the source of truth for the item state. The queue folders `accepted/`, `success/` and `failed/`
 only mirror it for convenience. The receipt path stores the payload with a `.meta.json` sidecar. The worker
@@ -201,7 +202,7 @@ helm chart deploys with the `Recreate` strategy). At its start, the worker reset
 
 With `cache_dir` set, the receipt path also keeps a local copy of each payload. The worker reads that copy when
 its digest matches the manifest and downloads the payload from the queue storage otherwise. The copy is
-dropped once the item is processed, and copies of items no longer in `accepted/` are swept at the worker start.
+dropped once the item is processed.
 
 ---
 
