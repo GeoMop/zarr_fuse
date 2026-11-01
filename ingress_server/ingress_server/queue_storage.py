@@ -187,19 +187,10 @@ class QueueStorage:
     def read_meta_text(self, ref: FileRef) -> str:
         return self.fs.cat_file(self._abs(self.meta_ref(ref))).decode("utf-8")
 
-    def find_item(self, name: str) -> FileRef | None:
-        for queue_name in QUEUE_NAMES:
-            ref = FileRef(f"{queue_name}/{name}")
-            if self.fs.exists(self._abs(ref)):
-                return ref
-        return None
-
     def move(self, ref: FileRef, dest_queue: str) -> FileRef:
         """Move a payload and its metadata from accepted/ to success/ or failed/."""
-        return self.relocate(ref, self.dest_ref(ref, dest_queue))
+        dest = self.dest_ref(ref, dest_queue)
 
-    def relocate(self, ref: FileRef, dest: FileRef) -> FileRef:
-        """Move a payload and its metadata between any two queues."""
         # Payload first, see the module docstring.
         self.fs.mv(self._abs(ref), self._abs(dest))
 

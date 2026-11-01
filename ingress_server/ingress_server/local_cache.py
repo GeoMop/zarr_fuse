@@ -9,8 +9,6 @@ from pathlib import Path
 
 LOG = logging.getLogger(__name__)
 
-TMP_SUFFIX = ".tmp"
-
 
 def content_hash(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
@@ -18,35 +16,14 @@ def content_hash(payload: bytes) -> str:
 
 class LocalCache:
     def __init__(self, cache_dir: str | Path | None):
-        self.root = Path(cache_dir).resolve() if cache_dir else None
-
-        if self.root is not None:
-            try:
-                self.root.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                LOG.exception("Unusable cache directory %s, the local cache is disabled", self.root)
-                self.root = None
-
-    @property
-    def enabled(self) -> bool:
-        return self.root is not None
-
-    def _path(self, name: str) -> Path | None:
-        path = (self.root / name).resolve()
-        if not path.is_relative_to(self.root):
-            LOG.error("Refusing to cache item %r outside of %s", name, self.root)
-            return None
-        return path
+        self.root = Path(cache_dir) if cache_dir else None
 
     def put(self, name: str, payload: bytes) -> None:
-        if not self.enabled:
+        if self.root is None:
             return
 
-        path = self._path(name)
-        if path is None:
-            return
-
-        tmp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}{TMP_SUFFIX}")
+        path = self.root / name
+        tmp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path.write_bytes(payload)
@@ -57,54 +34,20 @@ class LocalCache:
                 tmp_path.unlink(missing_ok=True)
 
     def get(self, name: str, sha256: str) -> bytes | None:
-        if not self.enabled or not sha256:
-            return None
-
-        path = self._path(name)
-        if path is None:
+        if self.root is None or not sha256:
             return None
 
         try:
-            payload = path.read_bytes()
-        except FileNotFoundError:
-            return None
+            payload = (self.root / name).read_bytes()
         except OSError:
-            LOG.exception("Failed to read the cached copy of %s", name)
             return None
-
-        if content_hash(payload) != sha256:
-            LOG.warning("Cached copy of %s does not match its content hash, ignored", name)
-            return None
-        return payload
+        return payload if content_hash(payload) == sha256 else None
 
     def evict(self, name: str) -> None:
-        if not self.enabled:
-            return
-
-        path = self._path(name)
-        if path is None:
+        if self.root is None:
             return
 
         try:
-            path.unlink(missing_ok=True)
+            (self.root / name).unlink(missing_ok=True)
         except OSError:
             LOG.exception("Failed to evict the cached copy of %s", name)
-
-    def sweep(self, keep: set[str]) -> None:
-        if not self.enabled:
-            return
-
-        try:
-            paths = [path for path in self.root.rglob("*") if path.is_file()]
-        except OSError:
-            LOG.exception("Failed to list the cache directory %s", self.root)
-            return
-
-        for path in paths:
-            name = path.relative_to(self.root).as_posix()
-            if name in keep and not name.endswith(TMP_SUFFIX):
-                continue
-            try:
-                path.unlink(missing_ok=True)
-            except OSError:
-                LOG.exception("Failed to sweep the cached file %s", path)

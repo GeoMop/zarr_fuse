@@ -1,4 +1,3 @@
-import json
 import signal
 import logging
 import warnings
@@ -6,7 +5,6 @@ import warnings
 import zarr_fuse as zf
 import xarray as xr
 from dataclasses import replace
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .app_config import AppConfig
@@ -177,10 +175,6 @@ def _failed(entry: ManifestEntry, exc: Exception) -> ManifestEntry:
 
 
 def _move_item(app_config: AppConfig, ref: FileRef, state: str) -> bool:
-    if state not in (SUCCESS, FAILED):
-        LOG.error("Not moving %s: manifest state %r is not a terminal state", ref, state)
-        return False
-
     try:
         app_config.queue.move(ref, state)
     except Exception:
@@ -191,52 +185,22 @@ def _move_item(app_config: AppConfig, ref: FileRef, state: str) -> bool:
     return True
 
 
-def _park_in_failed(app_config: AppConfig, ref: FileRef) -> bool:
-    app_config.cache.evict(_item_name(ref))
-    return _move_to_failed(app_config, ref)
-
-
-def _manifest_metadata(metadata: MetadataModel) -> str:
-    full = metadata.model_dump_json()
-    if len(full) <= STR_WIDTHS["metadata"]:
-        return full
-    return metadata.model_dump_json(exclude={"dataframe_row"})
-
-
 def _item_metadata(app_config: AppConfig, entry: ManifestEntry) -> MetadataModel:
-    """Metadata from the manifest, or from the sidecar if the manifest copy lacks dataframe_row."""
-    data = json.loads(entry.metadata)
-    if "dataframe_row" in data:
-        return MetadataModel.model_validate(data)
+    """Metadata from the manifest, or from the sidecar when it did not fit the manifest."""
+    if entry.metadata:
+        return MetadataModel.model_validate_json(entry.metadata)
     return _load_metadata(app_config, _accepted_ref(entry))
 
 
-def _data_time_text(value, ref: FileRef) -> str:
-    text = format_time_key(value)
-    if len(text) > STR_WIDTHS["data_time_min"]:
-        LOG.warning("Data time %r of %s does not fit the manifest, left empty", text, ref)
-        return ""
-    return text
-
-
 def _new_entry(ref: FileRef, metadata: MetadataModel) -> ManifestEntry:
-    try:
-        key = receipt_key(metadata.received_at)
-    except ValueError:
-        LOG.warning(
-            "Unreadable received_at %r of %s, registered at the current time",
-            metadata.received_at,
-            ref,
-        )
-        key = receipt_key(datetime.now(timezone.utc).isoformat())
-
+    metadata_json = metadata.model_dump_json()
     entry = ManifestEntry(
-        key=key,
+        key=receipt_key(metadata.received_at),
         item_name=_item_name(ref),
         source=metadata.endpoint_name,
         state=ACCEPTED,
         sha256=metadata.sha256 or "",
-        metadata=_manifest_metadata(metadata),
+        metadata=metadata_json if len(metadata_json) <= STR_WIDTHS["metadata"] else "",
     )
     validate_entry(entry)
     return entry
@@ -253,31 +217,22 @@ def _admit_new_items(
     """
     progressed = False
     entries: list[ManifestEntry] = []
-    without_meta: list[FileRef] = []
 
     for ref in refs:
         if app_config.stop_event.is_set():
             break
 
-        if ref not in with_meta:
-            without_meta.append(ref)
-            continue
-
         try:
+            if ref not in with_meta:
+                raise ValueError("no metadata sidecar")
             entries.append(_new_entry(ref, _load_metadata(app_config, ref)))
         except Exception as exc:
             LOG.error("Cannot register %s, moving it to the failed queue: %s", ref, exc)
-            progressed |= _park_in_failed(app_config, ref)
+            progressed |= _move_to_failed(app_config, ref)
 
     registered, known = app_config.manifest.register(entries)
     for entry in registered:
         LOG.info("Registered %s under %s", entry.item_name, entry.key)
-
-    known.update(app_config.manifest.find({_item_name(ref) for ref in without_meta}))
-    for ref in without_meta:
-        if _item_name(ref) not in known:
-            LOG.warning("%s has neither metadata nor a manifest entry, moving it to the failed queue", ref)
-            progressed |= _park_in_failed(app_config, ref)
 
     for name, entry in known.items():
         if entry.state == ACCEPTED:
@@ -295,16 +250,7 @@ def _read_payload(app_config: AppConfig, entry: ManifestEntry) -> bytes:
         return payload
 
     ref = _accepted_ref(entry)
-    try:
-        payload = app_config.queue.read_bytes(ref)
-    except FileNotFoundError:
-        found = app_config.queue.find_item(entry.item_name)
-        if found is None:
-            raise ValueError(f"Payload of {entry.item_name} is in none of the queues")
-        LOG.warning("Payload of pending %s found in %s, moving it back", entry.item_name, found)
-        app_config.queue.relocate(found, ref)
-        payload = app_config.queue.read_bytes(ref)
-
+    payload = app_config.queue.read_bytes(ref)
     if entry.sha256 and content_hash(payload) != entry.sha256:
         raise ValueError(f"Content hash of {ref} does not match the manifest")
 
@@ -383,7 +329,7 @@ def _process_available_files(app_config: AppConfig) -> bool:
         batch.append(item)
         entries[ref] = entry
 
-        data_time = (_data_time_text(item.time_key, ref), _data_time_text(item.time_max, ref))
+        data_time = (format_time_key(item.time_key), format_time_key(item.time_max))
         if data_time != (entry.data_time_min, entry.data_time_max):
             entries[ref] = replace(entry, data_time_min=data_time[0], data_time_max=data_time[1])
             updates[entry.item_name] = entries[ref]
@@ -463,8 +409,6 @@ def _recover_failed(app_config: AppConfig) -> None:
         LOG.exception("Failed to reset the failed manifest entries")
 
     app_config.queue.recover_failed()
-
-    app_config.cache.sweep(keep={_item_name(ref) for ref in app_config.queue.list_accepted()})
 
 
 def working_loop(app_config: AppConfig, poll_sleep: float = 30.0) -> None:
