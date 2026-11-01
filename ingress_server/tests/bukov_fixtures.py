@@ -8,7 +8,7 @@ import zarr_fuse as zf
 
 from ingress_server.app_config import AppConfig, BaseConfig, SmtpConfig
 from ingress_server.local_cache import LocalCache
-from ingress_server.manifest import ManifestStore, default_manifest_url
+from ingress_server.manifest import Manifest, default_manifest_url
 from ingress_server.queue_storage import FileRef, QueueStorage
 
 TESTS_DIR = Path(__file__).parent
@@ -66,7 +66,7 @@ def app_config(
     """
     return AppConfig(
         queue=storage,
-        manifest=ManifestStore(default_manifest_url(storage.url)),
+        manifest=Manifest(default_manifest_url(storage.url)),
         config_path=CONFIG_PATH,
         config={},
         base=BaseConfig(retention_time=retention_time),

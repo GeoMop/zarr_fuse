@@ -19,7 +19,7 @@ from ingress_server.io.time_filter import (
     sort_by_data_time,
     time_key_type_conflict,
 )
-from ingress_server.manifest import ManifestStore, default_manifest_url
+from ingress_server.manifest import Manifest, default_manifest_url
 from ingress_server.models import MetadataModel
 from ingress_server.queue_storage import QueueStorage
 from ingress_server import worker
@@ -153,7 +153,7 @@ def test_anomaly_is_emailed_only_once(tmp_path, monkeypatch):
     queue = QueueStorage(str(tmp_path / "queue"))
     app_config = AppConfig(
         queue=queue,
-        manifest=ManifestStore(default_manifest_url(queue.url)),
+        manifest=Manifest(default_manifest_url(queue.url)),
         config_path=tmp_path / "unused_config.yaml",
         config={},
         base=BaseConfig(),
