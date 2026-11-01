@@ -41,6 +41,6 @@ items:
       type: "str[256]"
       coords: received_at
     metadata:
-      description: "JSON of the item metadata (MetadataModel)."
+      description: "Item metadata (MetadataModel) as JSON text, not a path; empty if it does not fit, then the worker reads the .meta.json sidecar."
       type: "str[2048]"
       coords: received_at
