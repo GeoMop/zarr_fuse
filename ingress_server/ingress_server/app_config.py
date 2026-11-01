@@ -10,7 +10,7 @@ from typing import Any
 from dotenv import load_dotenv
 
 from .local_cache import LocalCache
-from .manifest import ManifestStore, default_manifest_url
+from .manifest import Manifest, default_manifest_url
 from .queue_storage import QueueStorage
 
 load_dotenv()
@@ -45,7 +45,7 @@ class SmtpConfig:
 @dataclass(frozen=True)
 class AppConfig:
     queue: QueueStorage
-    manifest: ManifestStore
+    manifest: Manifest
     config_path: Path
     config: dict[str, Any]
     base: BaseConfig
@@ -106,7 +106,7 @@ def load_app_config(config_path: str | Path) -> "AppConfig":
     smtp = _parse_smtp_config(cfg_block.get("smtp", {}))
 
     queue = QueueStorage(base.queue_dir_path)
-    manifest = ManifestStore(base.manifest_url or default_manifest_url(queue.url))
+    manifest = Manifest(base.manifest_url or default_manifest_url(queue.url))
     cache = LocalCache(base.cache_dir)
 
     app_config = AppConfig(
@@ -120,7 +120,6 @@ def load_app_config(config_path: str | Path) -> "AppConfig":
     )
 
     queue.ensure_layout()
-    manifest.ensure_store()
 
     LOG.info(
         "Application config loaded. queue=%s manifest=%s cache=%s",
