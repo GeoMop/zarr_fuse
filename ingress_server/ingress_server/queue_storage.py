@@ -163,23 +163,12 @@ class QueueStorage:
         Payload refs in the accepted queue, sorted by the item name, i.e. by
         the endpoint first and by the receipt time second.
         """
-        return self.scan_accepted()[0]
-
-    def scan_accepted(self) -> tuple[list[FileRef], set[FileRef]]:
-        """Payload refs in the accepted queue and the subset of them that has a sidecar."""
-        names = self._item_names(ACCEPTED)
-        name_set = set(names)
-
-        payloads = sorted(
-            name for name in names if not name.endswith((META_SUFFIX, TMP_SUFFIX))
-        )
-        refs = [FileRef(f"{ACCEPTED}/{name}") for name in payloads]
-        with_meta = {
-            FileRef(f"{ACCEPTED}/{name}")
-            for name in payloads
-            if name + META_SUFFIX in name_set
-        }
-        return refs, with_meta
+        names = [
+            name
+            for name in self._item_names(ACCEPTED)
+            if not name.endswith((META_SUFFIX, TMP_SUFFIX))
+        ]
+        return [FileRef(f"{ACCEPTED}/{name}") for name in sorted(names)]
 
     def read_bytes(self, ref: FileRef) -> bytes:
         return self.fs.cat_file(self._abs(ref))

@@ -1,46 +1,34 @@
 ATTRS:
-  description: "Ingress queue manifest, one entry per received payload."
+  description: "Ingress queue manifest: an append-only log of the item states."
 items:
   COORDS:
-    received_at:
-      description: "Payload receipt time; microsecond offsets keep the keys unique."
+    time:
+      description: "Time the row was recorded."
       unit: {tick: "us", tz: "UTC"}
       sorted: false
       chunk_size: 256
   VARS:
     item_name:
-      description: "Payload object name within its queue folder."
+      description: "Payload object name within its queue folder; its metadata is in the .meta.json sidecar next to it."
       type: "str[128]"
-      coords: received_at
+      coords: time
     source:
-      description: "Name of the endpoint or active scrapper that received the payload."
+      description: "Endpoint or active scrapper that received the payload."
       type: "str[64]"
-      coords: received_at
+      coords: time
     state:
-      description: "Processing state: accepted, success or failed."
+      description: "accepted, success or failed; the last row of an item is its current state."
       type: "str[16]"
-      coords: received_at
+      coords: time
     sha256:
-      description: "SHA-256 hex digest of the payload, computed at receipt."
+      description: "SHA-256 hex digest of the payload."
       type: "str[64]"
-      coords: received_at
-    data_time_min:
+      coords: time
+    data_time:
       description: "Minimum of the time_like_coord values of the payload, empty when unknown."
       type: "str[32]"
-      coords: received_at
-    data_time_max:
-      description: "Maximum of the time_like_coord values of the payload, empty when unknown."
-      type: "str[32]"
-      coords: received_at
-    updated_at:
-      description: "Time of the last change of the entry."
-      unit: {tick: "us", tz: "UTC"}
-      coords: received_at
+      coords: time
     error:
-      description: "Reason of the failure of a failed item, empty otherwise."
+      description: "Reason of the failure of a failed item."
       type: "str[256]"
-      coords: received_at
-    metadata:
-      description: "Item metadata (MetadataModel) as JSON text, not a path; empty if it does not fit, then the worker reads the .meta.json sidecar."
-      type: "str[2048]"
-      coords: received_at
+      coords: time
