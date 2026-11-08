@@ -20,6 +20,9 @@ ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 ENV AWS_REQUEST_CHECKSUM_CALCULATION=when_required
 ENV AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+# glibc keeps a malloc arena per thread (dask pool, store log handlers); the
+# fragmented arenas make RSS grow with every stored item until the OOM kill.
+ENV MALLOC_ARENA_MAX=2
 
 RUN groupadd -r ingress && useradd -r -g ingress -u 11233 -m -d /ingress-server ingress && \
     apt-get update && apt-get install -y --no-install-recommends git=${git_version} && \
