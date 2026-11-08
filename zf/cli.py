@@ -3,13 +3,16 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterator, List, Tuple
 
 from dotenv import load_dotenv
 
 import xarray as xr
+import zarr
 import zarr_fuse as zf
+from zarr_fuse.zarr_storage import _zarr_fuse_options, _zarr_store_open
 
 
 
@@ -139,6 +142,101 @@ def cmd_list(args) -> int:
     return 0
 
 
+@dataclass
+class DimConflict:
+    """Arrays of one group that disagree on the length of a named dimension."""
+
+    group: zarr.Group
+    dim: str
+    target: int
+    short: List[Tuple[str, int]]
+    long: List[Tuple[str, int]]
+
+
+def _dimension_names(array: zarr.Array) -> Tuple[str | None, ...]:
+    # zarr v3 keeps the names in the metadata, xarray writes them as an attribute in v2.
+    names = getattr(array.metadata, "dimension_names", None) or array.attrs.get("_ARRAY_DIMENSIONS")
+    return tuple(names or ())
+
+
+def find_dim_conflicts(group: zarr.Group) -> List[DimConflict]:
+    """
+    Find the dimensions whose length differs between the arrays of a group, in the
+    whole group tree. The target length is the length of the coordinate array named
+    after the dimension, or the maximum length when there is no such array.
+    """
+    lengths: Dict[str, Dict[str, int]] = {}
+    for name, array in group.arrays():
+        for axis, dim in enumerate(_dimension_names(array)):
+            if dim is not None:
+                lengths.setdefault(dim, {})[name] = array.shape[axis]
+
+    conflicts = []
+    for dim, by_array in sorted(lengths.items()):
+        if len(set(by_array.values())) < 2:
+            continue
+        target = by_array.get(dim, max(by_array.values()))
+        conflicts.append(DimConflict(
+            group=group,
+            dim=dim,
+            target=target,
+            short=sorted((name, n) for name, n in by_array.items() if n < target),
+            long=sorted((name, n) for name, n in by_array.items() if n > target),
+        ))
+
+    for _, child in sorted(group.groups()):
+        conflicts.extend(find_dim_conflicts(child))
+    return conflicts
+
+
+def extend_array(array: zarr.Array, dim: str, length: int) -> None:
+    """Grow `array` along `dim` to `length` and fill the new part with the array fill value."""
+    axis = _dimension_names(array).index(dim)
+    old_length = array.shape[axis]
+    shape = list(array.shape)
+    shape[axis] = length
+    array.resize(tuple(shape))
+    # The grown region may lie in an existing edge chunk; write it explicitly
+    # instead of relying on what that chunk holds past the old shape.
+    region = [slice(None)] * array.ndim
+    region[axis] = slice(old_length, length)
+    array[tuple(region)] = array.fill_value
+
+
+def cmd_fix_dims(args, store_kwargs: dict) -> int:
+    """
+    Report (and with --apply repair) arrays left shorter than their dimension,
+    e.g. by a write interrupted between the arrays of one dataset. Arrays longer
+    than the target are only reported, shrinking them would drop data.
+    Return 1 when some conflict is left unresolved.
+    """
+    options = _zarr_fuse_options(None, **store_kwargs)
+    # Explicit --store.* options win over ZF_* environment variables, so a repair
+    # never silently lands in the store some .env points to.
+    options.update(store_kwargs)
+    if not options.get("STORE_URL"):
+        raise SystemExit("fix-dims requires --store.STORE_URL=<store-url>")
+    root = zarr.open_group(_zarr_store_open(options), mode="r+" if args.apply else "r")
+
+    conflicts = find_dim_conflicts(root)
+    for conflict in conflicts:
+        print(f"{conflict.group.path or '/'} dim={conflict.dim} target={conflict.target}")
+        for name, length in conflict.short:
+            print(f"  extend {name}: {length} -> {conflict.target}")
+            if args.apply:
+                extend_array(conflict.group[name], conflict.dim, conflict.target)
+        for name, length in conflict.long:
+            print(f"  skip {name}: {length} > {conflict.target}, shrinking would drop data")
+
+    if not conflicts:
+        print("no dimension conflicts")
+        return 0
+    if not args.apply:
+        print("dry run, pass --apply to extend the short arrays")
+        return 1
+    return 1 if any(conflict.long for conflict in conflicts) else 0
+
+
 def arg_parser():
     parser = argparse.ArgumentParser(prog="zf", description="Zarr-fuse command line tool")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -171,6 +269,16 @@ def arg_parser():
         action="store_true",
         help="Print full xarray dataset repr for matched nodes.",
     )
+
+    fix_dims_parser = subparsers.add_parser(
+        "fix-dims",
+        help="Find arrays shorter than their dimension and extend them (store from --store.STORE_URL=...).",
+    )
+    fix_dims_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Extend the short arrays with the fill value. Without it only report.",
+    )
     return parser
 
 
@@ -183,7 +291,7 @@ def main(argv=None) -> int:
 
     src_kwargs, remaining = peeloff_dot_args(argv, "--src")
     dst_kwargs, remaining = peeloff_dot_args(remaining, "--dst")
-    #store_kwargs, remaining = peeloff_dot_args(remaining, "--store")
+    store_kwargs, remaining = peeloff_dot_args(remaining, "--store")
 
     parser = arg_parser()
     args = parser.parse_args(remaining)
@@ -192,6 +300,8 @@ def main(argv=None) -> int:
         return cmd_cp(args, src_kwargs, dst_kwargs)
     if args.command == "list":
         return cmd_list(args)
+    if args.command == "fix-dims":
+        return cmd_fix_dims(args, store_kwargs)
 
     parser.error("No command given.")
     return 1
