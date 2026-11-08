@@ -86,11 +86,20 @@ def _extract_one(app_config: AppConfig, ref: FileRef | Path) -> ExtractedItem:
     return make_extracted_item(FileRef(str(ref)), metadata, schema_path, obj)
 
 
-def _store_one(item: ExtractedItem) -> None:
+def _store_one(item: ExtractedItem, roots: dict[Path, zf.Node] | None = None) -> None:
+    """
+    Write an extracted item to its zarr store. `roots` caches the opened store
+    per schema for the caller's worker pass: every `zf.open_store` starts store
+    log handler threads that are never stopped, so opening the store per item
+    leaks threads and memory over a long queue.
+    """
     metadata = item.metadata
+    roots = {} if roots is None else roots
 
     try:
-        root = zf.open_store(item.schema_path)
+        if item.schema_path not in roots:
+            roots[item.schema_path] = zf.open_store(item.schema_path)
+        root = roots[item.schema_path]
     except Exception:
         LOG.exception("Failed to open zarr store for schema %s", item.schema_path)
         raise
@@ -226,6 +235,7 @@ def _process_available_files(app_config: AppConfig) -> bool:
 
     # Phase 3b: write the ready items to the zarr store in data-time order,
     # re-extracting each one, so at most one extracted object is in memory.
+    roots: dict[Path, zf.Node] = {}
     for item in ready_items:
 
         if app_config.stop_event.is_set():
@@ -233,7 +243,7 @@ def _process_available_files(app_config: AppConfig) -> bool:
 
         try:
             LOG.info("Storing data %s", item.ref)
-            _store_one(_extract_one(app_config, item.ref))
+            _store_one(_extract_one(app_config, item.ref), roots)
             app_config.queue.move(item.ref, SUCCESS)
             progressed = True
             LOG.info("Processing succeeded for %s", item.ref)

@@ -196,9 +196,9 @@ def test_batch_keeps_no_extracted_objects(tmp_path, monkeypatch):
     stored = []
     original_store = worker._store_one
 
-    def recording_store(item):
+    def recording_store(item, roots=None):
         stored.append(item)
-        original_store(item)
+        original_store(item, roots)
 
     monkeypatch.setattr(worker, "partition_by_retention", recording_partition)
     monkeypatch.setattr(worker, "_store_one", recording_store)
@@ -211,6 +211,29 @@ def test_batch_keeps_no_extracted_objects(tmp_path, monkeypatch):
     assert [item.ref for item in stored] == [f"accepted/{OLD_NAME}", f"accepted/{FRESH_NAME}"]
     assert all(item.obj is not None for item in stored)
     assert _success_names(app_config) == {OLD_NAME, FRESH_NAME}
+
+
+def test_store_opened_once_per_pass(tmp_path, monkeypatch):
+    """Every zf.open_store starts log handler threads, so a pass opens each store once."""
+    schema_path = _write_schema(tmp_path, monkeypatch)
+    app_config = _app_config(tmp_path)
+    _stage_item(app_config.queue, schema_path, OLD_NAME, OLD_DATE_TIME, temp=1.0)
+    _stage_item(app_config.queue, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
+    _stage_item(app_config.queue, schema_path, NEWER_NAME, NEWER_DATE_TIME, temp=3.0)
+
+    opened = []
+    original_open = zf.open_store
+
+    def counting_open(schema, **kwargs):
+        opened.append(schema)
+        return original_open(schema, **kwargs)
+
+    monkeypatch.setattr(worker.zf, "open_store", counting_open)
+
+    assert _process_available_files(app_config)
+
+    assert _success_names(app_config) == {OLD_NAME, FRESH_NAME}
+    assert opened == [schema_path]
 
 
 def np_datetime64(iso: str):
