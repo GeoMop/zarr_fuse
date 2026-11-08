@@ -26,7 +26,9 @@ class ExtractedItem:
     ref: FileRef
     metadata: MetadataModel
     schema_path: Path
-    obj: DataObject
+    # None once the worker has read the time key and released the data
+    # (see worker._process_available_files).
+    obj: DataObject | None
     time_key: Any = None
     time_error: str | None = None
 

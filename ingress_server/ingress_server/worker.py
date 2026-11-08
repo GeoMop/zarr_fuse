@@ -157,8 +157,12 @@ def _process_available_files(app_config: AppConfig) -> bool:
     batch: list[ExtractedItem] = []
     anomalies: list[dict] = []
 
-    # Phase 1: extract all accepted files; nothing is written to the store yet,
-    # so an interrupted batch is safely re-extracted on the next pass.
+    # Phase 1: extract all accepted files to learn their data time; nothing is
+    # written to the store yet, so an interrupted batch is safely re-extracted
+    # on the next pass. The extracted objects are released right away and
+    # re-extracted one at a time in phase 3b: keeping them would make memory
+    # grow with the queue, and a backlog of large payloads (e.g. GRIB files
+    # queued during a store outage) would never fit.
     for ref in app_config.queue.list_accepted():
 
         # Check for stop signal at the beginning of each loop iteration to allow graceful shutdown.
@@ -168,6 +172,7 @@ def _process_available_files(app_config: AppConfig) -> bool:
         try:
             LOG.info("Extracting data %s", ref)
             item = _extract_one(app_config, ref)
+            item.obj = None
             batch.append(item)
 
             if item.time_error:
@@ -219,7 +224,8 @@ def _process_available_files(app_config: AppConfig) -> bool:
         )
         LOG.debug("Held items: %s", [item.ref for item in held_items])
 
-    # Phase 3b: write the ready items to the zarr store in data-time order.
+    # Phase 3b: write the ready items to the zarr store in data-time order,
+    # re-extracting each one, so at most one extracted object is in memory.
     for item in ready_items:
 
         if app_config.stop_event.is_set():
@@ -227,7 +233,7 @@ def _process_available_files(app_config: AppConfig) -> bool:
 
         try:
             LOG.info("Storing data %s", item.ref)
-            _store_one(item)
+            _store_one(_extract_one(app_config, item.ref))
             app_config.queue.move(item.ref, SUCCESS)
             progressed = True
             LOG.info("Processing succeeded for %s", item.ref)

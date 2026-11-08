@@ -7,6 +7,7 @@ import zarr_fuse as zf
 
 from ingress_server.app_config import AppConfig, BaseConfig, SmtpConfig
 from ingress_server.models import MetadataModel
+from ingress_server import worker
 from ingress_server.queue_storage import QueueStorage
 from ingress_server.worker import _process_available_files
 
@@ -171,6 +172,45 @@ def test_held_item_is_released_once_newer_data_arrives(tmp_path, monkeypatch):
     date_time = ds["date_time"].values.astype("datetime64[s]")
     assert date_time.min() == np_datetime64(OLD_DATE_TIME)
     assert date_time.max() == np_datetime64(FRESH_DATE_TIME)
+
+
+def test_batch_keeps_no_extracted_objects(tmp_path, monkeypatch):
+    """
+    The retention partition sees only time keys: every extracted object is
+    released after the scan, so memory does not grow with the queue length.
+    Each ready item is re-extracted just before it is stored.
+    """
+    schema_path = _write_schema(tmp_path, monkeypatch)
+    app_config = _app_config(tmp_path)
+    _stage_item(app_config.queue, schema_path, OLD_NAME, OLD_DATE_TIME, temp=1.0)
+    _stage_item(app_config.queue, schema_path, FRESH_NAME, FRESH_DATE_TIME, temp=2.0)
+    _stage_item(app_config.queue, schema_path, NEWER_NAME, NEWER_DATE_TIME, temp=3.0)
+
+    partitioned = []
+    original_partition = worker.partition_by_retention
+
+    def recording_partition(items, retention_time):
+        partitioned.extend(items)
+        return original_partition(items, retention_time)
+
+    stored = []
+    original_store = worker._store_one
+
+    def recording_store(item):
+        stored.append(item)
+        original_store(item)
+
+    monkeypatch.setattr(worker, "partition_by_retention", recording_partition)
+    monkeypatch.setattr(worker, "_store_one", recording_store)
+
+    assert _process_available_files(app_config)
+
+    assert len(partitioned) == 3
+    assert all(item.obj is None for item in partitioned)
+    assert all(item.time_key is not None for item in partitioned)
+    assert [item.ref for item in stored] == [f"accepted/{OLD_NAME}", f"accepted/{FRESH_NAME}"]
+    assert all(item.obj is not None for item in stored)
+    assert _success_names(app_config) == {OLD_NAME, FRESH_NAME}
 
 
 def np_datetime64(iso: str):
