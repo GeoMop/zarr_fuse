@@ -1,6 +1,7 @@
 from dashboard import log_buffer
 from dashboard.log_format import LOG_CSS
 from dashboard.log_view import LogView, build_logs_link
+from dashboard.logs_page import LOGS_TAB_URL
 
 
 def _view() -> LogView:
@@ -98,7 +99,7 @@ def test_logs_link_is_a_plain_text_trigger() -> None:
 def test_header_links_to_the_standalone_log_page() -> None:
     view = _view()
 
-    assert 'href="/logs"' in view.label.object
+    assert f'href="{LOGS_TAB_URL}"' in view.label.object
     assert 'target="_blank"' in view.label.object
 
 

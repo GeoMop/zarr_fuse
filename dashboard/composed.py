@@ -16,6 +16,7 @@ from dashboard.config import (
 from dashboard.data import load_data
 from dashboard.log_buffer import mask_secrets
 from dashboard.log_view import LogView, build_logs_link
+from dashboard.logs_page import LOGS_TAB_URL
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
 from dashboard.perf_summary import begin, end, measure_operation
@@ -959,7 +960,7 @@ def _build_crash_page(tb: str) -> pn.Column:
             sizing_mode="stretch_both",
         ),
         pn.pane.HTML(
-            '<a href="/logs" target="_blank" rel="noopener" '
+            f'<a href="{LOGS_TAB_URL}" target="_blank" rel="noopener" '
             'style="color:#93c5fd;font-size:13px;">'
             "Open full server logs &#8594;</a>",
             sizing_mode="stretch_width",

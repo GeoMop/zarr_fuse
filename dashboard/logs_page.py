@@ -8,7 +8,9 @@ construction. That keeps it usable when ``build_dashboard`` raises during the
 initial load.
 
 ``GET /logs`` returns the HTML page; ``GET /logs.json?since=N`` returns the lines
-added after sequence ``N`` so the page can poll incrementally.
+added after sequence ``N`` so the page can poll incrementally. Links opened from
+the dashboard carry ``?from=dashboard`` and get a close-tab control instead of
+the dashboard link.
 """
 
 from __future__ import annotations
@@ -20,6 +22,13 @@ from tornado.web import RequestHandler
 
 from dashboard import log_buffer
 from dashboard.log_format import LOG_CSS, POLL_MS, SCROLL_JS, line_class
+
+LOGS_TAB_URL: Final[str] = "/logs?from=dashboard"
+
+_BACK_DASHBOARD: Final[str] = '<a href="/">&#8592; dashboard</a>'
+_BACK_CLOSE: Final[str] = (
+    '<button type="button" id="zf-close" title="Close this tab">close tab &times;</button>'
+)
 
 PAGE: Final[str] = """<!doctype html>
 <html lang="en">
@@ -45,7 +54,7 @@ __LOG_CSS__
 </head>
 <body>
 <div class="zf-log-view">
-  <div class="zf-log-header"><span>SERVER LOGS</span><a href="/">&#8592; dashboard</a></div>
+  <div class="zf-log-header"><span>SERVER LOGS</span>__BACK_HTML__</div>
   <div class="zf-log-scroll">
     <pre class="zf-log" id="zf-log-body"><span class="zf-empty">No output captured yet.</span></pre>
   </div>
@@ -60,6 +69,19 @@ const MAX_LINES = __MAX_LINES__;
 let since = 0;
 const body = document.getElementById('zf-log-body');
 const status = document.getElementById('zf-status');
+const closeBtn = document.getElementById('zf-close');
+
+if (closeBtn) {
+  closeBtn.addEventListener('click', function () {
+    window.close();
+    setTimeout(function () {
+      if (!window.closed) {
+        closeBtn.textContent = 'close manually';
+        closeBtn.title = 'The browser blocked automatic closing; please close this tab manually.';
+      }
+    }, 150);
+  });
+}
 
 function addLine(ts, text, cls) {
   if (body.querySelector('.zf-empty')) body.textContent = '';
@@ -117,13 +139,15 @@ def build_payload(since: int = 0) -> dict[str, object]:
     }
 
 
-def render_page() -> str:
-    """Render the standalone page with the shared CSS and scroll script."""
+def render_page(*, from_dashboard: bool = False) -> str:
+    """Render the page, using a close-tab control for dashboard-opened tabs."""
+    back_html = _BACK_CLOSE if from_dashboard else _BACK_DASHBOARD
     return (
         PAGE.replace("__LOG_CSS__", LOG_CSS)
         .replace("__SCROLL_JS__", SCROLL_JS)
         .replace("__POLL_MS__", str(POLL_MS))
         .replace("__MAX_LINES__", str(log_buffer.MAX_LINES))
+        .replace("__BACK_HTML__", back_html)
     )
 
 
@@ -146,7 +170,8 @@ class LogsPageHandler(RequestHandler):
     def get(self) -> None:
         self.set_header("Content-Type", "text/html; charset=utf-8")
         self.set_header("Cache-Control", "no-store")
-        self.write(render_page())
+        from_dashboard = self.get_query_argument("from", "") == "dashboard"
+        self.write(render_page(from_dashboard=from_dashboard))
 
 
 LOG_ROUTES = [

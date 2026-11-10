@@ -51,13 +51,18 @@ LOG_CSS: Final[str] = """
     letter-spacing: 0.04em;
     color: #94a3b8;
 }
-.zf-log-header a {
+.zf-log-header a, .zf-log-header button {
     color: #93c5fd;
+    font-family: inherit;
     font-size: 11px;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
     text-decoration: none;
     margin-right: 30px;
 }
-.zf-log-header a:hover { text-decoration: underline; }
+.zf-log-header a:hover, .zf-log-header button:hover { text-decoration: underline; }
 .zf-log {
     margin: 0;
     padding: 8px 10px 8px 10px;

@@ -14,6 +14,7 @@ import panel as pn
 
 from dashboard import log_buffer
 from dashboard.log_format import LOG_CSS, POLL_MS, SCROLL_JS, render_body
+from dashboard.logs_page import LOGS_TAB_URL
 
 RENDER_LIMIT: Final[int] = 300
 
@@ -38,7 +39,7 @@ _LINK_CSS = """
 
 _LABEL_HTML = (
     '<div class="zf-log-header"><span>SERVER LOGS</span>'
-    '<a href="/logs" target="_blank" rel="noopener" '
+    f'<a href="{LOGS_TAB_URL}" target="_blank" rel="noopener" '
     'title="Open full server logs in a new tab">open ↗</a></div>'
 )
 

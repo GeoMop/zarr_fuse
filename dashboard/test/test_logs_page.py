@@ -35,6 +35,22 @@ def test_page_contains_live_polling_and_client_side_escaping() -> None:
     assert "setInterval" in page
 
 
+def test_dashboard_origin_page_offers_close_tab() -> None:
+    page = render_page(from_dashboard=True)
+
+    assert 'id="zf-close"' in page
+    assert "window.close" in page
+    assert "close manually" in page
+    assert 'href="/"' not in page
+
+
+def test_direct_page_keeps_dashboard_link() -> None:
+    page = render_page()
+
+    assert 'href="/"' in page
+    assert 'id="zf-close"' not in page
+
+
 def test_log_routes() -> None:
     patterns = [pattern for pattern, _ in LOG_ROUTES]
 
