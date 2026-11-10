@@ -8,7 +8,7 @@ import yaml
 from dotenv import load_dotenv
 from zarr_fuse import schema as zf_schema
 
-from dashboard.debug_log import debug, debug_enabled
+from dashboard.debug_log import debug
 from dashboard.perf_summary import count, stage
 
 VIEWS_ENV_VAR = "ZF_VIEW_PATH"
@@ -446,12 +446,11 @@ def _read_schema_display(
     vertical_field: Optional[str],
     group_path: Optional[str],
 ) -> SchemaDisplayConfig:
-    if debug_enabled():
-        debug(
-            "[config] _read_schema_display: opening schema_path=%s exists=%s",
-            schema_path,
-            schema_path.exists(),
-        )
+    debug(
+        "[config] _read_schema_display: opening schema_path=%s exists=%s",
+        schema_path,
+        schema_path.exists(),
+    )
     schema = _load_schema_file(schema_path)
 
     def _find_data_node(node: Any) -> Optional[Dict[str, Any]]:

@@ -6,7 +6,7 @@ import panel as pn
 from holoviews import streams
 
 from dashboard.config import _resolve_fields_for_group_raw
-from dashboard.debug_log import debug, debug_enabled
+from dashboard.debug_log import debug
 from dashboard.perf_summary import Timer, count, measure_operation, stage
 from dashboard.profiling import operation, time_stage
 
@@ -535,16 +535,13 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         with stage("ts.markers"):
             overlay = overlay * build_marker_overlay(view=view, x_range=marker_window, xlim=xlim)
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
-        if debug_enabled():
-            n_visible = int(np.sum((times >= xlim[0]) & (times <= xlim[1])))
-            debug(
-                "[ylim] view=%s xlim=(%s, %s) n_visible=%s ylim=%s",
-                view,
-                xlim[0],
-                xlim[1],
-                n_visible,
-                ylim,
-            )
+        debug(
+            "[ylim] view=%s xlim=(%s, %s) ylim=%s",
+            view,
+            xlim[0],
+            xlim[1],
+            ylim,
+        )
         if ylim is None:
             full_xlim = (times.min(), times.max())
             ylim = _compute_ylim(times, selected_combos, full_xlim)

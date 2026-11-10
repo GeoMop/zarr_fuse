@@ -1,10 +1,8 @@
-"""Tests for the dashboard opt-in debug logging utility.
+"""Tests for the dashboard debug logging utility.
 
-``DASHBOARD_DEBUG`` fixes the enabled flag at import time, so these tests flip
-``debug_log._ENABLED`` directly and attach a capturing handler to the
-``dashboard.debug`` logger to assert on records without depending on console
-output. They also verify that the ``[config]`` diagnostics are wired to the
-logger and that the disabled path skips expensive preparation.
+The ``dashboard.debug`` records are always enabled; these tests attach a
+capturing handler and assert on records without depending on console output.
+They also verify that the ``[config]`` diagnostics are wired to the logger.
 
 Run: python -m pytest dashboard/test/test_debug_log.py -v
 """
@@ -22,8 +20,7 @@ from dashboard import config, debug_log
 
 @pytest.fixture
 def debug_capture(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Force debug on and capture every ``dashboard.debug`` record."""
-    monkeypatch.setattr(debug_log, "_ENABLED", True)
+    """Capture every ``dashboard.debug`` record."""
     monkeypatch.setattr(debug_log, "_handler_ready", False)
     captured: list[str] = []
 
@@ -43,49 +40,26 @@ def debug_capture(monkeypatch: pytest.MonkeyPatch) -> list[str]:
             debug_log.logger.removeHandler(existing)
 
 
-class _Boom:
-    def __repr__(self) -> str:
-        raise AssertionError("debug arguments must not be formatted while disabled")
-
-
 def _console_handlers() -> list[logging.Handler]:
     return [h for h in debug_log.logger.handlers if h.name == debug_log._HANDLER_NAME]
 
 
-def test_disabled_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
-    """While disabled, debug() emits nothing and installs no console handler."""
-    monkeypatch.setattr(debug_log, "_ENABLED", False)
-    monkeypatch.setattr(debug_log, "_handler_ready", False)
-    captured: list[str] = []
-
-    class _CapturingHandler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            captured.append(record.getMessage())
-
-    handler = _CapturingHandler()
-    debug_log.logger.addHandler(handler)
-    try:
-        debug_log.debug("[config] not emitted")
-    finally:
-        debug_log.logger.removeHandler(handler)
-
-    assert captured == []
-    assert not debug_log._handler_ready
-    assert _console_handlers() == []
-
-
-def test_enabled_emits_debug(debug_capture: list[str]) -> None:
-    """When enabled, debug() emits a DEBUG record with lazy %-formatting."""
+def test_debug_emits_record(debug_capture: list[str]) -> None:
+    """debug() emits a DEBUG record with lazy %-formatting."""
     debug_log.debug("[config] x=%s y=%s", 5, "five")
 
     assert debug_capture == ["[config] x=5 y=five"]
 
 
-def test_disabled_does_not_format_args(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Disabled debug() must not format arguments (no expensive __repr__)."""
-    monkeypatch.setattr(debug_log, "_ENABLED", False)
+def test_debug_ignores_legacy_env_flag(
+    debug_capture: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The removed DASHBOARD_DEBUG flag no longer suppresses diagnostics."""
+    monkeypatch.setenv("DASHBOARD_DEBUG", "0")
 
-    debug_log.debug("[ylim] n_visible=%s", _Boom())
+    debug_log.debug("[config] always emitted")
+
+    assert debug_capture == ["[config] always emitted"]
 
 
 def test_handler_installed_once(debug_capture: list[str]) -> None:
@@ -118,31 +92,13 @@ def _write_schema(tmp_path: Path) -> Path:
     return schema_path
 
 
-def test_read_schema_display_skips_expense_when_disabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The schema_path.exists() probe is skipped entirely while disabled."""
-    calls: list[tuple[str, tuple]] = []
-    monkeypatch.setattr(config, "debug_enabled", lambda: False)
-    monkeypatch.setattr(config, "debug", lambda msg, *args: calls.append((msg, args)))
-
-    config._read_schema_display(_write_schema(tmp_path), None, None, None, None)
-
-    assert calls == []
-
-
-def test_read_schema_display_logs_when_enabled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """With debugging on, the schema display probe is emitted once."""
+def test_read_schema_display_logs(debug_capture: list[str], tmp_path: Path) -> None:
+    """The schema display probe is emitted once."""
     schema_path = _write_schema(tmp_path)
-    calls: list[tuple[str, tuple]] = []
-    monkeypatch.setattr(config, "debug_enabled", lambda: True)
-    monkeypatch.setattr(config, "debug", lambda msg, *args: calls.append((msg, args)))
 
     config._read_schema_display(schema_path, None, None, None, None)
 
-    assert len(calls) == 1
-    message, args = calls[0]
-    assert message.startswith("[config] _read_schema_display: opening")
-    assert args == (schema_path, True)
+    assert any(
+        line.startswith("[config] _read_schema_display: opening")
+        for line in debug_capture
+    )

@@ -1,16 +1,28 @@
 import asyncio
+import html
+import traceback
 
 import holoviews as hv
 import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
 from holoviews import streams
 
-from dashboard.config import find_view_file, get_default_endpoint_name, load_view_config, load_views
+from dashboard.config import (
+    find_view_file,
+    get_default_endpoint_name,
+    load_view_config,
+    load_views,
+)
 from dashboard.data import load_data
+from dashboard.log_buffer import mask_secrets
+from dashboard.log_view import LogView, build_logs_link
 from dashboard.map_views import build_map_view
 from dashboard.multi_time_views import build_timeseries_views
 from dashboard.perf_summary import begin, end, measure_operation
-from dashboard.plot_selection import build_plot_selection_panel, resolve_available_dimensions
+from dashboard.plot_selection import (
+    build_plot_selection_panel,
+    resolve_available_dimensions,
+)
 from dashboard.profiling import operation, session, time_stage
 from dashboard.sidebar import _flatten_nodes, build_sidebar
 
@@ -37,6 +49,44 @@ hv.extension("bokeh")
 hv.renderer("bokeh").theme = "dark_minimal"
 
 _POPULATE_PAUSE = 0.05
+
+_LOGS_MODAL_CSS = """
+.dialog-content {
+    background: #0b1220;
+    padding: 0;
+    width: min(1100px, 94vw);
+    height: min(680px, 86vh);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+}
+.dialog-content > :not(.pnx-dialog-close) {
+    min-height: 0;
+    height: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.dialog-content .pnx-dialog-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 1.5em;
+    height: 1.5em;
+    z-index: 100003;
+    color: #94a3b8;
+}
+.dialog-content .pnx-dialog-close:hover {
+    background: rgba(148, 163, 184, 0.2);
+}
+.zf-log-view {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    position: relative;
+}
+"""
 
 
 def _placeholder_root(sizing_mode: str, label: str) -> pn.Column:
@@ -176,6 +226,17 @@ def build_dashboard():
     node_hint = None
     store_info = None
     reload_button = None
+
+    # ── Server log viewer (sidebar text link + modal, no layout change) ──
+    log_view = LogView(active=False)
+    logs_modal = pn.Modal(log_view, stylesheets=[_LOGS_MODAL_CSS])
+
+    def _on_logs_modal_open(event) -> None:
+        log_view.set_active(bool(event.new))
+
+    logs_modal.param.watch(_on_logs_modal_open, "open")
+    logs_link = build_logs_link()
+    logs_link.on_click(lambda _event: setattr(logs_modal, "open", True))
 
     # ── Variable dropdown for the plot selection panel ──────────────
     plot_var_selector = pn.widgets.Select(
@@ -628,7 +689,7 @@ def build_dashboard():
                     _set_root_error(controller, "Dataset panel", exc)
                     return
                 with time_stage("pane.attach", pane="controller"):
-                    controller.objects = controller_content.objects
+                    controller.objects = [*controller_content.objects, logs_link]
                     controller.styles = dict(controller_content.styles)
                 data.group_path = node_select.value
                 await asyncio.sleep(_POPULATE_PAUSE)
@@ -851,6 +912,7 @@ myLayout.registerComponent('view', function(container, componentState) {
 
 myLayout.init();
 </script>
+{{ embed(roots.logs_modal) }}
 {%% endblock %%}
 """
 
@@ -867,6 +929,7 @@ myLayout.init();
     tmpl.add_panel("bottom_left", bottom_left)
     tmpl.add_panel("bottom_mid", bottom_mid)
     tmpl.add_panel("bottom_right", bottom_right)
+    tmpl.add_panel("logs_modal", logs_modal)
 
     _build_stage.log()
     # The contextvars tokens belong to this frame, so the scopes are closed here;
@@ -877,3 +940,44 @@ myLayout.init();
     pn.state.onload(_populate)
     print(f"[session] build_dashboard ready session_id={session_id}")
     return tmpl
+
+
+def _build_crash_page(tb: str) -> pn.Column:
+    """Render the initial-load failure page shown instead of the dashboard."""
+    trace = html.escape(mask_secrets(tb))
+    return pn.Column(
+        pn.pane.Alert(
+            "Dashboard failed to load. The full server log is available at /logs.",
+            alert_type="danger",
+            sizing_mode="stretch_width",
+        ),
+        pn.pane.HTML(
+            "<pre style='margin:0;padding:12px;border-radius:8px;"
+            "background:#111827;color:#fca5a5;overflow:auto;"
+            "white-space:pre-wrap;word-break:break-word;max-height:70vh;'>"
+            f"{trace}</pre>",
+            sizing_mode="stretch_both",
+        ),
+        pn.pane.HTML(
+            '<a href="/logs" target="_blank" rel="noopener" '
+            'style="color:#93c5fd;font-size:13px;">'
+            "Open full server logs &#8594;</a>",
+            sizing_mode="stretch_width",
+        ),
+        sizing_mode="stretch_both",
+        styles={
+            "background": "#0b1220",
+            "padding": "16px",
+            "color": "#cbd5e1",
+        },
+    )
+
+
+def build_dashboard_or_error():
+    """Build the dashboard, returning a readable crash page if bootstrap fails."""
+    try:
+        return build_dashboard()
+    except Exception:  # noqa: BLE001 - the crash page is the fallback
+        traceback.print_exc()
+        print("[session] build_dashboard failed; returning crash page")
+        return _build_crash_page(traceback.format_exc())
