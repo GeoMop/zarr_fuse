@@ -687,6 +687,7 @@ def test_merge_ds_preserves_values_across_overlap_and_extensions(tmp_path):
         pytest.param("float64", "nan", np.float64, id="float"),
         pytest.param("int64", -1, np.int64, id="integer"),
         pytest.param("str[8]", "<NA>", "U8", id="string"),
+        pytest.param("str", "<NA>", np.dtypes.StringDType(), id="vlen-string"),
     ],
 )
 def test_merge_ds_respects_schema_na_value(tmp_path, var_type, na_value, dtype):
@@ -730,24 +731,31 @@ def test_merge_ds_respects_schema_na_value(tmp_path, var_type, na_value, dtype):
     npt.assert_array_equal(result, expected)
 
 
-def test_str_keeps_unicode(tmp_path):
-    """str[n] stores any Unicode characters, n counts characters, not bytes."""
+@pytest.mark.parametrize(
+    ("var_type", "dtype"),
+    [
+        pytest.param("str[4]", np.dtype("<U4"), id="fixed"),
+        pytest.param("str", np.dtypes.StringDType(), id="variable"),
+    ],
+)
+def test_str_keeps_unicode(tmp_path, var_type, dtype):
+    """Both string types store any Unicode characters, n in str[n] counts characters, not bytes."""
     schema_dict = {
         "VARS": {
-            "label": {"type": "str[4]", "coords": ["x"]},
+            "label": {"type": var_type, "coords": ["x"]},
         },
         "COORDS": {
             "x": {"unit": "", "type": "int64", "sorted": False},
         },
         "ATTRS": {"STORE_URL": str(tmp_path / "unicode.zarr")},
     }
-    labels = np.array(["žluť", "°C", "µS/m"])
+    labels = np.array(["žluť", "°C", "µS/m"], dtype=dtype)
 
     node = zf.open_store(schema_dict)
     node.update_from_ds(xr.Dataset({"label": ("x", labels)}, coords={"x": [0, 1, 2]}))
 
     result = zf.open_store(schema_dict).dataset["label"]
-    assert result.dtype == np.dtype("<U4")
+    assert result.dtype == dtype
     npt.assert_array_equal(result, labels)
 
 

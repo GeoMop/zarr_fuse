@@ -55,7 +55,7 @@ dependencies = [
     "fsspec",   # boto3 restriction => fsspec==2025.5.1
     "zarr",       # 3.x does not support write_empty_chunks
     "dask",       # for compatibility with xarray 0.18.2
-    "xarray",     # 0.19.0 does not support zarr 2.x well
+    "xarray>=2026.9",  # StringDType round trip for the str type
     "python-dotenv",  # for loading environment variables from .env files
 ]
 

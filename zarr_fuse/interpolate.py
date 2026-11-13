@@ -299,7 +299,9 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
 
     # Phase 3: interpolate ds_sorted to new coords
     dim_sorters = {d: sorter for d, (sorter, _) in dim_idx_sort.items()}
-    ds_sorted = ds_update.isel(**dim_sorters)
+    # xarray can not mask StringDType by NaN yet, use object as it does for str[n]
+    vlen_str = {name: da.astype(object) for name, da in ds_update.data_vars.items() if da.dtype.kind == "T"}
+    ds_sorted = ds_update.assign(vlen_str).isel(**dim_sorters)
 
     nearest_coords = {
         dim: coords
