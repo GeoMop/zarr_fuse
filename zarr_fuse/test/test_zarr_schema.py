@@ -410,6 +410,7 @@ def _has(bag: list[str], needle: str) -> bool:
         ("complex64", np.dtype("complex64"), "complex64"),
         ("complex128", np.dtype("complex128"), "complex128"),
         ("str[7]", np.dtype("<U7"), "str[7]"),
+        ("str", np.dtypes.StringDType(), "str"),
     ],
 )
 def test_dtype_parse_and_serialize_roundtrip(token, expected_dtype, expected_str):

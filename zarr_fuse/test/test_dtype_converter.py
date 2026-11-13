@@ -78,11 +78,11 @@ def test_dtype_from_cfg_basic_and_str():
     assert dt == np.dtype("<U5")
     assert ctx.count_level("ERROR") == 0
 
-    # bare 'str' -> default length warning to <U32
+    # bare 'str' -> variable length UTF-8
     ctx.clear()
     dt = ta.DType.from_cfg(DummyCfg("str", ctx), None).dtype
-    assert dt == np.dtype("<U32")
-    assert ctx.count_level("WARNING") >= 1
+    assert dt == np.dtypes.StringDType()
+    assert ctx.count_level("WARNING") == 0
 
     # str[0] -> warning + default length <U32
     ctx.clear()
