@@ -10,8 +10,12 @@ os.environ.setdefault("S3_ACCESS_KEY", os.getenv("ZF_S3_ACCESS_KEY"))
 os.environ.setdefault("S3_SECRET_KEY", os.getenv("ZF_S3_SECRET_KEY"))
 
 import panel as pn
+
 from dashboard.composed import build_dashboard
+from dashboard.patch_probe import install as install_patch_probe
 from dashboard.tile_service import S3TileHandler
+
+install_patch_probe()
 
 pn.extension()
 
