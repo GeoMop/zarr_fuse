@@ -156,6 +156,11 @@ configuration:
                                        # seen in the same batch (see the
                                        # per-endpoint time_like_coord option
                                        # below). 0 disables holding.
+    manifest_url: null                # zarr-fuse store tracking the queue items;
+                                      # default "<queue_dir_path>/manifest.zarr"
+    cache_dir: null                   # local directory for payload copies read
+                                      # by the worker instead of downloading
+                                      # them from an S3 queue; null disables it
 
   smtp:
     notify_to: ["ops@example.com"]
@@ -173,6 +178,22 @@ item is written in receipt order — so the email is the only signal. Each
 distinct anomaly is mailed once per worker process, not once per poll cycle.
 
 The rest of the file defines passive endpoints and active scrappers (see sections below).
+
+## Queue manifest
+
+The manifest (`manifest_url`, default `<queue_dir_path>/manifest.zarr`) is a zarr-fuse store with an append-only
+log of the queue items: every change of an item's state (`accepted`, `success`, `failed`) adds a row with the time,
+the item name, its source, the SHA-256 of the payload, the data time and the failure reason. The last row of an
+item is its current state. Its schema is `ingress_server/manifest.yaml`, which the server checks at startup.
+
+The payload and its `.meta.json` sidecar stay in the queue folders, which follow the manifest. At the start of
+every pass the worker adds new items of `accepted/` to the manifest and moves the items whose last state is
+`success` or `failed`; after the pass it records the outcomes and then moves the processed items. At startup the
+failed items are set back to `accepted`, i.e. retried. The worker is the only writer of the manifest, so only one
+ingress server may run on a queue (the helm chart deploys with the `Recreate` strategy).
+
+With `cache_dir` set, the receipt path also keeps a local copy of each payload. The worker reads it when its
+SHA-256 matches the sidecar and downloads the payload from the queue storage otherwise.
 
 ---
 
