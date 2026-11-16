@@ -1,5 +1,12 @@
 import os
 
+from dashboard.log_buffer import install as install_log_buffer
+
+# Capture terminal output before dashboard imports create logging handlers, so the
+# Server logs view sees both print() and logging output. The streams keep working
+# normally for the terminal.
+install_log_buffer()
+
 from dashboard.config import find_view_file, load_environment_from_config
 
 # Bootstrap env loading before importing dashboard modules that read env vars at import time.
@@ -10,8 +17,13 @@ os.environ.setdefault("S3_ACCESS_KEY", os.getenv("ZF_S3_ACCESS_KEY"))
 os.environ.setdefault("S3_SECRET_KEY", os.getenv("ZF_S3_SECRET_KEY"))
 
 import panel as pn
-from dashboard.composed import build_dashboard
+
+from dashboard.composed import build_dashboard_or_error
+from dashboard.logs_page import LOG_ROUTES
+from dashboard.patch_probe import install as install_patch_probe
 from dashboard.tile_service import S3TileHandler
+
+install_patch_probe()
 
 pn.extension()
 
@@ -31,12 +43,12 @@ def main() -> None:
     ]
     
     pn.serve(
-        {"/": build_dashboard},
+        build_dashboard_or_error,
         address=bind_address,
         port=bind_port,
         show=False,
         allow_websocket_origin=allow_websocket_origin,
-        extra_patterns=ROUTES,
+        extra_patterns=[*ROUTES, *LOG_ROUTES],
     )
 
 
