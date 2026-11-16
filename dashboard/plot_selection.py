@@ -11,7 +11,9 @@ import panel as pn
 import param
 from panel.io.model import JSCode
 
+from dashboard.perf_summary import add_stage, count, measure_operation, stage
 from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_SVG
+from dashboard.profiling import log_message, profiling_enabled
 
 
 class _PerfMetrics:
@@ -46,6 +48,11 @@ class _PerfMetrics:
             f"click->rebuild_avg={click_avg:.1f}ms "
             f"rebuild_avg={rebuild_avg:.1f}ms"
         )
+
+    def log(self) -> None:
+        """Emit the current counters through the ``dashboard.performance`` logger."""
+        if profiling_enabled():
+            log_message(self.report())
 
 
 perf = _PerfMetrics()
@@ -297,6 +304,10 @@ class SelectionState(param.Parameterized):
         mirroring ``add_site`` bookkeeping without rebuilding the table for a
         brand-new row.  Bumps *version* (redraw plots) and, when the depth set
         changes, *layout_version* (adds the depth columns to the table).
+        Each of the two notifications is timed separately on the active
+        operation summary (``fill_site.layout_notify``,
+        ``fill_site.version_notify``) so synchronous Panel/Param callbacks
+        can be attributed to the right counter.
 
         Returns ``False`` when no site with *entity_index* is registered (the
         caller should ``register_site`` then ``fill_site`` instead).
@@ -330,11 +341,13 @@ class SelectionState(param.Parameterized):
                 self._checked_count += 1
 
         if depth_changed:
-            self.layout_version += 1
+            with stage("fill_site.layout_notify"):
+                self.layout_version += 1
             print(f"[SelectionState] Filled site idx={entity_index} (depths changed)")
         else:
             print(f"[SelectionState] Filled site idx={entity_index}")
-        self._bump_version()
+        with stage("fill_site.version_notify"):
+            self._bump_version()
         return True
 
     def update_site_data(self, entity_index, series, times, depths=None) -> bool:
@@ -1069,7 +1082,7 @@ def build_plot_selection_panel(
         finally:
             elapsed = (time.perf_counter() - t0) * 1000
             perf.rebuild_duration_ms.append(elapsed)
-            print(f"[perf] _rebuild_table #{perf.full_rebuild_count}: {elapsed:.1f}ms")
+            add_stage("table.rebuild", elapsed / 1000.0)
 
     def _cancel_bump_timer(*, clear_loading=False):
         nonlocal _bump_timer
@@ -1109,11 +1122,11 @@ def build_plot_selection_panel(
             return
         _bump_timer = None
         perf.version_bump_count += 1
-        state.version += 1
+        with measure_operation("selection.edit", version=state.version + 1):
+            count("selection.version_bump")
+            state.version += 1
         if table_loading is not None:
             table_loading.visible = False
-        print(f"[perf] _flush_bump -> version={state.version} (total bumps={perf.version_bump_count})")
-        print(perf.report())
 
     def _sync_orientation(event=None):
         nonlocal _orientation_lock
@@ -1132,7 +1145,8 @@ def build_plot_selection_panel(
             state.col_dim = col_select.value
             _cancel_bump_timer(clear_loading=True)
             _rebuild_table()
-            state.version += 1
+            with measure_operation("selection.orientation"):
+                state.version += 1
         finally:
             _orientation_lock = False
 
@@ -1224,8 +1238,6 @@ def build_plot_selection_panel(
         _schedule_bump()
         edit_elapsed = (time.perf_counter() - t_edit) * 1000
         perf.edit_handler_ms.append(edit_elapsed)
-        print(f"[perf] on_edit ({row_key},{col})={new_value}: "
-              f"{edit_elapsed:.1f}ms (state->schedule, no Bokeh round-trip)")
 
     table.on_edit(_on_edit_cell)
 
