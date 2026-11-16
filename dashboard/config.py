@@ -8,6 +8,9 @@ import yaml
 from dotenv import load_dotenv
 from zarr_fuse import schema as zf_schema
 
+from dashboard.debug_log import debug, debug_enabled
+from dashboard.perf_summary import count, stage
+
 VIEWS_ENV_VAR = "ZF_VIEW_PATH"
 LEGACY_ENDPOINTS_ENV_VAR = "ENDPOINTS_PATH"
 SCHEMAS_ENV_VAR = "SCHEMAS_PATH"
@@ -39,10 +42,24 @@ _view_config_cache: dict[Path, dict] = {}
 def _parse_view_config(config_path: Path) -> dict:
     """Parse zf_view.yaml once and cache the result for the process lifetime."""
     key = config_path.resolve()
-    if key not in _view_config_cache:
-        with key.open("r", encoding="utf-8") as f:
-            _view_config_cache[key] = yaml.safe_load(f) or {}
-    return _view_config_cache[key]
+    cached = _view_config_cache.get(key)
+    if cached is not None:
+        count("config.cache_hit")
+        return cached
+    with stage("config.file.read"):
+        text = key.read_text(encoding="utf-8")
+    with stage("config.parse"):
+        parsed = yaml.safe_load(text) or {}
+    _view_config_cache[key] = parsed
+    return parsed
+
+
+def _load_schema_file(schema_path: Path) -> Any:
+    """Read and parse one schema YAML file, timing file I/O vs parse separately."""
+    with stage("schema.file.read"):
+        text = schema_path.read_text(encoding="utf-8")
+    with stage("schema.parse"):
+        return yaml.safe_load(text)
 
 
 @dataclass
@@ -219,13 +236,15 @@ def find_view_file() -> Path:
         env_path = os.getenv(LEGACY_ENDPOINTS_ENV_VAR)
         env_label = LEGACY_ENDPOINTS_ENV_VAR
         if env_path:
-            print("[config] find_view_file: ENDPOINTS_PATH is deprecated; use ZF_VIEW_PATH")
+            debug("[config] find_view_file: ENDPOINTS_PATH is deprecated; use ZF_VIEW_PATH")
 
     if env_path:
         path = Path(env_path).expanduser().resolve()
-        print(
-            f"[config] find_view_file: "
-            f"from ENV {env_label}={env_path} -> {path}"
+        debug(
+            "[config] find_view_file: from ENV %s=%s -> %s",
+            env_label,
+            env_path,
+            path,
         )
 
         if not path.exists():
@@ -427,9 +446,13 @@ def _read_schema_display(
     vertical_field: Optional[str],
     group_path: Optional[str],
 ) -> SchemaDisplayConfig:
-    print(f"[config] _read_schema_display: opening schema_path={schema_path} exists={schema_path.exists()}")
-    with schema_path.open("r", encoding="utf-8") as file:
-        schema = yaml.safe_load(file)
+    if debug_enabled():
+        debug(
+            "[config] _read_schema_display: opening schema_path=%s exists=%s",
+            schema_path,
+            schema_path.exists(),
+        )
+    schema = _load_schema_file(schema_path)
 
     def _find_data_node(node: Any) -> Optional[Dict[str, Any]]:
         if not isinstance(node, dict):
@@ -488,8 +511,7 @@ def read_variable_metadata(
     variable_name: str,
     group_path: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    with schema_path.open("r", encoding="utf-8") as file:
-        schema = yaml.safe_load(file)
+    schema = _load_schema_file(schema_path)
 
     def _find_data_node(node: Any) -> Optional[Dict[str, Any]]:
         if not isinstance(node, dict):
@@ -615,11 +637,12 @@ def _build_view_config(view_name: str, view_data: Dict[str, Any], base_dir: Path
             f"Schema file does not exist: {schema_file_path}"
         )
 
-    print(
-        f"[config] view={view_name} "
-        f"schema_path(raw)={schema_file} "
-        f"base_dir={base_dir} "
-        f"resolved={schema_file_path}"
+    debug(
+        "[config] view=%s schema_path(raw)=%s base_dir=%s resolved=%s",
+        view_name,
+        schema_file,
+        base_dir,
+        schema_file_path,
     )
 
     schema_for_display = SchemaConfig(
@@ -710,7 +733,12 @@ def load_views(config_path: Path) -> Dict[str, ViewConfig]:
         raise ValueError(f"Invalid view configuration format in {config_path}")
 
     base_dir = config_path.parent.parent
-    print(f"[config] load_views: config_path={config_path} config_path.parent={config_path.parent} base_dir={base_dir}")
+    debug(
+        "[config] load_views: config_path=%s config_path.parent=%s base_dir=%s",
+        config_path,
+        config_path.parent,
+        base_dir,
+    )
 
     views: Dict[str, ViewConfig] = {}
     for view_name, view_data in config.items():
