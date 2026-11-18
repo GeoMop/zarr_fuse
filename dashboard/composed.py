@@ -6,9 +6,9 @@ from bokeh.util.serialization import make_globally_unique_id
 from holoviews import streams
 
 from dashboard.config import find_view_file, get_default_endpoint_name, load_view_config, load_views
-from dashboard.data import load_data
+from dashboard.data import LocalClient, load_data
 from dashboard.map_views import build_map_view
-from dashboard.multi_time_views import build_timeseries_views
+from dashboard.multi_time_views import MapClickOperation, build_timeseries_views
 from dashboard.perf_summary import begin, end, measure_operation
 from dashboard.plot_selection import build_plot_selection_panel, resolve_available_dimensions
 from dashboard.profiling import operation, session, time_stage
@@ -194,6 +194,26 @@ def build_dashboard():
     tap_stream = streams.Tap(x=None, y=None)
 
     map_handlers = {"on_map_tap": lambda *_, **__: None}
+    map_click_state = MapClickOperation()
+    _map_click_generation = 0
+    _map_click_client: LocalClient | None = None
+
+    def _map_click_generation_value() -> int:
+        return _map_click_generation
+
+    def _invalidate_map_clicks() -> None:
+        nonlocal _map_click_generation
+        _map_click_generation += 1
+
+    def _map_click_client_factory() -> LocalClient:
+        nonlocal _map_click_client
+        if _map_click_client is None:
+            _map_click_client = LocalClient(data.client.views_path)
+        return _map_click_client
+
+    def _replace_map_click_client() -> None:
+        nonlocal _map_click_client
+        _map_click_client = None
 
     map_view, map_state = None, None
 
@@ -282,6 +302,7 @@ def build_dashboard():
 
     def _select_variable(var_name: str, label: str | None = None):
         if var_name != data.display_variable:
+            _invalidate_map_clicks()
             print(f"[variables] Changing from {data.display_variable} to {var_name}")
             data.display_variable = var_name
             loading_indicator.visible = True
@@ -396,6 +417,8 @@ def build_dashboard():
     def _switch_view(selected_view: str):
         nonlocal data, view_name
 
+        _invalidate_map_clicks()
+        _replace_map_click_client()
         view_name = selected_view
         view_obj = data.client.get_view(selected_view)
         data.view_name = selected_view
@@ -427,26 +450,15 @@ def build_dashboard():
         node_hint.visible = False
 
     def on_tap_event(*_):
-        if timeseries_loading.visible:
-            return  # debounce — already loading
+        x, y = tap_stream.x, tap_stream.y
+        if x is None or y is None:
+            return
+        if map_click_state.active:
+            return  # debounce — a map-click load is already running
         timeseries_loading.visible = True
-        # Capture coordinates at tap time (avoid stale values after delay)
-        _x, _y = tap_stream.x, tap_stream.y
-        doc = pn.state.curdoc
-
-        def _do_tap():
-            # The spinner is turned off by the deferred fetch loop inside
-            # on_map_tap once the last member's data has landed, not here.
-            map_handlers["on_map_tap"](_x, _y, loading=timeseries_loading)
-
-        if doc is not None:
-            # Use timeout, not next_tick — next_tick runs synchronously during
-            # document unlock, batching visible=True + visible=False together
-            # so the frontend never sees the spinner.  A small timeout lets the
-            # UI flush visible=True before the blocking I/O starts.
-            doc.add_timeout_callback(_do_tap, 100)
-        else:
-            _do_tap()
+        # The spinner is turned off by the map-click completion callback inside
+        # on_map_tap once the last member's data has landed, not here.
+        map_handlers["on_map_tap"](x, y, loading=timeseries_loading)
 
     top_left = _placeholder_root("stretch_both", "Loading map view...")
     top_right = _placeholder_root("stretch_both", "Loading plot selection...")
@@ -472,6 +484,10 @@ def build_dashboard():
                 new_map_state,
                 selection_state=selection_state,
                 render_spinner=render_spinner,
+                map_click_client=_map_click_client_factory,
+                map_click_state=map_click_state,
+                map_click_generation=_map_click_generation_value,
+                map_click_failure=_show_refresh_error,
             )
 
             map_handlers["on_map_tap"] = new_on_map_tap
@@ -504,6 +520,7 @@ def build_dashboard():
 
     def on_node_change(event):
         if event.new:
+            _invalidate_map_clicks()
             data.group_path = event.new
             selection_state.clear()
             loading_indicator.visible = True
@@ -550,6 +567,11 @@ def build_dashboard():
         def _run_reload():
             with measure_operation("data.reload", view=view_name):
                 try:
+                    # Invalidate map-click requests before the data changes.  A
+                    # new background client prevents new clicks from reusing the
+                    # old client's cache; already-running reads keep their client.
+                    _invalidate_map_clicks()
+                    _replace_map_click_client()
                     # Drop cached map/timeseries payloads; the zarr nodes reopen
                     # their dataset lazily so values are re-read from the store.
                     data.client.clear_cache()
@@ -682,6 +704,10 @@ def build_dashboard():
                             map_state,
                             selection_state=selection_state,
                             render_spinner=render_spinner,
+                            map_click_client=_map_click_client_factory,
+                            map_click_state=map_click_state,
+                            map_click_generation=_map_click_generation_value,
+                            map_click_failure=_show_refresh_error,
                         )
                     )
                 except Exception as exc:

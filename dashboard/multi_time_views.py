@@ -1,3 +1,6 @@
+import asyncio
+from dataclasses import dataclass
+
 import holoviews as hv
 import numpy as np
 import pandas as pd
@@ -9,6 +12,13 @@ from dashboard.config import _resolve_fields_for_group_raw
 from dashboard.debug_log import debug, debug_enabled
 from dashboard.perf_summary import Timer, count, measure_operation, stage
 from dashboard.profiling import operation, time_stage
+
+
+@dataclass
+class MapClickOperation:
+    """Explicit single-flight state for interactive map-click loading."""
+
+    active: bool = False
 
 
 def _resolve_marker_window(x_range, xlim, times):
@@ -88,7 +98,24 @@ def _resolve_tap_targets(x, y, clusters, all_meta, nearest_idx, min_dist, thresh
     return None
 
 
-def build_timeseries_views(data, map_state, selection_state, render_spinner=None):
+def build_timeseries_views(
+    data,
+    map_state,
+    selection_state,
+    render_spinner=None,
+    *,
+    map_click_client=None,
+    map_click_state=None,
+    map_click_generation=None,
+    map_click_failure=None,
+):
+    if map_click_client is None:
+        map_click_client = lambda: data.client
+    if map_click_state is None:
+        map_click_state = MapClickOperation()
+    if map_click_generation is None:
+        map_click_generation = lambda: 0
+
     _build_stage = time_stage("build_timeseries_views")
     view_config = data.client.get_view(data.view_name)
     defaults_config = view_config["defaults"]
@@ -625,25 +652,24 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         ],
     )
 
-    def _fill_registered_site(entity_index):
-        """Fetch the current variable's timeseries for a pre-registered site.
+    def _fetch_registered_site(client, view_name, group_path, variable, entity_index):
+        """Fetch one registered site without touching dashboard UI state.
 
-        The row is already visible in the plot-selection table (registered by
-        ``on_map_tap`` via ``register_site``); this call fills its data in
-        place so the plots update as each borehole's data arrives.  Returns
-        the resolved ``entity_index`` on success or ``None`` on failure.
+        This function runs in a worker thread.  It may use only the dedicated
+        background client and the captured request arguments.
         """
         _timer = Timer("fill_registered_site")
         print(f"[fill_ts] Filling registered idx={entity_index}")
-        if not data.display_variable:
+        if not variable:
             print(f"[fill_ts] No variable selected — skipping fill")
+            _timer.stop()
             return None
-        fig = data.client.get_timeseries_data(
-            data.view_name,
-            group_path=data.group_path,
+        fig = client.get_timeseries_data(
+            view_name,
+            group_path=group_path,
             lat=0.0,
             lon=0.0,
-            variable=data.display_variable,
+            variable=variable,
             entity_index=int(entity_index),
         )
         if fig.get("status") == "error":
@@ -665,18 +691,61 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
         if resolved_index != entity_index:
             print(f"[fill_ts] WARNING: resolved idx={resolved_index} != registered "
                   f"idx={entity_index} — filling the registered row")
-        with stage("selection.update"):
-            selection_state.fill_site(
-                entity_index,
-                series=series,
-                times=times,
-                depths=depths,
-            )
-        print(f"[plot_selection] Site filled: {entity_label}_{resolved_index}")
         _timer.stop()
+        return {
+            "resolved_index": resolved_index,
+            "series": series,
+            "times": times,
+            "depths": depths,
+        }
+
+    def _apply_registered_site(entity_index, payload):
+        """Apply one fetched payload to the registered selection row."""
+        if payload is None:
+            return None
+        with stage("selection.update"):
+            filled = selection_state.fill_site(
+                entity_index,
+                series=payload["series"],
+                times=payload["times"],
+                depths=payload["depths"],
+            )
+        if not filled:
+            print(f"[plot_selection] Fill skipped for idx={entity_index}: not registered")
+            return None
+        resolved_index = int(payload["resolved_index"])
+        print(f"[plot_selection] Site filled: {entity_label}_{resolved_index}")
         return resolved_index
 
-    def on_map_tap(x, y, loading=None):
+    def _map_click_request_is_current(generation, view_name, group_path, variable):
+        return (
+            generation == map_click_generation()
+            and data.view_name == view_name
+            and data.group_path == group_path
+            and data.display_variable == variable
+        )
+
+    def _apply_map_click_result(
+        generation, entity_index, payload, view_name, group_path, variable
+    ):
+        if not _map_click_request_is_current(
+            generation, view_name, group_path, variable
+        ):
+            return None
+        return _apply_registered_site(entity_index, payload)
+
+    def _finish_map_click(generation, failed, loading):
+        if loading is not None:
+            loading.visible = False
+        map_click_state.active = False
+        if (
+            failed
+            and generation == map_click_generation()
+            and map_click_failure is not None
+        ):
+            map_click_failure(failed)
+
+    def on_map_tap(x, y, loading=None, doc=None):
         if x is None or y is None:
             y, x, matched_meta = _default_coords()
             print(f"[tap] Initial load: using default coords y={y:.4f}, x={x:.4f}")
@@ -684,6 +753,9 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
             if entity_index is not None:
                 borehole_stream.event(borehole_index=entity_index)
             return entity_index
+
+        if map_click_state.active:
+            return None
 
         print(f"[tap] Click detected: x={x}, y={y}")
         lats_raw = map_state.get("lats")
@@ -744,40 +816,105 @@ def build_timeseries_views(data, map_state, selection_state, render_spinner=None
                 sid = meta_for_eidx.get(eidx) or f"{entity_label}_{eidx}"
             selection_state.register_site(eidx, sid)
 
+        generation = map_click_generation()
+        view_name = data.view_name
+        group_path = data.group_path
+        variable = data.display_variable
+        client = map_click_client()
+        target_doc = doc if doc is not None else pn.state.curdoc
         _select_op = operation("borehole.select", site=entity_label, count=len(targets))
+        map_click_state.active = True
 
-        def _do_deferred_fetch():
-            with measure_operation("borehole.select", site=entity_label, sites=len(targets)):
-                resolved_index = None
-                try:
-                    for target in targets:
-                        eidx = int(target["entity_index"])
-                        resolved = _fill_registered_site(eidx)
+        async def _load_targets():
+            failed: list[int] = []
+            try:
+                for target in targets:
+                    if generation != map_click_generation():
+                        break
+                    eidx = int(target["entity_index"])
+                    try:
+                        payload = await asyncio.to_thread(
+                            _fetch_registered_site,
+                            client,
+                            view_name,
+                            group_path,
+                            variable,
+                            eidx,
+                        )
+                    except Exception as exc:  # noqa: BLE001 - report and continue
+                        print(f"[tap] Fetch failed for idx={eidx}: {exc}")
+                        failed.append(eidx)
+                        continue
+                    if payload is None:
+                        failed.append(eidx)
+                        continue
+                    if generation != map_click_generation():
+                        break
+
+                    def _apply(eid=eidx, result=payload):
+                        try:
+                            resolved = _apply_map_click_result(
+                                generation,
+                                eid,
+                                result,
+                                view_name,
+                                group_path,
+                                variable,
+                            )
+                        except Exception as exc:  # noqa: BLE001 - report and continue
+                            print(f"[tap] Apply failed for idx={eid}: {exc}")
+                            resolved = None
                         if resolved is None:
-                            continue
-                        if resolved_index is None:
-                            resolved_index = resolved
-                    # No borehole_stream.event() here: every successful fill
-                    # bumps selection_state.version, which already refreshes
-                    # all three DynamicMaps. The stream event would only fire
-                    # a second, identical redraw (borehole_index is unused by
-                    # the plotting callbacks).
-                    return resolved_index
-                finally:
-                    if loading is not None:
-                        loading.visible = False
+                            failed.append(eid)
 
-        _wrapped = _select_op.wrap(_do_deferred_fetch, finish=True)
-        doc = pn.state.curdoc
-        if doc is not None:
-            # Small timeout (same trick as on_tap_event): the deferred fetch
-            # runs after the current callback yields, so the table row flush
-            # reaches the frontend before the blocking per-site fetches start.
-            # op.wrap reactivates borehole.select + current session in the
-            # timeout thread so the op spans scheduling delay + all fetches.
-            doc.add_timeout_callback(_wrapped, 100)
+                    target_doc.add_next_tick_callback(_select_op.wrap(_apply))
+            finally:
+                def _finish():
+                    _finish_map_click(generation, failed, loading)
+                    if failed and generation == map_click_generation():
+                        _select_op.finish(status="error")
+
+                target_doc.add_next_tick_callback(
+                    _select_op.wrap(_finish, finish=True)
+                )
+
+        if target_doc is not None:
+            asyncio.create_task(_select_op.wrap(_load_targets)())
         else:
-            _wrapped()
+            def _load_targets_sync():
+                failed: list[int] = []
+                try:
+                    with measure_operation(
+                        "borehole.select", site=entity_label, sites=len(targets)
+                    ):
+                        for target in targets:
+                            eidx = int(target["entity_index"])
+                            payload = _fetch_registered_site(
+                                client, view_name, group_path, variable, eidx
+                            )
+                            if payload is None:
+                                failed.append(eidx)
+                                continue
+                            try:
+                                resolved = _apply_map_click_result(
+                                    generation,
+                                    eidx,
+                                    payload,
+                                    view_name,
+                                    group_path,
+                                    variable,
+                                )
+                            except Exception as exc:  # noqa: BLE001 - report and continue
+                                print(f"[tap] Apply failed for idx={eidx}: {exc}")
+                                resolved = None
+                            if resolved is None:
+                                failed.append(eidx)
+                finally:
+                    _finish_map_click(generation, failed, loading)
+                    if failed and generation == map_click_generation():
+                        _select_op.finish(status="error")
+
+            _select_op.wrap(_load_targets_sync, finish=True)()
 
         return int(targets[0]["entity_index"]) if targets else None
 
