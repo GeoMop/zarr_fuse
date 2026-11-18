@@ -43,9 +43,14 @@ class LocalClient:
         self._timeseries_cache: Dict[str, Any] = {}
 
     def clear_cache(self):
-        """Clear all cached data"""
-        self._map_data_cache.clear()
-        self._timeseries_cache.clear()
+        """Replace the active caches so in-flight requests cannot repopulate them.
+
+        Requests capture the cache dictionary they start with, so replacing the
+        attribute here leaves any in-flight request writing to the old, detached
+        dictionary instead of the new active one.
+        """
+        self._map_data_cache = {}
+        self._timeseries_cache = {}
         print("[cache] Cleared all caches")
 
     def get_views(self) -> Dict[str, Any]:
@@ -173,10 +178,13 @@ class LocalClient:
         time_index: int = 0,
         depth_index: int = 0,
     ) -> dict[str, Any]:
-        # Check cache first
+        # Capture the active cache once; a concurrent clear_cache() replaces the
+        # attribute, so this request must keep using the dictionary it started
+        # with for both lookup and insertion.
+        cache = self._map_data_cache
         cache_key = f"{view_name}:{group_path}:{variable}:{time_index}:{depth_index}"
-        if hasattr(self, '_map_data_cache') and cache_key in getattr(self, '_map_data_cache', {}):
-            cached = self._map_data_cache[cache_key]
+        if cache_key in cache:
+            cached = cache[cache_key]
             print(f"[cache] get_map_data: cache hit for {variable}")
             count("map.cache_hit")
             return cached
@@ -421,8 +429,8 @@ class LocalClient:
                 "depth_index": selected_depth_index,
             }
         
-        # Cache the result
-        self._map_data_cache[cache_key] = result
+        # Cache the result in the dictionary captured at request start.
+        cache[cache_key] = result
         return result
 
     def get_timeseries_data(
@@ -448,12 +456,16 @@ class LocalClient:
         variable: str | None = None,
         entity_index: int | None = None,
     ) -> dict[str, Any]:
+        # Capture the active cache once; a concurrent clear_cache() replaces the
+        # attribute, so this request must keep using the dictionary it started
+        # with for both lookup and insertion.
+        cache = self._timeseries_cache
         # Check cache first - using location as part of key since timeseries is location-specific
         # Use higher precision here so nearby boreholes do not collapse
         # to the same cache entry when coordinates differ only slightly.
         cache_key = f"{view_name}:{group_path}:{variable}:{lat:.8f}:{lon:.8f}:{entity_index}"
-        if cache_key in self._timeseries_cache:
-            cached = self._timeseries_cache[cache_key]
+        if cache_key in cache:
+            cached = cache[cache_key]
             print(f"[cache] get_timeseries_data: cache hit for {variable}")
             count("timeseries.cache_hit")
             return cached
@@ -553,8 +565,8 @@ class LocalClient:
                 "borehole_name": entity_names[idx] if entity_names is not None else None,
             }
         
-        # Cache the result
-        self._timeseries_cache[cache_key] = result
+        # Cache the result in the dictionary captured at request start.
+        cache[cache_key] = result
         return result
 
 
