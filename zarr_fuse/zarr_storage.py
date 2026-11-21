@@ -809,6 +809,20 @@ class Node:
             ds[name].encoding.update(schema_vars[name].get_encoding())
         return ds
 
+    def _set_creation_chunks(self, ds: xr.Dataset) -> xr.Dataset:
+        """
+        Chunk the 1-D arrays of the first write by their coordinate's chunk_size.
+        N-D variables keep the first-write chunks: the default 1024 per
+        coordinate would make them huge.
+        """
+        for var in ds.variables.values():
+            if var.chunks is not None or len(var.dims) != 1:
+                continue
+            chunk_size = self.schema.COORDS[var.dims[0]].chunk_size
+            if chunk_size:
+                var.encoding["chunks"] = (int(chunk_size),)
+        return ds
+
     def write_ds(self, ds, **kwargs):
         ds.attrs = self.ensure_schema_attrs(ds.attrs)
         ds = self._coerce_encoding(ds)
@@ -889,6 +903,7 @@ class Node:
         # Store one disjoint extension slab per dimension.
         if ds_existing.attrs.get('__empty__', False):
             ds_update.attrs.pop('__empty__', None)
+            ds_update = self._set_creation_chunks(ds_update)
             return self.write_ds(ds_update, mode="a"), {}
 
         ds_update, split_indices = interpolate_ds(
