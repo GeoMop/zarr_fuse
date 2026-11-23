@@ -185,6 +185,7 @@ cython_debug/
 
 app/hlavo_surface/inputs/.env
 # Dashboard
+*_tile_url_cache.json
 dashboard/test_deployment/databuk/dashboard/node_modules/
 dashboard/test_deployment/databuk/dashboard/dist/
 dashboard/test_deployment/databuk/dashboard/.vite/

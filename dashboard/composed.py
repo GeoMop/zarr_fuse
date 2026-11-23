@@ -14,14 +14,16 @@ from dashboard.config import (
     load_views,
 )
 from dashboard.data import LocalClient, load_data
-from dashboard.map_views import build_map_view
+from dashboard.map_views import build_map_view, fetch_map_payload
 from dashboard.multi_time_views import (
     MapClickOperation,
     build_timeseries_views,
+    fetch_default_site_figure,
     fetch_registered_site_payload,
 )
-from dashboard.perf_summary import begin, end, measure_operation, stage
+from dashboard.perf_summary import measure_operation, stage
 from dashboard.plot_selection import (
+    SelectionState,
     build_plot_selection_panel,
     resolve_available_dimensions,
 )
@@ -49,8 +51,6 @@ pn.config.reconnect = True
 pn.config.notifications = True
 hv.extension("bokeh")
 hv.renderer("bokeh").theme = "dark_minimal"
-
-_POPULATE_PAUSE = 0.05
 
 
 def _placeholder_root(sizing_mode: str, label: str) -> pn.Column:
@@ -82,7 +82,7 @@ def _set_root(root: pn.Column, content: object, label: str = "") -> None:
 
 
 def _report_error(label: str, exc: BaseException) -> None:
-    """Print one traceback for a populate phase that failed."""
+    """Print a traceback for a dashboard operation that failed."""
     import traceback
 
     traceback.print_exc()
@@ -113,8 +113,6 @@ def _line_pane(content: object) -> pn.pane.HoloViews:
 
 
 def build_dashboard():
-    _build_stage = time_stage("build_dashboard")
-
     session_ctx = pn.state.curdoc.session_context if pn.state.curdoc and pn.state.curdoc.session_context else None
     session_id = session_ctx.id if session_ctx else "no-session"
     # Manual scopes (no re-indentation of the whole body): every timer created
@@ -124,7 +122,7 @@ def build_dashboard():
     _load_op = operation("dashboard.initial_load", session=session_id)
     _load_scope = _load_op.activate()
     _load_scope.__enter__()
-    _summary = begin("dashboard.initial_load")
+    _build_stage = time_stage("build_dashboard")
     print(f"[session] build_dashboard started session_id={session_id}")
 
     def _on_session_destroyed(session_context):
@@ -250,16 +248,15 @@ def build_dashboard():
         _replace_map_click_client()
         map_click_state.active_generation = None
 
-    map_view, map_state = None, None
+    map_state: dict = {}
 
     _current_var_label: str | None = None
     _suppress_variable_change = False
 
     def _fetch_and_show_metadata(var_name: str):
-        name_for_api = var_name
-        meta = data.client.get_variable_metadata(
-            data.view_name, data.group_path, name_for_api
-        )
+        _show_variable_metadata(data.client.get_variable_metadata(data.view_name, data.group_path, var_name))
+
+    def _show_variable_metadata(meta: dict | None) -> None:
         if meta:
             coords_text = ", ".join(meta.get("coords", []))
             unit_text = f" ({meta['unit']})" if meta.get("unit") else ""
@@ -278,61 +275,46 @@ def build_dashboard():
             )
             variable_metadata.visible = True
 
-    def _populate_variable_selector(view_name: str, group_path: str):
+    def _set_variable_options(variables: dict[str, str], default_var: str | None) -> str | None:
         nonlocal _current_var_label, _suppress_variable_change
+        var_name = default_var if default_var in variables else next(iter(variables), None)
+        if var_name is not None:
+            data.display_variable = var_name
+        if variable_selector is None:
+            return var_name
+
+        labels = {name: f"{name} ({unit})" if unit else name for name, unit in variables.items()}
+        var_label = labels.get(var_name)
+        _suppress_variable_change = True
+        try:
+            variable_selector.options = list(labels.values())
+            if var_label is not None:
+                _current_var_label = var_label
+            variable_selector.value = var_label
+            plot_var_selector.options = [var_label] if var_label is not None else []
+            if var_label is not None:
+                plot_var_selector.value = var_label
+            variable_metadata.visible = False
+        finally:
+            _suppress_variable_change = False
+        return var_name
+
+    def _populate_variable_selector(view_name: str, group_path: str):
         try:
             print(f"[variables] Loading for view={view_name}, group={group_path}")
             with time_stage("get_variables", view=view_name, group=group_path):
                 variables = data.client.get_variables(view_name, group_path)
-            print(f"[variables] Found: {len(variables)} variables")
-
             if variables:
-                var_options = [f"{name} ({unit})" if unit else name for name, unit in variables.items()]
-
-                for name, unit in variables.items():
-                    print(f"[variables]   - {name}: unit={unit}")
-
                 view_cfg = load_view_config(views_path, view_name)
                 default_var = view_cfg.defaults.display_variable if view_cfg.defaults else None
-
-                if default_var and default_var in variables:
-                    var_label = default_var + (f" ({variables[default_var]})" if variables[default_var] else "")
-                else:
-                    var_label = var_options[0] if var_options else None
-
-                # Changing options/value would otherwise fire the watcher once
-                # for the first option and once for the default, rebuilding all
-                # panes twice before the first real render.
-                _suppress_variable_change = True
-                try:
-                    variable_selector.options = var_options
-                    if var_label:
-                        var_name = var_label.split(" (")[0] if " (" in var_label else var_label
-                        _current_var_label = var_label
-                        data.display_variable = var_name
-                        variable_metadata.visible = False
-                        variable_selector.value = var_label
-                        plot_var_selector.options = [var_label]
-                        plot_var_selector.value = var_label
-                        _fetch_and_show_metadata(var_name)
-                    else:
-                        variable_selector.value = None
-                        data.display_variable = ""
-                        variable_metadata.visible = False
-                        plot_var_selector.options = []
-                finally:
-                    _suppress_variable_change = False
-
-                print(f"[variables] Loaded {len(variables)} variables successfully")
+                var_name = _set_variable_options(variables, default_var)
+                if var_name is not None:
+                    _fetch_and_show_metadata(var_name)
             else:
-                variable_selector.options = []
-                variable_metadata.visible = False
-                plot_var_selector.options = []
-                print(f"[variables] No variables in group {group_path}")
+                _set_variable_options({}, None)
+            print(f"[variables] Loaded {len(variables)} variables")
         except Exception as e:
-            variable_selector.options = []
-            variable_metadata.visible = False
-            plot_var_selector.options = []
+            _set_variable_options({}, None)
             print(f"[variables] ERROR: {e}")
 
     def _select_variable(var_name: str, label: str | None = None) -> None:
@@ -700,36 +682,28 @@ def build_dashboard():
             _wrapped()
 
     async def _populate() -> None:
-        """Fill the skeleton roots one pane at a time, in dependency order.
-
-        The first phase performs the only store round-trip of the initial load.
-        Every later phase is local work, and the pause after each phase gives
-        the browser time to show the pane that was just filled.
-        """
+        """Read the initial group and populate each pane as its data becomes available."""
         nonlocal structure, store_selector, node_select, variable_selector
         nonlocal variable_metadata, node_hint, store_info, reload_button
-        nonlocal selection_state, map_view, map_state
+        nonlocal selection_state, map_state
 
         with _load_op.activate():
-            _populate_stage = time_stage("populate_dashboard")
-            _status = "error"
-            try:
-                print(f"[populate] start session_id={session_id}")
+            populate_stage = time_stage("populate_dashboard")
+            status = "ok"
+            controls = ()
 
-                # Phase 1: opens the store; the sidebar needs its structure.
+            def report_failure(label: str, exc: Exception, *roots: pn.Column) -> None:
+                nonlocal status
+                status = "error"
+                _report_error(label, exc)
+                for root in roots:
+                    _set_root_error(root, label, exc)
+
+            print(f"[populate] start session_id={session_id}")
+            try:
                 try:
                     with time_stage("get_structure", view=view_name):
-                        structure = await asyncio.to_thread(
-                            data.client.get_structure, view_name
-                        )
-                except Exception as exc:
-                    _report_error("Data structure", exc)
-                    _set_root_error(controller, "Data structure", exc)
-                    return
-                await asyncio.sleep(_POPULATE_PAUSE)
-
-                # Phase 2: sidebar, then the group path taken from the tree.
-                try:
+                        structure = await asyncio.to_thread(data.client.get_structure, view_name)
                     (
                         controller_content,
                         store_selector,
@@ -747,23 +721,21 @@ def build_dashboard():
                         rendering_status=rendering_status,
                         table_loading=table_loading,
                     )
-                except Exception as exc:
-                    _report_error("Dataset panel", exc)
-                    _set_root_error(controller, "Dataset panel", exc)
-                    return
-                with time_stage("pane.attach", pane="controller"):
-                    controller.objects = controller_content.objects
-                    controller.styles = dict(controller_content.styles)
-                data.group_path = node_select.value
-                await asyncio.sleep(_POPULATE_PAUSE)
+                    data.group_path = node_select.value or data.group_path
+                    controls = (store_selector, node_select, variable_selector, reload_button)
+                    for control in controls:
+                        control.disabled = True
+                    with time_stage("pane.attach", pane="controller"):
+                        controller.objects = controller_content.objects
+                        controller.styles = dict(controller_content.styles)
+                except Exception as exc:  # noqa: BLE001 - keep other panes available
+                    report_failure("Dataset panel", exc, controller)
 
-                # Phase 3: plot selection table (depends on data.group_path).
                 try:
-                    view_cfg = data.client.get_view(view_name)
                     available_dims = resolve_available_dimensions(
-                        view_config=view_cfg,
+                        view_config=view,
                         group_path=data.group_path,
-                        schema_display=view_cfg.get("schema_display", {}),
+                        schema_display=view.get("schema_display", {}),
                     )
                     with time_stage("build_plot_selection_panel", view=view_name):
                         panel_table, selection_state = build_plot_selection_panel(
@@ -772,80 +744,130 @@ def build_dashboard():
                             plot_var_selector=plot_var_selector,
                             table_loading=table_loading,
                         )
-                except Exception as exc:
-                    _report_error("Plot selection", exc)
-                    _set_root_error(top_right, "Plot selection", exc)
-                else:
                     _set_root(top_right, panel_table, label="top_right")
-                await asyncio.sleep(_POPULATE_PAUSE)
+                except Exception as exc:  # noqa: BLE001 - plots can use selection without a table
+                    report_failure("Plot selection", exc, top_right)
+                    if selection_state is None:
+                        selection_state = SelectionState()
 
-                # Phase 4: map, the heaviest read after the structure.
+                # The tree determines the group. A configured variable lets the
+                # map read overlap discovery, using a separate store client.
+                group_path = data.group_path
+                configured_var = data.display_variable
+                initial_view = view_name
+                client = data.client
+                client_path = client.views_path
+
+                def read_map(variable: str) -> dict:
+                    return fetch_map_payload(LocalClient(client_path), initial_view, group_path, variable)
+
+                async def load_map(variable: str) -> dict | Exception:
+                    try:
+                        with time_stage("get_map_data", view=initial_view, group=group_path, variable=variable):
+                            return await asyncio.to_thread(read_map, variable)
+                    except Exception as exc:  # noqa: BLE001 - report only the selected variable's map failure
+                        return exc
+
+                async def load_metadata(variable: str) -> dict:
+                    try:
+                        # Metadata reads the schema file without touching the store client's caches.
+                        with time_stage("get_variable_metadata", view=initial_view, group=group_path):
+                            metadata = await asyncio.to_thread(
+                                client.get_variable_metadata, initial_view, group_path, variable,
+                            )
+                        if variable_metadata is not None and variables:
+                            _show_variable_metadata(metadata)
+                        return metadata or {}
+                    except Exception as exc:  # noqa: BLE001 - units and sidebar metadata are optional
+                        report_failure("Variable metadata", exc)
+                        return {}
+
+                initial_site = None
+                async with asyncio.TaskGroup() as tasks:
+                    map_task = tasks.create_task(load_map(configured_var)) if configured_var else None
+                    try:
+                        with time_stage("get_variables", view=initial_view, group=group_path):
+                            variables = await asyncio.to_thread(client.get_variables, initial_view, group_path)
+                        _set_variable_options(variables, configured_var)
+                    except Exception as exc:  # noqa: BLE001 - the configured variable can still be read
+                        variables = {}
+                        report_failure("Variables", exc)
+
+                    variable = data.display_variable
+                    metadata_task = tasks.create_task(load_metadata(variable)) if variable else None
+                    if map_task is not None and variable == configured_var:
+                        payload = await map_task
+                    else:
+                        if map_task is not None:
+                            map_task.cancel()
+                        payload = await load_map(variable)
+
+                    try:
+                        if isinstance(payload, Exception):
+                            raise payload
+                        map_view, map_state = build_map_view(data, tap_stream, map_payload=payload)
+                        _set_root(top_left, _map_pane(map_view), label="top_left")
+                        if node_hint is not None:
+                            update_data_warnings(map_state)
+                    except Exception as exc:  # noqa: BLE001 - keep the timeseries panes usable
+                        report_failure("Map view", exc, top_left)
+
+                    if variable:
+                        try:
+                            with time_stage("get_default_site", view=initial_view, group=group_path):
+                                initial_site = await asyncio.to_thread(
+                                    fetch_default_site_figure, client, initial_view, group_path,
+                                    variable, map_state, view.get("defaults", {}).get("default_site"),
+                                )
+                        except Exception as exc:  # noqa: BLE001 - interactive plots can open without default data
+                            report_failure("Default site", exc)
+                            rendering_status.object = f"⚠️ Default site failed: {str(exc)[:80]}"
+                            rendering_status.visible = True
+
+                line_roots = (bottom_left, bottom_mid, bottom_right)
                 try:
-                    map_view, map_state = await asyncio.to_thread(
-                        build_map_view, data, tap_stream
+                    left, mid, right, on_map_tap, fetch_site_entity = build_timeseries_views(
+                        data,
+                        map_state,
+                        selection_state=selection_state,
+                        render_spinner=render_spinner,
+                        map_click_client=_map_click_client_factory,
+                        map_click_state=map_click_state,
+                        map_click_generation=_map_click_generation_value,
+                        map_click_failure=_show_refresh_error,
+                        initial_site=initial_site,
+                        variable_metadata=metadata_task.result() if metadata_task is not None else {},
                     )
-                except Exception as exc:
-                    _report_error("Map view", exc)
-                    map_state = {}
-                    _set_root_error(top_left, "Map view", exc)
-                else:
-                    _set_root(top_left, _map_pane(map_view), label="top_left")
-                    update_data_warnings(map_state)
-                await asyncio.sleep(_POPULATE_PAUSE)
-
-                # Phase 5: variables; assigning the value triggers on_variable_change.
-                variable_selector.param.watch(on_variable_change, ["value"])
-                _populate_variable_selector(view_name, data.group_path)
-                await asyncio.sleep(_POPULATE_PAUSE)
-
-                # Phase 6: timeseries panes, then the default site fetch.
-                try:
-                    line_left, line_mid, line_right, on_map_tap, fetch_site_entity = (
-                        build_timeseries_views(
-                            data,
-                            map_state,
-                            selection_state=selection_state,
-                            render_spinner=render_spinner,
-                            map_click_client=_map_click_client_factory,
-                            map_click_state=map_click_state,
-                            map_click_generation=_map_click_generation_value,
-                            map_click_failure=_show_refresh_error,
-                        )
-                    )
-                except Exception as exc:
-                    _report_error("Timeseries", exc)
-                    for pane_root in (bottom_left, bottom_mid, bottom_right):
-                        _set_root_error(pane_root, "Timeseries", exc)
+                except Exception as exc:  # noqa: BLE001 - leave the map and table visible
+                    report_failure("Timeseries", exc, *line_roots)
                 else:
                     map_handlers["on_map_tap"] = on_map_tap
                     map_handlers["fetch_site"] = fetch_site_entity
-                    # Select the initial site before the panes exist so the
-                    # overlay update cannot race the pane layout pass, which
-                    # left the Plot Selection Tabulator unlaid out.
-                    on_map_tap(tap_stream.x, tap_stream.y)
-                    _set_root(bottom_left, _line_pane(line_left), label="bottom_left")
-                    _set_root(bottom_mid, _line_pane(line_mid), label="bottom_mid")
-                    _set_root(bottom_right, _line_pane(line_right), label="bottom_right")
+                    for root, line, label in zip(line_roots, (left, mid, right), ("bottom_left", "bottom_mid", "bottom_right")):
+                        try:
+                            _set_root(root, _line_pane(line), label=label)
+                        except Exception as exc:  # noqa: BLE001 - the other timeseries panes are independent
+                            report_failure(label, exc, root)
+                    tap_stream.param.watch(on_tap_event, ["x", "y"])
 
-                tap_stream.param.watch(on_tap_event, ["x", "y"])
-                await asyncio.sleep(_POPULATE_PAUSE)
-
-                # Phase 7: user actions go live only once everything is built.
-                node_select.param.watch(on_node_change, ["value"])
-                store_selector.param.watch(on_store_change, ["value"])
-                reload_button.on_click(on_reload)
-
-                _status = "ok"
-            except Exception as exc:
-                _report_error("Population", exc)
+                if controls:
+                    variable_selector.param.watch(on_variable_change, ["value"])
+                    node_select.param.watch(on_node_change, ["value"])
+                    store_selector.param.watch(on_store_change, ["value"])
+                    reload_button.on_click(on_reload)
+                    for control in controls:
+                        control.disabled = False
+            except asyncio.CancelledError:
+                status = "cancelled"
+                raise
+            except Exception as exc:  # noqa: BLE001 - report unexpected population errors
+                report_failure("Population", exc)
                 rendering_status.object = f"⚠️ Render error: {str(exc)[:80]}"
                 rendering_status.visible = True
             finally:
-                _populate_stage.log(status=_status)
-                _load_op.finish(status=_status, view=view_name, group=data.group_path)
-                if _summary is not None:
-                    end()
-                print(f"[populate] finished status={_status} session_id={session_id}")
+                populate_stage.log(status=status)
+                _load_op.finish(status=status, view=view_name, group=data.group_path)
+                print(f"[populate] finished status={status} session_id={session_id}")
 
     template = """
 {%% extends base %%}

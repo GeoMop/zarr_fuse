@@ -169,7 +169,7 @@ def _build_dashboard(monkeypatch) -> dict[str, object]:
     def fake_build_plot_selection_panel(*args, **kwargs):
         return _FakeWidget(), SelectionState()
 
-    def fake_build_map_view(data, tap_stream):
+    def fake_build_map_view(data, tap_stream, *, map_payload=None):
         return _FakeWidget(), {
             "lats": [47.0],
             "lons": [11.0],
@@ -258,8 +258,7 @@ def test_incomplete_interactive_tap_does_not_request_default_site(
 
     tap_stream = captured["tap_stream"]
     tap_calls = captured["tap_calls"]
-    assert tap_calls and tap_calls[0] == (None, None)
-    tap_calls.clear()
+    assert tap_calls == []
 
     tap_stream.x = x
     tap_stream.y = y

@@ -99,7 +99,7 @@ class _FakeData:
         self.client = _FakeClient()
         self.view_name = "A"
         self.group_path = "/"
-        self.display_variable = ""
+        self.display_variable = "old"
 
 
 class _FakeDocument:
@@ -285,6 +285,8 @@ def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False) -> di
     monkeypatch.setattr(composed, "load_views", lambda path: {"A": object()})
     monkeypatch.setattr(composed, "load_data", lambda *args, **kwargs: data)
     monkeypatch.setattr(composed, "LocalClient", fake_local_client)
+    monkeypatch.setattr(composed, "fetch_map_payload", lambda *args: {})
+    monkeypatch.setattr(composed, "fetch_default_site_figure", lambda *args: None)
     monkeypatch.setattr(composed, "fetch_registered_site_payload", fetch)
     monkeypatch.setattr(
         composed,

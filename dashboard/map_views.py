@@ -153,7 +153,17 @@ def _load_overlay(view_config):
     return gv.WMTS(tile_url).opts(alpha=0.9)
 
 
-def build_map_view(data, tap_stream):
+def fetch_map_payload(client, view_name: str, group_path: str, variable: str) -> dict:
+    """Read the map slice without constructing or updating any UI objects."""
+    if not variable:
+        return {"status": "error", "reason": "No variable selected"}
+    return client.get_map_data(
+        view_name, group_path=group_path, variable=variable, time_index=0, depth_index=0,
+    )
+
+
+def build_map_view(data, tap_stream, *, map_payload: dict | None = None):
+    """Build the map on the document thread from a supplied or freshly read slice."""
     _stage = time_stage("build_map_view")
     base_map = gvts.OSM()
 
@@ -265,16 +275,9 @@ def build_map_view(data, tap_stream):
         return callback
 
     default_display_variable = data.display_variable
-    if not default_display_variable:
-        fig = {"status": "error", "reason": "No variable selected"}
-    else:
-        fig = data.client.get_map_data(
-            data.view_name,
-            group_path=data.group_path,
-            variable=default_display_variable,
-            time_index=0,
-            depth_index=0,
-        )
+    fig = map_payload
+    if fig is None:
+        fig = fetch_map_payload(data.client, data.view_name, data.group_path, default_display_variable)
     total_points = 0  # Initialize for logging
     if fig.get("status") == "error":
         reason = fig.get("reason", "No map data available")

@@ -160,6 +160,39 @@ def _resolve_tap_targets(x, y, clusters, all_meta, nearest_idx, min_dist, thresh
     return None
 
 
+def _default_coords(map_state: dict, default_site_name: str | None):
+    lats = map_state.get("lats")
+    lons = map_state.get("lons")
+    if lats is None or lons is None:
+        lats = np.array([])
+        lons = np.array([])
+    if len(lats) == 0 or len(lons) == 0:
+        return 0.0, 0.0, None
+    if default_site_name:
+        all_meta = map_state.get("marker_meta") or []
+        for meta in all_meta:
+            if meta.get("site_id") == default_site_name:
+                idx = all_meta.index(meta)
+                return float(lats[idx]), float(lons[idx]), meta
+    return float(lats[0]), float(lons[0]), None
+
+
+def fetch_default_site_figure(
+    client: Any,
+    view_name: str,
+    group_path: str,
+    variable: str,
+    map_state: dict,
+    default_site_name: str | None,
+) -> dict:
+    """Read the default site's data using the usual map-based selection rule."""
+    lat, lon, marker = _default_coords(map_state, default_site_name)
+    return client.get_timeseries_data(
+        view_name, group_path=group_path, variable=variable, lat=lat, lon=lon,
+        entity_index=marker.get("entity_index") if marker is not None else None,
+    )
+
+
 def build_timeseries_views(
     data,
     map_state,
@@ -170,6 +203,8 @@ def build_timeseries_views(
     map_click_state=None,
     map_click_generation=None,
     map_click_failure=None,
+    initial_site: dict | None = None,
+    variable_metadata: dict | None = None,
 ):
     if map_click_client is None:
         map_click_client = lambda: data.client
@@ -194,9 +229,9 @@ def build_timeseries_views(
         or schema_display.get("display_variable")
         or "value"
     )
-    var_meta = data.client.get_variable_metadata(
-        data.view_name, data.group_path, metric_label
-    )
+    var_meta = variable_metadata
+    if var_meta is None:
+        var_meta = data.client.get_variable_metadata(data.view_name, data.group_path, metric_label)
     display_unit = var_meta.get("unit") if var_meta else None
     y_axis_label = f"{metric_label} ({display_unit})" if display_unit else metric_label
     entity_label = (
@@ -207,21 +242,58 @@ def build_timeseries_views(
     middle_window_days = timeseries_config["middle_window_days"]
     right_window_hours = timeseries_config["right_window_hours"]
 
-    def _default_coords():
-        lats = map_state.get("lats")
-        lons = map_state.get("lons")
-        if lats is None or lons is None:
-            lats = np.array([])
-            lons = np.array([])
-        if len(lats) == 0 or len(lons) == 0:
-            return 0.0, 0.0, None
-        if default_site_name:
-            all_meta = map_state.get("marker_meta") or []
-            for meta in all_meta:
-                if meta.get("site_id") == default_site_name:
-                    idx = all_meta.index(meta)
-                    return float(lats[idx]), float(lons[idx]), meta
-        return float(lats[0]), float(lons[0]), None
+    def _apply_site_figure(fig: dict) -> int | None:
+        """Apply a fetched time-series figure to the selection on the document thread."""
+        if fig.get("status") == "error":
+            reason = fig.get("reason", "Failed to load timeseries")
+            print(f"[fetch_ts] Error: {reason}")
+            count("fetch_timeseries.error")
+            return None
+
+        times = pd.to_datetime(fig.get("times", []))
+        depths = np.array(fig.get("depths", []), dtype=float)
+        series = [np.array(values, dtype=float) for values in fig.get("series", [])]
+        entity_index = int(fig.get("borehole_index", 0))
+        borehole_name = fig.get("borehole_name")
+
+        site_id = borehole_name if borehole_name else f"{entity_label}_{entity_index}"
+        with stage("selection.update"):
+            exists = any(s["entity_index"] == entity_index for s in selection_state.sites)
+            if exists:
+                # In-place refresh on a variable change: preserve identity, checked
+                # depths and table position.  If the new variable yields no series,
+                # blank the site (empty depths) so no stale old-variable data is
+                # drawn, and report it as no-data via the None return.
+                if not series:
+                    selection_state.update_site_data(
+                        entity_index,
+                        series=[],
+                        times=pd.to_datetime([]),
+                        depths=np.array([]),
+                    )
+                    print(f"[plot_selection] Site blanked (no data for variable): {site_id}")
+                    count("fetch_timeseries.blank")
+                    return None
+                selection_state.update_site_data(
+                    entity_index,
+                    series=series,
+                    times=times,
+                    depths=depths,
+                )
+                print(f"[plot_selection] Site updated: {site_id}")
+            else:
+                selection_state.add_site(
+                    entity_index=entity_index,
+                    site_id=site_id,
+                    depths=depths,
+                    series=series,
+                    times=times,
+                )
+                print(f"[plot_selection] Site added: {site_id}")
+        return entity_index
+
+    if initial_site is not None:
+        _apply_site_figure(initial_site)
 
     def _fetch_timeseries(lat, lon, marker_meta=None):
         """Fetch the current variable's timeseries and register a site.
@@ -248,56 +320,10 @@ def build_timeseries_views(
             variable=data.display_variable,
             entity_index=selected_entity_index,
         )
-        if fig.get("status") == "error":
-            reason = fig.get("reason", "Failed to load timeseries")
-            print(f"[fetch_ts] Error: {reason}")
+        try:
+            return _apply_site_figure(fig)
+        finally:
             _timer.stop()
-            count("fetch_timeseries.error")
-            return None
-
-        times = pd.to_datetime(fig.get("times", []))
-        depths = np.array(fig.get("depths", []), dtype=float)
-        series = [np.array(values, dtype=float) for values in fig.get("series", [])]
-        entity_index = int(fig.get("borehole_index", 0))
-        borehole_name = fig.get("borehole_name")
-
-        site_id = borehole_name if borehole_name else f"{entity_label}_{entity_index}"
-        with stage("selection.update"):
-            exists = any(s["entity_index"] == entity_index for s in selection_state.sites)
-            if exists:
-                # In-place refresh on a variable change: preserve identity, checked
-                # depths and table position.  If the new variable yields no series,
-                # blank the site (empty depths) so no stale old-variable data is
-                # drawn, and report it as no-data via the None return.
-                if not series:
-                    selection_state.update_site_data(
-                        entity_index,
-                        series=[],
-                        times=pd.to_datetime([]),
-                        depths=np.array([]),
-                    )
-                    print(f"[plot_selection] Site blanked (no data for variable): {site_id}")
-                    _timer.stop()
-                    count("fetch_timeseries.blank")
-                    return None
-                selection_state.update_site_data(
-                    entity_index,
-                    series=series,
-                    times=times,
-                    depths=depths,
-                )
-                print(f"[plot_selection] Site updated: {site_id}")
-            else:
-                selection_state.add_site(
-                    entity_index=entity_index,
-                    site_id=site_id,
-                    depths=depths,
-                    series=series,
-                    times=times,
-                )
-                print(f"[plot_selection] Site added: {site_id}")
-        _timer.stop()
-        return entity_index
 
     def build_timeseries_overlay(view="left"):
         max_points = 5000 if view == "left" else None
@@ -770,7 +796,7 @@ def build_timeseries_views(
 
     def on_map_tap(x, y, loading=None, doc=None):
         if x is None or y is None:
-            y, x, matched_meta = _default_coords()
+            y, x, matched_meta = _default_coords(map_state, default_site_name)
             print(f"[tap] Initial load: using default coords y={y:.4f}, x={x:.4f}")
             entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=matched_meta)
             if entity_index is not None:
