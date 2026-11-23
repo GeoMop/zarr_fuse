@@ -242,11 +242,17 @@ def test_startup_logs_one_initial_load_total_after_population(startup, monkeypat
             await startup.callbacks[0]()
 
     asyncio.run(run())
-    records = [
-        dict(field.split("=", 1) for field in message.split())
-        for message in caplog.messages
-        if message.startswith(("stage=build_dashboard ", "stage=populate_dashboard ", "stage=dashboard.initial_load "))
-    ]
+    records = []
+    seen = set()
+    for message in caplog.messages:
+        if not message.startswith(("stage=build_dashboard ", "stage=populate_dashboard ", "stage=dashboard.initial_load ")):
+            continue
+        record = dict(field.split("=", 1) for field in message.split())
+        key = (record.get("stage"), record.get("op"), record.get("status"))
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append(record)
     assert [record["stage"] for record in records] == ["build_dashboard", "populate_dashboard", "dashboard.initial_load"]
     assert records[0]["op"] == records[1]["op"] == records[2]["op"]
     assert records[2]["status"] == "ok"

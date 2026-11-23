@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,7 +12,9 @@ from holoviews import streams
 from dashboard.config import _resolve_fields_for_group_raw
 from dashboard.debug_log import debug, debug_enabled
 from dashboard.perf_summary import Timer, count, measure_operation, stage
-from dashboard.profiling import operation, time_stage
+from dashboard.profiling import log_message, operation, time_stage
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -40,9 +43,7 @@ def fetch_registered_site_payload(
     thread.
     """
     timer = Timer("fill_registered_site")
-    print(f"[fill_ts] Filling registered idx={entity_index}")
     if not variable:
-        print("[fill_ts] No variable selected — skipping fill")
         timer.stop()
         return None
     figure = client.get_timeseries_data(
@@ -55,7 +56,6 @@ def fetch_registered_site_payload(
     )
     if figure.get("status") == "error":
         reason = figure.get("reason", "Failed to load timeseries")
-        print(f"[fill_ts] Error: {reason}")
         timer.stop()
         count("fill_registered_site.error")
         return None
@@ -65,14 +65,14 @@ def fetch_registered_site_payload(
     series = [np.array(values, dtype=float) for values in figure.get("series", [])]
     resolved_index = int(figure.get("borehole_index", entity_index))
     if not series:
-        print(f"[fill_ts] No data for idx={resolved_index} — leaving row registered")
         timer.stop()
         count("fill_registered_site.no_data")
         return None
     if resolved_index != entity_index:
-        print(
-            f"[fill_ts] WARNING: resolved idx={resolved_index} != registered "
-            f"idx={entity_index} — filling the registered row"
+        logger.warning(
+            "[fill_ts] resolved idx=%s != registered idx=%s; filling registered row",
+            resolved_index,
+            entity_index,
         )
     timer.stop()
     return {
@@ -246,7 +246,6 @@ def build_timeseries_views(
         """Apply a fetched time-series figure to the selection on the document thread."""
         if fig.get("status") == "error":
             reason = fig.get("reason", "Failed to load timeseries")
-            print(f"[fetch_ts] Error: {reason}")
             count("fetch_timeseries.error")
             return None
 
@@ -271,7 +270,6 @@ def build_timeseries_views(
                         times=pd.to_datetime([]),
                         depths=np.array([]),
                     )
-                    print(f"[plot_selection] Site blanked (no data for variable): {site_id}")
                     count("fetch_timeseries.blank")
                     return None
                 selection_state.update_site_data(
@@ -280,7 +278,6 @@ def build_timeseries_views(
                     times=times,
                     depths=depths,
                 )
-                print(f"[plot_selection] Site updated: {site_id}")
             else:
                 selection_state.add_site(
                     entity_index=entity_index,
@@ -289,7 +286,6 @@ def build_timeseries_views(
                     series=series,
                     times=times,
                 )
-                print(f"[plot_selection] Site added: {site_id}")
         return entity_index
 
     if initial_site is not None:
@@ -303,15 +299,10 @@ def build_timeseries_views(
         report per-site failures without leaving stale data behind).
         """
         _timer = Timer("fetch_timeseries")
-        print(f"[fetch_ts] Called with lat={lat:.4f}, lon={lon:.4f}, marker_meta={marker_meta}")
         if not data.display_variable:
-            print(f"[fetch_ts] No variable selected — skipping fetch")
             return None
         marker_entity_index = marker_meta.get("entity_index") if isinstance(marker_meta, dict) else None
-        marker_site_id = marker_meta.get("site_id") if isinstance(marker_meta, dict) else None
         selected_entity_index = marker_entity_index
-        if marker_entity_index is not None:
-            print(f"[fetch_ts] Selected marker index={marker_entity_index}, site_id={marker_site_id}")
         fig = data.client.get_timeseries_data(
             data.view_name,
             group_path=data.group_path,
@@ -760,10 +751,8 @@ def build_timeseries_views(
                 depths=payload["depths"],
             )
         if not filled:
-            print(f"[plot_selection] Fill skipped for idx={entity_index}: not registered")
             return None
         resolved_index = int(payload["resolved_index"])
-        print(f"[plot_selection] Site filled: {entity_label}_{resolved_index}")
         return resolved_index
 
     def _map_click_request_is_current(generation, view_name, group_path, variable):
@@ -797,7 +786,6 @@ def build_timeseries_views(
     def on_map_tap(x, y, loading=None, doc=None):
         if x is None or y is None:
             y, x, matched_meta = _default_coords(map_state, default_site_name)
-            print(f"[tap] Initial load: using default coords y={y:.4f}, x={x:.4f}")
             entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=matched_meta)
             if entity_index is not None:
                 borehole_stream.event(borehole_index=entity_index)
@@ -805,14 +793,10 @@ def build_timeseries_views(
 
         if map_click_state.active:
             return None
-
-        print(f"[tap] Click detected: x={x}, y={y}")
         lats_raw = map_state.get("lats")
         lons_raw = map_state.get("lons")
         all_meta = map_state.get("marker_meta") or []
-        print(f"[tap] Computing nearest marker from {len(all_meta)} available markers")
         if lats_raw is None or lons_raw is None or not len(all_meta):
-            print(f"[tap] No markers available or missing lats/lons")
             if loading is not None:
                 loading.visible = False
             return None
@@ -821,7 +805,6 @@ def build_timeseries_views(
         lons = np.array(lons_raw, dtype=float)
         dist = (lats - float(y)) ** 2 + (lons - float(x)) ** 2
         nearest_idx = int(np.nanargmin(dist))
-        print(f"[tap] nearest_idx={nearest_idx}, distance={dist[nearest_idx]:.2e}")
         if not (0 <= nearest_idx < len(all_meta)):
             if loading is not None:
                 loading.visible = False
@@ -839,13 +822,10 @@ def build_timeseries_views(
             x, y, clusters, all_meta, nearest_idx, min_dist, threshold_deg
         )
         if targets is None:
-            print(f"[tap] Outside threshold ({min_dist:.2e} > {threshold_deg**2:.2e}): not selecting")
             if loading is not None:
                 loading.visible = False
             return None
-        if len(targets) > 1:
-            print(f"[tap] Merged cluster: adding {len(targets)} boreholes "
-                  f"{[t['entity_index'] for t in targets]}")
+        # Cluster merge is a normal interaction detail; no log by default.
 
         if loading is not None:
             loading.visible = True
@@ -890,8 +870,8 @@ def build_timeseries_views(
                             variable,
                             eidx,
                         )
-                    except Exception as exc:  # noqa: BLE001 - report and continue
-                        print(f"[tap] Fetch failed for idx={eidx}: {exc}")
+                    except Exception:  # noqa: BLE001 - report and continue
+                        logger.exception("[tap] failed to fetch site idx=%s", eidx)
                         failed.append(eidx)
                         continue
                     if payload is None:
@@ -910,8 +890,8 @@ def build_timeseries_views(
                                 group_path,
                                 variable,
                             )
-                        except Exception as exc:  # noqa: BLE001 - report and continue
-                            print(f"[tap] Apply failed for idx={eid}: {exc}")
+                        except Exception:  # noqa: BLE001 - report and continue
+                            logger.exception("[tap] failed to apply site idx=%s", eid)
                             resolved = None
                         if resolved is None:
                             failed.append(eid)
@@ -953,8 +933,8 @@ def build_timeseries_views(
                                     group_path,
                                     variable,
                                 )
-                            except Exception as exc:  # noqa: BLE001 - report and continue
-                                print(f"[tap] Apply failed for idx={eidx}: {exc}")
+                            except Exception:  # noqa: BLE001 - report and continue
+                                logger.exception("[tap] failed to apply site idx=%s", eidx)
                                 resolved = None
                             if resolved is None:
                                 failed.append(eidx)

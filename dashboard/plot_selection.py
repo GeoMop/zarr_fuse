@@ -19,10 +19,7 @@ from dashboard.profiling import log_message, profiling_enabled
 
 
 class _PerfMetrics:
-    """Collects lightweight performance counters for the plot selection table.
-
-    Reset via ``reset()``.  Read via ``report()``.
-    """
+    """Lightweight counters used by dashboard tests and diagnostics."""
 
     def __init__(self):
         self.reset()
@@ -33,6 +30,11 @@ class _PerfMetrics:
         self.version_bump_count = 0
         self.edit_handler_ms: list[float] = []
         self.rebuild_duration_ms: list[float] = []
+
+    def _append_bounded(self, bucket: list[float], value: float, limit: int = 512) -> None:
+        if len(bucket) >= limit:
+            bucket.pop(0)
+        bucket.append(value)
 
     def report(self) -> str:
         click_avg = (
@@ -52,7 +54,6 @@ class _PerfMetrics:
         )
 
     def log(self) -> None:
-        """Emit the current counters through the ``dashboard.performance`` logger."""
         if profiling_enabled():
             log_message(self.report())
 
@@ -219,7 +220,6 @@ class SelectionState(param.Parameterized):
         """
         for site in self._sites:
             if site["entity_index"] == entity_index:
-                print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
                 return
 
         depths_arr = np.asarray(depths, dtype=float).ravel()
@@ -241,8 +241,6 @@ class SelectionState(param.Parameterized):
         self._checked_count += len(finite_depths)
         self.layout_version += 1
         self._bump_version()
-        print(f"[SelectionState] Added site {site_id} (idx={entity_index}), "
-              f"depths={depths_arr.tolist()}")
 
     def remove_site(self, entity_index, bump_version: bool = True, bump_layout: bool = True):
         """Remove a site by its *entity_index*.  Triggers both counters."""
@@ -271,8 +269,6 @@ class SelectionState(param.Parameterized):
             self.layout_version += 1
         if bump_version:
             self._bump_version()
-        print(f"[SelectionState] Removed site {site_id} (idx={entity_index})")
-
     def register_site(self, entity_index, site_id):
         """Register a site row in the table without fetching any data.
 
@@ -285,7 +281,6 @@ class SelectionState(param.Parameterized):
         """
         for site in self._sites:
             if site["entity_index"] == entity_index:
-                print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
                 return
 
         self._cancel_panel_bump()
@@ -297,8 +292,6 @@ class SelectionState(param.Parameterized):
             "times": pd.to_datetime([]),
         })
         self.layout_version += 1
-        print(f"[SelectionState] Registered pending site {site_id} (idx={entity_index})")
-
     def fill_site(self, entity_index, series, times, depths) -> bool:
         """Populate a pending site (from ``register_site``) with fetched data.
 
@@ -335,9 +328,6 @@ class SelectionState(param.Parameterized):
         if depth_changed:
             with stage("fill_site.layout_notify"):
                 self.layout_version += 1
-            print(f"[SelectionState] Filled site idx={entity_index} (depths changed)")
-        else:
-            print(f"[SelectionState] Filled site idx={entity_index}")
         with stage("fill_site.version_notify"):
             self._bump_version()
         return True
@@ -394,9 +384,6 @@ class SelectionState(param.Parameterized):
         depth_changed = self._set_site_data(site, series, times, depths)
         if depth_changed:
             self.layout_version += 1
-            print(f"[SelectionState] Updated site idx={entity_index} (depths changed)")
-        else:
-            print(f"[SelectionState] Updated site idx={entity_index}")
         self._bump_version()
         return True
 
@@ -429,7 +416,6 @@ class SelectionState(param.Parameterized):
             if payload is None:
                 failed.append(entity_index)
                 self._set_site_data(site, [], pd.to_datetime([]), None)
-                print(f"[SelectionState] Cleared site idx={entity_index} (no data)")
             else:
                 pending = len(site["depths"]) == 0 and len(site["series"]) == 0
                 changed = self._set_site_data(
@@ -441,7 +427,6 @@ class SelectionState(param.Parameterized):
                 if pending:
                     self._check_site_depths(site)
                 depth_changed = depth_changed or changed
-                print(f"[SelectionState] Updated site idx={entity_index}")
             updated = True
 
         if depth_changed:
@@ -490,8 +475,6 @@ class SelectionState(param.Parameterized):
         self._checked_count = 0
         self.layout_version += 1
         self._bump_version(clear_loading=True)
-        print("[SelectionState] Cleared all sites")
-
     def restore_checked(self, saved: set[tuple[str, float]], *, bump_version: bool = True):
         """Prune the checked set to the *saved* ``(site_id, depth)`` keys.
 
@@ -1132,19 +1115,18 @@ def build_plot_selection_panel(
         perf.full_rebuild_count += 1
         t0 = time.perf_counter()
         try:
-            new_df, new_editors, new_formatters, _, _ = build_assignment_matrix(
-                state, state.row_dim, state.col_dim
-            )
-            new_hidden = _hidden_columns(new_df, state.row_dim)
-            _rebuild_col_styles()
-            table.value = new_df
-            table.editors = new_editors
-            table.formatters = new_formatters
-            table.hidden_columns = new_hidden
+            with stage("table.rebuild"):
+                new_df, new_editors, new_formatters, _, _ = build_assignment_matrix(
+                    state, state.row_dim, state.col_dim
+                )
+                new_hidden = _hidden_columns(new_df, state.row_dim)
+                _rebuild_col_styles()
+                table.value = new_df
+                table.editors = new_editors
+                table.formatters = new_formatters
+                table.hidden_columns = new_hidden
         finally:
-            elapsed = (time.perf_counter() - t0) * 1000
-            perf.rebuild_duration_ms.append(elapsed)
-            add_stage("table.rebuild", elapsed / 1000.0)
+            perf._append_bounded(perf.rebuild_duration_ms, (time.perf_counter() - t0) * 1000)
 
     def _cancel_bump_timer(*, clear_loading=False):
         nonlocal _bump_timer
@@ -1298,8 +1280,7 @@ def build_plot_selection_panel(
         state.set_checked(row_key, col, new_value, bump_version=False)
 
         _schedule_bump()
-        edit_elapsed = (time.perf_counter() - t_edit) * 1000
-        perf.edit_handler_ms.append(edit_elapsed)
+        perf._append_bounded(perf.edit_handler_ms, (time.perf_counter() - t_edit) * 1000)
 
     table.on_edit(_on_edit_cell)
 

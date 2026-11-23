@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Callable
 from functools import partial
 
@@ -27,8 +28,10 @@ from dashboard.plot_selection import (
     build_plot_selection_panel,
     resolve_available_dimensions,
 )
-from dashboard.profiling import operation, session, time_stage
+from dashboard.profiling import log_message, operation, session, time_stage
 from dashboard.sidebar import _flatten_nodes, build_sidebar
+
+logger = logging.getLogger(__name__)
 
 JS_FILES = {
     "jquery": "https://code.jquery.com/jquery-1.11.1.min.js",
@@ -82,11 +85,8 @@ def _set_root(root: pn.Column, content: object, label: str = "") -> None:
 
 
 def _report_error(label: str, exc: BaseException) -> None:
-    """Print a traceback for a dashboard operation that failed."""
-    import traceback
-
-    traceback.print_exc()
-    print(f"[populate] {label} failed: {exc}")
+    """Log a dashboard operation failure to the normal server log."""
+    logger.exception("[populate] %s failed", label)
 
 
 def _set_root_error(root: pn.Column, label: str, exc: BaseException) -> None:
@@ -123,18 +123,18 @@ def build_dashboard():
     _load_scope = _load_op.activate()
     _load_scope.__enter__()
     _build_stage = time_stage("build_dashboard")
-    print(f"[session] build_dashboard started session_id={session_id}")
+    print(f"[session] build_dashboard started session_id={session_id}", flush=True)
 
     def _on_session_destroyed(session_context):
         # Idempotent: finishes an initial_load left open by a failed build.
         _load_op.finish(status="error")
         sid = session_context.id if session_context is not None else session_id
-        print(f"[session] session destroyed session_id={sid}")
+        print(f"[session] session destroyed session_id={sid}", flush=True)
 
     pn.state.on_session_destroyed(_on_session_destroyed)
 
     views_path = find_view_file()
-    print(f"Using views config: {views_path}")
+    log_message(f"Using views config: {views_path}")
 
     configured_default = get_default_endpoint_name(views_path)
     views = load_views(views_path)
@@ -303,7 +303,7 @@ def build_dashboard():
 
     def _populate_variable_selector(view_name: str, group_path: str):
         try:
-            print(f"[variables] Loading for view={view_name}, group={group_path}")
+            log_message(f"[variables] Loading for view={view_name}, group={group_path}")
             with time_stage("get_variables", view=view_name, group=group_path):
                 variables = data.client.get_variables(view_name, group_path)
             if variables:
@@ -314,10 +314,9 @@ def build_dashboard():
                     _fetch_and_show_metadata(var_name)
             else:
                 _set_variable_options({}, None)
-            print(f"[variables] Loaded {len(variables)} variables")
-        except Exception as e:
+        except Exception:
             _set_variable_options({}, None)
-            print(f"[variables] ERROR: {e}")
+            logger.exception("[variables] failed to load variables for view=%s group=%s", view_name, group_path)
 
     def _select_variable(var_name: str, label: str | None = None) -> None:
         nonlocal variable_switch_task, variable_switch_active
@@ -336,7 +335,7 @@ def build_dashboard():
         target_doc = pn.state.curdoc
         switch_op = operation("variable.switch", variable=var_name)
 
-        print(f"[variables] Changing from {data.display_variable} to {var_name}")
+        log_message(f"[variables] Changing from {data.display_variable} to {var_name}")
         data.display_variable = var_name
         variable_switch_active = True
         loading_indicator.visible = True
@@ -349,16 +348,16 @@ def build_dashboard():
                 payload = fetch_registered_site_payload(
                     client, request_view, request_group, var_name, idx
                 )
-            except Exception as exc:  # noqa: BLE001 - report this site's failure and continue
-                print(f"[variables] Failed to load site idx={idx}: {exc}")
+            except Exception:  # noqa: BLE001 - report this site's failure and continue
+                logger.exception("[variables] failed to load site idx=%s variable=%s", idx, var_name)
                 payload = None
             return idx, payload
 
         def _fetch_metadata() -> dict:
             try:
                 return data.client.get_variable_metadata(request_view, request_group, var_name) or {}
-            except Exception as exc:  # noqa: BLE001 - metadata is optional for the switch
-                print(f"[variables] Failed to load metadata for {var_name}: {exc}")
+            except Exception:  # noqa: BLE001 - metadata is optional for the switch
+                logger.exception("[variables] failed to load metadata for %s", var_name)
                 return {}
 
         def _complete(
@@ -464,9 +463,6 @@ def build_dashboard():
                 result = map_handlers["fetch_site"](idx)
                 if result is None:
                     failed.append(idx)
-                    print(f"[refresh_views] Failed to refresh site idx={idx}")
-                else:
-                    print(f"[refresh_views] Refreshed site idx={idx}")
         finally:
             timeseries_loading.visible = False
         if failed:
@@ -688,12 +684,10 @@ def build_dashboard():
                         _refetch_sites()
                     refresh_views(rebuild_map=True)
                 except Exception as exc:  # noqa: BLE001 - surface any reload failure
-                    import traceback
-                    traceback.print_exc()
+                    logger.exception("[reload] failed")
                     rendering_status.object = f"⚠️ Reload failed: {str(exc)[:80]}"
                     rendering_status.visible = True
                     pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
-                    print(f"[reload] ERROR: {exc}")
                 finally:
                     loading_indicator.visible = False
 
@@ -722,7 +716,7 @@ def build_dashboard():
                 for root in roots:
                     _set_root_error(root, label, exc)
 
-            print(f"[populate] start session_id={session_id}")
+            log_message(f"[populate] start session_id={session_id}")
             try:
                 try:
                     with time_stage("get_structure", view=view_name):
@@ -890,7 +884,7 @@ def build_dashboard():
             finally:
                 populate_stage.log(status=status)
                 _load_op.finish(status=status, view=view_name, group=data.group_path)
-                print(f"[populate] finished status={status} session_id={session_id}")
+                log_message(f"[populate] finished status={status} session_id={session_id}")
 
     template = """
 {%% extends base %%}
@@ -1048,5 +1042,5 @@ myLayout.init();
     _load_scope.__exit__(None, None, None)
 
     pn.state.onload(_populate)
-    print(f"[session] build_dashboard ready session_id={session_id}")
+    log_message(f"[session] build_dashboard ready session_id={session_id}")
     return tmpl
