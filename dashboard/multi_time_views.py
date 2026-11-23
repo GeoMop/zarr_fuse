@@ -1,11 +1,11 @@
 import asyncio
 from dataclasses import dataclass
+from typing import Any
 
 import holoviews as hv
 import numpy as np
 import pandas as pd
 import panel as pn
-
 from holoviews import streams
 
 from dashboard.config import _resolve_fields_for_group_raw
@@ -18,7 +18,69 @@ from dashboard.profiling import operation, time_stage
 class MapClickOperation:
     """Explicit single-flight state for interactive map-click loading."""
 
-    active: bool = False
+    active_generation: int | None = None
+
+    @property
+    def active(self) -> bool:
+        """Whether a map read owns the click guard."""
+        return self.active_generation is not None
+
+
+def fetch_registered_site_payload(
+    client: Any,
+    view_name: str | None,
+    group_path: str,
+    variable: str | None,
+    entity_index: int,
+) -> dict[str, Any] | None:
+    """Fetch one registered site without touching dashboard UI state.
+
+    This function runs in a worker thread. It may use only the supplied client
+    and request arguments; callers apply any returned payload on the document
+    thread.
+    """
+    timer = Timer("fill_registered_site")
+    print(f"[fill_ts] Filling registered idx={entity_index}")
+    if not variable:
+        print("[fill_ts] No variable selected — skipping fill")
+        timer.stop()
+        return None
+    figure = client.get_timeseries_data(
+        view_name,
+        group_path=group_path,
+        lat=0.0,
+        lon=0.0,
+        variable=variable,
+        entity_index=int(entity_index),
+    )
+    if figure.get("status") == "error":
+        reason = figure.get("reason", "Failed to load timeseries")
+        print(f"[fill_ts] Error: {reason}")
+        timer.stop()
+        count("fill_registered_site.error")
+        return None
+
+    times = pd.to_datetime(figure.get("times", []))
+    depths = np.array(figure.get("depths", []), dtype=float)
+    series = [np.array(values, dtype=float) for values in figure.get("series", [])]
+    resolved_index = int(figure.get("borehole_index", entity_index))
+    if not series:
+        print(f"[fill_ts] No data for idx={resolved_index} — leaving row registered")
+        timer.stop()
+        count("fill_registered_site.no_data")
+        return None
+    if resolved_index != entity_index:
+        print(
+            f"[fill_ts] WARNING: resolved idx={resolved_index} != registered "
+            f"idx={entity_index} — filling the registered row"
+        )
+    timer.stop()
+    return {
+        "resolved_index": resolved_index,
+        "series": series,
+        "times": times,
+        "depths": depths,
+    }
 
 
 def _resolve_marker_window(x_range, xlim, times):
@@ -248,6 +310,22 @@ def build_timeseries_views(
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
 
         site_lookup = {s["entity_index"]: s for s in selection_state.sites}
+        cache = _left_curves if view == "left" else _full_curves
+        meta_cache = _left_meta if view == "left" else _full_meta
+        selected_set = set(selected_combos)
+
+        for key in list(cache):
+            entity_idx, depth_idx = key
+            site = site_lookup.get(entity_idx)
+            if (
+                key not in selected_set
+                or site is None
+                or depth_idx >= len(site["series"])
+                or len(site["series"][depth_idx]) == 0
+            ):
+                del cache[key]
+                meta_cache.pop(key, None)
+
         times = next(
             (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
             None,
@@ -269,25 +347,17 @@ def build_timeseries_views(
         row_dim = selection_state.row_dim
         col_dim = selection_state.col_dim
 
-        # Select per-combo cache for this view type
-        cache = _left_curves if view == "left" else _full_curves
-        meta_cache = _left_meta if view == "left" else _full_meta
-
-        selected_set = set(selected_combos)
-
-        # Remove stale entries (deselected combos)
-        for key in list(cache):
-            if key not in selected_set:
-                del cache[key]
-                meta_cache.pop(key, None)
-
         # Build only new / changed combos
         for entity_idx, depth_idx in selected_combos:
             key = (entity_idx, depth_idx)
             site = site_lookup.get(entity_idx)
-            if site is None or depth_idx >= len(site["series"]):
+            if (
+                site is None
+                or depth_idx >= len(site["series"])
+                or len(site["series"][depth_idx]) == 0
+            ):
                 debug(
-                    "[timeseries] SKIP combo entity=%s depth_idx=%s: site=None or series too short",
+                    "[timeseries] SKIP combo entity=%s depth_idx=%s: no usable series",
                     entity_idx,
                     depth_idx,
                 )
@@ -652,53 +722,6 @@ def build_timeseries_views(
         ],
     )
 
-    def _fetch_registered_site(client, view_name, group_path, variable, entity_index):
-        """Fetch one registered site without touching dashboard UI state.
-
-        This function runs in a worker thread.  It may use only the dedicated
-        background client and the captured request arguments.
-        """
-        _timer = Timer("fill_registered_site")
-        print(f"[fill_ts] Filling registered idx={entity_index}")
-        if not variable:
-            print(f"[fill_ts] No variable selected — skipping fill")
-            _timer.stop()
-            return None
-        fig = client.get_timeseries_data(
-            view_name,
-            group_path=group_path,
-            lat=0.0,
-            lon=0.0,
-            variable=variable,
-            entity_index=int(entity_index),
-        )
-        if fig.get("status") == "error":
-            reason = fig.get("reason", "Failed to load timeseries")
-            print(f"[fill_ts] Error: {reason}")
-            _timer.stop()
-            count("fill_registered_site.error")
-            return None
-
-        times = pd.to_datetime(fig.get("times", []))
-        depths = np.array(fig.get("depths", []), dtype=float)
-        series = [np.array(values, dtype=float) for values in fig.get("series", [])]
-        resolved_index = int(fig.get("borehole_index", entity_index))
-        if not series:
-            print(f"[fill_ts] No data for idx={resolved_index} — leaving row registered")
-            _timer.stop()
-            count("fill_registered_site.no_data")
-            return None
-        if resolved_index != entity_index:
-            print(f"[fill_ts] WARNING: resolved idx={resolved_index} != registered "
-                  f"idx={entity_index} — filling the registered row")
-        _timer.stop()
-        return {
-            "resolved_index": resolved_index,
-            "series": series,
-            "times": times,
-            "depths": depths,
-        }
-
     def _apply_registered_site(entity_index, payload):
         """Apply one fetched payload to the registered selection row."""
         if payload is None:
@@ -735,14 +758,14 @@ def build_timeseries_views(
         return _apply_registered_site(entity_index, payload)
 
     def _finish_map_click(generation, failed, loading):
+        if map_click_state.active_generation != generation:
+            return
+        map_click_state.active_generation = None
+        if generation != map_click_generation():
+            return
         if loading is not None:
             loading.visible = False
-        map_click_state.active = False
-        if (
-            failed
-            and generation == map_click_generation()
-            and map_click_failure is not None
-        ):
+        if failed and map_click_failure is not None:
             map_click_failure(failed)
 
     def on_map_tap(x, y, loading=None, doc=None):
@@ -823,7 +846,7 @@ def build_timeseries_views(
         client = map_click_client()
         target_doc = doc if doc is not None else pn.state.curdoc
         _select_op = operation("borehole.select", site=entity_label, count=len(targets))
-        map_click_state.active = True
+        map_click_state.active_generation = generation
 
         async def _load_targets():
             failed: list[int] = []
@@ -834,7 +857,7 @@ def build_timeseries_views(
                     eidx = int(target["entity_index"])
                     try:
                         payload = await asyncio.to_thread(
-                            _fetch_registered_site,
+                            fetch_registered_site_payload,
                             client,
                             view_name,
                             group_path,
@@ -889,7 +912,7 @@ def build_timeseries_views(
                     ):
                         for target in targets:
                             eidx = int(target["entity_index"])
-                            payload = _fetch_registered_site(
+                            payload = fetch_registered_site_payload(
                                 client, view_name, group_path, variable, eidx
                             )
                             if payload is None:

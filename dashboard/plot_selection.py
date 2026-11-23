@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -312,17 +314,11 @@ class SelectionState(param.Parameterized):
         Returns ``False`` when no site with *entity_index* is registered (the
         caller should ``register_site`` then ``fill_site`` instead).
         """
-        site = None
-        for s in self._sites:
-            if s["entity_index"] == entity_index:
-                site = s
-                break
+        site = self._find_site(entity_index)
         if site is None:
             return False
 
         depths_arr = np.asarray(depths, dtype=float).ravel()
-        finite_depths = [float(d) for d in depths_arr if np.isfinite(float(d))]
-
         depth_changed = False
         old_depths = np.asarray(site["depths"]).ravel()
         if not np.array_equal(old_depths, depths_arr, equal_nan=True):
@@ -334,11 +330,7 @@ class SelectionState(param.Parameterized):
         site["series"] = series
         site["times"] = times
 
-        for dv in finite_depths:
-            key = (str(site["site_id"]), dv)
-            if key not in self._checked:
-                self._checked.add(key)
-                self._checked_count += 1
+        self._check_site_depths(site)
 
         if depth_changed:
             with stage("fill_site.layout_notify"):
@@ -350,39 +342,56 @@ class SelectionState(param.Parameterized):
             self._bump_version()
         return True
 
-    def update_site_data(self, entity_index, series, times, depths=None) -> bool:
-        """Replace an existing site's series/times in place.
+    def _find_site(self, entity_index: int) -> dict[str, Any] | None:
+        for site in self._sites:
+            if site["entity_index"] == entity_index:
+                return site
+        return None
 
-        Used on a variable change to refresh data without clearing and
-        re-adding (which would rebuild the table).  The site's identity,
-        checked depths and row/column position are preserved.  Only the
-        *version* is bumped (redraw plots) unless the depth set changed, in
-        which case *layout_version* is also bumped (rebuild table).
+    def _check_site_depths(self, site: dict[str, Any]) -> None:
+        for value in site["depths"]:
+            depth = float(value)
+            key = (site["site_id"], depth)
+            if np.isfinite(depth) and key not in self._checked:
+                self._checked.add(key)
+                self._checked_count += 1
 
-        Returns ``True`` if the site was updated, ``False`` if no site with
-        *entity_index* exists (the caller should ``add_site`` instead).
-        """
-        site = None
-        for s in self._sites:
-            if s["entity_index"] == entity_index:
-                site = s
-                break
-        if site is None:
-            return False
-
+    def _set_site_data(
+        self,
+        site: dict[str, Any],
+        series: Any,
+        times: Any,
+        depths: Any | None,
+    ) -> bool:
         site["times"] = times
         site["series"] = series
 
-        depth_changed = False
-        if depths is not None:
-            new_depths = np.asarray(depths, dtype=float).ravel()
-            old_depths = np.asarray(site["depths"]).ravel()
-            if not np.array_equal(old_depths, new_depths, equal_nan=True):
-                old_depth_count = self._depth_count_for(site["site_id"])
-                site["depths"] = new_depths
-                self._reconcile_checked(site, old_depth_count)
-                depth_changed = True
+        if depths is None:
+            return False
 
+        new_depths = np.asarray(depths, dtype=float).ravel()
+        old_depths = np.asarray(site["depths"]).ravel()
+        if np.array_equal(old_depths, new_depths, equal_nan=True):
+            return False
+
+        old_depth_count = self._depth_count_for(site["site_id"])
+        site["depths"] = new_depths
+        self._reconcile_checked(site, old_depth_count)
+        return True
+
+    def update_site_data(self, entity_index, series, times, depths=None) -> bool:
+        """Replace an existing site's series/times in place.
+
+        The site's identity, checked depths and row/column position are
+        preserved.  Only *version* is bumped unless the depth set changed, in
+        which case *layout_version* is also bumped.  Returns ``True`` when a
+        matching site was updated.
+        """
+        site = self._find_site(entity_index)
+        if site is None:
+            return False
+
+        depth_changed = self._set_site_data(site, series, times, depths)
         if depth_changed:
             self.layout_version += 1
             print(f"[SelectionState] Updated site idx={entity_index} (depths changed)")
@@ -390,6 +399,59 @@ class SelectionState(param.Parameterized):
             print(f"[SelectionState] Updated site idx={entity_index}")
         self._bump_version()
         return True
+
+    def update_sites_data(
+        self,
+        updates: Sequence[tuple[int, dict[str, Any] | None]],
+        *,
+        notify_version: bool = True,
+    ) -> list[int]:
+        """Apply a batch of site payloads and advance the plot version once.
+
+        A ``None`` payload clears the site's curves while keeping its depths,
+        identity and checked combinations, so a failed variable fetch cannot
+        leave old-variable data visible.  Returns entity indices that were not
+        registered or had no payload.
+
+        Use ``notify_version=False`` when replacing the plots immediately after the
+        batch. The plot version still advances, and layout changes still notify.
+        """
+        updated = False
+        depth_changed = False
+        failed: list[int] = []
+
+        for entity_index, payload in updates:
+            site = self._find_site(entity_index)
+            if site is None:
+                failed.append(entity_index)
+                continue
+
+            if payload is None:
+                failed.append(entity_index)
+                self._set_site_data(site, [], pd.to_datetime([]), None)
+                print(f"[SelectionState] Cleared site idx={entity_index} (no data)")
+            else:
+                pending = len(site["depths"]) == 0 and len(site["series"]) == 0
+                changed = self._set_site_data(
+                    site,
+                    payload["series"],
+                    payload["times"],
+                    payload["depths"],
+                )
+                if pending:
+                    self._check_site_depths(site)
+                depth_changed = depth_changed or changed
+                print(f"[SelectionState] Updated site idx={entity_index}")
+            updated = True
+
+        if depth_changed:
+            self.layout_version += 1
+        if updated and notify_version:
+            self._bump_version(clear_loading=True)
+        elif updated:
+            with param.parameterized.discard_events(self):
+                self._bump_version(clear_loading=True)
+        return failed
 
     def _reconcile_checked(self, site, old_depth_count: int):
         """Prune checked keys that no longer map to valid depths on *site*.

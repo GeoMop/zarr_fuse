@@ -129,3 +129,71 @@ class TestUpdateSiteData:
         # BH-1 now has `finite` depths while BH-2 keeps its 3 depths.
         assert state._valid_count == 3 + finite
         assert state._checked_count == len(state._checked)
+
+
+class TestUpdateSitesData:
+    def test_batch_bumps_version_once_for_all_sites(self):
+        state = _make_state()
+        checked_before = state.checked_combinations()
+        identities = [(s["entity_index"], s["site_id"]) for s in state.sites]
+        v0, l0 = state.version, state.layout_version
+        times = ["2020-03-01", "2020-03-02", "2020-03-03"]
+        updates = [
+            (0, {
+                "series": [[10] * 3, [20] * 3, [30] * 3],
+                "times": times,
+                "depths": [0.0, 1.0, 2.0],
+            }),
+            (1, {
+                "series": [[40] * 3, [50] * 3, [60] * 3],
+                "times": times,
+                "depths": [1.0, 2.0, 3.0],
+            }),
+        ]
+
+        failed = state.update_sites_data(updates)
+
+        assert failed == []
+        assert state.version == v0 + 1
+        assert state.layout_version == l0
+        assert [(s["entity_index"], s["site_id"]) for s in state.sites] == identities
+        assert state.checked_combinations() == checked_before
+        assert [s["series"][0][0] for s in state.sites] == [10, 40]
+
+    def test_none_payload_clears_data_but_preserves_depths_and_checks(self):
+        state = _make_state()
+        checked_before = state.checked_combinations()
+        depths_before = [list(s["depths"]) for s in state.sites]
+        v0, l0 = state.version, state.layout_version
+
+        failed = state.update_sites_data([(1, None)])
+
+        assert failed == [1]
+        assert state.version == v0 + 1
+        assert state.layout_version == l0
+        assert state.sites[1]["series"] == []
+        assert len(state.sites[1]["times"]) == 0
+        assert list(state.sites[1]["depths"]) == depths_before[1]
+        assert state.checked_combinations() == checked_before
+
+    def test_changed_depths_bump_layout_once_for_batch(self):
+        state = _make_state()
+        v0, l0 = state.version, state.layout_version
+        times = ["2020-03-01", "2020-03-02", "2020-03-03"]
+        updates = [
+            (0, {
+                "series": [[10] * 3, [20] * 3],
+                "times": times,
+                "depths": [1.0, 2.0],
+            }),
+            (1, {
+                "series": [[30] * 3, [40] * 3],
+                "times": times,
+                "depths": [2.0, 3.0],
+            }),
+        ]
+
+        state.update_sites_data(updates)
+
+        assert state.version == v0 + 1
+        assert state.layout_version == l0 + 1

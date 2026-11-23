@@ -295,11 +295,13 @@ def test_reload_invalidates_inflight_request_and_replaces_client() -> None:
         )
         doc = _FakeDocument()
         on_map_tap = views[3]
+        loading = SimpleNamespace(visible=False)
 
-        assert on_map_tap(11.0, 47.0, doc=doc) == 7
+        assert on_map_tap(11.0, 47.0, loading=loading, doc=doc) == 7
         await _wait_for_event(old_gate.entered)
 
         generation[0] += 1
+        loading.visible = True  # The foreground request now owns the spinner.
         clients[0] = new_client
         old_gate.release.set()
         await _wait_for_callbacks(doc, 1)
@@ -307,6 +309,7 @@ def test_reload_invalidates_inflight_request_and_replaces_client() -> None:
 
         assert state.sites[0]["series"] == [], "stale result must be discarded"
         assert operation.active is False
+        assert loading.visible, "stale completion must leave the new operation's spinner alone"
 
         assert on_map_tap(11.0, 47.0, doc=doc) == 7
         await _wait_for_callbacks(doc, 2)
