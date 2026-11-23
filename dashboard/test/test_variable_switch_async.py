@@ -153,7 +153,7 @@ def _payload(entity_index: int, value: float) -> dict:
     }
 
 
-def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False) -> dict[str, object]:
+def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False, metadata=None) -> dict[str, object]:
     captured: dict[str, object] = {
         "clients": [],
         "calls": [],
@@ -199,6 +199,8 @@ def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False) -> di
         captured["store_selector"] = store_selector
         captured["node_select"] = node_select
         captured["variable_selector"] = variable_selector
+        variable_metadata = kwargs.get("variable_metadata", _Widget(visible=False))
+        captured["variable_metadata"] = variable_metadata
         captured["loading_indicator"] = kwargs["loading_indicator"]
         captured["timeseries_loading"] = kwargs["timeseries_loading"]
         captured["rendering_status"] = kwargs["rendering_status"]
@@ -207,7 +209,7 @@ def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False) -> di
             store_selector,
             node_select,
             variable_selector,
-            _Widget(visible=False),
+            variable_metadata,
             _Widget(visible=False),
             _Widget(),
             _Widget(),
@@ -245,6 +247,7 @@ def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False) -> di
 
     def fake_build_timeseries_views(*args, **kwargs):
         captured["refresh_count"] += 1
+        captured["refresh_metadata"] = kwargs.get("variable_metadata")
         if real_map_clicks:
             left, mid, right, on_map_tap, fetch_site = multi_time_views.build_timeseries_views(
                 *args, **kwargs
@@ -288,6 +291,24 @@ def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False) -> di
     monkeypatch.setattr(composed, "fetch_map_payload", lambda *args: {})
     monkeypatch.setattr(composed, "fetch_default_site_figure", lambda *args: None)
     monkeypatch.setattr(composed, "fetch_registered_site_payload", fetch)
+    captured["errors"] = []
+    orig_report = composed._report_error
+
+    def report(label, exc):
+        captured["errors"].append((label, str(exc)))
+        orig_report(label, exc)
+
+    monkeypatch.setattr(composed, "_report_error", report)
+    if metadata is not None:
+        captured["metadata_calls"] = []
+        captured["metadata_threads"] = []
+
+        def fake_metadata(view_name, group_path, variable):
+            captured["metadata_calls"].append((view_name, group_path, variable))
+            captured["metadata_threads"].append(threading.get_ident())
+            return metadata(view_name, group_path, variable) if callable(metadata) else metadata
+
+        data.client.get_variable_metadata = fake_metadata
     monkeypatch.setattr(
         composed,
         "load_view_config",
@@ -711,3 +732,45 @@ def test_background_client_setup_failure_releases_loading_state(monkeypatch) -> 
     status = next(widget for widget in captured["widgets"] if widget._kwargs.get("alert_type") == "danger")
     assert status.visible
     assert "client setup failed" in status.object
+
+
+@pytest.mark.parametrize(
+    "metadata_value",
+    [{"name": "new", "unit": "m", "description": "desc", "coords": ["time"]}, None],
+)
+def test_variable_switch_fetches_metadata_once_off_ui_thread(monkeypatch, metadata_value) -> None:
+    """Metadata is read once in background and reused by sidebar and rebuilt plots."""
+    main_thread = threading.get_ident()
+    gate = _Gate()
+
+    def fetch(client, view_name, group_path, variable, entity_index):
+        gate.entered.set()
+        assert gate.release.wait(timeout=5)
+        return _payload(entity_index, 60.0)
+
+    captured = _build_dashboard(
+        monkeypatch,
+        fetch,
+        metadata=lambda *_: metadata_value,
+    )
+    doc = captured["doc"]
+    metadata_widget = captured["variable_metadata"]
+    metadata_widget.visible = True
+    metadata_widget.object = "stale"
+
+    async def scenario() -> None:
+        _select(captured, "new (u)")
+        await _wait_for(gate.entered.is_set)
+        gate.release.set()
+        await _wait_for_callbacks(doc, 1)
+        doc.drain()
+
+    asyncio.run(scenario())
+    assert captured["metadata_calls"] == [("A", "/", "old"), ("A", "/", "new")]
+    assert captured["metadata_threads"][-1] != main_thread
+    assert captured["refresh_metadata"] == (metadata_value or {})
+    if metadata_value is None:
+        assert not metadata_widget.visible
+    else:
+        assert metadata_widget.visible
+        assert "m" in metadata_widget.object

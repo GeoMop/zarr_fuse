@@ -274,6 +274,8 @@ def build_dashboard():
                 "</div></div>"
             )
             variable_metadata.visible = True
+        else:
+            variable_metadata.visible = False
 
     def _set_variable_options(variables: dict[str, str], default_var: str | None) -> str | None:
         nonlocal _current_var_label, _suppress_variable_change
@@ -352,7 +354,16 @@ def build_dashboard():
                 payload = None
             return idx, payload
 
-        def _complete(get_results: Callable[[], list[tuple[int, dict | None]]]) -> None:
+        def _fetch_metadata() -> dict:
+            try:
+                return data.client.get_variable_metadata(request_view, request_group, var_name) or {}
+            except Exception as exc:  # noqa: BLE001 - metadata is optional for the switch
+                print(f"[variables] Failed to load metadata for {var_name}: {exc}")
+                return {}
+
+        def _complete(
+            get_results: Callable[[], tuple[list[tuple[int, dict | None]], dict]],
+        ) -> None:
             status = "cancelled"
             try:
                 if (
@@ -364,12 +375,12 @@ def build_dashboard():
                     return
 
                 with measure_operation("variable.switch", variable=var_name):
-                    results = get_results()
+                    results, metadata = get_results()
                     with stage("selection.update"):
                         # Replacement plots render the batch when they are attached.
                         failed = selection_state.update_sites_data(results, notify_version=False)
-                    refresh_views(rebuild_map=False)
-                    _fetch_and_show_metadata(var_name)
+                    refresh_views(rebuild_map=False, variable_metadata=metadata)
+                    _show_variable_metadata(metadata)
                 if failed:
                     _show_refresh_error(failed)
                 status = "error" if failed else "ok"
@@ -390,16 +401,25 @@ def build_dashboard():
                     _clear_variable_switch()
                 switch_op.finish(status=status)
 
-        async def _load() -> list[tuple[int, dict | None]]:
+        async def _load() -> tuple[list[tuple[int, dict | None]], dict]:
             client = LocalClient(views_path)
-            results = []
-            for idx in entity_indices:
-                results.append(await asyncio.to_thread(_fetch_site, client, idx))
-            return results
+            metadata_task = asyncio.create_task(asyncio.to_thread(_fetch_metadata))
+            try:
+                results = []
+                for idx in entity_indices:
+                    results.append(await asyncio.to_thread(_fetch_site, client, idx))
+                return results, await metadata_task
+            except asyncio.CancelledError:
+                metadata_task.cancel()
+                try:
+                    await metadata_task
+                except asyncio.CancelledError:
+                    pass
+                raise
 
-        def _load_sync() -> list[tuple[int, dict | None]]:
+        def _load_sync() -> tuple[list[tuple[int, dict | None]], dict]:
             client = LocalClient(views_path)
-            return [_fetch_site(client, idx) for idx in entity_indices]
+            return [_fetch_site(client, idx) for idx in entity_indices], _fetch_metadata()
 
         complete_sync = switch_op.wrap(partial(_complete, _load_sync))
         if target_doc is None:
@@ -410,7 +430,9 @@ def build_dashboard():
         except RuntimeError:
             target_doc.add_next_tick_callback(complete_sync)
         else:
-            def _loaded(task: asyncio.Task[list[tuple[int, dict | None]]]) -> None:
+            def _loaded(
+                task: asyncio.Task[tuple[list[tuple[int, dict | None]], dict]],
+            ) -> None:
                 if generation != _map_click_generation_value():
                     if not task.cancelled():
                         task.exception()
@@ -547,7 +569,7 @@ def build_dashboard():
     bottom_mid = _placeholder_root("stretch_both", "Loading month timeseries...")
     bottom_right = _placeholder_root("stretch_both", "Loading day timeseries...")
 
-    def refresh_views(rebuild_map: bool = True):
+    def refresh_views(rebuild_map: bool = True, *, variable_metadata: dict | None = None):
         with time_stage("refresh_views", rebuild_map=rebuild_map):
             if rebuild_map:
                 new_map_view, new_map_state = build_map_view(data, tap_stream)
@@ -569,6 +591,7 @@ def build_dashboard():
                 map_click_state=map_click_state,
                 map_click_generation=_map_click_generation_value,
                 map_click_failure=_show_refresh_error,
+                variable_metadata=variable_metadata,
             )
 
             map_handlers["on_map_tap"] = new_on_map_tap
