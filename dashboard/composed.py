@@ -1,18 +1,37 @@
 import asyncio
+import logging
+from collections.abc import Callable
+from functools import partial
 
 import holoviews as hv
 import panel as pn
 from bokeh.util.serialization import make_globally_unique_id
 from holoviews import streams
 
-from dashboard.config import find_view_file, get_default_endpoint_name, load_view_config, load_views
-from dashboard.data import load_data
-from dashboard.map_views import build_map_view
-from dashboard.multi_time_views import build_timeseries_views
-from dashboard.perf_summary import begin, end, measure_operation
-from dashboard.plot_selection import build_plot_selection_panel, resolve_available_dimensions
-from dashboard.profiling import operation, session, time_stage
+from dashboard.config import (
+    find_view_file,
+    get_default_endpoint_name,
+    load_view_config,
+    load_views,
+)
+from dashboard.data import LocalClient, load_data
+from dashboard.map_views import build_map_view, fetch_map_payload
+from dashboard.multi_time_views import (
+    MapClickOperation,
+    build_timeseries_views,
+    fetch_default_site_figure,
+    fetch_registered_site_payload,
+)
+from dashboard.perf_summary import measure_operation, stage
+from dashboard.plot_selection import (
+    SelectionState,
+    build_plot_selection_panel,
+    resolve_available_dimensions,
+)
+from dashboard.profiling import log_message, operation, session, time_stage
 from dashboard.sidebar import _flatten_nodes, build_sidebar
+
+logger = logging.getLogger(__name__)
 
 JS_FILES = {
     "jquery": "https://code.jquery.com/jquery-1.11.1.min.js",
@@ -35,8 +54,6 @@ pn.config.reconnect = True
 pn.config.notifications = True
 hv.extension("bokeh")
 hv.renderer("bokeh").theme = "dark_minimal"
-
-_POPULATE_PAUSE = 0.05
 
 
 def _placeholder_root(sizing_mode: str, label: str) -> pn.Column:
@@ -68,11 +85,8 @@ def _set_root(root: pn.Column, content: object, label: str = "") -> None:
 
 
 def _report_error(label: str, exc: BaseException) -> None:
-    """Print one traceback for a populate phase that failed."""
-    import traceback
-
-    traceback.print_exc()
-    print(f"[populate] {label} failed: {exc}")
+    """Log a dashboard operation failure to the normal server log."""
+    logger.exception("[populate] %s failed", label)
 
 
 def _set_root_error(root: pn.Column, label: str, exc: BaseException) -> None:
@@ -99,8 +113,6 @@ def _line_pane(content: object) -> pn.pane.HoloViews:
 
 
 def build_dashboard():
-    _build_stage = time_stage("build_dashboard")
-
     session_ctx = pn.state.curdoc.session_context if pn.state.curdoc and pn.state.curdoc.session_context else None
     session_id = session_ctx.id if session_ctx else "no-session"
     # Manual scopes (no re-indentation of the whole body): every timer created
@@ -110,19 +122,19 @@ def build_dashboard():
     _load_op = operation("dashboard.initial_load", session=session_id)
     _load_scope = _load_op.activate()
     _load_scope.__enter__()
-    _summary = begin("dashboard.initial_load")
-    print(f"[session] build_dashboard started session_id={session_id}")
+    _build_stage = time_stage("build_dashboard")
+    print(f"[session] build_dashboard started session_id={session_id}", flush=True)
 
     def _on_session_destroyed(session_context):
         # Idempotent: finishes an initial_load left open by a failed build.
         _load_op.finish(status="error")
         sid = session_context.id if session_context is not None else session_id
-        print(f"[session] session destroyed session_id={sid}")
+        print(f"[session] session destroyed session_id={sid}", flush=True)
 
     pn.state.on_session_destroyed(_on_session_destroyed)
 
     views_path = find_view_file()
-    print(f"Using views config: {views_path}")
+    log_message(f"Using views config: {views_path}")
 
     configured_default = get_default_endpoint_name(views_path)
     views = load_views(views_path)
@@ -194,17 +206,57 @@ def build_dashboard():
     tap_stream = streams.Tap(x=None, y=None)
 
     map_handlers = {"on_map_tap": lambda *_, **__: None}
+    map_click_state = MapClickOperation()
+    variable_switch_task: asyncio.Task[list[tuple[int, dict | None]]] | None = None
+    variable_switch_active = False
+    _map_click_generation = 0
+    _map_click_client: LocalClient | None = None
 
-    map_view, map_state = None, None
+    def _map_click_generation_value() -> int:
+        return _map_click_generation
+
+    def _clear_variable_switch() -> None:
+        nonlocal variable_switch_active, variable_switch_task
+        variable_switch_active = False
+        variable_switch_task = None
+        timeseries_loading.visible = False
+        loading_indicator.visible = False
+
+    def _invalidate_requests() -> None:
+        """Retire site loads before changing the request context."""
+        nonlocal _map_click_generation
+        _map_click_generation += 1
+        if variable_switch_task is not None:
+            variable_switch_task.cancel()
+        if variable_switch_active:
+            _clear_variable_switch()
+        elif map_click_state.active:
+            timeseries_loading.visible = False
+
+    def _map_click_client_factory() -> LocalClient:
+        nonlocal _map_click_client
+        if _map_click_client is None:
+            _map_click_client = LocalClient(data.client.views_path)
+        return _map_click_client
+
+    def _replace_map_click_client() -> None:
+        nonlocal _map_click_client
+        _map_click_client = None
+
+    def _detach_map_click() -> None:
+        """Release the guard while any retired worker keeps its own client."""
+        _replace_map_click_client()
+        map_click_state.active_generation = None
+
+    map_state: dict = {}
 
     _current_var_label: str | None = None
     _suppress_variable_change = False
 
     def _fetch_and_show_metadata(var_name: str):
-        name_for_api = var_name
-        meta = data.client.get_variable_metadata(
-            data.view_name, data.group_path, name_for_api
-        )
+        _show_variable_metadata(data.client.get_variable_metadata(data.view_name, data.group_path, var_name))
+
+    def _show_variable_metadata(meta: dict | None) -> None:
         if meta:
             coords_text = ", ".join(meta.get("coords", []))
             unit_text = f" ({meta['unit']})" if meta.get("unit") else ""
@@ -222,104 +274,175 @@ def build_dashboard():
                 "</div></div>"
             )
             variable_metadata.visible = True
+        else:
+            variable_metadata.visible = False
+
+    def _set_variable_options(variables: dict[str, str], default_var: str | None) -> str | None:
+        nonlocal _current_var_label, _suppress_variable_change
+        var_name = default_var if default_var in variables else next(iter(variables), None)
+        if var_name is not None:
+            data.display_variable = var_name
+        if variable_selector is None:
+            return var_name
+
+        labels = {name: f"{name} ({unit})" if unit else name for name, unit in variables.items()}
+        var_label = labels.get(var_name)
+        _suppress_variable_change = True
+        try:
+            variable_selector.options = list(labels.values())
+            if var_label is not None:
+                _current_var_label = var_label
+            variable_selector.value = var_label
+            plot_var_selector.options = [var_label] if var_label is not None else []
+            if var_label is not None:
+                plot_var_selector.value = var_label
+            variable_metadata.visible = False
+        finally:
+            _suppress_variable_change = False
+        return var_name
 
     def _populate_variable_selector(view_name: str, group_path: str):
-        nonlocal _current_var_label, _suppress_variable_change
         try:
-            print(f"[variables] Loading for view={view_name}, group={group_path}")
+            log_message(f"[variables] Loading for view={view_name}, group={group_path}")
             with time_stage("get_variables", view=view_name, group=group_path):
                 variables = data.client.get_variables(view_name, group_path)
-            print(f"[variables] Found: {len(variables)} variables")
-
             if variables:
-                var_options = [f"{name} ({unit})" if unit else name for name, unit in variables.items()]
-
-                for name, unit in variables.items():
-                    print(f"[variables]   - {name}: unit={unit}")
-
                 view_cfg = load_view_config(views_path, view_name)
                 default_var = view_cfg.defaults.display_variable if view_cfg.defaults else None
-
-                if default_var and default_var in variables:
-                    var_label = default_var + (f" ({variables[default_var]})" if variables[default_var] else "")
-                else:
-                    var_label = var_options[0] if var_options else None
-
-                # Changing options/value would otherwise fire the watcher once
-                # for the first option and once for the default, rebuilding all
-                # panes twice before the first real render.
-                _suppress_variable_change = True
-                try:
-                    variable_selector.options = var_options
-                    if var_label:
-                        var_name = var_label.split(" (")[0] if " (" in var_label else var_label
-                        _current_var_label = var_label
-                        data.display_variable = var_name
-                        variable_metadata.visible = False
-                        variable_selector.value = var_label
-                        plot_var_selector.options = [var_label]
-                        plot_var_selector.value = var_label
-                        _fetch_and_show_metadata(var_name)
-                    else:
-                        variable_selector.value = None
-                        data.display_variable = ""
-                        variable_metadata.visible = False
-                        plot_var_selector.options = []
-                finally:
-                    _suppress_variable_change = False
-
-                print(f"[variables] Loaded {len(variables)} variables successfully")
+                var_name = _set_variable_options(variables, default_var)
+                if var_name is not None:
+                    _fetch_and_show_metadata(var_name)
             else:
-                variable_selector.options = []
-                variable_metadata.visible = False
-                plot_var_selector.options = []
-                print(f"[variables] No variables in group {group_path}")
-        except Exception as e:
-            variable_selector.options = []
-            variable_metadata.visible = False
-            plot_var_selector.options = []
-            print(f"[variables] ERROR: {e}")
+                _set_variable_options({}, None)
+        except Exception:
+            _set_variable_options({}, None)
+            logger.exception("[variables] failed to load variables for view=%s group=%s", view_name, group_path)
 
-    def _select_variable(var_name: str, label: str | None = None):
-        if var_name != data.display_variable:
-            print(f"[variables] Changing from {data.display_variable} to {var_name}")
-            data.display_variable = var_name
-            loading_indicator.visible = True
-            display_label = label or var_name
-            # Keep the single-option dropdown in sync with the selected variable
-            plot_var_selector.options = [display_label]
-            plot_var_selector.value = display_label
+    def _select_variable(var_name: str, label: str | None = None) -> None:
+        nonlocal variable_switch_task, variable_switch_active
+        if var_name == data.display_variable:
+            return
 
-            _switch_op = operation("variable.switch", variable=var_name)
+        _invalidate_requests()
+        if map_click_state.active:
+            _detach_map_click()
+        generation = _map_click_generation_value()
+        request_view = data.view_name
+        request_group = data.group_path
+        views_path = data.client.views_path
+        display_label = label or var_name
+        entity_indices = [int(site["entity_index"]) for site in selection_state.sites]
+        target_doc = pn.state.curdoc
+        switch_op = operation("variable.switch", variable=var_name)
 
-            def _run_refresh():
+        log_message(f"[variables] Changing from {data.display_variable} to {var_name}")
+        data.display_variable = var_name
+        variable_switch_active = True
+        loading_indicator.visible = True
+        timeseries_loading.visible = bool(entity_indices)
+        plot_var_selector.options = [display_label]
+        plot_var_selector.value = display_label
+
+        def _fetch_site(client: LocalClient, idx: int) -> tuple[int, dict | None]:
+            try:
+                payload = fetch_registered_site_payload(
+                    client, request_view, request_group, var_name, idx
+                )
+            except Exception:  # noqa: BLE001 - report this site's failure and continue
+                logger.exception("[variables] failed to load site idx=%s variable=%s", idx, var_name)
+                payload = None
+            return idx, payload
+
+        def _fetch_metadata() -> dict:
+            try:
+                return data.client.get_variable_metadata(request_view, request_group, var_name) or {}
+            except Exception:  # noqa: BLE001 - metadata is optional for the switch
+                logger.exception("[variables] failed to load metadata for %s", var_name)
+                return {}
+
+        def _complete(
+            get_results: Callable[[], tuple[list[tuple[int, dict | None]], dict]],
+        ) -> None:
+            status = "cancelled"
+            try:
+                if (
+                    generation != _map_click_generation_value()
+                    or request_view != data.view_name
+                    or request_group != data.group_path
+                    or var_name != data.display_variable
+                ):
+                    return
+
                 with measure_operation("variable.switch", variable=var_name):
-                    try:
-                        # Refresh each site's data with the current variable first,
-                        # then rebuild the plot closures so the freshly-built
-                        # dynamic plots render already-updated data on their first
-                        # render.  The map and plot-selection table are not
-                        # rerendered (their content is variable-independent).
-                        _refetch_sites()
-                        refresh_views(rebuild_map=False)
-                        plot_var_selector.value = display_label
-                        _fetch_and_show_metadata(var_name)
-                    except Exception as e:
-                        import traceback; traceback.print_exc()
-                        plot_var_selector.options = []
-                        rendering_status.object = f"⚠️ Render error: {str(e)[:80]}"
-                        rendering_status.visible = True
-                        pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
-                        print(f"[variables] Error viewing {var_name}: {e}")
-                    finally:
-                        loading_indicator.visible = False
+                    results, metadata = get_results()
+                    with stage("selection.update"):
+                        # Replacement plots render the batch when they are attached.
+                        failed = selection_state.update_sites_data(results, notify_version=False)
+                    refresh_views(rebuild_map=False, variable_metadata=metadata)
+                    _show_variable_metadata(metadata)
+                if failed:
+                    _show_refresh_error(failed)
+                status = "error" if failed else "ok"
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:  # noqa: BLE001 - report load and render failures in the UI
+                status = "error"
+                _report_error(f"Viewing {var_name}", exc)
+                plot_var_selector.options = []
+                rendering_status.object = f"⚠️ Render error: {str(exc)[:80]}"
+                rendering_status.visible = True
+                if target_doc is not None:
+                    target_doc.add_timeout_callback(
+                        lambda: setattr(rendering_status, "visible", False), 5000
+                    )
+            finally:
+                if generation == _map_click_generation_value():
+                    _clear_variable_switch()
+                switch_op.finish(status=status)
 
-            _wrapped = _switch_op.wrap(_run_refresh, finish=True)
-            doc = pn.state.curdoc
-            if doc is not None:
-                doc.add_next_tick_callback(_wrapped)
-            else:
-                _wrapped()
+        async def _load() -> tuple[list[tuple[int, dict | None]], dict]:
+            client = LocalClient(views_path)
+            metadata_task = asyncio.create_task(asyncio.to_thread(_fetch_metadata))
+            try:
+                results = []
+                for idx in entity_indices:
+                    results.append(await asyncio.to_thread(_fetch_site, client, idx))
+                return results, await metadata_task
+            except asyncio.CancelledError:
+                metadata_task.cancel()
+                try:
+                    await metadata_task
+                except asyncio.CancelledError:
+                    pass
+                raise
+
+        def _load_sync() -> tuple[list[tuple[int, dict | None]], dict]:
+            client = LocalClient(views_path)
+            return [_fetch_site(client, idx) for idx in entity_indices], _fetch_metadata()
+
+        complete_sync = switch_op.wrap(partial(_complete, _load_sync))
+        if target_doc is None:
+            complete_sync()
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            target_doc.add_next_tick_callback(complete_sync)
+        else:
+            def _loaded(
+                task: asyncio.Task[tuple[list[tuple[int, dict | None]], dict]],
+            ) -> None:
+                if generation != _map_click_generation_value():
+                    if not task.cancelled():
+                        task.exception()
+                    switch_op.finish(status="cancelled")
+                else:
+                    target_doc.add_next_tick_callback(
+                        switch_op.wrap(partial(_complete, task.result))
+                    )
+
+            variable_switch_task = loop.create_task(switch_op.wrap(_load)())
+            variable_switch_task.add_done_callback(_loaded)
 
     def _refetch_sites():
         """Re-fetch every registered site with the current variable, in place.
@@ -332,27 +455,24 @@ def build_dashboard():
         """
         if not selection_state.sites:
             return
-        failed: list[str] = []
+        failed: list[int] = []
         timeseries_loading.visible = True
         try:
             for site in list(selection_state.sites):
                 idx = site["entity_index"]
                 result = map_handlers["fetch_site"](idx)
                 if result is None:
-                    failed.append(str(idx))
-                    print(f"[refresh_views] Failed to refresh site idx={idx}")
-                else:
-                    print(f"[refresh_views] Refreshed site idx={idx}")
+                    failed.append(idx)
         finally:
             timeseries_loading.visible = False
         if failed:
             _show_refresh_error(failed)
 
-    def _show_refresh_error(failed: list[str]):
+    def _show_refresh_error(failed: list[int]) -> None:
         label = plot_var_selector.value or data.display_variable
         rendering_status.object = (
             f"⚠️ {label}: data not available at {len(failed)} site(s) "
-            f"({', '.join(failed)})"
+            f"({', '.join(map(str, failed))})"
         )
         rendering_status.visible = True
         doc = pn.state.curdoc
@@ -396,6 +516,8 @@ def build_dashboard():
     def _switch_view(selected_view: str):
         nonlocal data, view_name
 
+        _invalidate_requests()
+        _detach_map_click()
         view_name = selected_view
         view_obj = data.client.get_view(selected_view)
         data.view_name = selected_view
@@ -427,26 +549,15 @@ def build_dashboard():
         node_hint.visible = False
 
     def on_tap_event(*_):
-        if timeseries_loading.visible:
-            return  # debounce — already loading
+        x, y = tap_stream.x, tap_stream.y
+        if x is None or y is None:
+            return
+        if map_click_state.active or variable_switch_active or loading_indicator.visible:
+            return  # debounce — a background load is already running
         timeseries_loading.visible = True
-        # Capture coordinates at tap time (avoid stale values after delay)
-        _x, _y = tap_stream.x, tap_stream.y
-        doc = pn.state.curdoc
-
-        def _do_tap():
-            # The spinner is turned off by the deferred fetch loop inside
-            # on_map_tap once the last member's data has landed, not here.
-            map_handlers["on_map_tap"](_x, _y, loading=timeseries_loading)
-
-        if doc is not None:
-            # Use timeout, not next_tick — next_tick runs synchronously during
-            # document unlock, batching visible=True + visible=False together
-            # so the frontend never sees the spinner.  A small timeout lets the
-            # UI flush visible=True before the blocking I/O starts.
-            doc.add_timeout_callback(_do_tap, 100)
-        else:
-            _do_tap()
+        # The spinner is turned off by the map-click completion callback inside
+        # on_map_tap once the last member's data has landed, not here.
+        map_handlers["on_map_tap"](x, y, loading=timeseries_loading)
 
     top_left = _placeholder_root("stretch_both", "Loading map view...")
     top_right = _placeholder_root("stretch_both", "Loading plot selection...")
@@ -454,7 +565,7 @@ def build_dashboard():
     bottom_mid = _placeholder_root("stretch_both", "Loading month timeseries...")
     bottom_right = _placeholder_root("stretch_both", "Loading day timeseries...")
 
-    def refresh_views(rebuild_map: bool = True):
+    def refresh_views(rebuild_map: bool = True, *, variable_metadata: dict | None = None):
         with time_stage("refresh_views", rebuild_map=rebuild_map):
             if rebuild_map:
                 new_map_view, new_map_state = build_map_view(data, tap_stream)
@@ -472,6 +583,11 @@ def build_dashboard():
                 new_map_state,
                 selection_state=selection_state,
                 render_spinner=render_spinner,
+                map_click_client=_map_click_client_factory,
+                map_click_state=map_click_state,
+                map_click_generation=_map_click_generation_value,
+                map_click_failure=_show_refresh_error,
+                variable_metadata=variable_metadata,
             )
 
             map_handlers["on_map_tap"] = new_on_map_tap
@@ -484,6 +600,7 @@ def build_dashboard():
 
     def on_store_change(event):
         if event.new and event.new != view_name:
+            _invalidate_requests()
             loading_indicator.visible = True
 
             _switch_op = operation("view.switch", view=event.new)
@@ -504,6 +621,9 @@ def build_dashboard():
 
     def on_node_change(event):
         if event.new:
+            _invalidate_requests()
+            if map_click_state.active:
+                _detach_map_click()
             data.group_path = event.new
             selection_state.clear()
             loading_indicator.visible = True
@@ -550,6 +670,11 @@ def build_dashboard():
         def _run_reload():
             with measure_operation("data.reload", view=view_name):
                 try:
+                    # Invalidate map-click requests before the data changes.  A
+                    # new background client prevents new clicks from reusing the
+                    # old client's cache; already-running reads keep their client.
+                    _invalidate_requests()
+                    _replace_map_click_client()
                     # Drop cached map/timeseries payloads; the zarr nodes reopen
                     # their dataset lazily so values are re-read from the store.
                     data.client.clear_cache()
@@ -559,12 +684,10 @@ def build_dashboard():
                         _refetch_sites()
                     refresh_views(rebuild_map=True)
                 except Exception as exc:  # noqa: BLE001 - surface any reload failure
-                    import traceback
-                    traceback.print_exc()
+                    logger.exception("[reload] failed")
                     rendering_status.object = f"⚠️ Reload failed: {str(exc)[:80]}"
                     rendering_status.visible = True
                     pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
-                    print(f"[reload] ERROR: {exc}")
                 finally:
                     loading_indicator.visible = False
 
@@ -576,36 +699,28 @@ def build_dashboard():
             _wrapped()
 
     async def _populate() -> None:
-        """Fill the skeleton roots one pane at a time, in dependency order.
-
-        The first phase performs the only store round-trip of the initial load.
-        Every later phase is local work, and the pause after each phase gives
-        the browser time to show the pane that was just filled.
-        """
+        """Read the initial group and populate each pane as its data becomes available."""
         nonlocal structure, store_selector, node_select, variable_selector
         nonlocal variable_metadata, node_hint, store_info, reload_button
-        nonlocal selection_state, map_view, map_state
+        nonlocal selection_state, map_state
 
         with _load_op.activate():
-            _populate_stage = time_stage("populate_dashboard")
-            _status = "error"
-            try:
-                print(f"[populate] start session_id={session_id}")
+            populate_stage = time_stage("populate_dashboard")
+            status = "ok"
+            controls = ()
 
-                # Phase 1: opens the store; the sidebar needs its structure.
+            def report_failure(label: str, exc: Exception, *roots: pn.Column) -> None:
+                nonlocal status
+                status = "error"
+                _report_error(label, exc)
+                for root in roots:
+                    _set_root_error(root, label, exc)
+
+            log_message(f"[populate] start session_id={session_id}")
+            try:
                 try:
                     with time_stage("get_structure", view=view_name):
-                        structure = await asyncio.to_thread(
-                            data.client.get_structure, view_name
-                        )
-                except Exception as exc:
-                    _report_error("Data structure", exc)
-                    _set_root_error(controller, "Data structure", exc)
-                    return
-                await asyncio.sleep(_POPULATE_PAUSE)
-
-                # Phase 2: sidebar, then the group path taken from the tree.
-                try:
+                        structure = await asyncio.to_thread(data.client.get_structure, view_name)
                     (
                         controller_content,
                         store_selector,
@@ -623,23 +738,21 @@ def build_dashboard():
                         rendering_status=rendering_status,
                         table_loading=table_loading,
                     )
-                except Exception as exc:
-                    _report_error("Dataset panel", exc)
-                    _set_root_error(controller, "Dataset panel", exc)
-                    return
-                with time_stage("pane.attach", pane="controller"):
-                    controller.objects = controller_content.objects
-                    controller.styles = dict(controller_content.styles)
-                data.group_path = node_select.value
-                await asyncio.sleep(_POPULATE_PAUSE)
+                    data.group_path = node_select.value or data.group_path
+                    controls = (store_selector, node_select, variable_selector, reload_button)
+                    for control in controls:
+                        control.disabled = True
+                    with time_stage("pane.attach", pane="controller"):
+                        controller.objects = controller_content.objects
+                        controller.styles = dict(controller_content.styles)
+                except Exception as exc:  # noqa: BLE001 - keep other panes available
+                    report_failure("Dataset panel", exc, controller)
 
-                # Phase 3: plot selection table (depends on data.group_path).
                 try:
-                    view_cfg = data.client.get_view(view_name)
                     available_dims = resolve_available_dimensions(
-                        view_config=view_cfg,
+                        view_config=view,
                         group_path=data.group_path,
-                        schema_display=view_cfg.get("schema_display", {}),
+                        schema_display=view.get("schema_display", {}),
                     )
                     with time_stage("build_plot_selection_panel", view=view_name):
                         panel_table, selection_state = build_plot_selection_panel(
@@ -648,76 +761,130 @@ def build_dashboard():
                             plot_var_selector=plot_var_selector,
                             table_loading=table_loading,
                         )
-                except Exception as exc:
-                    _report_error("Plot selection", exc)
-                    _set_root_error(top_right, "Plot selection", exc)
-                else:
                     _set_root(top_right, panel_table, label="top_right")
-                await asyncio.sleep(_POPULATE_PAUSE)
+                except Exception as exc:  # noqa: BLE001 - plots can use selection without a table
+                    report_failure("Plot selection", exc, top_right)
+                    if selection_state is None:
+                        selection_state = SelectionState()
 
-                # Phase 4: map, the heaviest read after the structure.
+                # The tree determines the group. A configured variable lets the
+                # map read overlap discovery, using a separate store client.
+                group_path = data.group_path
+                configured_var = data.display_variable
+                initial_view = view_name
+                client = data.client
+                client_path = client.views_path
+
+                def read_map(variable: str) -> dict:
+                    return fetch_map_payload(LocalClient(client_path), initial_view, group_path, variable)
+
+                async def load_map(variable: str) -> dict | Exception:
+                    try:
+                        with time_stage("get_map_data", view=initial_view, group=group_path, variable=variable):
+                            return await asyncio.to_thread(read_map, variable)
+                    except Exception as exc:  # noqa: BLE001 - report only the selected variable's map failure
+                        return exc
+
+                async def load_metadata(variable: str) -> dict:
+                    try:
+                        # Metadata reads the schema file without touching the store client's caches.
+                        with time_stage("get_variable_metadata", view=initial_view, group=group_path):
+                            metadata = await asyncio.to_thread(
+                                client.get_variable_metadata, initial_view, group_path, variable,
+                            )
+                        if variable_metadata is not None and variables:
+                            _show_variable_metadata(metadata)
+                        return metadata or {}
+                    except Exception as exc:  # noqa: BLE001 - units and sidebar metadata are optional
+                        report_failure("Variable metadata", exc)
+                        return {}
+
+                initial_site = None
+                async with asyncio.TaskGroup() as tasks:
+                    map_task = tasks.create_task(load_map(configured_var)) if configured_var else None
+                    try:
+                        with time_stage("get_variables", view=initial_view, group=group_path):
+                            variables = await asyncio.to_thread(client.get_variables, initial_view, group_path)
+                        _set_variable_options(variables, configured_var)
+                    except Exception as exc:  # noqa: BLE001 - the configured variable can still be read
+                        variables = {}
+                        report_failure("Variables", exc)
+
+                    variable = data.display_variable
+                    metadata_task = tasks.create_task(load_metadata(variable)) if variable else None
+                    if map_task is not None and variable == configured_var:
+                        payload = await map_task
+                    else:
+                        if map_task is not None:
+                            map_task.cancel()
+                        payload = await load_map(variable)
+
+                    try:
+                        if isinstance(payload, Exception):
+                            raise payload
+                        map_view, map_state = build_map_view(data, tap_stream, map_payload=payload)
+                        _set_root(top_left, _map_pane(map_view), label="top_left")
+                        if node_hint is not None:
+                            update_data_warnings(map_state)
+                    except Exception as exc:  # noqa: BLE001 - keep the timeseries panes usable
+                        report_failure("Map view", exc, top_left)
+
+                    if variable:
+                        try:
+                            with time_stage("get_default_site", view=initial_view, group=group_path):
+                                initial_site = await asyncio.to_thread(
+                                    fetch_default_site_figure, client, initial_view, group_path,
+                                    variable, map_state, view.get("defaults", {}).get("default_site"),
+                                )
+                        except Exception as exc:  # noqa: BLE001 - interactive plots can open without default data
+                            report_failure("Default site", exc)
+                            rendering_status.object = f"⚠️ Default site failed: {str(exc)[:80]}"
+                            rendering_status.visible = True
+
+                line_roots = (bottom_left, bottom_mid, bottom_right)
                 try:
-                    map_view, map_state = await asyncio.to_thread(
-                        build_map_view, data, tap_stream
+                    left, mid, right, on_map_tap, fetch_site_entity = build_timeseries_views(
+                        data,
+                        map_state,
+                        selection_state=selection_state,
+                        render_spinner=render_spinner,
+                        map_click_client=_map_click_client_factory,
+                        map_click_state=map_click_state,
+                        map_click_generation=_map_click_generation_value,
+                        map_click_failure=_show_refresh_error,
+                        initial_site=initial_site,
+                        variable_metadata=metadata_task.result() if metadata_task is not None else {},
                     )
-                except Exception as exc:
-                    _report_error("Map view", exc)
-                    map_state = {}
-                    _set_root_error(top_left, "Map view", exc)
-                else:
-                    _set_root(top_left, _map_pane(map_view), label="top_left")
-                    update_data_warnings(map_state)
-                await asyncio.sleep(_POPULATE_PAUSE)
-
-                # Phase 5: variables; assigning the value triggers on_variable_change.
-                variable_selector.param.watch(on_variable_change, ["value"])
-                _populate_variable_selector(view_name, data.group_path)
-                await asyncio.sleep(_POPULATE_PAUSE)
-
-                # Phase 6: timeseries panes, then the default site fetch.
-                try:
-                    line_left, line_mid, line_right, on_map_tap, fetch_site_entity = (
-                        build_timeseries_views(
-                            data,
-                            map_state,
-                            selection_state=selection_state,
-                            render_spinner=render_spinner,
-                        )
-                    )
-                except Exception as exc:
-                    _report_error("Timeseries", exc)
-                    for pane_root in (bottom_left, bottom_mid, bottom_right):
-                        _set_root_error(pane_root, "Timeseries", exc)
+                except Exception as exc:  # noqa: BLE001 - leave the map and table visible
+                    report_failure("Timeseries", exc, *line_roots)
                 else:
                     map_handlers["on_map_tap"] = on_map_tap
                     map_handlers["fetch_site"] = fetch_site_entity
-                    # Select the initial site before the panes exist so the
-                    # overlay update cannot race the pane layout pass, which
-                    # left the Plot Selection Tabulator unlaid out.
-                    on_map_tap(tap_stream.x, tap_stream.y)
-                    _set_root(bottom_left, _line_pane(line_left), label="bottom_left")
-                    _set_root(bottom_mid, _line_pane(line_mid), label="bottom_mid")
-                    _set_root(bottom_right, _line_pane(line_right), label="bottom_right")
+                    for root, line, label in zip(line_roots, (left, mid, right), ("bottom_left", "bottom_mid", "bottom_right")):
+                        try:
+                            _set_root(root, _line_pane(line), label=label)
+                        except Exception as exc:  # noqa: BLE001 - the other timeseries panes are independent
+                            report_failure(label, exc, root)
+                    tap_stream.param.watch(on_tap_event, ["x", "y"])
 
-                tap_stream.param.watch(on_tap_event, ["x", "y"])
-                await asyncio.sleep(_POPULATE_PAUSE)
-
-                # Phase 7: user actions go live only once everything is built.
-                node_select.param.watch(on_node_change, ["value"])
-                store_selector.param.watch(on_store_change, ["value"])
-                reload_button.on_click(on_reload)
-
-                _status = "ok"
-            except Exception as exc:
-                _report_error("Population", exc)
+                if controls:
+                    variable_selector.param.watch(on_variable_change, ["value"])
+                    node_select.param.watch(on_node_change, ["value"])
+                    store_selector.param.watch(on_store_change, ["value"])
+                    reload_button.on_click(on_reload)
+                    for control in controls:
+                        control.disabled = False
+            except asyncio.CancelledError:
+                status = "cancelled"
+                raise
+            except Exception as exc:  # noqa: BLE001 - report unexpected population errors
+                report_failure("Population", exc)
                 rendering_status.object = f"⚠️ Render error: {str(exc)[:80]}"
                 rendering_status.visible = True
             finally:
-                _populate_stage.log(status=_status)
-                _load_op.finish(status=_status, view=view_name, group=data.group_path)
-                if _summary is not None:
-                    end()
-                print(f"[populate] finished status={_status} session_id={session_id}")
+                populate_stage.log(status=status)
+                _load_op.finish(status=status, view=view_name, group=data.group_path)
+                log_message(f"[populate] finished status={status} session_id={session_id}")
 
     template = """
 {%% extends base %%}
@@ -875,5 +1042,5 @@ myLayout.init();
     _load_scope.__exit__(None, None, None)
 
     pn.state.onload(_populate)
-    print(f"[session] build_dashboard ready session_id={session_id}")
+    log_message(f"[session] build_dashboard ready session_id={session_id}")
     return tmpl
