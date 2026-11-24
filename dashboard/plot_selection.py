@@ -1116,36 +1116,38 @@ def build_plot_selection_panel(
             _bump_timer.daemon = True
             _bump_timer.start()
 
-    def _flush_bump(generation=None):
+    def _flush_bump(generation: int | None = None) -> None:
+        """Notify version watchers for the latest scheduled edit."""
         nonlocal _bump_timer
         if generation is not None and generation != _bump_generation:
             return
-        _bump_timer = None
-        perf.version_bump_count += 1
-        with measure_operation("selection.edit", version=state.version + 1):
+        with measure_operation("selection.edit.flush", version=state.version + 1):
+            _bump_timer = None
+            perf.version_bump_count += 1
             count("selection.version_bump")
             state.version += 1
-        if table_loading is not None:
-            table_loading.visible = False
+            if table_loading is not None:
+                table_loading.visible = False
 
-    def _sync_orientation(event=None):
+    def _sync_orientation(event=None) -> None:
+        """Apply the selected axes and rebuild the table before notifying plots."""
         nonlocal _orientation_lock
         if _orientation_lock:
             return
         _orientation_lock = True
         try:
-            if row_select.value == col_select.value:
-                other = next(
-                    (k for k, v in available_dims.items() if v != row_select.value),
-                    None,
-                )
-                if other is not None:
-                    col_select.value = available_dims[other]
-            state.row_dim = row_select.value
-            state.col_dim = col_select.value
-            _cancel_bump_timer(clear_loading=True)
-            _rebuild_table()
             with measure_operation("selection.orientation"):
+                if row_select.value == col_select.value:
+                    other = next(
+                        (k for k, v in available_dims.items() if v != row_select.value),
+                        None,
+                    )
+                    if other is not None:
+                        col_select.value = available_dims[other]
+                state.row_dim = row_select.value
+                state.col_dim = col_select.value
+                _cancel_bump_timer(clear_loading=True)
+                _rebuild_table()
                 state.version += 1
         finally:
             _orientation_lock = False

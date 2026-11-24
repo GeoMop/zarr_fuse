@@ -14,6 +14,7 @@ import asyncio
 import logging
 import re
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -245,6 +246,64 @@ def _reset_summary_stack() -> None:
 
 def _summary_lines(lines: list[str], event: str) -> list[str]:
     return [line for line in lines if line.startswith(f"event={event} ")]
+
+
+@pytest.mark.parametrize(
+    ("method", "args", "cache", "key", "counter"),
+    [
+        ("get_map_data", (), "_map_data_cache", "demo:/:temp:0:0", "map.cache_hit"),
+        (
+            "get_timeseries_data", (50.0, 14.0), "_timeseries_cache",
+            "demo:/:temp:50.00000000:14.00000000:None", "timeseries.cache_hit",
+        ),
+    ],
+)
+def test_data_fetch_summary(
+    perf_log: list[str], method: str, args: tuple[float, ...],
+    cache: str, key: str, counter: str,
+) -> None:
+    """Standalone data fetches emit a summary and nested fetches reuse their caller's."""
+    from dashboard.data import LocalClient
+
+    client = LocalClient(Path("views.yaml"))
+    cached = {"status": "success"}
+    getattr(client, cache)[key] = cached
+    fetch = getattr(client, method)
+
+    assert fetch("demo", "/", *args, variable="temp") is cached
+    headers = _summary_lines(perf_log, "op.summary")
+    assert len(headers) == 1 and f"operation={method} " in headers[0]
+    counters = _summary_lines(perf_log, "op.counters")
+    assert len(counters) == 1 and f"{counter}=1" in counters[0]
+    assert _summary_lines(perf_log, "op.stage") == []
+
+    perf_log.clear()
+    with perf_summary.measure_operation("caller"):
+        assert fetch("demo", "/", *args, variable="temp") is cached
+    headers = _summary_lines(perf_log, "op.summary")
+    assert len(headers) == 1 and "operation=caller " in headers[0]
+    assert f" stage={method} " in _summary_lines(perf_log, "op.stage")[0]
+    assert f"{counter}=1" in _summary_lines(perf_log, "op.counters")[0]
+
+
+def test_orientation_summary_includes_table_rebuild(perf_log: list[str]) -> None:
+    """Changing the row selector attributes the rebuild to selection.orientation."""
+    from dashboard.plot_selection import SelectionState, build_plot_selection_panel
+
+    state = SelectionState()
+    state.add_site(0, "BH-1", [0.0], [[1]], ["2020-01-01"])
+    panel, state = build_plot_selection_panel(state=state)
+    control_bar, _table = panel
+    row_select, _col_select, _var_selector = control_bar
+    version = state.version
+    perf_log.clear()
+
+    row_select.value = "vertical"
+
+    assert state.version == version + 1
+    headers = _summary_lines(perf_log, "op.summary")
+    assert len(headers) == 1 and "operation=selection.orientation " in headers[0]
+    assert any(" stage=table.rebuild " in line for line in _summary_lines(perf_log, "op.stage"))
 
 
 def test_summary_aggregates_stage_and_counters(perf_log: list[str]) -> None:

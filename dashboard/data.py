@@ -16,7 +16,7 @@ from dashboard.config import (
     read_variable_metadata,
     resolve_schema_fields,
 )
-from dashboard.perf_summary import count, stage
+from dashboard.perf_summary import count, current, measure_operation, stage
 
 
 @dataclass
@@ -74,12 +74,13 @@ class LocalClient:
         )
 
     def _open_node(self, view_name: Optional[str]) -> Any:
+        """Return the cached node or open the view's store on first use."""
         handle = self._view_handle(view_name)
         if handle.name in self._nodes:
             count("store.cache_hit")
             return self._nodes[handle.name]
 
-        with stage("store.open"):
+        with stage("store.open") if current() else measure_operation("store.open"):
             schema = zf.schema.deserialize(handle.schema_path)
             schema.ds.ATTRS["STORE_URL"] = handle.store_uri
             node = zf.open_store(schema, MODE="r")
@@ -162,7 +163,8 @@ class LocalClient:
         time_index: int = 0,
         depth_index: int = 0,
     ) -> dict[str, Any]:
-        with stage("get_map_data"):
+        """Load the map data for one variable and slice."""
+        with stage("get_map_data") if current() else measure_operation("get_map_data"):
             return self._get_map_data(view_name, group_path, variable, time_index, depth_index)
 
     def _get_map_data(
@@ -434,7 +436,10 @@ class LocalClient:
         variable: str | None = None,
         entity_index: int | None = None,
     ) -> dict[str, Any]:
-        with stage("get_timeseries_data"):
+        """Load one site's time series for the selected variable."""
+        with (
+            stage("get_timeseries_data") if current() else measure_operation("get_timeseries_data")
+        ):
             return self._get_timeseries_data(
                 view_name, group_path, lat, lon, variable, entity_index
             )

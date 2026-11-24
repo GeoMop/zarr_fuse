@@ -12,10 +12,9 @@ Design notes
   uses its public ``log_event`` / ``profiling_enabled`` API.
 - Probes are near no-ops when profiling is disabled or when no operation is
   active: no clock is read and nothing is formatted until ``emit``.
-- Summaries are tracked per thread (``threading.local``). Wrap synchronous user
-  operations with :func:`measure_operation`; for deferred callbacks that share
-  the thread, use :func:`begin`/:func:`end` or :func:`measure_operation` inside
-  the callback (``Operation.wrap`` already restores the profiling context).
+- The summary stack is shared by asyncio tasks on the same thread. Keep
+  summary scopes within synchronous blocks and open a fresh scope inside
+  deferred callbacks. ``Operation.wrap`` restores log tags only.
 
 Emitted records (via ``logging.getLogger("dashboard.performance")``)::
 
