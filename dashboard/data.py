@@ -511,12 +511,6 @@ class LocalClient:
                 idx = int(np.nanargmin(dist))
                 print(f"[fetch_ts][backend] Resolved nearest entity_index={idx}")
 
-            if idx < available_min or idx > available_max:
-                return {
-                    "status": "error",
-                    "reason": f"entity_index {idx} is out of range for available entities {available_min}..{available_max}",
-                }
-
         with stage("ts.read"):
             entity_names = None
             if entity_field and entity_field in ds:
