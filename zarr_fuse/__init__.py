@@ -7,7 +7,8 @@ except PackageNotFoundError:
 # Use of relative imports is recomenden  in __init__.py
 from . import zarr_schema as schema
 from . import units
-from .zarr_storage import Node, open_store, remove_store
+from .zarr_storage import Node, open_node, open_store, remove_store
+from .repository import ZFRepository, open_repository
 
 
 try:
@@ -23,4 +24,4 @@ except ModuleNotFoundError as e:
 
 # What is allowed to be imported by
 # from zarr_fuse import *
-__all__ = ['schema', 'Node', 'open_store', 'remove_store', 'units']
+__all__ = ['schema', 'Node', 'open_node', 'open_store', 'remove_store', 'ZFRepository', 'open_repository', 'units']

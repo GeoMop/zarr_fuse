@@ -7,15 +7,16 @@ The default values of these variables are get from the root ATTRS of the schema,
 but these could be overwritten by the system environment variables named "ZF_<variable name>".
 Environment variable are recommended mean to pass S3 secrets, see `S3_ACCESS_KEY` and `S3_SECRET_KEY` below.
 
-# zf.open_store options
-The `zf.open_store` function also accepts **kwargs dictionary which
-have even higher priority then the environment variables.
+# zf.open_node and zf.open_repository options
+The `zf.open_node` and `zf.open_repository` functions also accept these variables as **kwargs,
+they have the lowest priority, the schema ATTRS and then the environment variables overwrite them.
 
 ## Store Instance Variables
 - `STORE_URL` is a store url passed to `zarr.storage.FsspecStore`. Supported are:
     - **S3 store** url in form `s3://<bucket_name>/<store_path>`, e.g. `s3://test_bucket/project_XYZ/case_storage.zarr`
     - **Zip store** (not supported yet), url with `zip://` prefix, followed by realtive or absolute path on the local filesystem
     - **local store** url without any `<prefix>://` prefix, could be a relative or absolute path to the zarr store root folder on the local filesystem, e.g. `./
+    - For `zf.open_repository` it is the location of the IceChunk repository, an S3 or a local store url.
     
 - `S3_ACCESS_KEY` and `S3_SECRET_KEY` is standard AWS secretes pair. These could be part of attributes, but that is highly insecure and would produce a warning.
 
