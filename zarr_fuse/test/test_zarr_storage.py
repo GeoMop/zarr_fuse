@@ -174,6 +174,20 @@ def test_zarr_fuse_options_rejects_unknown_logger():
         zf.zarr_storage._zarr_fuse_options(None, LOGGER='unknown')
 
 
+def test_open_store_is_deprecated(tmp_path):
+    """open_store still opens the store but warns to use open_node."""
+    schema = {
+        "ATTRS": {"STORE_URL": str(tmp_path / "deprecated.zarr")},
+        "VARS": {"data": {"unit": "", "type": "float64", "coords": ["x"]}},
+        "COORDS": {"x": {"unit": "", "type": "float64"}},
+    }
+
+    with pytest.warns(DeprecationWarning, match="open_node"):
+        node = zf.open_store(schema)
+
+    assert isinstance(node, zf.Node)
+
+
 def test_datetime_encoding_roundtrip(smart_tmp_path):
     store_path = smart_tmp_path / "datetime_roundtrip.zarr"
     shutil.rmtree(store_path, ignore_errors=True)
