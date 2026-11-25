@@ -809,6 +809,21 @@ class Node:
             ds[name].encoding.update(schema_vars[name].get_encoding())
         return ds
 
+    def _set_creation_chunks(self, ds: xr.Dataset) -> xr.Dataset:
+        """Chunk the arrays of the first write by the chunk_size of their coordinates."""
+        chunk_sizes = {
+            coord.name: int(coord.chunk_size)
+            for coord in self.schema.COORDS.values()
+            if coord.chunk_size
+        }
+        for var in ds.variables.values():
+            if var.chunks is None and any(dim in chunk_sizes for dim in var.dims):
+                var.encoding["chunks"] = tuple(
+                    chunk_sizes.get(dim, max(1, size))
+                    for dim, size in zip(var.dims, var.shape)
+                )
+        return ds
+
     def write_ds(self, ds, **kwargs):
         ds.attrs = self.ensure_schema_attrs(ds.attrs)
         ds = self._coerce_encoding(ds)
@@ -889,6 +904,7 @@ class Node:
         # Store one disjoint extension slab per dimension.
         if ds_existing.attrs.get('__empty__', False):
             ds_update.attrs.pop('__empty__', None)
+            ds_update = self._set_creation_chunks(ds_update)
             return self.write_ds(ds_update, mode="a"), {}
 
         ds_update, split_indices = interpolate_ds(
