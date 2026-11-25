@@ -739,7 +739,10 @@ def test_merge_ds_respects_schema_na_value(tmp_path, var_type, na_value, dtype):
     ],
 )
 def test_str_keeps_unicode(tmp_path, var_type, dtype):
-    """Both string types store any Unicode characters, n in str[n] counts characters, not bytes."""
+    """
+    Both string types store any Unicode characters. The str[n] is UTF-32 with a fixed size
+    of 4*n bytes, so n counts characters, not UTF-8 bytes.
+    """
     schema_dict = {
         "VARS": {
             "label": {"type": var_type, "coords": ["x"]},
