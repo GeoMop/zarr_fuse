@@ -110,7 +110,7 @@ def _coerce_with_na(arr: np.ndarray, target_dtype: np.dtype, na_value, ctx: 'Sch
 
 
 def _is_str(a) -> bool:
-    return a.dtype.kind in ("S", "U", "O")
+    return a.dtype.kind in ("S", "U", "T", "O")
 
 def _is_numeric(a) -> bool:
     return np.issubdtype(a.dtype, np.number)
@@ -196,6 +196,7 @@ na_kind_dict = {
     'c': np.nan + 1j * np.nan,
     'M': np.datetime64("NaT"),
     'm': np.timedelta64("NaT"),
+    'T': "\uFFFF",
 }
 
 # DEFAULT_NA_BY_DTYPE = {
@@ -209,15 +210,12 @@ DEFAULT_STR_LEN = 32
 def dtype_init(cfg: ContextCfg) -> np.dtype:
     _type, _ctx = cfg.split()
     _type = _type.strip()
-    # 'str[n]' type
+    # 'str' variable length UTF-8, 'str[n]' fixed length UTF-32
     m = _STR_DTYPE_RE.match(_type)
     if m:
         n = m.group(1)
         if n is None:
-            _ctx.warning(
-                "Used type 'str' without length specification, assuming 'str[32]. Zarr-fuse only supports fixed string values in arrays.'",
-                stacklevel=3)
-            n = DEFAULT_STR_LEN
+            return np.dtypes.StringDType()
         n = int(n)
         if n <= 0:
             _ctx.warning(f"Invalid type 'str[{n}]',  n > 0 required. Using default length n={DEFAULT_STR_LEN}.",
@@ -260,6 +258,8 @@ class DType:
             # n chars = itemsize / itemsize_of('<U1')
             n = dt.itemsize // np.dtype("<U1").itemsize
             return f"str[{n}]"
+        if dt.kind == "T":
+            return "str"
 
         # Simple dict lookup for known scalar dtypes
         return _PREFERRED_NAME.get(dt, str(dt))
@@ -293,7 +293,7 @@ def make_na(na_cfg: ContextCfg, dt: np.dtype):
         elif dtype.kind in {"f"}:
             if val == "nan":
                 return np.asarray([np.nan], dtype=dtype)[0]
-        if dtype.kind in {"U"}:
+        if dtype.kind in {"U", "T"}:
             return np.asarray([val], dtype=dtype)[0]
         raise ValueError(f"Unknown NA sentinel string: {val}")
     else:

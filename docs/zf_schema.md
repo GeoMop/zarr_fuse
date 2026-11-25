@@ -62,12 +62,16 @@ Could be string or dictionary. The second case is used to define more complex va
 Explicit data type of the variable in terms of Numpy dtype. 
 Default is 'datetime64[*]' in case of DateTime unit and 'float' otherwise.
 We accept also following types for non-physical quantities:
-  [`bool`, `int`, `int8`, `int32`, `int64`, `float`, `float32`, `float64`, `complex`, `str[n]` ]. 
-  Here `str[n]` defines fixed length UTF8 string of length n, 
-  longer strings are truncated on write to the store. The variable length strings have support in the ZARR and
-  might be supported in future versions.
+  [`bool`, `int`, `int8`, `int32`, `int64`, `float`, `float32`, `float64`, `complex`, `str`, `str[n]` ]. 
+  Here `str` defines variable length UTF-8 string (Numpy `StringDType`), stored as Zarr `string` data type.
+  Reading it back as `StringDType` requires xarray 2026.09 or newer, older versions return `object` arrays.
+  The `str[n]` defines fixed length Unicode string of n characters (Numpy `<U{n}`, UTF-32, 4 bytes per character),
+  longer strings are truncated on write to the store. It is stored as Zarr `fixed_length_utf32` data type,
+  Zarr before 3.3 emits `UnstableSpecificationWarning` for it, but the stored format is the same.
+  There is no separate ASCII type, ASCII is a subset of UTF-8 and Zarr has no V3 specification
+  for fixed length byte strings (Numpy `S{n}`).
 The `datatime64[*]` is automaticaly used for DateTime unit variables. The explicit use of `timedelta64[*]` is not supported (yet).
-If  `unit` is provided, the `bool` and `str[n]` are not allowed.
+If  `unit` is provided, the `bool`, `str` and `str[n]` are not allowed.
 Explicit type specification is recommended.
 
 ### `na_value:` (optional)
