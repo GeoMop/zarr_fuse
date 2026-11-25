@@ -11,7 +11,7 @@ jobs:
       max-parallel: 1
       #1   # Avoid race condition for the single test S3 storage bucket. 
       matrix:
-        python-version: [ "3.11", "3.12", "3.13"]
+        python-version: [ "3.12", "3.13"]
 
     steps:
     - uses: actions/checkout@v4

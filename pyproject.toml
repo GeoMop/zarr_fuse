@@ -21,7 +21,7 @@ classifiers = [
     "License :: OSI Approved :: BSD License",
     "Programming Language :: Python :: 3"
 ]
-requires-python = ">=3.11" # at least due to zarr>=3.x
+requires-python = ">=3.12" # at least due to icechunk
 # With new aiobotocore version 2.18.0+ we get the error:
 #[WARNING] S3 test failed completely: [Errno 22] An error occurred (MissingContentLength) when calling the PutObject operation: Unknown
 #[INFO] Skipping S3 test due to environment issues
@@ -54,6 +54,7 @@ dependencies = [
     "s3fs",     # boto3 restriction => s3fs==0.4.2
     "fsspec",   # boto3 restriction => fsspec==2025.5.1
     "zarr",       # 3.x does not support write_empty_chunks
+    "icechunk>=2.3",  # versioned zarr repositories
     "dask",       # for compatibility with xarray 0.18.2
     "xarray",     # 0.19.0 does not support zarr 2.x well
     "python-dotenv",  # for loading environment variables from .env files
