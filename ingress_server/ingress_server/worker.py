@@ -4,6 +4,7 @@ import warnings
 
 import zarr_fuse as zf
 import xarray as xr
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .app_config import AppConfig
@@ -20,6 +21,15 @@ from .models import MetadataModel
 from .queue_storage import ACCEPTED, FAILED, SUCCESS, FileRef
 
 LOG = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class IngressResult:
+    state: str
+    source: str = ""
+    sha256: str = ""
+    data_time: str = ""
+    error: str = ""
 
 
 def _load_metadata(app_config: AppConfig, ref: FileRef) -> MetadataModel:
@@ -135,15 +145,14 @@ def _item_name(ref: FileRef) -> str:
     return ref.partition("/")[2]
 
 
-def _outcome(item: ExtractedItem, state: str, error: str = "") -> dict:
-    return {
-        "item_name": _item_name(item.ref),
-        "source": item.metadata.endpoint_name,
-        "state": state,
-        "sha256": item.metadata.sha256 or "",
-        "data_time": "" if item.time_key is None else str(item.time_key),
-        "error": error,
-    }
+def _outcome(item: ExtractedItem, state: str, error: str = "") -> IngressResult:
+    return IngressResult(
+        state=state,
+        source=item.metadata.endpoint_name,
+        sha256=item.metadata.sha256 or "",
+        data_time="" if item.time_key is None else str(item.time_key),
+        error=error,
+    )
 
 
 def _sync_manifest(app_config: AppConfig) -> list[FileRef]:
@@ -164,15 +173,18 @@ def _sync_manifest(app_config: AppConfig) -> list[FileRef]:
     return pending
 
 
-def _finish(app_config: AppConfig, done: list[tuple[FileRef, dict]]) -> bool:
+def _finish(app_config: AppConfig, done: dict[FileRef, IngressResult]) -> bool:
     """Record the outcomes in the manifest, then move the items to the queue of their state."""
-    app_config.manifest.add([row for _, row in done])
-    for ref, row in done:
+    app_config.manifest.add([
+        {"item_name": _item_name(ref), **asdict(result)}
+        for ref, result in done.items()
+    ])
+    for ref, result in done.items():
         try:
-            app_config.queue.move(ref, row["state"])
+            app_config.queue.move(ref, result.state)
             app_config.cache.evict(_item_name(ref))
         except Exception:
-            LOG.exception("Failed to move %s to the %s queue", ref, row["state"])
+            LOG.exception("Failed to move %s to the %s queue", ref, result.state)
     return bool(done)
 
 
@@ -194,20 +206,12 @@ def _notify_anomalies(app_config: AppConfig, anomalies: list[dict]) -> None:
         LOG.exception("Failed to send data anomaly notification")
 
 
-def _process_available_files(app_config: AppConfig) -> bool:
-    """
-    Run one pass over the accepted queue and report whether at least one item
-    left it. An item that can be neither stored nor moved to failed/ is not
-    progress: counting it as such would make `working_loop` skip its sleep and
-    re-list the whole queue forever. Items held back by the retention window
-    are not progress either — they are waiting for newer data, not for the CPU.
-    """
-    done: list[tuple[FileRef, dict]] = []
+def _extract_batch(app_config: AppConfig) -> tuple[list[ExtractedItem], dict[FileRef, IngressResult]]:
+    """Extract all accepted files; nothing is written to the store yet,
+    so an interrupted batch is safely re-extracted on the next pass."""
     batch: list[ExtractedItem] = []
-    anomalies: list[dict] = []
+    done: dict[FileRef, IngressResult] = {}
 
-    # Phase 1: extract all accepted files; nothing is written to the store yet,
-    # so an interrupted batch is safely re-extracted on the next pass.
     for ref in _sync_manifest(app_config):
 
         # Check for stop signal at the beginning of each loop iteration to allow graceful shutdown.
@@ -216,29 +220,33 @@ def _process_available_files(app_config: AppConfig) -> bool:
 
         try:
             LOG.info("Extracting data %s", ref)
-            item = _extract_one(app_config, ref)
-            batch.append(item)
-
-            if item.time_error:
-                anomalies.append({
-                    "type": "time_key",
-                    "error": item.time_error,
-                    "context": {
-                        "file": item.ref,
-                        "endpoint": item.metadata.endpoint_name,
-                    },
-                })
+            batch.append(_extract_one(app_config, ref))
 
         except ValueError as exc:
             LOG.warning("Processing rejected for %s: %s", ref, exc)
-            done.append((ref, {"item_name": _item_name(ref), "state": FAILED, "error": str(exc)}))
+            done[ref] = IngressResult(FAILED, error=str(exc))
 
         except Exception as exc:
             LOG.exception("Extraction failed for %s", ref)
-            done.append((ref, {"item_name": _item_name(ref), "state": FAILED, "error": str(exc)}))
+            done[ref] = IngressResult(FAILED, error=str(exc))
 
-    # Phase 2: filter — order the batch by the time of the data instead of
-    # the time of the payload receipt.
+    return batch, done
+
+
+def _filter_batch(app_config: AppConfig, batch: list[ExtractedItem]) -> list[ExtractedItem]:
+    anomalies = [
+        {
+            "type": "time_key",
+            "error": item.time_error,
+            "context": {
+                "file": item.ref,
+                "endpoint": item.metadata.endpoint_name,
+            },
+        }
+        for item in batch if item.time_error
+    ]
+
+    # Order the batch by the time of the data instead of the time of the payload receipt.
     sorted_batch = sort_by_data_time(batch)
     if [item.ref for item in sorted_batch] != [item.ref for item in batch]:
         LOG.info("Batch reordered by data time: %s", [item.ref for item in sorted_batch])
@@ -254,7 +262,7 @@ def _process_available_files(app_config: AppConfig) -> bool:
 
     _notify_anomalies(app_config, anomalies)
 
-    # Phase 3a: hold back items that are not yet older than retention_time
+    # Hold back items that are not yet older than retention_time
     # relative to the newest data seen in this batch — they stay in
     # accepted/ and are re-checked on the next pass, once newer data has
     # actually arrived to age them out.
@@ -268,7 +276,12 @@ def _process_available_files(app_config: AppConfig) -> bool:
         )
         LOG.debug("Held items: %s", [item.ref for item in held_items])
 
-    # Phase 3b: write the ready items to the zarr store in data-time order.
+    return ready_items
+
+
+def _store_batch(app_config: AppConfig, ready_items: list[ExtractedItem]) -> dict[FileRef, IngressResult]:
+    done: dict[FileRef, IngressResult] = {}
+
     for item in ready_items:
 
         if app_config.stop_event.is_set():
@@ -277,17 +290,31 @@ def _process_available_files(app_config: AppConfig) -> bool:
         try:
             LOG.info("Storing data %s", item.ref)
             _store_one(item)
-            done.append((item.ref, _outcome(item, SUCCESS)))
+            done[item.ref] = _outcome(item, SUCCESS)
             LOG.info("Processing succeeded for %s", item.ref)
 
         except ValueError as exc:
             LOG.warning("Processing rejected for %s: %s", item.ref, exc)
-            done.append((item.ref, _outcome(item, FAILED, str(exc))))
+            done[item.ref] = _outcome(item, FAILED, str(exc))
 
         except Exception as exc:
             LOG.exception("Processing failed for %s", item.ref)
-            done.append((item.ref, _outcome(item, FAILED, str(exc))))
+            done[item.ref] = _outcome(item, FAILED, str(exc))
 
+    return done
+
+
+def _process_available_files(app_config: AppConfig) -> bool:
+    """
+    Run one pass over the accepted queue and report whether at least one item
+    left it. An item that can be neither stored nor moved to failed/ is not
+    progress: counting it as such would make `working_loop` skip its sleep and
+    re-list the whole queue forever. Items held back by the retention window
+    are not progress either — they are waiting for newer data, not for the CPU.
+    """
+    batch, done = _extract_batch(app_config)
+    ready_items = _filter_batch(app_config, batch)
+    done.update(_store_batch(app_config, ready_items))
     return _finish(app_config, done)
 
 
