@@ -88,6 +88,8 @@ def _extract_one(app_config: AppConfig, ref: FileRef | Path) -> ExtractedItem:
 
 
 def _read_payload(app_config: AppConfig, ref: FileRef, sha256: str | None) -> bytes:
+    """Read the payload, i.e. the raw received file of the queue item `ref`,
+    indexed in the manifest by its `item_name`."""
     name = _item_name(ref)
     payload = app_config.cache.get(name, sha256)
     if payload is None:
