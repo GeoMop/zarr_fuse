@@ -34,9 +34,9 @@ def check_schema(schema: zf.schema.NodeSchema) -> None:
     coords = list(ds.COORDS)
     columns = {name: str(var.dtype) for name, var in ds.VARS.items()}
     expected = {name: f"<U{width}" for name, width in COLUMNS.items()}
-    if coords != [TIME] or ds.COORDS[TIME].sorted or columns != expected:
+    if coords != [TIME] or not ds.COORDS[TIME].sorted or columns != expected:
         raise ValueError(
-            f"{SCHEMA_PATH} must have the unsorted coordinate {TIME!r} and the variables {expected}, "
+            f"{SCHEMA_PATH} must have the sorted coordinate {TIME!r} and the variables {expected}, "
             f"it has the coordinates {coords} and the variables {columns}"
         )
 
@@ -59,8 +59,7 @@ class Manifest:
         ds = self._node().dataset
         if TIME not in ds.coords:
             return {}
-        order = np.argsort(ds[TIME].values)
-        return dict(zip(ds["item_name"].values[order].tolist(), ds["state"].values[order].tolist()))
+        return dict(zip(ds["item_name"].values.tolist(), ds["state"].values.tolist()))
 
     def add(self, rows: list[dict]) -> None:
         if not rows:
