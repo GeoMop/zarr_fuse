@@ -322,6 +322,8 @@ def interpolate_ds(ds_update: xr.Dataset, ds_existing: xr.Dataset,
     # positions below so sparse data does not contaminate neighboring values.
     ds_for_interp = ds_nearest.copy()
     for var_name, data_array in ds_nearest.data_vars.items():
+        if not np.issubdtype(data_array.dtype, np.number):
+            continue
         for dim in linear_coords:
             if dim in data_array.dims:
                 data_array = data_array.interpolate_na(
