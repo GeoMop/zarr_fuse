@@ -810,17 +810,18 @@ class Node:
         return ds
 
     def _set_creation_chunks(self, ds: xr.Dataset) -> xr.Dataset:
-        """
-        Chunk the 1-D arrays of the first write by their coordinate's chunk_size.
-        N-D variables keep the first-write chunks: the default 1024 per
-        coordinate would make them huge.
-        """
+        """Chunk the arrays of the first write by the chunk_size of their coordinates."""
+        chunk_sizes = {
+            coord.name: int(coord.chunk_size)
+            for coord in self.schema.COORDS.values()
+            if coord.chunk_size
+        }
         for var in ds.variables.values():
-            if var.chunks is not None or len(var.dims) != 1:
-                continue
-            chunk_size = self.schema.COORDS[var.dims[0]].chunk_size
-            if chunk_size:
-                var.encoding["chunks"] = (int(chunk_size),)
+            if var.chunks is None and any(dim in chunk_sizes for dim in var.dims):
+                var.encoding["chunks"] = tuple(
+                    chunk_sizes.get(dim, max(1, size))
+                    for dim, size in zip(var.dims, var.shape)
+                )
         return ds
 
     def write_ds(self, ds, **kwargs):

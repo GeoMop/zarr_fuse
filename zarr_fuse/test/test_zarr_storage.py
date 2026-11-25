@@ -805,7 +805,7 @@ def test_write_ds_partial_chunk_update(smart_tmp_path):
 
 
 def test_first_update_chunks_by_schema_chunk_size(tmp_path):
-    """The chunk shape follows the schema chunk_size, not the size of the first update."""
+    """The chunk shape follows the schema chunk_size of every dimension, not the size of the first update."""
     schema_dict = {
         "VARS": {
             "data": {"unit": "", "type": "float64", "coords": ["x"]},
@@ -831,12 +831,16 @@ def test_first_update_chunks_by_schema_chunk_size(tmp_path):
     group = zarr.open_group(str(tmp_path / "first_update_chunks.zarr"), mode="r")
     assert group["x"].chunks == (3,)
     assert group["data"].chunks == (3,)
-    assert group["grid"].chunks == (1, 2)
+    assert group["grid"].chunks == (3, 1024)
     assert group["y"].chunks == (1024,)
 
     ds = zf.open_store(schema_dict).dataset
     np.testing.assert_array_equal(ds["x"].values, [0.0, 1.0, 2.0, 3.0, 4.0])
     np.testing.assert_array_equal(ds["data"].values, [10.0, 11.0, 12.0, 13.0, 14.0])
+    np.testing.assert_array_equal(
+        ds["grid"].values,
+        [[1.0, 2.0], [3.0, np.nan], [4.0, np.nan], [5.0, np.nan], [6.0, np.nan]],
+    )
 
 
 @pytest.mark.xfail(
