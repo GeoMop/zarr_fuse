@@ -551,11 +551,14 @@ class LocalClient:
         lat: float = 0.0,
         lon: float = 0.0,
     ) -> dict[str, Any]:
-        """Describe a site and history availability without reading measurement values."""
+        """Describe a time-series site or return an error status for a static variable."""
         cache = self._timeseries_window_cache
         group_path = group_path.strip("/")
         ds, fields, times = self._timeseries_group(cache, view_name, group_path)
         array = ds[variable]
+        if fields.time not in array.dims or fields.entity not in array.dims:
+            return {"status": "error"}
+
         if entity_index is None:
 
             def coordinate(name):

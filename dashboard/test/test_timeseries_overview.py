@@ -7,6 +7,7 @@ import pytest
 import xarray as xr
 
 from dashboard.data import LocalClient, ViewHandle
+from dashboard.multi_time_views import fetch_registered_site_payload
 from dashboard.timeseries_overview import extrema_indices
 
 
@@ -106,3 +107,14 @@ def test_missing_overview_keeps_unknown_depth_selectable(setup_right):
     )
     assert state.site_depth_all_nan("B", 0)
     assert not state.site_depth_all_nan("B", 3)
+
+
+def test_static_site_metadata_does_not_register_a_time_series(setup_right, monkeypatch):
+    ds, data, _, _ = setup_right
+    ds = ds.assign(project_id=("entity", ["A", "B"]))
+    monkeypatch.delenv("ZF_TIMESERIES_OVERVIEW_DIR", raising=False)
+    monkeypatch.setattr(
+        data.client, "_get_group", lambda *_: SimpleNamespace(dataset=ds)
+    )
+
+    assert fetch_registered_site_payload(data.client, "view", "/", "project_id", 0) is None
