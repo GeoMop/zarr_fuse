@@ -10,7 +10,7 @@ from zarr_fuse.logger import StoreLogHandler
 
 def _schema(store_url) -> dict:
     return {
-        "ATTRS": {"STORE_URL": str(store_url)},
+        "ATTRS": {"STORE_URL": str(store_url), "SCHEMA_FAMILY": "weather", "SCHEMA_VERSION": "1.0"},
         "VARS": {"temp": {"unit": "", "type": "float64", "coords": ["t"]}},
         "COORDS": {"t": {"unit": "", "type": "float64"}},
         "meteo": {
@@ -18,6 +18,12 @@ def _schema(store_url) -> dict:
             "COORDS": {"t": {"unit": "", "type": "float64"}},
         },
     }
+
+
+SOIL = {
+    "VARS": {"moisture": {"unit": "", "type": "float64", "coords": ["t"]}},
+    "COORDS": {"t": {"unit": "", "type": "float64"}},
+}
 
 
 def test_commit_publishes_the_session(tmp_path):
@@ -85,6 +91,67 @@ def test_writable_repository_node_does_not_log_to_the_store(tmp_path):
     root = zf.open_repository(_schema(tmp_path / "repo")).open(mode="a")
 
     assert not any(isinstance(handler, StoreLogHandler) for handler in root.logger.handlers)
+
+
+def test_schema_is_stored_once(tmp_path):
+    """The node schemas are stored in a single chunk, a commit without a schema change does not rewrite it."""
+    repo = zf.open_repository(_schema(tmp_path / "repo"))
+    root = repo.open(mode="a")
+    root["meteo"].update(pl.DataFrame({"t": [0.0], "rain": [1.0]}))
+    root = root.commit("first")
+    first = repo.ic.lookup_branch("main")
+    root["meteo"].update(pl.DataFrame({"t": [1.0], "rain": [2.0]}))
+    root.commit("data only")
+
+    diff = repo.ic.diff(from_snapshot_id=first, to_branch="main")
+    assert "/__zf__/schema" not in diff.updated_arrays
+    assert "/__zf__/schema" not in diff.updated_chunks
+    meteo = repo.open()["meteo"]
+    assert "__structure__" not in meteo.dataset.attrs
+    assert set(meteo.schema.VARS) == {"rain"}
+    assert repo.ic.list_tags() == {"schema/1.0"}
+    commits = list(repo.ic.ancestry(branch="main"))[:2]
+    assert {commit.metadata["schema_version"] for commit in commits} == {"1.0"}
+
+
+def test_changed_schema_needs_new_version(tmp_path):
+    """A changed schema is stored only as a new version, tagged by the snapshot that introduces it."""
+    schema = _schema(tmp_path / "repo")
+    zf.open_repository(schema).open(mode="a").commit("first")
+    schema["soil"] = SOIL
+
+    with pytest.raises(ValueError, match="1.0"):
+        zf.open_repository(schema).open(mode="a").commit("same version")
+
+    schema["ATTRS"]["SCHEMA_VERSION"] = "1.1"
+    repo = zf.open_repository(schema)
+    repo.open(mode="a").commit("new version")
+
+    assert repo.ic.list_tags() == {"schema/1.0", "schema/1.1"}
+    assert "soil" in repo.open().children
+    assert "soil" not in repo.open(tag="schema/1.0").children
+
+
+@pytest.mark.parametrize("attrs", [{"SCHEMA_FAMILY": "climate"}, {"SCHEMA_VERSION": "2.0"}])
+def test_schema_family_and_major_version_are_fixed(tmp_path, attrs):
+    """Another family or major version of the schema needs a new repository."""
+    schema = _schema(tmp_path / "repo")
+    zf.open_repository(schema).open(mode="a").commit("first")
+    schema["ATTRS"].update(attrs)
+    schema["soil"] = SOIL
+
+    with pytest.raises(ValueError, match="new repository"):
+        zf.open_repository(schema).open(mode="a").commit("other schema")
+
+
+@pytest.mark.parametrize("version", [None, 1.0, "1", "a.1"])
+def test_stored_schema_needs_valid_version(tmp_path, version):
+    """SCHEMA_VERSION must be a string '<major>.<minor>' with an integer major."""
+    schema = _schema(tmp_path / "repo")
+    schema["ATTRS"]["SCHEMA_VERSION"] = version
+
+    with pytest.raises(ValueError, match="SCHEMA_VERSION"):
+        zf.open_repository(schema).open(mode="a").commit("first")
 
 
 def test_repository_on_s3(load_repo_secret_env):
