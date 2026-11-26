@@ -182,6 +182,7 @@ def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False, metad
         Template=_FakeTemplate,
         Row=_Widget,
         Column=_Widget,
+        Modal=_Widget,
         indicators=SimpleNamespace(LoadingSpinner=_Widget),
         pane=SimpleNamespace(Markdown=_Widget, Alert=_Widget),
         widgets=SimpleNamespace(Select=_Widget, Button=_Widget),

@@ -147,7 +147,8 @@ def test_startup_overlaps_reads_and_attaches_ready_windows(startup) -> None:
             template = composed.build_dashboard()
             template.server_doc(doc, location=False)
             assert set(template._render_items) == {
-                "controller", "top_left", "top_right", "bottom_left", "bottom_mid", "bottom_right"
+                "controller", "top_left", "top_right", "bottom_left", "bottom_mid", "bottom_right",
+                "logs_modal",
             }
             assert doc.roots
             assert panes == []

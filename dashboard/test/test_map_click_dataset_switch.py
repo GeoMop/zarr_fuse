@@ -132,6 +132,7 @@ def _build_dashboard(monkeypatch) -> dict[str, object]:
         Template=_FakeTemplate,
         Row=_FakeWidget,
         Column=_FakeWidget,
+        Modal=_FakeWidget,
         indicators=SimpleNamespace(LoadingSpinner=_FakeWidget),
         pane=SimpleNamespace(Markdown=_FakeWidget, Alert=_FakeWidget),
         widgets=SimpleNamespace(Select=_FakeWidget, Button=_FakeWidget),
