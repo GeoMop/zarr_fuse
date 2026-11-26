@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
+from collections import OrderedDict
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from datetime import datetime
+from operator import index
 from pathlib import Path
+from threading import Lock
 from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
 import xarray as xr
-import zarr_fuse as zf
 
+import zarr_fuse as zf
 from dashboard.config import (
+    SchemaFieldsConfig,
     find_view_file,
     load_view_config,
     load_views,
@@ -34,6 +41,33 @@ class ViewHandle:
     store_uri: str
 
 
+class _TimeseriesWindowCache:
+    """Group metadata and recent materialized windows for one cache generation."""
+
+    MAX_WINDOWS = 32
+
+    def __init__(self) -> None:
+        self.lock = Lock()
+        self.groups: dict[
+            tuple[str, str], tuple[xr.Dataset, SchemaFieldsConfig, pd.DatetimeIndex]
+        ] = {}
+        self.windows: OrderedDict[tuple, xr.DataArray] = OrderedDict()
+
+
+def _copy_timeseries_window(window: xr.DataArray) -> xr.DataArray:
+    copied = window.copy(deep=True)
+    # Rebuild indexed coordinate variables from the copied indexes. xarray's
+    # deep copy can leave those variables backed by the original index buffers.
+    coordinates = dict(copied.coords.variables)
+    for coordinate_index, variables in copied.xindexes.group_by_index():
+        coordinates.update(coordinate_index.create_variables(variables))
+    return xr.DataArray(
+        copied.variable,
+        coords=xr.Coordinates(coordinates, indexes=copied.xindexes),
+        name=copied.name,
+    )
+
+
 class LocalClient:
     def __init__(self, views_path: Path):
         self.views_path = Path(views_path).expanduser().resolve()
@@ -41,6 +75,7 @@ class LocalClient:
         self._nodes: Dict[str, Any] = {}
         self._map_data_cache: Dict[str, Any] = {}
         self._timeseries_cache: Dict[str, Any] = {}
+        self._timeseries_window_cache = _TimeseriesWindowCache()
 
     def clear_cache(self):
         """Replace the active caches so in-flight requests cannot repopulate them.
@@ -51,6 +86,7 @@ class LocalClient:
         """
         self._map_data_cache = {}
         self._timeseries_cache = {}
+        self._timeseries_window_cache = _TimeseriesWindowCache()
         print("[cache] Cleared all caches")
 
     def get_views(self) -> Dict[str, Any]:
@@ -432,6 +468,120 @@ class LocalClient:
         # Cache the result in the dictionary captured at request start.
         cache[cache_key] = result
         return result
+
+    def get_timeseries_window_data(
+        self,
+        view_name: str,
+        group_path: str,
+        *,
+        variable: str,
+        entity_index: int,
+        start: str | datetime | np.datetime64,
+        end: str | datetime | np.datetime64,
+        depth_indices: Sequence[int] | None = None,
+    ) -> xr.DataArray:
+        """Read one entity over the closed interval ``[start, end]``.
+
+        Bounds are UTC, including naive inputs. All samples at either endpoint
+        are included, including duplicate timestamps. The stored time index
+        must be decoded, ascending, and free of NaT.
+
+        Return an eager DataArray in the variable's original dimension order
+        with the entity dimension selected as a scalar. Depth indices are
+        zero-based and returned in the requested order. Use None for all depths
+        or for a variable without a depth dimension. Empty intervals retain
+        their time dimension and dtype. Missing measurements are preserved.
+        """
+        cache = self._timeseries_window_cache
+        group_path = group_path.strip("/")
+        group_key = (view_name, group_path)
+        start, end = (pd.Timestamp(bound) for bound in (start, end))
+        if pd.isna(start) or pd.isna(end):
+            raise ValueError("Window bounds cannot be NaT")
+        start, end = (
+            bound.tz_convert("UTC").tz_localize(None) if bound.tzinfo else bound
+            for bound in (start, end)
+        )
+        if start > end:
+            raise ValueError("Window start must be at or before end")
+
+        entity_index = index(entity_index)
+        depths = None if depth_indices is None else tuple(map(index, depth_indices))
+        key = (*group_key, variable, entity_index, depths, start, end)
+        with stage("timeseries_window.cache"):
+            with cache.lock:
+                result = cache.windows.get(key)
+                if result is not None:
+                    cache.windows.move_to_end(key)
+            if result is not None:
+                count("timeseries_window.cache_hit")
+                return _copy_timeseries_window(result)
+
+        with stage("timeseries_window.metadata"):
+            with cache.lock:
+                group = cache.groups.get(group_key)
+            if group is None:
+                view = self._view_config(view_name)
+                fields = resolve_schema_fields(view.schema, group_path)
+                if fields is None:
+                    raise ValueError(
+                        f"No schema field mapping for group {group_path!r}"
+                    )
+                ds = self._get_group(view_name, group_path).dataset
+                time_index = ds.indexes.get(fields.time)
+                if not isinstance(time_index, pd.DatetimeIndex):
+                    raise ValueError(
+                        f"{fields.time!r} must be a decoded datetime dimension coordinate"
+                    )
+                if time_index.hasnans or not time_index.is_monotonic_increasing:
+                    raise ValueError(
+                        f"{fields.time!r} must be ascending and contain no NaT"
+                    )
+                with cache.lock:
+                    group = cache.groups.setdefault(group_key, (ds, fields, time_index))
+            else:
+                count("timeseries_window.metadata_hit")
+        ds, fields, time_index = group
+
+        with stage("timeseries_window.select"):
+            array = ds[variable]
+            if fields.time not in array.dims or fields.entity not in array.dims:
+                raise ValueError(
+                    f"{variable!r} must have the mapped time and entity dimensions"
+                )
+            if not 0 <= entity_index < array.sizes[fields.entity]:
+                raise IndexError(
+                    f"Invalid entity index {entity_index} for {variable!r}"
+                )
+            if time_index.tz is not None:
+                start, end = (bound.tz_localize("UTC") for bound in (start, end))
+            # Compare timestamps without casting bounds to the index's unit.
+            selectors: dict[str, slice | int | list[int]] = {
+                fields.time: slice(
+                    bisect_left(time_index, start),
+                    bisect_right(time_index, end),
+                ),
+                fields.entity: entity_index,
+            }
+            if depths is not None:
+                depth_dim = fields.vertical
+                if depth_dim is None or depth_dim not in array.dims:
+                    raise ValueError(f"{variable!r} has no mapped depth dimension")
+                if any(
+                    depth < 0 or depth >= array.sizes[depth_dim] for depth in depths
+                ):
+                    raise IndexError(f"Invalid depth indices {depths} for {variable!r}")
+                selectors[depth_dim] = list(depths)
+            selected = array.isel(selectors)
+
+        with stage("timeseries_window.read"):
+            result = selected.load()
+        with cache.lock:
+            cache.windows[key] = result
+            cache.windows.move_to_end(key)
+            if len(cache.windows) > cache.MAX_WINDOWS:
+                cache.windows.popitem(last=False)
+        return _copy_timeseries_window(result)
 
     def get_timeseries_data(
         self,
