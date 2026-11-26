@@ -212,7 +212,7 @@ class TestBoreholeSelectPipeline:
             def get_variable_metadata(self, view_name: str, group_path: str, variable: str):
                 return {"unit": "degC"}
 
-            def get_timeseries_data(
+            def get_timeseries_site_metadata(
                 self,
                 view_name: str,
                 group_path: str,
@@ -250,7 +250,7 @@ class TestBoreholeSelectPipeline:
 
     def test_map_tap_records_pipeline_stages(self, perf_log: list[str]) -> None:
         data, _map_state, state, views = self._build_views()
-        _left, _mid, _right, on_map_tap, _fetch_site = views
+        _left, _mid, _right, on_map_tap = views
 
         # ``pn.state.curdoc`` is None in tests, so the deferred fetch runs
         # synchronously inside this call.
@@ -280,23 +280,20 @@ class TestBoreholeSelectPipeline:
         """
         monkeypatch.setattr(profiling, "_ENABLED", False)
         _data, _map_state, state, views = self._build_views()
-        line_left, _mid, _right, on_map_tap, _fetch_site = views
+        line_left, _mid, _right, on_map_tap = views
 
-        stream = next(s for s in line_left.streams if hasattr(s, "borehole_index"))
-        events: list[dict] = []
-        stream.add_subscriber(lambda **kwargs: events.append(kwargs))
+        assert not any(hasattr(stream, "borehole_index") for stream in line_left.streams)
         version_before = state.version
 
         selected = on_map_tap(x=11.0, y=47.0)
 
         assert selected == 7
         assert state.version > version_before, "version subscription drives the refresh"
-        assert events == [], f"borehole_stream fired redundantly: {events}"
 
     def test_map_tap_without_profiling_still_selects(self, monkeypatch) -> None:
         monkeypatch.setattr(profiling, "_ENABLED", False)
         _data, _map_state, state, views = self._build_views()
-        _left, _mid, _right, on_map_tap, _fetch_site = views
+        _left, _mid, _right, on_map_tap = views
 
         selected = on_map_tap(x=11.0, y=47.0)
 

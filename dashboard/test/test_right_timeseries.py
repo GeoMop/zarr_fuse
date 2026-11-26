@@ -1,9 +1,7 @@
 """Exercise the right pane's windowed reads without a live server or S3."""
 
 import asyncio
-from pathlib import Path
 from threading import Event, get_ident
-from types import SimpleNamespace
 
 import holoviews as hv
 import numpy as np
@@ -14,14 +12,9 @@ import xarray as xr
 from bokeh.document import Document
 from bokeh.models import GlyphRenderer, Line, Scatter
 from holoviews import streams
-from zarr.storage import LocalStore
 
-from dashboard.config import SchemaConfig, SchemaFieldsConfig
-from dashboard.data import LocalClient
 from dashboard.multi_time_views import build_timeseries_views
-from dashboard.plot_selection import SelectionState
-from dashboard.right_timeseries import RightWindow
-from dashboard.scripts.benchmark_timeseries import CountingStore
+from dashboard.timeseries_requests import TimeseriesWindow
 
 
 class _Document:
@@ -40,53 +33,13 @@ class _Document:
         handle.cancel()
 
 
-@pytest.fixture
-def setup_right(tmp_path, monkeypatch):
-    hv.extension("bokeh")
-    times = pd.date_range("2024-01-01", periods=169, freq="h").delete(145)
-    times = times.insert(148, times[147])
-    values = np.arange(len(times) * 4, dtype=np.float32).reshape(len(times), 2, 2)
-    values[151, 0, 0] = np.nan
-    ds = xr.Dataset(
-        {"temp": (("depth", "time", "entity"), values.transpose(2, 0, 1))},
-        coords={"time": times, "entity": ["A", "B"], "depth": [0.0, 3.0]},
-    )
-    path = tmp_path / "test.zarr"
-    ds.to_zarr(path, consolidated=False, encoding={"temp": {"chunks": (1, 16, 1)}})
-    store = CountingStore(LocalStore(path, read_only=True))
-    client = LocalClient(Path("unused.yaml"))
-    fields = SchemaFieldsConfig("lat", "lon", "time", "entity", "depth")
-    schema = SchemaConfig(file="", fields=fields)
-    monkeypatch.setattr(
-        client, "_view_config", lambda *_: SimpleNamespace(schema=schema)
-    )
-    monkeypatch.setattr(
-        client,
-        "_get_group",
-        lambda *_: SimpleNamespace(dataset=xr.open_zarr(store, consolidated=False)),
-    )
-    monkeypatch.setattr(client, "get_variable_metadata", lambda *_: {})
-    monkeypatch.setattr(
-        client,
-        "get_view",
-        lambda *_: {
-            "defaults": {},
-            "schema_display": {"entity_name": "Site"},
-            "schema": {
-                "fields": {"time": "time", "entity": "entity", "vertical": "depth"}
-            },
-            "visualization": {
-                "timeseries": {"middle_window_days": 30, "right_window_hours": 24}
-            },
-        },
-    )
-    state = SelectionState()
-    state.add_site(0, "A", [0.0, 3.0], [np.full(len(times), -1.0)] * 2, times)
-    data = SimpleNamespace(
-        client=client, view_name="view", group_path="/", display_variable="temp"
-    )
-    with store:
-        yield ds, data, state, store
+def _windows(data, doc=None, *, right=None):
+    return {
+        pane: right
+        if pane == "right" and right is not None
+        else TimeseriesWindow(doc, data, pane=pane)
+        for pane in ("left", "mid", "right")
+    }
 
 
 async def _until(predicate):
@@ -113,7 +66,7 @@ def _pan(view, start, end):
 def test_initial_day_uses_window_reader_and_preserves_raw_values(
     setup_right, monkeypatch
 ):
-    """The right pane draws only day samples; the other panes still draw legacy input."""
+    """The right pane draws only day samples from the window reader."""
     ds, data, state, store = setup_right
     read = data.client.get_timeseries_window_data
     calls = []
@@ -125,9 +78,9 @@ def test_initial_day_uses_window_reader_and_preserves_raw_values(
     monkeypatch.setattr(data.client, "get_timeseries_window_data", track)
 
     async def run():
-        controller = RightWindow(_Document(), data)
-        left, mid, right, *_ = build_timeseries_views(
-            data, {}, state, right_window=controller
+        controller = TimeseriesWindow(_Document(), data)
+        _, _, right, *_ = build_timeseries_views(
+            data, {}, state, windows=_windows(data, right=controller)
         )
         try:
             plot = hv.renderer("bokeh").get_plot(right)
@@ -154,9 +107,6 @@ def test_initial_day_uses_window_reader_and_preserves_raw_values(
             for marker in markers:
                 stamps = pd.to_datetime(marker.data_source.data["time"])
                 assert (stamps >= start).all() and (stamps <= end).all()
-            for legacy in (left, mid):
-                assert len(_curves(legacy)[0]) == ds.sizes["time"]
-                assert (_curves(legacy)[0].dimension_values(1) == -1).all()
         finally:
             controller.close()
 
@@ -178,9 +128,9 @@ def test_zoom_pan_reset_reuses_covered_window_and_tracks_shared_center(
     monkeypatch.setattr(data.client, "get_timeseries_window_data", record)
 
     async def run():
-        controller = RightWindow(_Document(), data)
+        controller = TimeseriesWindow(_Document(), data)
         left, mid, right, *_ = build_timeseries_views(
-            data, {}, state, right_window=controller
+            data, {}, state, windows=_windows(data, right=controller)
         )
         try:
             plot = hv.renderer("bokeh").get_plot(right)
@@ -263,9 +213,9 @@ def test_in_flight_result_cannot_publish_after_supersession(
     monkeypatch.setattr(data.client, "get_timeseries_window_data", block)
 
     async def run():
-        controller = RightWindow(_Document(), data)
+        controller = TimeseriesWindow(_Document(), data)
         _, _, right, *_ = build_timeseries_views(
-            data, {}, state, right_window=controller
+            data, {}, state, windows=_windows(data, right=controller)
         )
         try:
             _curves(right)
@@ -326,9 +276,9 @@ def test_slow_read_is_reused_or_skips_obsolete_sites(setup_right, monkeypatch, c
     monkeypatch.setattr(data.client, "get_timeseries_window_data", record)
 
     async def run():
-        controller = RightWindow(_Document(), data)
+        controller = TimeseriesWindow(_Document(), data)
         _, _, right, *_ = build_timeseries_views(
-            data, {}, state, right_window=controller
+            data, {}, state, windows=_windows(data, right=controller)
         )
         try:
             _curves(right)
@@ -364,8 +314,10 @@ def test_slow_read_is_reused_or_skips_obsolete_sites(setup_right, monkeypatch, c
 def test_replacing_right_pane_detaches_selection_and_plot_callbacks(setup_right):
     """Dispose the right-only watcher and let Panel detach its plot subscribers."""
     _, data, state, _ = setup_right
-    controller = RightWindow(None, data)
-    _, _, right, *_ = build_timeseries_views(data, {}, state, right_window=controller)
+    controller = TimeseriesWindow(None, data)
+    _, _, right, *_ = build_timeseries_views(
+        data, {}, state, windows=_windows(data, right=controller)
+    )
     selection = _plot_stream(right, streams.Params)
     layout = pn.Column(pn.pane.HoloViews(right))
     layout.get_root(Document())
@@ -395,9 +347,9 @@ def test_close_removes_queued_document_delivery(setup_right):
 
     async def run():
         document = DeferredDocument()
-        controller = RightWindow(document, data)
+        controller = TimeseriesWindow(document, data)
         _, _, right, *_ = build_timeseries_views(
-            data, {}, state, right_window=controller
+            data, {}, state, windows=_windows(data, right=controller)
         )
         try:
             _curves(right)
@@ -414,8 +366,10 @@ def test_teardown_releases_watcher_after_bokeh_destroys_document(setup_right):
     """Session cleanup can run after the document callback dispatcher is destroyed."""
     _, data, state, _ = setup_right
     document = Document()
-    controller = RightWindow(document, data)
-    _, _, right, *_ = build_timeseries_views(data, {}, state, right_window=controller)
+    controller = TimeseriesWindow(document, data)
+    _, _, right, *_ = build_timeseries_views(
+        data, {}, state, windows=_windows(data, right=controller)
+    )
     _curves(right)
     assert controller._timeout is not None
     document.callbacks.destroy()
@@ -439,9 +393,9 @@ def test_selection_empty_window_and_error_stay_local(setup_right, monkeypatch):
     monkeypatch.setattr(data.client, "get_timeseries_window_data", record)
 
     async def run():
-        controller = RightWindow(_Document(), data)
+        controller = TimeseriesWindow(_Document(), data)
         left, _, right, *_ = build_timeseries_views(
-            data, {}, state, right_window=controller
+            data, {}, state, windows=_windows(data, right=controller)
         )
         try:
             plot = hv.renderer("bokeh").get_plot(right)
@@ -466,8 +420,113 @@ def test_selection_empty_window_and_error_stay_local(setup_right, monkeypatch):
             assert "failed" not in plot.state.title.text
             _pan(right, "2024-01-03", "2024-01-03T05:00")
             await _until(lambda: "Window load failed" in plot.state.title.text)
-            assert len(_curves(left)[0]) == len(times)
+            assert "Window load failed" not in hv.Store.lookup_options(
+                "bokeh", left[()], "plot"
+            ).kwargs.get("title", "")
         finally:
             controller.close()
+
+    asyncio.run(run())
+
+
+def test_middle_scales_dense_windows_without_losing_peaks_or_gaps(
+    setup_right, monkeypatch
+):
+    """Dense adaptive curves keep exact peak timestamps and explicit NaN breaks."""
+    _, data, state, _ = setup_right
+    samples = None
+    calls = []
+
+    def read(*args, depth_indices, start, end, **kwargs):
+        nonlocal samples
+        calls.append((start, end))
+        times = pd.date_range(start, end, periods=6000)
+        times = times.insert(124, times[123]).delete(700)
+        samples = np.zeros(6000)
+        samples[123], samples[124] = 90, -30
+        samples[250:253] = np.nan
+        return xr.DataArray(
+            np.repeat(samples[:, None], len(depth_indices), axis=1),
+            dims=("time", "depth"),
+            coords={"time": times},
+        )
+
+    monkeypatch.setattr(data.client, "get_timeseries_window_data", read)
+
+    async def run():
+        windows = _windows(data, _Document())
+        _, mid, _, *_ = build_timeseries_views(data, {}, state, windows=windows)
+        try:
+            assert not len(_curves(mid)[0])
+            await _until(lambda: len(_curves(mid)[0]) > 0)
+            assert calls[0][1] - calls[0][0] == pd.Timedelta(days=30)
+            curve = _curves(mid)[0]
+            values = curve.dimension_values(1)
+            assert len(values) < len(samples)
+            assert values[np.isfinite(values)].max() == 90
+            assert values[np.isfinite(values)].min() == -30
+            assert np.isnan(values).any()
+            timestamps = curve.dimension_values(0)
+            assert (
+                timestamps[np.flatnonzero(values == 90)[0]]
+                == timestamps[np.flatnonzero(values == -30)[0]]
+            )
+        finally:
+            for controller in windows.values():
+                controller.close()
+
+    asyncio.run(run())
+
+
+def test_left_missing_overview_refines_only_after_zoom(setup_right, monkeypatch):
+    """A missing sidecar leaves a zoomable viewport without scanning the source history."""
+    ds, data, state, store = setup_right
+    monkeypatch.delenv("ZF_TIMESERIES_OVERVIEW_DIR", raising=False)
+
+    async def run():
+        windows = _windows(data, _Document())
+        left, _, _, *_ = build_timeseries_views(data, {}, state, windows=windows)
+        try:
+            plot = hv.renderer("bokeh").get_plot(left)
+            await _until(lambda: "Overview unavailable" in plot.state.title.text)
+            assert store.chunk_reads("temp") == (0, 0)
+            start, end = pd.Timestamp("2024-01-03"), pd.Timestamp("2024-01-04")
+            _pan(left, start, end)
+            await _until(lambda: len(_curves(left)[0]) > 0)
+            expected = ds.temp.sel(time=slice(start, end)).isel(entity=0, depth=0)
+            np.testing.assert_array_equal(
+                _curves(left)[0].dimension_values(1), expected.values
+            )
+            reads = store.chunk_reads("temp")
+            _pan(left, start + pd.Timedelta(hours=2), end)
+            assert store.chunk_reads("temp") == reads
+        finally:
+            for controller in windows.values():
+                controller.close()
+
+    asyncio.run(run())
+
+
+def test_left_keeps_all_persisted_extrema_and_gap_breaks(setup_right, monkeypatch):
+    """A saved overview may exceed the normal raw budget when it has many gaps."""
+    _, data, state, _ = setup_right
+    values = np.arange(4001, dtype=float)
+    values[1:3200:2] = np.nan
+
+    def read(*args, depth_indices, start, end, **kwargs):
+        times = pd.date_range(start, end, periods=len(values))
+        return {depth: (times, values) for depth in depth_indices}
+
+    monkeypatch.setattr(data.client, "get_timeseries_overview_data", read)
+
+    async def run():
+        windows = _windows(data, _Document())
+        left, _, _, *_ = build_timeseries_views(data, {}, state, windows=windows)
+        try:
+            await _until(lambda: len(_curves(left)[0]) > 0)
+            np.testing.assert_array_equal(_curves(left)[0].dimension_values(1), values)
+        finally:
+            for controller in windows.values():
+                controller.close()
 
     asyncio.run(run())

@@ -1,4 +1,4 @@
-"""Schedule and publish windowed reads for the right time-series pane."""
+"""Schedule and publish windowed reads for a time-series pane."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 Bounds = tuple[pd.Timestamp, pd.Timestamp]
 TraceKey = tuple[int, int]
 Traces = dict[TraceKey, tuple[pd.DatetimeIndex, np.ndarray]]
-_WindowChanged = streams.Stream.define("RightWindowChanged", revision=0)
+_WindowChanged = streams.Stream.define("TimeseriesWindowChanged", revision=0)
 
 
 @dataclass(frozen=True)
@@ -34,8 +34,11 @@ class SiteWindow:
 class _Request:
     bounds: Bounds
     sites: tuple[SiteWindow, ...]
+    overview: bool = False
 
     def covers(self, other: _Request) -> bool:
+        if self.overview != other.overview:
+            return False
         start, end = self.bounds
         requested_start, requested_end = other.bounds
         if not start <= requested_start <= requested_end <= end:
@@ -46,21 +49,22 @@ class _Request:
         )
 
 
-class RightWindow:
+class TimeseriesWindow:
     """Keep one loaded window and coalesce requests while a read is in flight."""
 
-    def __init__(self, doc, data) -> None:
+    def __init__(self, doc, data, *, pane: str = "right") -> None:
         self.doc = doc
         self.data = data
         self.context = (data.view_name, data.group_path, data.display_variable)
         self.client = data.client
+        self.pane = pane
+        self._operation_name = f"timeseries.{pane}_window"
         self.changed = _WindowChanged()
         self._selection: streams.Params | None = None
         self._closed = False
         self._wanted: _Request | None = None
-        self._loaded: _Request | None = None
-        self._traces: Traces = {}
-        self._error = False
+        self._loaded: dict[bool, tuple[_Request, Traces]] = {}
+        self._error = ""
         self._timeout = None
         self._delivery = None
         self._active: tuple[_Request, Event, asyncio.Task] | None = None
@@ -77,12 +81,22 @@ class RightWindow:
             self.data.display_variable,
         )
 
+    def _covered(self, request: _Request) -> Traces | None:
+        loaded = self._loaded.get(request.overview)
+        if loaded is not None:
+            previous, traces = loaded
+            if previous.covers(request):
+                return traces
+        return None
+
     def request(
         self,
         bounds: Bounds,
         sites: tuple[SiteWindow, ...],
         time_dim: str,
         depth_dim: str | None,
+        *,
+        overview: bool = False,
     ) -> tuple[Traces, str]:
         """Queue the latest uncovered window and return available traces and status."""
         if not self._is_current():
@@ -90,11 +104,11 @@ class RightWindow:
         if not sites:
             self.clear_selection()
             return {}, ""
-        request = _Request(bounds, sites)
-        covered = self._loaded is not None and self._loaded.covers(request)
+        request = _Request(bounds, sites, overview)
+        covered = self._covered(request)
         if request != self._wanted:
             self._wanted = request
-            self._error = False
+            self._error = ""
             self._cancel_timeout()
             active_covers = False
             if self._active is not None:
@@ -102,18 +116,21 @@ class RightWindow:
                 active_covers = not stop.is_set() and active.covers(request)
                 if not active_covers:
                     stop.set()
-            if covered:
-                with measure_operation("timeseries.right_window.covered"):
-                    count("timeseries.right_window.coverage_hit")
+            if covered is not None:
+                with measure_operation(f"{self._operation_name}.covered"):
+                    count(f"{self._operation_name}.coverage_hit")
             elif not active_covers and self.doc is not None:
                 self._timeout = self.doc.add_timeout_callback(
                     lambda: self._start(time_dim, depth_dim), 75
                 )
         if self.doc is None:
             return {}, ""
-        if covered:
-            return self._traces, ""
-        return {}, "Window load failed" if self._error else "Loading window…"
+        if covered is not None:
+            return covered, ""
+        previous = {}
+        if self.pane == "left" and self._loaded:
+            _, previous = self._loaded.get(True) or self._loaded[False]
+        return previous, self._error or "Loading window…"
 
     def _cancel_timeout(self) -> None:
         if self._timeout is not None:
@@ -141,8 +158,7 @@ class RightWindow:
             _, _, task = self._active
             task.cancel()
             self._active = None
-        self._loaded = None
-        self._traces = {}
+        self._loaded.clear()
         self.doc = None
 
     def clear_selection(self) -> None:
@@ -160,7 +176,7 @@ class RightWindow:
             not self._is_current()
             or request is None
             or self._active is not None
-            or (self._loaded is not None and self._loaded.covers(request))
+            or self._covered(request) is not None
         ):
             return
         stop = Event()
@@ -169,15 +185,34 @@ class RightWindow:
 
     def _read(
         self, request: _Request, time_dim: str, depth_dim: str | None, stop: Event
-    ) -> Traces:
+    ) -> Traces | None:
         """Materialize each selected site in the worker thread."""
         view, group, variable = self.context
         start, end = request.bounds
         traces: Traces = {}
-        with measure_operation("timeseries.right_window.read"):
+        with measure_operation(f"{self._operation_name}.read"):
             for site in request.sites:
                 if stop.is_set():
                     break
+                if request.overview:
+                    summary = self.client.get_timeseries_overview_data(
+                        view,
+                        group,
+                        variable=variable,
+                        entity_index=site.entity,
+                        depth_indices=site.depths,
+                        start=start,
+                        end=end,
+                    )
+                    if summary is None:
+                        return None
+                    traces.update(
+                        {
+                            (site.entity, depth): trace
+                            for depth, trace in summary.items()
+                        }
+                    )
+                    continue
                 array = self.client.get_timeseries_window_data(
                     view,
                     group,
@@ -199,7 +234,12 @@ class RightWindow:
     async def _load(
         self, request: _Request, time_dim: str, depth_dim: str | None, stop: Event
     ) -> None:
-        op = operation("timeseries.right_window", sites=len(request.sites))
+        op = operation(self._operation_name, sites=len(request.sites))
+        error = (
+            "Overview unavailable; zoom in for measurements"
+            if request.overview
+            else "Window load failed"
+        )
         with op.activate():
             try:
                 traces = await asyncio.to_thread(
@@ -209,7 +249,8 @@ class RightWindow:
                 op.finish(status="cancelled")
                 return
             except Exception:
-                logger.exception("Right time-series window read failed")
+                logger.exception("Time-series window read failed")
+                error = "Window load failed"
                 traces = None
         if not self._is_current():
             op.finish(status="cancelled")
@@ -228,10 +269,15 @@ class RightWindow:
                 and request.covers(wanted)
                 and (traces is not None or request == wanted)
             ):
-                self._error = traces is None
+                self._error = error if traces is None else ""
                 if traces is not None:
-                    self._loaded, self._traces = request, traces
-                with measure_operation("timeseries.right_window.update"):
+                    self._loaded[request.overview] = (request, traces)
+                with measure_operation(f"{self._operation_name}.update"):
+                    if traces is not None:
+                        count(
+                            "timeseries.loaded_samples",
+                            sum(len(times) for times, _ in traces.values()),
+                        )
                     self.changed.event(revision=self.changed.revision + 1)
                 op.finish(status="error" if self._error else "ok")
             else:
@@ -240,3 +286,11 @@ class RightWindow:
                     self._start(time_dim, depth_dim)
 
         self._delivery = (self.doc.add_next_tick_callback(op.wrap(apply)), op)
+
+
+def make_timeseries_windows(doc, data) -> dict[str, TimeseriesWindow]:
+    """Create the three independent pane controllers for one dashboard context."""
+    return {
+        pane: TimeseriesWindow(doc, data, pane=pane)
+        for pane in ("left", "mid", "right")
+    }

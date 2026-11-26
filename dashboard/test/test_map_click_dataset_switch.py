@@ -181,7 +181,7 @@ def _build_dashboard(monkeypatch) -> dict[str, object]:
         data, map_state, selection_state=None, render_spinner=None, **kwargs
     ):
         captured["map_click_client"] = kwargs["map_click_client"]
-        captured["right_window"] = kwargs["right_window"]
+        captured["right_window"] = kwargs["windows"]["right"]
 
         def fake_on_map_tap(x, y, loading=None, doc=None):
             tap_calls.append((x, y))
@@ -192,7 +192,6 @@ def _build_dashboard(monkeypatch) -> dict[str, object]:
             _FakeWidget(),
             _FakeWidget(),
             fake_on_map_tap,
-            lambda *args, **kwargs: None,
         )
 
     def fake_local_client(views_path):

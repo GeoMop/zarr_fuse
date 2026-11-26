@@ -1,9 +1,9 @@
 import asyncio
+import html
 import logging
+import traceback
 from collections.abc import Callable
 from functools import partial
-import html
-import traceback
 
 import holoviews as hv
 import panel as pn
@@ -34,8 +34,8 @@ from dashboard.plot_selection import (
     resolve_available_dimensions,
 )
 from dashboard.profiling import log_message, operation, session, time_stage
-from dashboard.right_timeseries import RightWindow
 from dashboard.sidebar import _flatten_nodes, build_sidebar
+from dashboard.timeseries_requests import TimeseriesWindow, make_timeseries_windows
 
 logger = logging.getLogger(__name__)
 
@@ -171,16 +171,22 @@ def build_dashboard():
     _build_stage = time_stage("build_dashboard")
     print(f"[session] build_dashboard started session_id={session_id}", flush=True)
 
-    right_window: RightWindow | None = None
+    windows: dict[str, TimeseriesWindow] = {}
+    population_task: asyncio.Task | None = None
 
-    def _retire_right_window(*, session_destroyed: bool = False) -> None:
-        nonlocal right_window
-        if right_window is not None:
-            right_window.close(session_destroyed=session_destroyed)
-            right_window = None
+    def _retire_windows(*, session_destroyed: bool = False) -> None:
+        for controller in windows.values():
+            controller.close(session_destroyed=session_destroyed)
+        windows.clear()
 
     def _on_session_destroyed(session_context):
-        _retire_right_window(session_destroyed=True)
+        nonlocal _map_click_generation
+        _retire_windows(session_destroyed=True)
+        _map_click_generation += 1
+        if population_task is not None:
+            population_task.cancel()
+        if variable_switch_task is not None:
+            variable_switch_task.cancel()
         # Idempotent: finishes an initial_load left open by a failed build.
         _load_op.finish(status="error")
         sid = session_context.id if session_context is not None else session_id
@@ -291,7 +297,7 @@ def build_dashboard():
     def _invalidate_requests() -> None:
         """Retire site loads before changing the request context."""
         nonlocal _map_click_generation
-        _retire_right_window()
+        _retire_windows()
         _map_click_generation += 1
         if variable_switch_task is not None:
             variable_switch_task.cancel()
@@ -385,14 +391,16 @@ def build_dashboard():
             _set_variable_options({}, None)
             logger.exception("[variables] failed to load variables for view=%s group=%s", view_name, group_path)
 
-    def _select_variable(var_name: str, label: str | None = None) -> None:
+    def _select_variable(var_name: str, label: str | None = None, *, reload: bool = False) -> None:
         nonlocal variable_switch_task, variable_switch_active
-        if var_name == data.display_variable:
+        if not reload and var_name == data.display_variable:
             return
 
         _invalidate_requests()
-        if map_click_state.active:
+        if reload or map_click_state.active:
             _detach_map_click()
+        if reload:
+            data.client.clear_cache()
         generation = _map_click_generation_value()
         request_view = data.view_name
         request_group = data.group_path
@@ -400,7 +408,7 @@ def build_dashboard():
         display_label = label or var_name
         entity_indices = [int(site["entity_index"]) for site in selection_state.sites]
         target_doc = pn.state.curdoc
-        switch_op = operation("variable.switch", variable=var_name)
+        switch_op = operation("data.reload" if reload else "variable.switch", variable=var_name)
 
         log_message(f"[variables] Changing from {data.display_variable} to {var_name}")
         data.display_variable = var_name
@@ -445,7 +453,7 @@ def build_dashboard():
                     with stage("selection.update"):
                         # Replacement plots render the batch when they are attached.
                         failed = selection_state.update_sites_data(results, notify_version=False)
-                    refresh_views(rebuild_map=False, variable_metadata=metadata)
+                    refresh_views(rebuild_map=reload, variable_metadata=metadata)
                     _show_variable_metadata(metadata)
                 if failed:
                     _show_refresh_error(failed)
@@ -510,30 +518,6 @@ def build_dashboard():
 
             variable_switch_task = loop.create_task(switch_op.wrap(_load)())
             variable_switch_task.add_done_callback(_loaded)
-
-    def _refetch_sites():
-        """Re-fetch every registered site with the current variable, in place.
-
-        Each site's data is replaced via ``fetch_site`` (by stable
-        ``entity_index``) so every selected site moves to the new variable
-        regardless of coordinate filtering or map CRS units.  Sites are never
-        cleared, so checked depths and table position are preserved.  Reports
-        per-site no-data/failure in the service status.
-        """
-        if not selection_state.sites:
-            return
-        failed: list[int] = []
-        timeseries_loading.visible = True
-        try:
-            for site in list(selection_state.sites):
-                idx = site["entity_index"]
-                result = map_handlers["fetch_site"](idx)
-                if result is None:
-                    failed.append(idx)
-        finally:
-            timeseries_loading.visible = False
-        if failed:
-            _show_refresh_error(failed)
 
     def _show_refresh_error(failed: list[int]) -> None:
         label = plot_var_selector.value or data.display_variable
@@ -633,7 +617,6 @@ def build_dashboard():
     bottom_right = _placeholder_root("stretch_both", "Loading day timeseries...")
 
     def refresh_views(rebuild_map: bool = True, *, variable_metadata: dict | None = None):
-        nonlocal right_window
         with time_stage("refresh_views", rebuild_map=rebuild_map):
             if rebuild_map:
                 new_map_view, new_map_state = build_map_view(data, tap_stream)
@@ -646,9 +629,9 @@ def build_dashboard():
                 # rebuild (only the timeseries plots need to redraw).
                 new_map_state = map_state
 
-            _retire_right_window()
-            right_window = RightWindow(pn.state.curdoc, data)
-            new_line_left, new_line_mid, new_line_right, new_on_map_tap, new_fetch_site = build_timeseries_views(
+            _retire_windows()
+            windows.update(make_timeseries_windows(pn.state.curdoc, data))
+            new_line_left, new_line_mid, new_line_right, new_on_map_tap = build_timeseries_views(
                 data,
                 new_map_state,
                 selection_state=selection_state,
@@ -658,11 +641,10 @@ def build_dashboard():
                 map_click_generation=_map_click_generation_value,
                 map_click_failure=_show_refresh_error,
                 variable_metadata=variable_metadata,
-                right_window=right_window,
+                windows=windows.copy(),
             )
 
             map_handlers["on_map_tap"] = new_on_map_tap
-            map_handlers["fetch_site"] = new_fetch_site
             if rebuild_map:
                 _set_root(top_left, _map_pane(new_map_view), label="top_left")
             _set_root(bottom_left, _line_pane(new_line_left), label="bottom_left")
@@ -717,65 +699,18 @@ def build_dashboard():
                 _wrapped()
 
     def on_reload(_event=None):
-        """Re-read the current view / group / variable from the store.
-
-        The current dashboard state is kept: view, group path, variable, the
-        registered sites and their checked depths.  Only the underlying data is
-        discarded and fetched again, then the map and the timeseries panes are
-        rebuilt.  This is intentionally a data refresh only -- the data
-        structure tree and the variable list are not re-read, and the
-        timeseries time window re-anchors to the rebuilt views.
-        """
-        if loading_indicator.visible:
-            return  # debounce — a reload is already running
-
-        loading_indicator.visible = True
-
-        _reload_op = operation(
-            "data.reload",
-            view=view_name,
-            group=data.group_path,
-            variable=data.display_variable,
-        )
-
-        def _run_reload():
-            with measure_operation("data.reload", view=view_name):
-                try:
-                    # Invalidate map-click requests before the data changes.  A
-                    # new background client prevents new clicks from reusing the
-                    # old client's cache; already-running reads keep their client.
-                    _invalidate_requests()
-                    _replace_map_click_client()
-                    # Drop cached map/timeseries payloads; the zarr nodes reopen
-                    # their dataset lazily so values are re-read from the store.
-                    data.client.clear_cache()
-                    if data.display_variable:
-                        # Refresh each site in place so the table position and the
-                        # checked depths survive the reload.
-                        _refetch_sites()
-                    refresh_views(rebuild_map=True)
-                except Exception as exc:  # noqa: BLE001 - surface any reload failure
-                    logger.exception("[reload] failed")
-                    rendering_status.object = f"⚠️ Reload failed: {str(exc)[:80]}"
-                    rendering_status.visible = True
-                    pn.state.add_timeout(None, 5000, lambda: setattr(rendering_status, "visible", False))
-                finally:
-                    loading_indicator.visible = False
-
-        _wrapped = _reload_op.wrap(_run_reload, finish=True)
-        doc = pn.state.curdoc
-        if doc is not None:
-            doc.add_next_tick_callback(_wrapped)
-        else:
-            _wrapped()
+        """Invalidate the source snapshot and refresh metadata off the document thread."""
+        if not loading_indicator.visible:
+            _select_variable(data.display_variable, _current_var_label, reload=True)
 
     async def _populate() -> None:
         """Read the initial group and populate each pane as its data becomes available."""
-        nonlocal right_window
         nonlocal structure, store_selector, node_select, variable_selector
         nonlocal variable_metadata, node_hint, store_info, reload_button
         nonlocal selection_state, map_state
+        nonlocal population_task
 
+        population_task = asyncio.current_task()
         with _load_op.activate():
             populate_stage = time_stage("populate_dashboard")
             status = "ok"
@@ -915,8 +850,8 @@ def build_dashboard():
 
                 line_roots = (bottom_left, bottom_mid, bottom_right)
                 try:
-                    right_window = RightWindow(pn.state.curdoc, data)
-                    left, mid, right, on_map_tap, fetch_site_entity = build_timeseries_views(
+                    windows.update(make_timeseries_windows(pn.state.curdoc, data))
+                    left, mid, right, on_map_tap = build_timeseries_views(
                         data,
                         map_state,
                         selection_state=selection_state,
@@ -927,13 +862,12 @@ def build_dashboard():
                         map_click_failure=_show_refresh_error,
                         initial_site=initial_site,
                         variable_metadata=metadata_task.result() if metadata_task is not None else {},
-                        right_window=right_window,
+                        windows=windows.copy(),
                     )
                 except Exception as exc:  # noqa: BLE001 - leave the map and table visible
                     report_failure("Timeseries", exc, *line_roots)
                 else:
                     map_handlers["on_map_tap"] = on_map_tap
-                    map_handlers["fetch_site"] = fetch_site_entity
                     for root, line, label in zip(line_roots, (left, mid, right), ("bottom_left", "bottom_mid", "bottom_right")):
                         try:
                             _set_root(root, _line_pane(line), label=label)
@@ -956,6 +890,7 @@ def build_dashboard():
                 rendering_status.object = f"⚠️ Render error: {str(exc)[:80]}"
                 rendering_status.visible = True
             finally:
+                population_task = None
                 populate_stage.log(status=status)
                 _load_op.finish(status=status, view=view_name, group=data.group_path)
                 log_message(f"[populate] finished status={status} session_id={session_id}")

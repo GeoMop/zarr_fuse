@@ -249,9 +249,9 @@ def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False, metad
     def fake_build_timeseries_views(*args, **kwargs):
         captured["refresh_count"] += 1
         captured["refresh_metadata"] = kwargs.get("variable_metadata")
-        captured["right_window"] = kwargs["right_window"]
+        captured["right_window"] = kwargs["windows"]["right"]
         if real_map_clicks:
-            left, mid, right, on_map_tap, fetch_site = multi_time_views.build_timeseries_views(
+            left, mid, right, on_map_tap = multi_time_views.build_timeseries_views(
                 *args, **kwargs
             )
             captured["map_click_state"] = kwargs["map_click_state"]
@@ -260,7 +260,7 @@ def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False, metad
                 if x is not None and y is not None:
                     return on_map_tap(x, y, loading=loading, doc=doc)
 
-            return left, mid, right, interactive_tap, fetch_site
+            return left, mid, right, interactive_tap
 
         def fake_on_map_tap(x, y, loading=None, doc=None):
             captured["tap_calls"].append((x, y))
@@ -270,16 +270,15 @@ def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False, metad
             _Widget(),
             _Widget(),
             fake_on_map_tap,
-            lambda *args, **kwargs: None,
         )
 
     def fake_local_client(views_path):
         client = SimpleNamespace(views_path=Path(views_path))
         if real_map_clicks:
-            def get_timeseries_data(view_name, *, group_path, lat, lon, variable, entity_index):
+            def get_timeseries_site_metadata(view_name, *, group_path, lat, lon, variable, entity_index):
                 return fetch(client, view_name, group_path, variable, entity_index)
 
-            client.get_timeseries_data = get_timeseries_data
+            client.get_timeseries_site_metadata = get_timeseries_site_metadata
         captured["clients"].append(client)
         return client
 
@@ -541,8 +540,10 @@ def test_context_change_releases_map_click_guard(monkeypatch, selector: str, val
 
     async def scenario() -> None:
         try:
+            existing_tasks = asyncio.all_tasks()
             tap.trigger()
             await _wait_for(old.entered.is_set)
+            (old_read,) = asyncio.all_tasks() - existing_tasks
             captured[selector].value = value
             if keeps_sites:
                 await _wait_for_callbacks(doc, 1)
@@ -560,8 +561,8 @@ def test_context_change_releases_map_click_guard(monkeypatch, selector: str, val
             assert captured["clients"][0] is not captured["clients"][-1]
 
             old.release.set()
-            await _wait_for_callbacks(doc, 1)
-            doc.drain()
+            await asyncio.wait_for(old_read, timeout=3)
+            assert not doc.callbacks
             assert map_click.active
             assert spinner.visible
             if keeps_sites:

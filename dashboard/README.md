@@ -53,6 +53,36 @@ DASHBOARD_PROFILE=1             # enables structured timing output via
                                 # logging.getLogger("dashboard.performance")
 ```
 
+### Time-series overviews
+
+The month and day panes can open directly from raw time windows. The history pane uses one coarse,
+preprocessed Zarr overview per source, group, and variable. It can switch to raw measurements when
+zoomed to a window no wider than the configured month span.
+
+Generate each overview from the repository root using the same view configuration as the dashboard:
+
+```text
+python -m dashboard.scripts.build_timeseries_overview VIEWS_YAML VIEW GROUP VARIABLE OVERVIEW_DIRECTORY
+```
+
+Set `ZF_TIMESERIES_OVERVIEW_DIR` to that directory on the dashboard server. The directory is local
+to the dashboard process and may be mounted read-only. The command can read a configured local or S3
+source and writes a new, separate local Zarr store. Each default overview has 750 time buckets.
+It stores original timestamps for the first, last, minimum, and maximum samples of each finite
+run in each bucket, plus gap breaks and per-depth historical availability.
+
+Sidecar names include the source URI, group, variable, shape, coordinate values, and
+`ZF_TIMESERIES_OVERVIEW_REVISION`. A changed time axis or source shape selects a new filename.
+To refresh after in-place measurement corrections or to change the bucket count, set a new revision
+in both the preprocessing and dashboard environments and regenerate the configured overviews before
+deploying that revision. The generator refuses to replace an existing sidecar. Dashboard reload
+discards cached metadata and discovers newly generated sidecars. Keep old revisions as needed or
+remove them from the sidecar directory after rollout.
+
+When a sidecar is missing or no longer matches, the history pane prompts users to zoom for raw
+measurements. Month and day can still load independently. Depths with unknown availability remain
+selectable until a summary provides a history-wide answer.
+
 ### Performance profiling
 
 Set `DASHBOARD_PROFILE=1` (before launching the server) to emit records through

@@ -6,15 +6,18 @@ import asyncio
 import logging
 import threading
 from pathlib import Path
+from time import perf_counter
 from types import SimpleNamespace
 
 import pytest
 from bokeh.document import Document
 from panel.io.state import set_curdoc
+from zarr.storage import LocalStore
 
 from dashboard import composed, profiling
 from dashboard.data import DashboardData
 from dashboard.plot_selection import SelectionState
+from dashboard.test.test_right_timeseries import _curves
 
 
 class _Read:
@@ -79,7 +82,7 @@ def startup(monkeypatch):
         get_variables = lambda self, *args, **kwargs: reads.variables(self, *args, **kwargs)
         get_variable_metadata = lambda self, *args, **kwargs: reads.metadata(self, *args, **kwargs)
         get_map_data = lambda self, *args, **kwargs: reads.map(self, *args, **kwargs)
-        get_timeseries_data = lambda self, *args, **kwargs: reads.site(self, *args, **kwargs)
+        get_timeseries_site_metadata = lambda self, *args, **kwargs: reads.site(self, *args, **kwargs)
 
     path = Path("views.yaml")
     data = DashboardData("local", "/configured", "temp", Client(path))
@@ -188,9 +191,136 @@ def test_startup_overlaps_reads_and_attaches_ready_windows(startup) -> None:
         assert all(thread != startup.thread for _, thread, _, _ in read.calls)
 
 
+@pytest.mark.parametrize("delay_overview", [False, True])
+def test_startup_loads_each_pane_without_a_raw_history_scan(
+    startup, setup_right, tmp_path, monkeypatch, delay_overview
+):
+    """The dashboard starts with metadata, two bounded reads and a saved overview."""
+    ds, source, _, store = setup_right
+    client = source.client
+    monkeypatch.setattr(
+        client, "_view_handle", lambda *_: SimpleNamespace(store_uri="source")
+    )
+    monkeypatch.setenv("ZF_TIMESERIES_OVERVIEW_DIR", str(tmp_path))
+    grouped = tmp_path / "generation-source.zarr"
+    ds.to_zarr(grouped, group="sites", consolidated=False)
+    monkeypatch.setattr(
+        client, "_overview_source", lambda handle: (handle.store_uri, LocalStore(grouped, read_only=True))
+    )
+    client.generate_timeseries_overview("local", "/sites", "temp", tmp_path, bins=8)
+    store.reads.clear()
+    fake_client = startup.data.client
+    startup.reads.map.result["marker_meta"][1]["entity_index"] = 0
+    monkeypatch.setattr(
+        fake_client, "get_timeseries_site_metadata", client.get_timeseries_site_metadata
+    )
+    monkeypatch.setattr(
+        fake_client,
+        "get_timeseries_overview_data",
+        client.get_timeseries_overview_data,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        fake_client,
+        "get_timeseries_window_data",
+        client.get_timeseries_window_data,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        fake_client,
+        "get_timeseries_data",
+        lambda *a, **k: pytest.fail("legacy history reader"),
+        raising=False,
+    )
+    overview_started, release = threading.Event(), threading.Event()
+    if not delay_overview:
+        release.set()
+    views = []
+    wrap_pane = composed._line_pane
+
+    def blocked_overview(*args, **kwargs):
+        overview_started.set()
+        assert release.wait(5)
+        return client.get_timeseries_overview_data(*args, **kwargs)
+
+    def attach_view(view):
+        views.append(view)
+        return wrap_pane(view)
+
+    monkeypatch.setattr(fake_client, "get_timeseries_overview_data", blocked_overview)
+    monkeypatch.setattr(composed, "_line_pane", attach_view)
+
+    async def run():
+        doc = Document()
+        with set_curdoc(doc):
+            started = perf_counter()
+            template = composed.build_dashboard()
+            template.server_doc(doc, location=False)
+            await startup.callbacks[0]()
+            shell_ready = perf_counter() - started
+            left, mid, right = views
+            ready = {}
+            try:
+                async with asyncio.timeout(8):
+                    while len(ready) < 3:
+                        for callback in doc.session_callbacks:
+                            if type(callback).__name__ in {
+                                "TimeoutCallback",
+                                "NextTickCallback",
+                            }:
+                                callback.callback()
+                        for name, view in zip(("left", "mid", "right"), views):
+                            if name not in ready and len(_curves(view)[0]):
+                                ready[name] = perf_counter() - started
+                        if {"mid", "right"} <= ready.keys():
+                            release.set()
+                        await asyncio.sleep(0.01)
+            finally:
+                release.set()
+                for callback in list(doc.session_destroyed_callbacks):
+                    # Only the application callback needs to run on this unscheduled test document.
+                    if getattr(callback, "__name__", "") == "_on_session_destroyed":
+                        callback(None)
+            assert overview_started.is_set()
+            if delay_overview:
+                assert ready["left"] >= max(ready["mid"], ready["right"])
+            counts = [len(_curves(view)[0]) for view in (left, mid, right)]
+            assert counts[0] <= 4 * 8 + 5
+            assert counts[1] > counts[2] > 0
+            reads, size = store.chunk_reads("temp")
+            keys = {key for key, _ in store.reads if key.startswith("temp/c/")}
+            full = 2 * ((ds.sizes["time"] + 15) // 16)
+            assert 0 < len(keys) < full
+            assert startup.selections[0].sites[0]["series"] == []
+            print(
+                f"local startup delayed_overview={delay_overview} shell={shell_ready:.3f}s first={ready} samples={counts} "
+                f"measurement_GETs={reads} bytes={size} distinct_chunks={len(keys)}/{full}"
+            )
+            store.reads.clear()
+            index = ds.indexes["time"]
+            client.get_timeseries_window_data(
+                "local",
+                "/sites",
+                variable="temp",
+                entity_index=0,
+                start=index[0],
+                end=index[-1],
+            )
+            print(
+                f"local full-history comparison measurement_GETs_and_bytes={store.chunk_reads('temp')}"
+            )
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize(
     ("failed_read", "ready_pane"),
-    [("structure", "bottom_right"), ("map", "bottom_right"), ("metadata", "bottom_right"), ("site", "bottom_right")],
+    [
+        ("structure", "bottom_right"),
+        ("map", "bottom_right"),
+        ("metadata", "bottom_right"),
+        ("site", "bottom_right"),
+    ],
 )
 def test_startup_contains_read_failures(startup, failed_read, ready_pane) -> None:
     """A failed startup read leaves the other usable windows available."""

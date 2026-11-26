@@ -10,10 +10,14 @@ import panel as pn
 from holoviews import streams
 
 from dashboard.config import _resolve_fields_for_group_raw
-from dashboard.debug_log import debug
 from dashboard.perf_summary import Timer, count, measure_operation, stage
-from dashboard.profiling import log_message, operation, time_stage
-from dashboard.right_timeseries import RightWindow, SiteWindow
+from dashboard.profiling import operation, time_stage
+from dashboard.timeseries_overview import extrema_indices
+from dashboard.timeseries_requests import (
+    SiteWindow,
+    TimeseriesWindow,
+    make_timeseries_windows,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +32,10 @@ class MapClickOperation:
     def active(self) -> bool:
         """Whether a map read owns the click guard."""
         return self.active_generation is not None
+
+
+def _site_metadata(figure: dict) -> dict:
+    return {key: figure[key] for key in ("availability", "single_trace") if key in figure}
 
 
 def fetch_registered_site_payload(
@@ -47,7 +55,7 @@ def fetch_registered_site_payload(
     if not variable:
         timer.stop()
         return None
-    figure = client.get_timeseries_data(
+    figure = client.get_timeseries_site_metadata(
         view_name,
         group_path=group_path,
         lat=0.0,
@@ -56,7 +64,6 @@ def fetch_registered_site_payload(
         entity_index=int(entity_index),
     )
     if figure.get("status") == "error":
-        reason = figure.get("reason", "Failed to load timeseries")
         timer.stop()
         count("fill_registered_site.error")
         return None
@@ -65,7 +72,7 @@ def fetch_registered_site_payload(
     depths = np.array(figure.get("depths", []), dtype=float)
     series = [np.array(values, dtype=float) for values in figure.get("series", [])]
     resolved_index = int(figure.get("borehole_index", entity_index))
-    if not series:
+    if not len(depths):
         timer.stop()
         count("fill_registered_site.no_data")
         return None
@@ -81,6 +88,7 @@ def fetch_registered_site_payload(
         "series": series,
         "times": times,
         "depths": depths,
+        **_site_metadata(figure),
     }
 
 
@@ -175,7 +183,8 @@ def _default_coords(map_state: dict, default_site_name: str | None):
             if meta.get("site_id") == default_site_name:
                 idx = all_meta.index(meta)
                 return float(lats[idx]), float(lons[idx]), meta
-    return float(lats[0]), float(lons[0]), None
+    markers = map_state.get("marker_meta") or [None]
+    return float(lats[0]), float(lons[0]), markers[0]
 
 
 def fetch_default_site_figure(
@@ -188,7 +197,7 @@ def fetch_default_site_figure(
 ) -> dict:
     """Read the default site's data using the usual map-based selection rule."""
     lat, lon, marker = _default_coords(map_state, default_site_name)
-    return client.get_timeseries_data(
+    return client.get_timeseries_site_metadata(
         view_name, group_path=group_path, variable=variable, lat=lat, lon=lon,
         entity_index=marker.get("entity_index") if marker is not None else None,
     )
@@ -206,7 +215,7 @@ def build_timeseries_views(
     map_click_failure=None,
     initial_site: dict | None = None,
     variable_metadata: dict | None = None,
-    right_window: RightWindow | None = None,
+    windows: dict[str, TimeseriesWindow] | None = None,
 ):
     if map_click_client is None:
         map_click_client = lambda: data.client
@@ -214,13 +223,11 @@ def build_timeseries_views(
         map_click_state = MapClickOperation()
     if map_click_generation is None:
         map_click_generation = lambda: 0
-    if right_window is None:
-        right_window = RightWindow(pn.state.curdoc, data)
+    if windows is None:
+        windows = make_timeseries_windows(pn.state.curdoc, data)
 
     _build_stage = time_stage("build_timeseries_views")
     view_config = data.client.get_view(data.view_name)
-    defaults_config = view_config["defaults"]
-    default_site_name = defaults_config.get("default_site")
     schema_display = view_config["schema_display"]
     schema_config = view_config["schema"]
     fields_config = _resolve_fields_for_group_raw(schema_config, data.group_path)
@@ -249,7 +256,6 @@ def build_timeseries_views(
     def _apply_site_figure(fig: dict) -> int | None:
         """Apply a fetched time-series figure to the selection on the document thread."""
         if fig.get("status") == "error":
-            reason = fig.get("reason", "Failed to load timeseries")
             count("fetch_timeseries.error")
             return None
 
@@ -267,7 +273,7 @@ def build_timeseries_views(
                 # depths and table position.  If the new variable yields no series,
                 # blank the site (empty depths) so no stale old-variable data is
                 # drawn, and report it as no-data via the None return.
-                if not series:
+                if not len(depths):
                     selection_state.update_site_data(
                         entity_index,
                         series=[],
@@ -281,6 +287,7 @@ def build_timeseries_views(
                     series=series,
                     times=times,
                     depths=depths,
+                    **_site_metadata(fig),
                 )
             else:
                 selection_state.add_site(
@@ -289,190 +296,12 @@ def build_timeseries_views(
                     depths=depths,
                     series=series,
                     times=times,
+                    **_site_metadata(fig),
                 )
         return entity_index
 
     if initial_site is not None:
         _apply_site_figure(initial_site)
-
-    def _fetch_timeseries(lat, lon, marker_meta=None):
-        """Fetch the current variable's timeseries and register a site.
-
-        Returns the resolved ``entity_index`` on success, or ``None`` when no
-        variable is selected or the fetch failed (callers can use this to
-        report per-site failures without leaving stale data behind).
-        """
-        _timer = Timer("fetch_timeseries")
-        if not data.display_variable:
-            return None
-        marker_entity_index = marker_meta.get("entity_index") if isinstance(marker_meta, dict) else None
-        selected_entity_index = marker_entity_index
-        fig = data.client.get_timeseries_data(
-            data.view_name,
-            group_path=data.group_path,
-            lat=lat,
-            lon=lon,
-            variable=data.display_variable,
-            entity_index=selected_entity_index,
-        )
-        try:
-            return _apply_site_figure(fig)
-        finally:
-            _timer.stop()
-
-    def build_timeseries_overlay(view="left"):
-        max_points = 5000 if view == "left" else None
-        if selection_state is None:
-            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
-            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
-        selected_combos = selection_state.get_selected_combinations()
-        if not selected_combos or not selection_state.sites:
-            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
-            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
-
-        site_lookup = {s["entity_index"]: s for s in selection_state.sites}
-        cache = _left_curves if view == "left" else _full_curves
-        meta_cache = _left_meta if view == "left" else _full_meta
-        selected_set = set(selected_combos)
-
-        for key in list(cache):
-            entity_idx, depth_idx = key
-            site = site_lookup.get(entity_idx)
-            if (
-                key not in selected_set
-                or site is None
-                or depth_idx >= len(site["series"])
-                or len(site["series"][depth_idx]) == 0
-            ):
-                del cache[key]
-                meta_cache.pop(key, None)
-
-        times = next(
-            (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
-            None,
-        )
-        if times is None or len(times) == 0:
-            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
-            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
-
-        n_times = len(times)
-        if max_points is not None and n_times > max_points:
-            step = n_times // max_points
-            ds_times = times[::step]
-        else:
-            ds_times = times
-
-        row_shapes = getattr(selection_state, "_row_shapes", {})
-        col_colors = getattr(selection_state, "_col_colors", {})
-
-        row_dim = selection_state.row_dim
-        col_dim = selection_state.col_dim
-
-        # Build only new / changed combos
-        for entity_idx, depth_idx in selected_combos:
-            key = (entity_idx, depth_idx)
-            site = site_lookup.get(entity_idx)
-            if (
-                site is None
-                or depth_idx >= len(site["series"])
-                or len(site["series"][depth_idx]) == 0
-            ):
-                debug(
-                    "[timeseries] SKIP combo entity=%s depth_idx=%s: no usable series",
-                    entity_idx,
-                    depth_idx,
-                )
-                continue
-            depths_arr = np.asarray(site["depths"]).ravel()
-            depth_val = depths_arr[depth_idx] if depth_idx < len(depths_arr) else depth_idx
-            site_id = site["site_id"]
-            label = f"{site_id} @ {depth_val:.2f}"
-
-            row_key = site_id if row_dim == "entity" else depth_val
-            col_key = depth_val if col_dim == "vertical" else site_id
-            shape = row_shapes.get(str(row_key), "circle")
-            color = col_colors.get(str(col_key), "#000000")
-            meta = (shape, color)
-
-            if key not in cache or meta_cache.get(key) != meta:
-                series_vals = site["series"][depth_idx]
-                if max_points is not None and n_times > max_points:
-                    local_vals = series_vals[::step]
-                else:
-                    local_vals = series_vals
-
-                # Curve (solid line)
-                curve_df = pd.DataFrame({
-                    time_dim: ds_times,
-                    y_axis_label: local_vals,
-                })
-                curve = hv.Curve(curve_df, time_dim, y_axis_label, label=label).opts(
-                    color=color,
-                )
-                cache[key] = curve
-                meta_cache[key] = meta
-
-        if not cache:
-            debug("[timeseries] No curves generated — returning empty overlay")
-            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
-            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
-
-        debug("[timeseries] Returning overlay with %s curves", len(cache))
-        return hv.Overlay(list(cache.values()))
-
-    def build_marker_overlay(view="left", x_range=None, xlim=None):
-        n_markers = 5
-
-        selected_combos = selection_state.get_selected_combinations()
-
-        site_lookup = {s["entity_index"]: s for s in selection_state.sites}
-        times = next(
-            (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
-            None,
-        )
-
-        window = _resolve_marker_window(x_range, xlim, times)
-        if window is None:
-            return hv.Overlay([])
-        marker_times = pd.date_range(start=window[0], end=window[1], periods=n_markers)
-
-        row_shapes = getattr(selection_state, "_row_shapes", {})
-        col_colors = getattr(selection_state, "_col_colors", {})
-        row_dim = selection_state.row_dim
-        col_dim = selection_state.col_dim
-
-        times_ns = np.array(times, dtype="datetime64[ns]").astype("int64")
-        marker_times_ns = np.array(marker_times, dtype="datetime64[ns]").astype("int64")
-
-        scatters = []
-        for entity_idx, depth_idx in selected_combos:
-            site = site_lookup.get(entity_idx)
-            if site is None or depth_idx >= len(site["series"]):
-                continue
-            depths_arr = np.asarray(site["depths"]).ravel()
-            depth_val = depths_arr[depth_idx] if depth_idx < len(depths_arr) else depth_idx
-            site_id = site["site_id"]
-            label = f"{site_id} @ {depth_val:.2f}"
-
-            row_key = site_id if row_dim == "entity" else depth_val
-            col_key = depth_val if col_dim == "vertical" else site_id
-            shape = row_shapes.get(str(row_key), "circle")
-            color = col_colors.get(str(col_key), "#000000")
-
-            series_vals = site["series"][depth_idx]
-            marker_y = np.interp(marker_times_ns, times_ns, series_vals)
-            marker_df = pd.DataFrame({
-                time_dim: marker_times,
-                y_axis_label: marker_y,
-            })
-            scatter = hv.Scatter(marker_df, time_dim, y_axis_label, label=label).opts(
-                color=color,
-                marker=shape,
-                size=8,
-            )
-            scatters.append(scatter)
-
-        return hv.Overlay(scatters)
 
     def clamp_range(center, span, times):
         if len(times) == 0:
@@ -497,7 +326,6 @@ def build_timeseries_views(
 
     _center_time = None
     center_stream = streams.Stream.define("Center", center=None)()
-    borehole_stream = streams.Stream.define("Borehole", borehole_index=None)()
 
     left_tap = streams.Tap()
     mid_tap = streams.Tap()
@@ -546,50 +374,12 @@ def build_timeseries_views(
     mid_tap.param.watch(update_center_from_tap, ["x"])
     right_tap.param.watch(update_center_from_tap, ["x"])
 
-    def _compute_ylim(times, selected_combos, xlim):
-        if selection_state is None or len(times) == 0 or not selected_combos:
-            return None
-        mask = (times >= xlim[0]) & (times <= xlim[1])
-        visible = np.where(mask)[0]
-        if len(visible) == 0:
-            return None
-        values = []
-        site_lookup = {s["entity_index"]: s for s in selection_state.sites}
-        for entity_idx, depth_idx in selected_combos:
-            site = site_lookup.get(entity_idx)
-            if site is None or depth_idx >= len(site["series"]):
-                continue
-            vals = site["series"][depth_idx][visible]
-            values.extend(vals[np.isfinite(vals)])
-        if not values:
-            return None
-        ymin, ymax = float(np.min(values)), float(np.max(values))
-        padding = (ymax - ymin) * 0.1 or 1.0
-        return (ymin - padding, ymax + padding)
+    ranges = {}
 
-    _left_ylim_cache = None
-    _left_ylim_version = None
-    _mid_ylim_cache = None
-    _mid_ylim_key = None
-    _overlay_cache = {}
-    _overlay_version = None
-    _left_curves: dict[tuple[int, int], hv.Overlay] = {}
-    _left_meta: dict[tuple[int, int], tuple[str, str]] = {}
-    _full_curves: dict[tuple[int, int], hv.Overlay] = {}
-    _full_meta: dict[tuple[int, int], tuple[str, str]] = {}
-    _left_reset_key = [None]  # (version, center) tuple per view
-    _mid_reset_key = [None]
-    _marker_state = {"left": [None, None], "mid": [None, None]}
-    # [last_key, last_adopted_x_range] per view: when the (version, center)
-    # key changes the marker window re-anchors to xlim, and a live x_range is
-    # only adopted when it differs from the stored baseline (a real pan/zoom).
-
-    right_anchor = right_reported = right_visible = None
-
-    def right_overlay(times, center, x_range, selected_combos):
-        """Resolve the viewport and build curves and markers from loaded windows."""
-        nonlocal right_anchor, right_reported, right_visible
-        home = clamp_range(center, right_span, times)
+    def plot_viewport(view, times, center, x_range):
+        full = (times.min(), times.max())
+        span = mid_span if view == "mid" else right_span
+        home = full if view == "left" else clamp_range(center, span, times)
         reported = None
         if x_range is not None:
             try:
@@ -601,38 +391,45 @@ def build_timeseries_views(
                 ]
                 reported = _resolve_marker_window(endpoints, None, times)
             except (TypeError, ValueError, OverflowError):
-                pass  # A range can be incomplete while Bokeh initializes its axes.
-        anchor = (selection_state.version, center, home)
-        if anchor != right_anchor:
-            right_anchor = anchor
-            right_visible = home
-        elif reported is not None and reported != right_reported:
-            # Browser range events round to milliseconds; ignore an echo of our range.
-            if any(
+                pass  # Bokeh may report incomplete bounds during initialization.
+        anchor = (center, home)
+        previous_anchor, previous_report, visible = ranges.get(view, (None, None, home))
+        if anchor != previous_anchor:
+            visible = home
+        elif (
+            reported is not None
+            and reported != previous_report
+            and any(
                 abs(new - old) > pd.Timedelta(milliseconds=1)
-                for new, old in zip(reported, right_visible)
-            ):
-                right_visible = reported
-        right_reported = reported
-        xlim = right_visible
+                for new, old in zip(reported, visible)
+            )
+        ):
+            visible = reported
+        ranges[view] = (anchor, reported, visible)
+        return visible, home, full
+
+    def selected_sites():
         sites = {site["entity_index"]: site for site in selection_state.sites}
         depths_by_site = {}
-        for entity, depth in selected_combos:
-            if depth < len(sites[entity]["series"]):
+        for entity, depth in selection_state.get_selected_combinations():
+            site = sites[entity]
+            if len(site["times"]):
                 depths_by_site.setdefault(entity, []).append(depth)
         requests = tuple(
-            SiteWindow(entity, tuple(depths), len(sites[entity]["series"]) == 1)
+            SiteWindow(
+                entity,
+                tuple(depths),
+                sites[entity].get("single_trace", len(sites[entity]["depths"]) == 1),
+            )
             for entity, depths in depths_by_site.items()
         )
-        traces, status = right_window.request(
-            xlim, requests, time_dim, fields_config.get("vertical")
-        )
-        return (*build_right_curves(xlim, requests, sites, traces), xlim, home, status)
+        return sites, requests
 
-    def build_right_curves(xlim, requests, sites, traces):
+    def build_curves(xlim, requests, sites, traces, *, reduce_dense=False):
         curves, markers, extrema = [], [], []
         shapes = getattr(selection_state, "_row_shapes", {})
         colors = getattr(selection_state, "_col_colors", {})
+        marker_times = pd.date_range(*xlim, periods=5)
         for request in requests:
             site = sites[request.entity]
             for depth in request.depths:
@@ -655,9 +452,19 @@ def build_timeseries_views(
                     depth_value if selection_state.col_dim == "vertical" else site_id
                 )
                 color = colors.get(str(col_key), "#000000")
-                data_frame = pd.DataFrame(
-                    {time_dim: trace_times[visible], y_axis_label: values[visible]}
+                visible_times, visible_values = trace_times[visible], values[visible]
+                retained = (
+                    extrema_indices(visible_times, visible_values, 750)
+                    if reduce_dense and len(visible_values) > 3000
+                    else slice(None)
                 )
+                data_frame = pd.DataFrame(
+                    {
+                        time_dim: visible_times[retained],
+                        y_axis_label: visible_values[retained],
+                    }
+                )
+                count("timeseries.rendered_samples", len(data_frame))
                 curves.append(
                     hv.Curve(data_frame, time_dim, y_axis_label, label=label).opts(
                         color=color
@@ -666,7 +473,6 @@ def build_timeseries_views(
                 finite = values[visible & np.isfinite(values)]
                 if finite.size:
                     extrema.extend((finite.min(), finite.max()))
-                marker_times = pd.date_range(*xlim, periods=5)
                 marker_y = np.interp(
                     marker_times.as_unit("ns").asi8,
                     trace_times.as_unit("ns").asi8,
@@ -692,122 +498,81 @@ def build_timeseries_views(
             curves.append(hv.Curve(empty, time_dim, y_axis_label))
         return hv.Overlay(curves + markers), ylim
 
-    def create_timeseries_view(center=None, view="left", x_range=None, **_):
+    def create_timeseries_view(center=None, view="left", x_range=None):
         nonlocal _center_time
-        nonlocal _left_ylim_cache, _left_ylim_version
-        nonlocal _mid_ylim_cache, _mid_ylim_key
-        nonlocal _overlay_cache, _overlay_version
-        nonlocal _marker_state
-        _view_timer = Timer("create_timeseries_view")
+        timer = Timer("create_timeseries_view")
         count("plot.redraws")
-        if selection_state is None:
-            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
-            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
-
-        selected_combos = selection_state.get_selected_combinations()
-        times = next(
-            (s["times"] for s in selection_state.sites if len(s["times"]) > 0),
-            None,
+        controller = windows[view]
+        times = (
+            next(
+                (site["times"] for site in selection_state.sites if len(site["times"])),
+                None,
+            )
+            if selection_state is not None
+            else None
         )
-        if times is None or len(times) == 0:
-            if view == "right":
-                right_window.clear_selection()
-            empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
-            return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
-
+        if times is None:
+            controller.clear_selection()
+            return build_curves(
+                (pd.Timestamp(0), pd.Timestamp(0)),
+                (),
+                {},
+                {},
+            )[0]
         if center is not None:
             _center_time = center
         elif _center_time is None:
             _center_time = times.min() + 0.95 * (times.max() - times.min())
-        center_time = _center_time
-        status = ""
-        right_home = None
-
-        if view == "left":
-            xlim = (times.min(), times.max())
-            if _left_ylim_version != selection_state.version:
-                _left_ylim_cache = _compute_ylim(times, selected_combos, xlim)
-                _left_ylim_version = selection_state.version
-            ylim = _left_ylim_cache
-        elif view == "mid":
-            xlim = clamp_range(center_time, mid_span, times)
-            _mid_key = (selection_state.version, center_time)
-            if _mid_key != _mid_ylim_key:
-                _mid_ylim_cache = _compute_ylim(times, selected_combos, xlim)
-                _mid_ylim_key = _mid_key
-            ylim = _mid_ylim_cache
-        else:
-            with stage("timeseries.right_window.plot"):
-                overlay, ylim, xlim, right_home, status = right_overlay(
-                    times, center_time, x_range, selected_combos
-                )
-
-        if view != "right":
-            if _overlay_version != selection_state.version:
-                with stage("ts.overlay"):
-                    _overlay_cache["left"] = build_timeseries_overlay(view="left")
-                    _overlay_cache["full"] = build_timeseries_overlay(view="full")
-                _overlay_version = selection_state.version
-            overlay = _overlay_cache["left"] if view == "left" else _overlay_cache["full"]
-            marker_window = None
-            _marker_key = (selection_state.version, center)
-            _marker_adapt = _marker_state[view]
-            if _marker_adapt[0] != _marker_key:
-                _marker_adapt[0] = _marker_key
-                _marker_adapt[1] = x_range
-            elif x_range is not None and x_range != _marker_adapt[1]:
-                _marker_adapt[1] = x_range
-                marker_window = x_range
-            with stage("ts.markers"):
-                overlay = overlay * build_marker_overlay(view=view, x_range=marker_window, xlim=xlim)
-        overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
-        debug(
-            "[ylim] view=%s xlim=(%s, %s) ylim=%s",
-            view,
-            xlim[0],
-            xlim[1],
-            ylim,
+        viewport, home, full = plot_viewport(view, times, _center_time, x_range)
+        sites, requests = selected_sites()
+        overview = view == "left" and (
+            viewport == full or viewport[1] - viewport[0] > mid_span
         )
-        if ylim is None and view != "right":
-            full_xlim = (times.min(), times.max())
-            ylim = _compute_ylim(times, selected_combos, full_xlim)
-            debug("[ylim] fallback to full range: %s", ylim)
-        full_bounds = (times.min(), times.max())
-        max_interval_ms = None
-        if view == "mid":
-            max_interval_ms = int(mid_span.total_seconds() * 1000)
-        elif view == "right":
-            max_interval_ms = int(right_span.total_seconds() * 1000)
-        hooks = []
-        if view == "right":
-            hooks.append(_make_xrange_hook(xlim, bounds=full_bounds,
-                                           max_interval_ms=max_interval_ms, reset=right_home))
-            if ylim:
-                hooks.append(_make_yrange_hook(ylim))
-        else:
-            _view_reset = _left_reset_key if view == "left" else _mid_reset_key
-            current_key = (selection_state.version, center)
-            if x_range is None or _view_reset[0] != current_key:
-                hooks.append(_make_xrange_hook(xlim, bounds=full_bounds, max_interval_ms=max_interval_ms))
-                if ylim:
-                    hooks.append(_make_yrange_hook(ylim))
-                _view_reset[0] = current_key
+        # A coarse summary covers the whole history and can be reused across overview pans.
+        bounds = full if overview else viewport
+        traces, status = controller.request(
+            bounds,
+            requests,
+            time_dim,
+            fields_config.get("vertical"),
+            overview=overview,
+        )
+        with stage(f"timeseries.{view}_window.plot"):
+            overlay, ylim = build_curves(
+                viewport,
+                requests,
+                sites,
+                traces,
+                reduce_dense=view == "mid"
+                or (view == "left" and not overview and not status),
+            )
+        overlay = overlay * hv.VLine(_center_time).opts(color="red", line_width=2)
+        span = {"mid": mid_span, "right": right_span}.get(view)
+        max_interval_ms = int(span.total_seconds() * 1000) if span is not None else None
+        hooks = [
+            _make_xrange_hook(
+                viewport, bounds=full, max_interval_ms=max_interval_ms, reset=home
+            )
+        ]
+        if ylim:
+            hooks.append(_make_yrange_hook(ylim))
 
         def _apply_axis_theme(plot, element):
-            p = plot.state
-            p.axis.major_label_text_color = "#000000"
-            p.axis.axis_label_text_color = "#000000"
-            p.axis.axis_line_alpha = 0
-            p.axis.major_tick_line_alpha = 0
-            p.axis.minor_tick_line_alpha = 0
-        hooks.append(_apply_axis_theme)
+            axis = plot.state.axis
+            axis.major_label_text_color = "#000000"
+            axis.axis_label_text_color = "#000000"
+            axis.axis_line_alpha = 0
+            axis.major_tick_line_alpha = 0
+            axis.minor_tick_line_alpha = 0
 
-        n_sites = len(selection_state.sites)
+        hooks.append(_apply_axis_theme)
+        n_sites = len(sites)
         site_label = "1 site" if n_sites == 1 else f"{n_sites} sites"
-        _view_timer.stop()
+        timer.stop()
         return overlay.opts(
             responsive=True,
-            title=f"{metric_label} over Time ({site_label})" + (f" — {status}" if status else ""),
+            title=f"{metric_label} over Time ({site_label})"
+            + (f" ? {status}" if status else ""),
             tools=["hover", "xwheel_zoom", "xpan", "tap", "reset"],
             active_tools=["xwheel_zoom", "xpan"],
             show_legend=False,
@@ -815,45 +580,24 @@ def build_timeseries_views(
             hooks=hooks,
         )
 
-    line_left = hv.DynamicMap(
-        lambda center=None, x_range=None, **kwargs: create_timeseries_view(
-            center=center, view="left", x_range=x_range
-        ),
-        streams=[
-            streams.Params(selection_state, parameters=["version"]),
-            left_tap,
-            center_stream,
-            borehole_stream,
-            left_range_x,
-        ],
-    )
+    def make_view(view, tap, ranges_x):
+        controller = windows[view]
+        return hv.DynamicMap(
+            lambda center=None, x_range=None, **_: create_timeseries_view(
+                center, view, x_range
+            ),
+            streams=[
+                controller.watch_selection(selection_state),
+                tap,
+                center_stream,
+                ranges_x,
+                controller.changed,
+            ],
+        )
 
-    line_mid = hv.DynamicMap(
-        lambda center=None, x_range=None, **kwargs: create_timeseries_view(
-            center=center, view="mid", x_range=x_range
-        ),
-        streams=[
-            streams.Params(selection_state, parameters=["version"]),
-            mid_tap,
-            center_stream,
-            borehole_stream,
-            mid_range_x,
-        ],
-    )
-
-    line_right = hv.DynamicMap(
-        lambda center=None, x_range=None, **kwargs: create_timeseries_view(
-            center=center, view="right", x_range=x_range
-        ),
-        streams=[
-            right_window.watch_selection(selection_state),
-            right_tap,
-            center_stream,
-            borehole_stream,
-            right_range_x,
-            right_window.changed,
-        ],
-    )
+    line_left = make_view("left", left_tap, left_range_x)
+    line_mid = make_view("mid", mid_tap, mid_range_x)
+    line_right = make_view("right", right_tap, right_range_x)
 
     def _apply_registered_site(entity_index, payload):
         """Apply one fetched payload to the registered selection row."""
@@ -865,6 +609,7 @@ def build_timeseries_views(
                 series=payload["series"],
                 times=payload["times"],
                 depths=payload["depths"],
+                **_site_metadata(payload),
             )
         if not filled:
             return None
@@ -901,11 +646,7 @@ def build_timeseries_views(
 
     def on_map_tap(x, y, loading=None, doc=None):
         if x is None or y is None:
-            y, x, matched_meta = _default_coords(map_state, default_site_name)
-            entity_index = _fetch_timeseries(lat=float(y), lon=float(x), marker_meta=matched_meta)
-            if entity_index is not None:
-                borehole_stream.event(borehole_index=entity_index)
-            return entity_index
+            return None
 
         if map_click_state.active:
             return None
@@ -1014,14 +755,17 @@ def build_timeseries_views(
 
                     target_doc.add_next_tick_callback(_select_op.wrap(_apply))
             finally:
-                def _finish():
-                    _finish_map_click(generation, failed, loading)
-                    if failed and generation == map_click_generation():
-                        _select_op.finish(status="error")
+                if generation != map_click_generation():
+                    if map_click_state.active_generation == generation:
+                        map_click_state.active_generation = None
+                    _select_op.finish(status="cancelled")
+                else:
+                    def _finish():
+                        _finish_map_click(generation, failed, loading)
+                        if failed and generation == map_click_generation():
+                            _select_op.finish(status="error")
 
-                target_doc.add_next_tick_callback(
-                    _select_op.wrap(_finish, finish=True)
-                )
+                    target_doc.add_next_tick_callback(_select_op.wrap(_finish, finish=True))
 
         if target_doc is not None:
             asyncio.create_task(_select_op.wrap(_load_targets)())
@@ -1063,15 +807,5 @@ def build_timeseries_views(
 
         return int(targets[0]["entity_index"]) if targets else None
 
-    def fetch_site_entity(entity_index):
-        """Fetch the current variable's timeseries for a specific entity index.
-
-        Bypasses map nearest-marker resolution (and its coordinate/threshold
-        sensitivity) by passing ``marker_meta`` carrying the entity index, which
-        ``get_timeseries_data`` uses directly.  Returns the resolved
-        ``entity_index`` on success or ``None`` on failure.
-        """
-        return _fetch_timeseries(0.0, 0.0, {"entity_index": int(entity_index)})
-
     _build_stage.log()
-    return line_left, line_mid, line_right, on_map_tap, fetch_site_entity
+    return line_left, line_mid, line_right, on_map_tap

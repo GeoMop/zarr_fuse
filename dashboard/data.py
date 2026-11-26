@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 from bisect import bisect_left, bisect_right
 from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from operator import index
+from os import getenv
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Optional
@@ -13,6 +15,8 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 import xarray as xr
+from zarr.abc.store import Store
+from zarr.storage import ZipStore
 
 import zarr_fuse as zf
 from dashboard.config import (
@@ -24,6 +28,10 @@ from dashboard.config import (
     resolve_schema_fields,
 )
 from dashboard.perf_summary import count, stage
+from dashboard.timeseries_overview import overview_path, write_overview
+from zarr_fuse.zarr_storage import _zarr_fuse_options, _zarr_store_open
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -51,6 +59,7 @@ class _TimeseriesWindowCache:
         self.groups: dict[
             tuple[str, str], tuple[xr.Dataset, SchemaFieldsConfig, pd.DatetimeIndex]
         ] = {}
+        self.overviews: dict[tuple[str, str, str], xr.Dataset | None] = {}
         self.windows: OrderedDict[tuple, xr.DataArray] = OrderedDict()
 
 
@@ -469,6 +478,197 @@ class LocalClient:
         cache[cache_key] = result
         return result
 
+    def _timeseries_group(
+        self,
+        cache: _TimeseriesWindowCache,
+        view_name: str,
+        group_path: str,
+    ) -> tuple[xr.Dataset, SchemaFieldsConfig, pd.DatetimeIndex]:
+        group_key = (view_name, group_path)
+        with stage("timeseries_window.metadata"):
+            with cache.lock:
+                group = cache.groups.get(group_key)
+            if group is None:
+                view = self._view_config(view_name)
+                fields = resolve_schema_fields(view.schema, group_path)
+                if fields is None:
+                    raise ValueError(
+                        f"No schema field mapping for group {group_path!r}"
+                    )
+                ds = self._get_group(view_name, group_path).dataset
+                time_index = ds.indexes.get(fields.time)
+                if not isinstance(time_index, pd.DatetimeIndex):
+                    raise ValueError(
+                        f"{fields.time!r} must be a decoded datetime dimension coordinate"
+                    )
+                if time_index.hasnans or not time_index.is_monotonic_increasing:
+                    raise ValueError(
+                        f"{fields.time!r} must be ascending and contain no NaT"
+                    )
+                with cache.lock:
+                    group = cache.groups.setdefault(group_key, (ds, fields, time_index))
+            else:
+                count("timeseries_window.metadata_hit")
+        return group
+
+    def _overview(self, cache, view_name, group_path, array) -> xr.Dataset | None:
+        directory = getenv("ZF_TIMESERIES_OVERVIEW_DIR")
+        if not directory:
+            return None
+        key = (view_name, group_path, array.name)
+        with cache.lock:
+            if key in cache.overviews:
+                return cache.overviews[key]
+        path = overview_path(
+            Path(directory),
+            getenv("ZF_STORE_URL", self._view_handle(view_name).store_uri),
+            group_path,
+            array,
+        )
+        summary = None
+        if path.is_dir():
+            try:
+                candidate = xr.open_zarr(path, chunks=None, consolidated=False)
+                if {
+                    "available",
+                    "start",
+                    "length",
+                    "timestamp",
+                    "value",
+                } <= candidate.data_vars.keys():
+                    summary = candidate
+            except (OSError, ValueError, KeyError):
+                logger.warning(
+                    "Cannot open time-series overview %s", path, exc_info=True
+                )
+        with cache.lock:
+            return cache.overviews.setdefault(key, summary)
+
+    def get_timeseries_site_metadata(
+        self,
+        view_name: str,
+        group_path: str,
+        *,
+        variable: str,
+        entity_index: int | None,
+        lat: float = 0.0,
+        lon: float = 0.0,
+    ) -> dict[str, Any]:
+        """Describe a site and history availability without reading measurement values."""
+        cache = self._timeseries_window_cache
+        group_path = group_path.strip("/")
+        ds, fields, times = self._timeseries_group(cache, view_name, group_path)
+        array = ds[variable]
+        if entity_index is None:
+
+            def coordinate(name):
+                field = ds[name]
+                return field.isel(
+                    {dim: 0 for dim in field.dims if dim != fields.entity}
+                ).values
+
+            distances = (coordinate(fields.lat) - lat) ** 2 + (
+                coordinate(fields.lon) - lon
+            ) ** 2
+            entity_index = int(np.nanargmin(distances))
+        if not 0 <= entity_index < array.sizes[fields.entity]:
+            raise IndexError(f"Invalid entity index {entity_index} for {variable!r}")
+        single_trace = fields.vertical not in array.dims
+        # Depth 0 is the selection-table position of a depthless measurement.
+        depths = [0.0] if single_trace else ds[fields.vertical].values
+        summary = self._overview(cache, view_name, group_path, array)
+        availability = None
+        if summary is not None:
+            try:
+                known = summary.available.isel(entity_position=entity_index).values
+                if len(known) == len(depths):
+                    availability = known
+            except (OSError, ValueError, KeyError, IndexError):
+                logger.warning(
+                    "Cannot load overview availability for %s", variable, exc_info=True
+                )
+        name = ds[fields.entity].isel({fields.entity: entity_index}).values.item()
+        if times.tz is not None:
+            times = times.tz_convert("UTC").tz_localize(None)
+        return {
+            "status": "success",
+            "borehole_index": entity_index,
+            "borehole_name": str(name),
+            "depths": depths,
+            "times": times[[0, -1]] if len(times) else times,
+            "availability": availability,
+            "single_trace": single_trace,
+        }
+
+    def get_timeseries_overview_data(
+        self,
+        view_name: str,
+        group_path: str,
+        *,
+        variable: str,
+        entity_index: int,
+        depth_indices: tuple[int, ...],
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+    ) -> dict[int, tuple[pd.DatetimeIndex, np.ndarray]] | None:
+        """Return persisted traces or None if no matching source snapshot exists."""
+        cache = self._timeseries_window_cache
+        group_path = group_path.strip("/")
+        ds, _, _ = self._timeseries_group(cache, view_name, group_path)
+        summary = self._overview(cache, view_name, group_path, ds[variable])
+        if summary is None:
+            return None
+        spans = summary[["start", "length"]].isel(
+            entity_position=entity_index, depth_position=list(depth_indices)
+        )
+        result = {}
+        for depth, offset, size in zip(
+            depth_indices, spans.start.values, spans.length.values
+        ):
+            points = summary.isel(point=slice(offset, offset + size))
+            times = pd.DatetimeIndex(points.timestamp.values)
+            visible = slice(bisect_left(times, start), bisect_right(times, end))
+            result[depth] = (times[visible], points.value.isel(point=visible).values)
+        return result
+
+    def _overview_source(self, handle: ViewHandle) -> tuple[str, Store]:
+        """Resolve the configured source without the write-capable Node initializer."""
+        schema = zf.schema.deserialize(handle.schema_path)
+        schema.ds.ATTRS["STORE_URL"] = handle.store_uri
+        options = _zarr_fuse_options(schema)
+        uri = options["STORE_URL"]
+        if uri.startswith("zip://"):
+            return uri, ZipStore(uri.removeprefix("zip://"), mode="r")
+        return uri, _zarr_store_open(options).with_read_only(True)
+
+    def generate_timeseries_overview(
+        self,
+        view_name: str,
+        group_path: str,
+        variable: str,
+        directory: Path,
+        *,
+        bins: int = 750,
+    ) -> Path:
+        """Preprocess one variable into a new sidecar, leaving the source store read-only."""
+        group_path = group_path.strip("/")
+        fields = resolve_schema_fields(self._view_config(view_name).schema, group_path)
+        if fields is None:
+            raise ValueError(f"No schema field mapping for group {group_path!r}")
+        uri, store = self._overview_source(self._view_handle(view_name))
+        with store, xr.open_zarr(store, group=group_path, consolidated=False) as ds:
+            array = ds[variable]
+            destination = overview_path(directory, uri, group_path, array)
+            write_overview(
+                array,
+                time_dim=fields.time,
+                entity_dim=fields.entity,
+                depth_dim=fields.vertical,
+                destination=destination,
+                bins=bins,
+            )
+        return destination
+
     def get_timeseries_window_data(
         self,
         view_name: str,
@@ -517,31 +717,7 @@ class LocalClient:
                 count("timeseries_window.cache_hit")
                 return _copy_timeseries_window(result)
 
-        with stage("timeseries_window.metadata"):
-            with cache.lock:
-                group = cache.groups.get(group_key)
-            if group is None:
-                view = self._view_config(view_name)
-                fields = resolve_schema_fields(view.schema, group_path)
-                if fields is None:
-                    raise ValueError(
-                        f"No schema field mapping for group {group_path!r}"
-                    )
-                ds = self._get_group(view_name, group_path).dataset
-                time_index = ds.indexes.get(fields.time)
-                if not isinstance(time_index, pd.DatetimeIndex):
-                    raise ValueError(
-                        f"{fields.time!r} must be a decoded datetime dimension coordinate"
-                    )
-                if time_index.hasnans or not time_index.is_monotonic_increasing:
-                    raise ValueError(
-                        f"{fields.time!r} must be ascending and contain no NaT"
-                    )
-                with cache.lock:
-                    group = cache.groups.setdefault(group_key, (ds, fields, time_index))
-            else:
-                count("timeseries_window.metadata_hit")
-        ds, fields, time_index = group
+        ds, fields, time_index = self._timeseries_group(cache, view_name, group_path)
 
         with stage("timeseries_window.select"):
             array = ds[variable]

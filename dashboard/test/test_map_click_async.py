@@ -77,7 +77,7 @@ class _BackgroundClient:
         self.max_active = 0
         self._lock = threading.Lock()
 
-    def get_timeseries_data(
+    def get_timeseries_site_metadata(
         self,
         view_name: str,
         group_path: str,
@@ -304,8 +304,10 @@ def test_reload_invalidates_inflight_request_and_replaces_client() -> None:
         loading.visible = True  # The foreground request now owns the spinner.
         clients[0] = new_client
         old_gate.release.set()
-        await _wait_for_callbacks(doc, 1)
-        doc.drain()
+        async with asyncio.timeout(3):
+            while operation.active:
+                await asyncio.sleep(0.01)
+        assert not doc.callbacks
 
         assert state.sites[0]["series"] == [], "stale result must be discarded"
         assert operation.active is False
