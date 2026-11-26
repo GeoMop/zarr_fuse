@@ -1,25 +1,23 @@
 import logging
 import math
 import os
-import time
 from urllib.parse import urlencode
 
 import cartopy.crs as ccrs
 import geoviews as gv
 import holoviews as hv
-from holoviews.streams import RangeXY
 import numpy as np
 import pandas as pd
-
-from dashboard.config import overlay_enabled, find_view_file
 from geoviews import tile_sources as gvts
+from holoviews.streams import RangeXY
+
+from dashboard.config import find_view_file, overlay_enabled
+from dashboard.profiling import time_stage
 
 try:
     _vpath = find_view_file()
 except FileNotFoundError:
     _vpath = None
-
-from geoviews import tile_sources as gvts
 
 logger = logging.getLogger(__name__)
 
@@ -153,8 +151,18 @@ def _load_overlay(view_config):
     return gv.WMTS(tile_url).opts(alpha=0.9)
 
 
-def build_map_view(data, tap_stream):
-    start = time.perf_counter()
+def fetch_map_payload(client, view_name: str, group_path: str, variable: str) -> dict:
+    """Read the map slice without constructing or updating any UI objects."""
+    if not variable:
+        return {"status": "error", "reason": "No variable selected"}
+    return client.get_map_data(
+        view_name, group_path=group_path, variable=variable, time_index=0, depth_index=0,
+    )
+
+
+def build_map_view(data, tap_stream, *, map_payload: dict | None = None):
+    """Build the map on the document thread from a supplied or freshly read slice."""
+    _stage = time_stage("build_map_view")
     base_map = gvts.OSM()
 
     view_config = data.client.get_view(data.view_name)
@@ -265,17 +273,10 @@ def build_map_view(data, tap_stream):
         return callback
 
     default_display_variable = data.display_variable
-    if not default_display_variable:
-        fig = {"status": "error", "reason": "No variable selected"}
-    else:
-        fig = data.client.get_map_data(
-            data.view_name,
-            group_path=data.group_path,
-            variable=default_display_variable,
-            time_index=0,
-            depth_index=0,
-        )
-    total_points = 0  # Initialize for logging
+    fig = map_payload
+    if fig is None:
+        fig = fetch_map_payload(data.client, data.view_name, data.group_path, default_display_variable)
+
     if fig.get("status") == "error":
         reason = fig.get("reason", "No map data available")
         logger.warning("Map data unavailable for group '%s': %s", data.group_path, reason)
@@ -286,39 +287,14 @@ def build_map_view(data, tap_stream):
         entities = None
         map_title = f"{map_config['title']} - {reason}"
         data_error_reason = reason
-        print(f"[map] Total points: 0 (error: {reason})")
     else:
-        # Print raw values BEFORE numpy conversion to see what's really in the data
-        raw_lats = fig["lat"]
-        raw_lons = fig["lon"]
-        raw_values = fig["values"]
         marker_meta = fig.get("marker_meta") or []
-        print(f"[map] Raw data sample - lat[0]: {repr(raw_lats[0])}, lon[0]: {repr(raw_lons[0])}, value[0]: {repr(raw_values[0])}")
-        
-        lats = np.array(raw_lats, dtype=float)
-        lons = np.array(raw_lons, dtype=float)
-        values = np.array(raw_values, dtype=float)
+        lats = np.array(fig["lat"], dtype=float)
+        lons = np.array(fig["lon"], dtype=float)
+        values = np.array(fig["values"], dtype=float)
         entities = fig.get("entities")
         map_title = map_config["title"]
         data_error_reason = None
-        total_points = len(lats)
-        finite_selected_values = int(np.isfinite(values).sum())
-        missing_selected_values = int(np.sum(~np.isfinite(values)))
-        displayed_markers = int(np.sum(np.isfinite(lats) & np.isfinite(lons)))
-        print(f"[map] Total entities: {total_points}")
-        print(f"[map] Valid coordinate markers: {displayed_markers}")
-        print(f"[map] Finite selected values: {finite_selected_values}")
-        print(f"[map] Missing selected values: {missing_selected_values}")
-        print(f"[map] Displayed markers: {displayed_markers}")
-        print(f"[map] All points (including NaN values, invalid coordinates excluded later):")
-        for i in range(total_points):
-            lat_valid = "OK" if np.isfinite(lats[i]) else "INVALID"
-            lon_valid = "OK" if np.isfinite(lons[i]) else "INVALID"
-            val_valid = "OK" if np.isfinite(values[i]) else "INVALID/NaN"
-            entity = entities[i] if entities is not None and i < len(entities) else "N/A"
-            marker_info = marker_meta[i] if i < len(marker_meta) else {}
-            # Show raw values from original data and converted numpy values
-            print(f"  [{i}] raw_lat={repr(raw_lats[i])}, raw_lon={repr(raw_lons[i])}, lat={repr(lats[i])}, lon={repr(lons[i])} ({lat_valid}, {lon_valid}) raw_value={repr(raw_values[i])}, value={repr(values[i])} ({val_valid}) entity={entity} marker_meta={marker_info}")
 
     valid_mask = np.isfinite(lats) & np.isfinite(lons)
     if not np.all(valid_mask):
@@ -329,14 +305,11 @@ def build_map_view(data, tap_stream):
             entities = np.array(entities)[valid_mask]
         if marker_meta:
             marker_meta = [marker_meta[i] for i, keep in enumerate(valid_mask) if keep]
-        print(f"[map] Points after lat/lon filter: {len(lats)} (removed {total_points - len(lats)})")
-    else:
-        print(f"[map] All {len(lats)} points have valid lat/lon - displaying all")
 
     if len(lats) == 0:
-        reason = fig.get("reason", "No valid map points available") if fig.get("status") == "error" else "No valid map points available"
+        reason = data_error_reason or "No valid map points available"
         logger.warning("Map data unavailable for group '%s': %s", data.group_path, reason)
-        print(f"[map] Final points to display: 0")
+        data_error_reason = reason
         map_state = {
             "lats": lats,
             "lons": lons,
@@ -344,101 +317,53 @@ def build_map_view(data, tap_stream):
             "variable": default_display_variable,
             "data_error_reason": reason,
         }
-        empty_df = pd.DataFrame({lon_field: [], lat_field: [], entity_field: [], "value": []})
-        data.current_map_df = empty_df  # Store empty df for refresh access
-
-        # Step 4: Use DynamicMap even for empty case
-        points_callback = _make_points_callback(data, map_config, lon_field, lat_field, entity_field, f"{map_config['title']} - {reason}")
+        data.current_map_df = pd.DataFrame({
+            lon_field: [], lat_field: [], entity_field: [], "value": [],
+            "has_value": pd.Series(dtype=bool),
+        })
+        points_callback = _make_points_callback(
+            data, map_config, lon_field, lat_field, entity_field, f"{map_config['title']} - {reason}"
+        )
+        map_points_dmap = hv.DynamicMap(points_callback, streams=[RangeXY()])
+        tap_stream.source = map_points_dmap
+        xlim, ylim = WORLD_XLIM, WORLD_YLIM
+    else:
+        map_df = pd.DataFrame({
+            lon_field: lons,
+            lat_field: lats,
+            entity_field: entities if entities is not None else [""] * len(lons),
+            "value": values,
+            "has_value": np.isfinite(values),
+        })
+        if marker_meta:
+            map_df["site_id"] = [m.get("site_id") for m in marker_meta]
+            map_df["entity_index"] = [m.get("entity_index") for m in marker_meta]
+            map_df["marker_has_value"] = [m.get("has_value") for m in marker_meta]
+            map_df["marker_value"] = [m.get("value") for m in marker_meta]
+        data.current_map_df = map_df
+        points_callback = _make_points_callback(data, map_config, lon_field, lat_field, entity_field, map_title)
         map_points_dmap = hv.DynamicMap(points_callback, streams=[RangeXY()])
         tap_stream.source = map_points_dmap
 
-        xlim = WORLD_XLIM
-        ylim = WORLD_YLIM
+        bounds = _data_bounds(lats, lons)
+        if bounds is None:
+            xlim, ylim = WORLD_XLIM, WORLD_YLIM
+        else:
+            min_lat, max_lat, min_lon, max_lon = bounds
+            min_x, max_y = _lonlat_to_web_mercator(min_lon, max_lat)
+            max_x, min_y = _lonlat_to_web_mercator(max_lon, min_lat)
+            xlim, ylim = (min_x, max_x), (min_y, max_y)
+        map_state = {
+            "lats": lats,
+            "lons": lons,
+            "marker_meta": marker_meta,
+            "variable": default_display_variable,
+            "data_error_reason": data_error_reason,
+        }
 
-        map_view = (base_map * map_points_dmap).opts(
-            xlim=xlim,
-            ylim=ylim,
-            framewise=True,
-            axiswise=True,
-        )
-        result = map_view, map_state
-        print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
-        return result
-
-    map_df = pd.DataFrame({
-        lon_field: lons,
-        lat_field: lats,
-        entity_field: entities if entities is not None else [""] * len(lons),
-        "value": values,
-        "has_value": np.isfinite(values),
-    })
-    if marker_meta:
-        map_df["site_id"] = [m.get("site_id") for m in marker_meta]
-        map_df["entity_index"] = [m.get("entity_index") for m in marker_meta]
-        map_df["marker_has_value"] = [m.get("has_value") for m in marker_meta]
-        map_df["marker_value"] = [m.get("value") for m in marker_meta]
-    data.current_map_df = map_df  # Store latest map_df on data object for refresh access
-
-    points_callback = _make_points_callback(data, map_config, lon_field, lat_field, entity_field, map_title)
-    map_points_dmap = hv.DynamicMap(points_callback, streams=[RangeXY()])
-
-    tap_stream.source = map_points_dmap
-
-    print(f"[map] Final points to display: {len(lats)}")
-
-    # Selection marker that highlights the tapped point
-    def _selection_marker(x, y):
-        if x is None or y is None:
-            return hv.Points([])
-        mx, my = _lonlat_to_web_mercator(x, y)
-        return hv.Points([(mx, my)]).opts(
-            color="#ff0000",
-            size=20,
-            marker="circle",
-            line_color="white",
-            line_width=3,
-            fill_alpha=0.5,
-            tools=[],
-        )
-
-    selection_marker_dmap = hv.DynamicMap(_selection_marker, streams=[tap_stream])
-
-    bounds = _data_bounds(lats, lons)
-    if bounds is not None:
-        min_lat, max_lat, min_lon, max_lon = bounds
-        min_x, max_y = _lonlat_to_web_mercator(min_lon, max_lat)
-        max_x, min_y = _lonlat_to_web_mercator(max_lon, min_lat)
-        xlim = (min_x, max_x)
-        ylim = (min_y, max_y)
-    else:
-        xlim = WORLD_XLIM
-        ylim = WORLD_YLIM
-
-    map_state = {
-        "lats": lats,
-        "lons": lons,
-        "marker_meta": marker_meta,
-        "variable": default_display_variable,
-        "data_error_reason": data_error_reason,
-    }
-
+    layers = base_map * map_points_dmap
     if overlay_layer is not None:
-        map_view = (base_map * overlay_layer * map_points_dmap).opts(
-            xlim=xlim,
-            ylim=ylim,
-            framewise=True,
-            axiswise=True,
-        )
-        result = map_view, map_state
-        print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
-        return result
-
-    map_view = (base_map * map_points_dmap).opts(
-        xlim=xlim,
-        ylim=ylim,
-        framewise=True,
-        axiswise=True,
-    )
-    result = map_view, map_state
-    print(f"[timing] build_map_view: {time.perf_counter() - start:.3f}s")
-    return result
+        layers = base_map * overlay_layer * map_points_dmap
+    map_view = layers.opts(xlim=xlim, ylim=ylim, framewise=True, axiswise=True)
+    _stage.log()
+    return map_view, map_state

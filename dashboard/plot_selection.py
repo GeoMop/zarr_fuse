@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -11,14 +13,13 @@ import panel as pn
 import param
 from panel.io.model import JSCode
 
+from dashboard.perf_summary import add_stage, count, measure_operation, stage
 from dashboard.plot_styles import COLORS, MARKER_SHAPES, SHAPE_TO_SVG
+from dashboard.profiling import log_message, profiling_enabled
 
 
 class _PerfMetrics:
-    """Collects lightweight performance counters for the plot selection table.
-
-    Reset via ``reset()``.  Read via ``report()``.
-    """
+    """Lightweight counters used by dashboard tests and diagnostics."""
 
     def __init__(self):
         self.reset()
@@ -29,6 +30,11 @@ class _PerfMetrics:
         self.version_bump_count = 0
         self.edit_handler_ms: list[float] = []
         self.rebuild_duration_ms: list[float] = []
+
+    def _append_bounded(self, bucket: list[float], value: float, limit: int = 512) -> None:
+        if len(bucket) >= limit:
+            bucket.pop(0)
+        bucket.append(value)
 
     def report(self) -> str:
         click_avg = (
@@ -46,6 +52,10 @@ class _PerfMetrics:
             f"click->rebuild_avg={click_avg:.1f}ms "
             f"rebuild_avg={rebuild_avg:.1f}ms"
         )
+
+    def log(self) -> None:
+        if profiling_enabled():
+            log_message(self.report())
 
 
 perf = _PerfMetrics()
@@ -210,7 +220,6 @@ class SelectionState(param.Parameterized):
         """
         for site in self._sites:
             if site["entity_index"] == entity_index:
-                print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
                 return
 
         depths_arr = np.asarray(depths, dtype=float).ravel()
@@ -232,8 +241,6 @@ class SelectionState(param.Parameterized):
         self._checked_count += len(finite_depths)
         self.layout_version += 1
         self._bump_version()
-        print(f"[SelectionState] Added site {site_id} (idx={entity_index}), "
-              f"depths={depths_arr.tolist()}")
 
     def remove_site(self, entity_index, bump_version: bool = True, bump_layout: bool = True):
         """Remove a site by its *entity_index*.  Triggers both counters."""
@@ -262,8 +269,6 @@ class SelectionState(param.Parameterized):
             self.layout_version += 1
         if bump_version:
             self._bump_version()
-        print(f"[SelectionState] Removed site {site_id} (idx={entity_index})")
-
     def register_site(self, entity_index, site_id):
         """Register a site row in the table without fetching any data.
 
@@ -276,7 +281,6 @@ class SelectionState(param.Parameterized):
         """
         for site in self._sites:
             if site["entity_index"] == entity_index:
-                print(f"[SelectionState] Site {site_id} (idx={entity_index}) already added, skipping")
                 return
 
         self._cancel_panel_bump()
@@ -288,8 +292,6 @@ class SelectionState(param.Parameterized):
             "times": pd.to_datetime([]),
         })
         self.layout_version += 1
-        print(f"[SelectionState] Registered pending site {site_id} (idx={entity_index})")
-
     def fill_site(self, entity_index, series, times, depths) -> bool:
         """Populate a pending site (from ``register_site``) with fetched data.
 
@@ -297,21 +299,19 @@ class SelectionState(param.Parameterized):
         mirroring ``add_site`` bookkeeping without rebuilding the table for a
         brand-new row.  Bumps *version* (redraw plots) and, when the depth set
         changes, *layout_version* (adds the depth columns to the table).
+        Each of the two notifications is timed separately on the active
+        operation summary (``fill_site.layout_notify``,
+        ``fill_site.version_notify``) so synchronous Panel/Param callbacks
+        can be attributed to the right counter.
 
         Returns ``False`` when no site with *entity_index* is registered (the
         caller should ``register_site`` then ``fill_site`` instead).
         """
-        site = None
-        for s in self._sites:
-            if s["entity_index"] == entity_index:
-                site = s
-                break
+        site = self._find_site(entity_index)
         if site is None:
             return False
 
         depths_arr = np.asarray(depths, dtype=float).ravel()
-        finite_depths = [float(d) for d in depths_arr if np.isfinite(float(d))]
-
         depth_changed = False
         old_depths = np.asarray(site["depths"]).ravel()
         if not np.array_equal(old_depths, depths_arr, equal_nan=True):
@@ -323,60 +323,120 @@ class SelectionState(param.Parameterized):
         site["series"] = series
         site["times"] = times
 
-        for dv in finite_depths:
-            key = (str(site["site_id"]), dv)
-            if key not in self._checked:
+        self._check_site_depths(site)
+
+        if depth_changed:
+            with stage("fill_site.layout_notify"):
+                self.layout_version += 1
+        with stage("fill_site.version_notify"):
+            self._bump_version()
+        return True
+
+    def _find_site(self, entity_index: int) -> dict[str, Any] | None:
+        for site in self._sites:
+            if site["entity_index"] == entity_index:
+                return site
+        return None
+
+    def _check_site_depths(self, site: dict[str, Any]) -> None:
+        for value in site["depths"]:
+            depth = float(value)
+            key = (site["site_id"], depth)
+            if np.isfinite(depth) and key not in self._checked:
                 self._checked.add(key)
                 self._checked_count += 1
 
-        if depth_changed:
-            self.layout_version += 1
-            print(f"[SelectionState] Filled site idx={entity_index} (depths changed)")
-        else:
-            print(f"[SelectionState] Filled site idx={entity_index}")
-        self._bump_version()
+    def _set_site_data(
+        self,
+        site: dict[str, Any],
+        series: Any,
+        times: Any,
+        depths: Any | None,
+    ) -> bool:
+        site["times"] = times
+        site["series"] = series
+
+        if depths is None:
+            return False
+
+        new_depths = np.asarray(depths, dtype=float).ravel()
+        old_depths = np.asarray(site["depths"]).ravel()
+        if np.array_equal(old_depths, new_depths, equal_nan=True):
+            return False
+
+        old_depth_count = self._depth_count_for(site["site_id"])
+        site["depths"] = new_depths
+        self._reconcile_checked(site, old_depth_count)
         return True
 
     def update_site_data(self, entity_index, series, times, depths=None) -> bool:
         """Replace an existing site's series/times in place.
 
-        Used on a variable change to refresh data without clearing and
-        re-adding (which would rebuild the table).  The site's identity,
-        checked depths and row/column position are preserved.  Only the
-        *version* is bumped (redraw plots) unless the depth set changed, in
-        which case *layout_version* is also bumped (rebuild table).
-
-        Returns ``True`` if the site was updated, ``False`` if no site with
-        *entity_index* exists (the caller should ``add_site`` instead).
+        The site's identity, checked depths and row/column position are
+        preserved.  Only *version* is bumped unless the depth set changed, in
+        which case *layout_version* is also bumped.  Returns ``True`` when a
+        matching site was updated.
         """
-        site = None
-        for s in self._sites:
-            if s["entity_index"] == entity_index:
-                site = s
-                break
+        site = self._find_site(entity_index)
         if site is None:
             return False
 
-        site["times"] = times
-        site["series"] = series
+        depth_changed = self._set_site_data(site, series, times, depths)
+        if depth_changed:
+            self.layout_version += 1
+        self._bump_version()
+        return True
 
+    def update_sites_data(
+        self,
+        updates: Sequence[tuple[int, dict[str, Any] | None]],
+        *,
+        notify_version: bool = True,
+    ) -> list[int]:
+        """Apply a batch of site payloads and advance the plot version once.
+
+        A ``None`` payload clears the site's curves while keeping its depths,
+        identity and checked combinations, so a failed variable fetch cannot
+        leave old-variable data visible.  Returns entity indices that were not
+        registered or had no payload.
+
+        Use ``notify_version=False`` when replacing the plots immediately after the
+        batch. The plot version still advances, and layout changes still notify.
+        """
+        updated = False
         depth_changed = False
-        if depths is not None:
-            new_depths = np.asarray(depths, dtype=float).ravel()
-            old_depths = np.asarray(site["depths"]).ravel()
-            if not np.array_equal(old_depths, new_depths, equal_nan=True):
-                old_depth_count = self._depth_count_for(site["site_id"])
-                site["depths"] = new_depths
-                self._reconcile_checked(site, old_depth_count)
-                depth_changed = True
+        failed: list[int] = []
+
+        for entity_index, payload in updates:
+            site = self._find_site(entity_index)
+            if site is None:
+                failed.append(entity_index)
+                continue
+
+            if payload is None:
+                failed.append(entity_index)
+                self._set_site_data(site, [], pd.to_datetime([]), None)
+            else:
+                pending = len(site["depths"]) == 0 and len(site["series"]) == 0
+                changed = self._set_site_data(
+                    site,
+                    payload["series"],
+                    payload["times"],
+                    payload["depths"],
+                )
+                if pending:
+                    self._check_site_depths(site)
+                depth_changed = depth_changed or changed
+            updated = True
 
         if depth_changed:
             self.layout_version += 1
-            print(f"[SelectionState] Updated site idx={entity_index} (depths changed)")
-        else:
-            print(f"[SelectionState] Updated site idx={entity_index}")
-        self._bump_version()
-        return True
+        if updated and notify_version:
+            self._bump_version(clear_loading=True)
+        elif updated:
+            with param.parameterized.discard_events(self):
+                self._bump_version(clear_loading=True)
+        return failed
 
     def _reconcile_checked(self, site, old_depth_count: int):
         """Prune checked keys that no longer map to valid depths on *site*.
@@ -415,8 +475,6 @@ class SelectionState(param.Parameterized):
         self._checked_count = 0
         self.layout_version += 1
         self._bump_version(clear_loading=True)
-        print("[SelectionState] Cleared all sites")
-
     def restore_checked(self, saved: set[tuple[str, float]], *, bump_version: bool = True):
         """Prune the checked set to the *saved* ``(site_id, depth)`` keys.
 
@@ -1057,19 +1115,18 @@ def build_plot_selection_panel(
         perf.full_rebuild_count += 1
         t0 = time.perf_counter()
         try:
-            new_df, new_editors, new_formatters, _, _ = build_assignment_matrix(
-                state, state.row_dim, state.col_dim
-            )
-            new_hidden = _hidden_columns(new_df, state.row_dim)
-            _rebuild_col_styles()
-            table.value = new_df
-            table.editors = new_editors
-            table.formatters = new_formatters
-            table.hidden_columns = new_hidden
+            with stage("table.rebuild"):
+                new_df, new_editors, new_formatters, _, _ = build_assignment_matrix(
+                    state, state.row_dim, state.col_dim
+                )
+                new_hidden = _hidden_columns(new_df, state.row_dim)
+                _rebuild_col_styles()
+                table.value = new_df
+                table.editors = new_editors
+                table.formatters = new_formatters
+                table.hidden_columns = new_hidden
         finally:
-            elapsed = (time.perf_counter() - t0) * 1000
-            perf.rebuild_duration_ms.append(elapsed)
-            print(f"[perf] _rebuild_table #{perf.full_rebuild_count}: {elapsed:.1f}ms")
+            perf._append_bounded(perf.rebuild_duration_ms, (time.perf_counter() - t0) * 1000)
 
     def _cancel_bump_timer(*, clear_loading=False):
         nonlocal _bump_timer
@@ -1109,11 +1166,11 @@ def build_plot_selection_panel(
             return
         _bump_timer = None
         perf.version_bump_count += 1
-        state.version += 1
+        with measure_operation("selection.edit", version=state.version + 1):
+            count("selection.version_bump")
+            state.version += 1
         if table_loading is not None:
             table_loading.visible = False
-        print(f"[perf] _flush_bump -> version={state.version} (total bumps={perf.version_bump_count})")
-        print(perf.report())
 
     def _sync_orientation(event=None):
         nonlocal _orientation_lock
@@ -1132,7 +1189,8 @@ def build_plot_selection_panel(
             state.col_dim = col_select.value
             _cancel_bump_timer(clear_loading=True)
             _rebuild_table()
-            state.version += 1
+            with measure_operation("selection.orientation"):
+                state.version += 1
         finally:
             _orientation_lock = False
 
@@ -1222,10 +1280,7 @@ def build_plot_selection_panel(
         state.set_checked(row_key, col, new_value, bump_version=False)
 
         _schedule_bump()
-        edit_elapsed = (time.perf_counter() - t_edit) * 1000
-        perf.edit_handler_ms.append(edit_elapsed)
-        print(f"[perf] on_edit ({row_key},{col})={new_value}: "
-              f"{edit_elapsed:.1f}ms (state->schedule, no Bokeh round-trip)")
+        perf._append_bounded(perf.edit_handler_ms, (time.perf_counter() - t_edit) * 1000)
 
     table.on_edit(_on_edit_cell)
 
