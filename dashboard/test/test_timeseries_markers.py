@@ -114,3 +114,67 @@ def test_indicator_markers_are_inside_the_visible_window(view: str) -> None:
         f"{view}: {len(outside)} of {len(markers)} indicator markers are outside "
         f"the visible window ({start} .. {end})"
     )
+
+
+def _build_two_site_views():
+    values = np.sin(np.arange(len(_TIMES)) / 30.0) * 5 + 10
+    stale_values = np.full(len(_TIMES), 999.0)
+    state = SelectionState()
+    state.add_site(
+        entity_index=7,
+        site_id="BH-7",
+        depths=[0.0],
+        series=[values],
+        times=_TIMES,
+    )
+    state.add_site(
+        entity_index=8,
+        site_id="BH-8",
+        depths=[0.0],
+        series=[stale_values],
+        times=_TIMES,
+    )
+    data = _FakeData()
+    map_state = {
+        "lats": [47.0, 47.0],
+        "lons": [11.0, 11.0],
+        "marker_meta": [
+            {"entity_index": 7, "site_id": "BH-7"},
+            {"entity_index": 8, "site_id": "BH-8"},
+        ],
+    }
+    left, mid, right, _on_map_tap, _fetch_site = build_timeseries_views(
+        data, map_state, state
+    )
+    return state, {"left": left, "mid": mid, "right": right}
+
+
+def _numeric_values(plot: Any) -> list[float]:
+    values: list[float] = []
+    for renderer in plot.state.renderers:
+        if not isinstance(renderer, GlyphRenderer):
+            continue
+        for column in renderer.data_source.data.values():
+            array = np.asarray(column)
+            if array.dtype.kind in "fiu":
+                values.extend(float(value) for value in array.tolist())
+    return values
+
+
+def test_cleared_site_does_not_keep_stale_curves_markers_or_ylim() -> None:
+    state, dmaps = _build_two_site_views()
+    left = dmaps["left"]
+    plot = hv.renderer("bokeh").get_plot(left)
+    left.event()
+    assert any(value == 999.0 for value in _numeric_values(plot))
+
+    checked_before = state.checked_combinations()
+    state.update_sites_data([(8, None)])
+
+    assert state.checked_combinations() == checked_before
+
+    for name, dmap in dmaps.items():
+        plot = hv.renderer("bokeh").get_plot(dmap[...,])
+        values = _numeric_values(plot)
+        assert not any(value == 999.0 for value in values), name
+        assert plot.state.y_range.end < 100, name
