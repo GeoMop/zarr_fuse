@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,7 +14,7 @@ import pytest
 from dashboard import composed, multi_time_views
 from dashboard.plot_selection import SelectionState
 
-_TIMES = pd.date_range("2020-01-01", periods=3)
+_START = datetime(2020, 1, 1)
 _VARIABLE_OPTIONS = {"old": "u", "new": "u", "new2": "u"}
 
 
@@ -143,12 +144,19 @@ class _Gate:
         self.release = threading.Event()
 
 
-def _payload(entity_index: int, value: float) -> dict:
+def _site_time_offset(site: dict) -> float:
+    return (site["times"][0] - _START).total_seconds()
+
+
+def _site_times(time_offset: float) -> pd.DatetimeIndex:
+    return pd.date_range(_START + timedelta(seconds=time_offset), periods=3)
+
+
+def _payload(entity_index: int, time_offset: float) -> dict:
     return {
         "status": "success",
-        "times": _TIMES,
+        "times": _site_times(time_offset),
         "depths": [0.0, 1.0],
-        "series": [[value, value + 1, value + 2], [value + 10, value + 11, value + 12]],
         "borehole_index": entity_index,
     }
 
@@ -222,15 +230,13 @@ def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False, metad
             entity_index=7,
             site_id="BH-7",
             depths=[0.0, 1.0],
-            series=[[1, 2, 3], [4, 5, 6]],
-            times=_TIMES,
+            times=_site_times(1),
         )
         state.add_site(
             entity_index=8,
             site_id="BH-8",
             depths=[0.0, 1.0],
-            series=[[7, 8, 9], [10, 11, 12]],
-            times=_TIMES,
+            times=_site_times(7),
         )
         captured["selection_state"] = state
         return _Widget(), state
@@ -383,14 +389,14 @@ def test_background_fetch_applies_once_on_document_thread(monkeypatch) -> None:
         gate.release.set()
         await _wait_for_callbacks(doc, 1)
 
-        assert [s["series"][0][0] for s in state.sites] == [1, 7], (
+        assert [_site_time_offset(s) for s in state.sites] == [1, 7], (
             "worker must not mutate SelectionState"
         )
         doc.drain()
 
     asyncio.run(scenario())
 
-    assert [s["series"][0][0] for s in state.sites] == [17, 18]
+    assert [_site_time_offset(s) for s in state.sites] == [17, 18]
     assert captured["refresh_count"] == refresh_before + 1
     assert captured["right_window"] is not right_before
     assert captured["map_build_count"] == map_builds_before
@@ -421,7 +427,7 @@ def test_failed_site_is_cleared_without_losing_identity_or_checks(monkeypatch) -
 
     asyncio.run(scenario())
 
-    assert state.sites[1]["series"] == []
+    assert len(state.sites[1]["times"]) == 0
     assert len(state.sites[1]["times"]) == 0
     assert list(state.sites[1]["depths"]) == depths_before
     assert state.checked_combinations() == checked_before
@@ -462,7 +468,7 @@ def test_superseded_switch_result_is_discarded(monkeypatch, already_queued: bool
             _select(captured, "new2 (u)")
             if already_queued:
                 doc.drain()
-                assert [s["series"][0][0] for s in state.sites] == [1, 7]
+                assert [_site_time_offset(s) for s in state.sites] == [1, 7]
                 assert captured["loading_indicator"].visible
                 assert captured["timeseries_loading"].visible
             await _wait_for_callbacks(doc, 1)
@@ -473,7 +479,7 @@ def test_superseded_switch_result_is_discarded(monkeypatch, already_queued: bool
     asyncio.run(scenario())
 
     assert captured["data"].display_variable == "new2"
-    assert [s["series"][0][0] for s in state.sites] == [40.0, 40.0]
+    assert [_site_time_offset(s) for s in state.sites] == [40.0, 40.0]
     assert not captured["loading_indicator"].visible
     assert not captured["timeseries_loading"].visible
     assert len(captured["clients"]) == 2
@@ -551,7 +557,7 @@ def test_context_change_releases_map_click_guard(monkeypatch, selector: str, val
             assert not spinner.visible
             assert not map_click.active
             if keeps_sites:
-                assert state.sites[0]["series"][0][0] == 15.0
+                assert _site_time_offset(state.sites[0]) == 15.0
             else:
                 assert state.sites == []
 
@@ -566,14 +572,14 @@ def test_context_change_releases_map_click_guard(monkeypatch, selector: str, val
             assert map_click.active
             assert spinner.visible
             if keeps_sites:
-                assert state.sites[0]["series"][0][0] == 15.0
+                assert _site_time_offset(state.sites[0]) == 15.0
             else:
-                assert state.sites[0]["series"] == []
+                assert len(state.sites[0]["times"]) == 0
 
             new.release.set()
             await _wait_for_callbacks(doc, 2)
             doc.drain()
-            assert state.sites[0]["series"][0][0] == 20.0
+            assert _site_time_offset(state.sites[0]) == 20.0
             assert not map_click.active
             assert not spinner.visible
         finally:
@@ -637,14 +643,14 @@ def test_rapid_a_b_a_switch_applies_only_final_a(monkeypatch) -> None:
             _select(captured, "new (u)")
             await _wait_for(final_a.entered.is_set)
             doc.drain()
-            assert [s["series"][0][0] for s in state.sites] == [1, 7]
+            assert [_site_time_offset(s) for s in state.sites] == [1, 7]
             assert captured["refresh_count"] == initial_refreshes
             assert captured["timeseries_loading"].visible
 
             final_a.release.set()
             await _wait_for_callbacks(doc, 1)
             doc.drain()
-            assert [s["series"][0][0] for s in state.sites] == [40.0, 40.0]
+            assert [_site_time_offset(s) for s in state.sites] == [40.0, 40.0]
         finally:
             first_a.release.set()
             b.release.set()
@@ -653,7 +659,7 @@ def test_rapid_a_b_a_switch_applies_only_final_a(monkeypatch) -> None:
     asyncio.run(scenario())
     doc.drain()
     assert captured["data"].display_variable == "new"
-    assert [s["series"][0][0] for s in state.sites] == [40.0, 40.0]
+    assert [_site_time_offset(s) for s in state.sites] == [40.0, 40.0]
     assert captured["refresh_count"] == initial_refreshes + 1
     assert not captured["timeseries_loading"].visible
 

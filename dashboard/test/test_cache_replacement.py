@@ -73,64 +73,16 @@ def _pause_before_cache_insert(
     return entered, release
 
 
-def test_clear_cache_replaces_both_cache_dictionaries() -> None:
+def test_clear_cache_replaces_active_caches() -> None:
     client = LocalClient(Path("unused.yml"))
-    client._map_data_cache["map"] = 1
-    client._timeseries_cache["ts"] = 2
     old_map = client._map_data_cache
-    old_ts = client._timeseries_cache
+    old_window_cache = client._timeseries_window_cache
+    old_map["map"] = 1
 
     client.clear_cache()
 
     assert client._map_data_cache == {} and client._map_data_cache is not old_map
-    assert client._timeseries_cache == {} and client._timeseries_cache is not old_ts
-
-
-def test_inflight_timeseries_request_cannot_repopulate_replacement_cache(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client, calls = _make_client(monkeypatch)
-    entered, release = _pause_before_cache_insert(monkeypatch)
-    results: list[dict] = []
-    errors: list[BaseException] = []
-
-    def _request() -> dict:
-        return client.get_timeseries_data(
-            "view", "/", lat=47.0, lon=11.0, variable="temp", entity_index=0
-        )
-
-    def _worker() -> None:
-        try:
-            results.append(_request())
-        except BaseException as exc:  # pragma: no cover - surfaced below
-            errors.append(exc)
-
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
-    try:
-        assert entered.wait(timeout=5)
-        client.clear_cache()
-        new_cache = client._timeseries_cache
-    finally:
-        release.set()
-    thread.join(timeout=5)
-
-    assert not thread.is_alive()
-    if errors:
-        raise errors[0]
-    assert results and results[0]["status"] == "success"
-    assert new_cache == {}
-    assert client._timeseries_cache is new_cache
-    assert calls["get_group"] == 1
-
-    second = _request()
-    assert second["status"] == "success"
-    assert calls["get_group"] == 2
-    assert len(client._timeseries_cache) == 1
-
-    third = _request()
-    assert third == second
-    assert calls["get_group"] == 2
+    assert client._timeseries_window_cache is not old_window_cache
 
 
 def test_inflight_map_request_cannot_repopulate_replacement_cache(

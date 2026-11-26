@@ -260,7 +260,7 @@ def test_slow_read_is_reused_or_skips_obsolete_sites(setup_right, monkeypatch, c
     """Zoom into an active read or supersede it without waiting for obsolete sites."""
     ds, data, state, _ = setup_right
     times = ds.indexes["time"]
-    state.add_site(1, "B", [0.0, 3.0], [np.zeros(len(times))] * 2, times)
+    state.add_site(1, "B", [0.0, 3.0], times)
     entered, release = Event(), Event()
     call_order = []
     reader = data.client.get_timeseries_window_data
@@ -404,7 +404,7 @@ def test_selection_empty_window_and_error_stay_local(setup_right, monkeypatch):
             assert [curve.label for curve in _curves(right)] == ["A @ 3.00"]
             assert len(calls) == 1
             times = ds.indexes["time"]
-            state.add_site(1, "B", [0.0, 3.0], [np.zeros(len(times))] * 2, times)
+            state.add_site(1, "B", [0.0, 3.0], times)
             await _until(lambda: len(_curves(right)) == 3)
             assert [
                 (call["entity_index"], call["depth_indices"]) for call in calls[-2:]

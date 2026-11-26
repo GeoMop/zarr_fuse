@@ -6,7 +6,7 @@
 
 Cold opens a fresh store and dataset. Warm repeats on that same dataset.
 The dashboard payload cache and OS cache flushing are outside this benchmark.
-Use --compare-readers to measure LocalClient history and window requests instead.
+Use --compare-readers to measure LocalClient reads at history, month, and day scales.
 In that mode, repeat uses the payload cache and metadata-warm changes a bound
 to keep the selection off the payload cache.
 """
@@ -20,14 +20,13 @@ from statistics import median
 from types import SimpleNamespace
 from typing import Any
 
-import numpy as np
 import pandas as pd
 import xarray as xr
 import zarr
 from zarr.storage import LocalStore, WrapperStore, ZipStore
 
 from dashboard.config import SchemaConfig, SchemaFieldsConfig
-from dashboard.data import LocalClient, _to_json_floats
+from dashboard.data import LocalClient
 from dashboard.perf_summary import count, measure_operation
 from dashboard.profiling import profiling_enabled, time_stage
 
@@ -75,8 +74,10 @@ def _time_slice(index: pd.DatetimeIndex, window: str) -> slice:
 def _window_bounds(
     index: pd.DatetimeIndex, window: str
 ) -> tuple[pd.Timestamp, pd.Timestamp]:
-    span = pd.Timedelta(days=30 if window == "month" else 1)
     first, last = index[0], index[-1]
+    if window == "history":
+        return first, last
+    span = pd.Timedelta(days=30 if window == "month" else 1)
     center = first + 0.95 * (last - first)
     start = max(first, min(center - span / 2, last - span))
     return start, min(last, start + span)
@@ -107,21 +108,21 @@ def _measure(
         count("measurement.gets", gets)
         count("measurement.bytes", size)
         with time_stage("benchmark.convert") as timer:
-            strings = pd.to_datetime(times).astype(str).tolist()
-            traces = [_to_json_floats(column) for column in values.T]
-            plot_times = pd.to_datetime(strings)
-            plot_values = [np.asarray(trace, dtype=float) for trace in traces]
+            frames = [
+                pd.DataFrame({"time": times, "value": trace})
+                for trace in values.T
+            ]
             convert_ms = timer.elapsed() * 1000
 
         with time_stage("benchmark.curves") as timer:
             curves = [
                 hv.Curve(
-                    pd.DataFrame({"time": plot_times, "value": trace}),
+                    frame,
                     "time",
                     "value",
                     label=f"Depth {depth}",
                 )
-                for depth, trace in enumerate(plot_values)
+                for depth, frame in enumerate(frames)
             ]
             overlay = hv.Overlay(curves)
             curve_ms = timer.elapsed() * 1000
@@ -145,7 +146,7 @@ def _describe_sampling(index: pd.DatetimeIndex) -> None:
 def _compare_readers(
     args: argparse.Namespace, open_store: Callable[[], CountingStore]
 ) -> None:
-    """Measure both reader APIs against the same store and entity."""
+    """Measure the window reader at each scale for the same store and entity."""
     schema = SchemaConfig(
         file="",
         fields=SchemaFieldsConfig(
@@ -163,11 +164,6 @@ def _compare_readers(
 
         def _get_group(self, view_name, group_path):
             ds = xr.open_zarr(self.store, group=group_path, consolidated=False)
-            # Some historical archives lack map coordinates. An explicit
-            # entity index only needs their size in the legacy reader.
-            for field in ("latitude", "longitude"):
-                if field not in ds:
-                    ds[field] = (args.entity, np.full(ds.sizes[args.entity], np.nan))
             return SimpleNamespace(dataset=ds)
 
     with (
@@ -182,12 +178,11 @@ def _compare_readers(
         "variable": args.variable,
         "entity_index": args.entity_index,
     }
-    print("reader/cache        samples  GETs     bytes  request (ms)")
+    print("window/cache        samples  GETs     bytes  request (ms)")
     for window in ("history", "month", "day"):
         results = {label: [] for label in ("cold", "repeat")}
-        if window != "history":
-            start, end = _window_bounds(time_index, window)
-            results["metadata-warm"] = []
+        start, end = _window_bounds(time_index, window)
+        results["metadata-warm"] = []
         for _ in range(args.repeats):
             with open_store() as store:
                 client = BenchmarkClient(store)
@@ -197,21 +192,15 @@ def _compare_readers(
                         "timeseries.compare", window=window, cache=cache
                     ):
                         with time_stage("benchmark.reader_request") as timer:
-                            if window == "history":
-                                result = client.get_timeseries_data(
-                                    **timeseries_args, lat=0.0, lon=0.0
-                                )
-                                size = len(result["times"])
-                            else:
-                                request_end = (
-                                    end + pd.Timedelta(1, unit="ns")
-                                    if cache == "metadata-warm"
-                                    else end
-                                )
-                                result = client.get_timeseries_window_data(
-                                    **timeseries_args, start=start, end=request_end
-                                )
-                                size = result.sizes[args.time]
+                            request_end = (
+                                end + pd.Timedelta(1, unit="ns")
+                                if cache == "metadata-warm"
+                                else end
+                            )
+                            result = client.get_timeseries_window_data(
+                                **timeseries_args, start=start, end=request_end
+                            )
+                            size = result.sizes[args.time]
                             elapsed_ms = timer.elapsed() * 1000
                         gets, read_bytes = store.chunk_reads(array_path)
                         count("measurement.gets", gets)

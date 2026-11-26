@@ -14,13 +14,11 @@ def _make_state():
     state.add_site(
         entity_index=0, site_id="BH-1",
         depths=[0.0, 1.0, 2.0],
-        series=[[1, 2, 3], [4, 5, 6], [7, 8, 9]],
         times=["2020-01-01", "2020-01-02", "2020-01-03"],
     )
     state.add_site(
         entity_index=1, site_id="BH-2",
         depths=[1.0, 2.0, 3.0],
-        series=[[1, 2, 3], [4, 5, 6], [7, 8, 9]],
         times=["2020-01-01", "2020-01-02", "2020-01-03"],
     )
     return state
@@ -43,7 +41,6 @@ class TestAddSite:
         state.add_site(
             entity_index=0, site_id="BH-1",
             depths=[0.0],
-            series=[[1]],
             times=["2020-01-01"],
         )
         assert len(state._sites) == n_sites_before
@@ -221,7 +218,7 @@ class TestCheckedRestore:
         for site in _make_state().sites:
             state.add_site(
                 site["entity_index"], site["site_id"],
-                site["depths"], site["series"], site["times"],
+                site["depths"], site["times"],
             )
         assert len(state._checked) == 6, "re-add auto-checks all depths"
 
@@ -233,7 +230,7 @@ class TestCheckedRestore:
         state = _make_state()
         saved = {("BH-1", 0.0), ("BH-9", 123.0)}
         state.clear()
-        state.add_site(0, "BH-1", [0.0], [[1]], ["2020-01-01"])
+        state.add_site(0, "BH-1", [0.0], ["2020-01-01"])
         state.restore_checked(saved)
         assert state.checked_combinations() == {("BH-1", 0.0)}
 
@@ -242,7 +239,7 @@ class TestVersionBumps:
     def test_add_site_bumps_version_and_layout(self):
         state = SelectionState()
         v, lv = state.version, state.layout_version
-        state.add_site(0, "BH-1", [0.0], [[1]], ["2020-01-01"])
+        state.add_site(0, "BH-1", [0.0], ["2020-01-01"])
         assert state.version > v
         assert state.layout_version > lv
 

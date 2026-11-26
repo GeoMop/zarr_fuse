@@ -15,8 +15,8 @@ from dashboard.plot_selection import SelectionState, build_assignment_matrix, bu
 
 def _two_site_state():
     state = SelectionState()
-    state.add_site(0, "BH-1", [0.0, 1.0], [[1, 2], [3, 4]], ["2020-01-01", "2020-01-02"])
-    state.add_site(1, "BH-2", [1.0, 2.0], [[5, 6], [7, 8]], ["2020-01-01", "2020-01-02"])
+    state.add_site(0, "BH-1", [0.0, 1.0], ["2020-01-01", "2020-01-02"])
+    state.add_site(1, "BH-2", [1.0, 2.0], ["2020-01-01", "2020-01-02"])
     return state
 
 
@@ -178,22 +178,22 @@ class TestEdgeCases:
 
     def test_single_site(self):
         state = SelectionState()
-        state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"])
+        state.add_site(0, "BH-1", [5.0], ["2020-01-01"])
         df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert len(df) == 2  # header row + 1 site
         assert str(df.iloc[1]["_row_label"]).endswith("BH-1")
 
     def test_entity_index_column_present(self):
         state = SelectionState()
-        state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"])
-        state.add_site(1, "BH-2", [5.0], [[1]], ["2020-01-01"])
+        state.add_site(0, "BH-1", [5.0], ["2020-01-01"])
+        state.add_site(1, "BH-2", [5.0], ["2020-01-01"])
         df, _, _, _, _ = build_assignment_matrix(state, "entity", "vertical")
         assert "entity_index" in df.columns
         assert list(df["entity_index"])[1:] == [0.0, 1.0]
 
     def test_entity_index_nan_in_vertical_mode(self):
         state = SelectionState()
-        state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"])
+        state.add_site(0, "BH-1", [5.0], ["2020-01-01"])
         df, _, _, _, _ = build_assignment_matrix(state, "vertical", "entity")
         assert "entity_index" in df.columns
         # header row has NaN, data row also has NaN in vertical mode
@@ -658,7 +658,7 @@ class TestTrailingDebounce:
         _, state, _ = _make_panel()
         state._panel_schedule_bump()
         gen_before = state._panel_bump_generation()
-        state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"])
+        state.add_site(0, "BH-1", [5.0], ["2020-01-01"])
         gen_after = state._panel_bump_generation()
         _time.sleep(_WAIT)
         assert state.version >= 2
@@ -678,7 +678,7 @@ class TestTrailingDebounce:
         state._panel_schedule_bump()
         v_before = state.version
         _time.sleep(0.005)
-        state.add_site(2, "BH-3", [0.0], [[1]], ["2020-01-01"])
+        state.add_site(2, "BH-3", [0.0], ["2020-01-01"])
         v_after_add = state.version
         assert v_after_add == v_before + 1, "add_site should produce exactly one version bump"
         _time.sleep(_WAIT)
@@ -691,7 +691,7 @@ class TestTrailingDebounce:
         state._panel_schedule_bump()
         gen_old = state._panel_bump_generation()
         _time.sleep(0.005)
-        state.add_site(2, "BH-3", [0.0], [[1]], ["2020-01-01"])
+        state.add_site(2, "BH-3", [0.0], ["2020-01-01"])
         gen_at_add = state._panel_bump_generation()
         v_after_add = state.version
         state._panel_flush_bump(generation=gen_old)

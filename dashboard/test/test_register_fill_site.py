@@ -13,7 +13,6 @@ def _make_state():
     state.add_site(
         entity_index=0, site_id="BH-1",
         depths=[0.0, 1.0, 2.0],
-        series=[[1, 2, 3], [4, 5, 6], [7, 8, 9]],
         times=["2020-01-01", "2020-01-02", "2020-01-03"],
     )
     return state
@@ -62,7 +61,6 @@ class TestFillSite:
 
         ok = state.fill_site(
             entity_index=5,
-            series=[[10, 11, 12], [13, 14, 15]],
             times=pd.to_datetime(["2020-02-01", "2020-02-02", "2020-02-03"]),
             depths=[5.0, 6.0],
         )
@@ -79,7 +77,6 @@ class TestFillSite:
 
         state.fill_site(
             entity_index=5,
-            series=[[10, 11, 12]],
             times=pd.to_datetime(["2020-02-01", "2020-02-02", "2020-02-03"]),
             depths=[5.0, 6.0],
         )
@@ -90,7 +87,6 @@ class TestFillSite:
         state = _make_state()
         ok = state.fill_site(
             entity_index=99,
-            series=[[10, 11, 12]],
             times=pd.to_datetime(["2020-02-01", "2020-02-02", "2020-02-03"]),
             depths=[5.0],
         )
@@ -101,7 +97,6 @@ class TestFillSite:
         state.register_site(entity_index=5, site_id="BH-5")
         state.fill_site(
             entity_index=5,
-            series=[[10, 11, 12]],
             times=pd.to_datetime(["2020-02-01", "2020-02-02", "2020-02-03"]),
             depths=[5.0],
         )
@@ -113,21 +108,19 @@ class TestFillSite:
     def test_refill_same_depths_is_idempotent(self):
         state = _make_state()
         state.register_site(entity_index=5, site_id="BH-5")
-        first_fill = ([[10, 11, 12], [13, 14, 15]], [5.0, 6.0])
+        depths = [5.0, 6.0]
         state.fill_site(
             entity_index=5,
-            series=first_fill[0],
             times=pd.to_datetime(["2020-02-01", "2020-02-02", "2020-02-03"]),
-            depths=first_fill[1],
+            depths=depths,
         )
         checked_before = state.checked_combinations()
         layout_before = state.layout_version
 
         ok = state.fill_site(
             entity_index=5,
-            series=first_fill[0],
             times=pd.to_datetime(["2020-02-01", "2020-02-02", "2020-02-03"]),
-            depths=first_fill[1],
+            depths=depths,
         )
 
         assert ok is True
@@ -142,7 +135,6 @@ class TestFillSite:
 
         state.fill_site(
             entity_index=5,
-            series=[[10, 11, 12]],
             times=pd.to_datetime(["2020-02-01", "2020-02-02", "2020-02-03"]),
             depths=[5.0],
         )

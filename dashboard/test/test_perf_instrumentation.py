@@ -91,13 +91,11 @@ def _run_fill(monkeypatch: pytest.MonkeyPatch, profiling_on: bool) -> dict[str, 
     with perf_summary.measure_operation("borehole.select"):
         first = state.fill_site(
             entity_index=7,
-            series=[[1.0, 2.0], [3.0, 4.0]],
             times=pd.to_datetime(["2020-01-01", "2020-01-02"]),
             depths=[0.0, 1.0],
         )
         second = state.fill_site(
             entity_index=7,
-            series=[[1.0, 2.0], [3.0, 4.0]],
             times=pd.to_datetime(["2020-01-01", "2020-01-02"]),
             depths=[0.0, 1.0],
         )
@@ -123,7 +121,6 @@ class TestFillSiteNotifyStages:
         with perf_summary.measure_operation("borehole.select"):
             ok = state.fill_site(
                 entity_index=7,
-                series=[[1.0, 2.0]],
                 times=pd.to_datetime(["2020-01-01", "2020-01-02"]),
                 depths=[0.0, 1.0],
             )
@@ -138,14 +135,12 @@ class TestFillSiteNotifyStages:
         state.register_site(entity_index=7, site_id="BH-7")
         state.fill_site(
             entity_index=7,
-            series=[[1.0, 2.0]],
             times=pd.to_datetime(["2020-01-01", "2020-01-02"]),
             depths=[0.0, 1.0],
         )
         with perf_summary.measure_operation("borehole.select"):
             state.fill_site(
                 entity_index=7,
-                series=[[1.0, 2.0]],
                 times=pd.to_datetime(["2020-01-01", "2020-01-02"]),
                 depths=[0.0, 1.0],
             )
@@ -159,7 +154,6 @@ class TestFillSiteNotifyStages:
         with perf_summary.measure_operation("borehole.select"):
             ok = state.fill_site(
                 entity_index=99,
-                series=[[1.0]],
                 times=pd.to_datetime(["2020-01-01"]),
                 depths=[0.0],
             )
@@ -173,7 +167,6 @@ class TestFillSiteNotifyStages:
         state.register_site(entity_index=7, site_id="BH-7")
         state.fill_site(
             entity_index=7,
-            series=[[1.0, 2.0]],
             times=pd.to_datetime(["2020-01-01", "2020-01-02"]),
             depths=[0.0, 1.0],
         )
@@ -226,7 +219,6 @@ class TestBoreholeSelectPipeline:
                     "status": "ok",
                     "times": ["2020-01-01", "2020-01-02", "2020-01-03"],
                     "depths": [0.0, 1.0],
-                    "series": [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
                     "borehole_index": int(entity_index or 0),
                     "borehole_name": "BH-7",
                 }

@@ -14,22 +14,21 @@ from dashboard.plot_styles import COLORS, MARKER_SHAPES
 
 def _one_site_one_depth():
     state = SelectionState()
-    state.add_site(0, "BH-1", [5.0], [[1]], ["2020-01-01"])
+    state.add_site(0, "BH-1", [5.0], ["2020-01-01"])
     return state
 
 
 def _n_sites(count: int, depth: float = 0.0):
     state = SelectionState()
     for i in range(count):
-        state.add_site(i, f"BH-{i}", [depth], [[i + 1]], ["2020-01-01"])
+        state.add_site(i, f"BH-{i}", [depth], ["2020-01-01"])
     return state
 
 
 def _one_site_n_depths(count: int):
     depths = list(range(count))
-    data = [[i + j for j in range(count)] for i in range(count)]
     state = SelectionState()
-    state.add_site(0, "BH-1", depths, data, ["2020-01-01"] * count)
+    state.add_site(0, "BH-1", depths, ["2020-01-01"] * count)
     return state
 
 

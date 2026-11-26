@@ -83,18 +83,15 @@ class LocalClient:
         self.base_dir = self.views_path.parent.parent
         self._nodes: Dict[str, Any] = {}
         self._map_data_cache: Dict[str, Any] = {}
-        self._timeseries_cache: Dict[str, Any] = {}
         self._timeseries_window_cache = _TimeseriesWindowCache()
 
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         """Replace the active caches so in-flight requests cannot repopulate them.
 
-        Requests capture the cache dictionary they start with, so replacing the
-        attribute here leaves any in-flight request writing to the old, detached
-        dictionary instead of the new active one.
+        Requests capture their cache at entry and can finish writing to that
+        detached cache after a clear.
         """
         self._map_data_cache = {}
-        self._timeseries_cache = {}
         self._timeseries_window_cache = _TimeseriesWindowCache()
         print("[cache] Cleared all caches")
 
@@ -758,142 +755,6 @@ class LocalClient:
             if len(cache.windows) > cache.MAX_WINDOWS:
                 cache.windows.popitem(last=False)
         return _copy_timeseries_window(result)
-
-    def get_timeseries_data(
-        self,
-        view_name: str | None,
-        group_path: str,
-        lat: float,
-        lon: float,
-        variable: str | None = None,
-        entity_index: int | None = None,
-    ) -> dict[str, Any]:
-        with stage("get_timeseries_data"):
-            return self._get_timeseries_data(
-                view_name, group_path, lat, lon, variable, entity_index
-            )
-
-    def _get_timeseries_data(
-        self,
-        view_name: str | None,
-        group_path: str,
-        lat: float,
-        lon: float,
-        variable: str | None = None,
-        entity_index: int | None = None,
-    ) -> dict[str, Any]:
-        # Capture the active cache once; a concurrent clear_cache() replaces the
-        # attribute, so this request must keep using the dictionary it started
-        # with for both lookup and insertion.
-        cache = self._timeseries_cache
-        # Check cache first - using location as part of key since timeseries is location-specific
-        # Use higher precision here so nearby boreholes do not collapse
-        # to the same cache entry when coordinates differ only slightly.
-        cache_key = f"{view_name}:{group_path}:{variable}:{lat:.8f}:{lon:.8f}:{entity_index}"
-        if cache_key in cache:
-            cached = cache[cache_key]
-            print(f"[cache] get_timeseries_data: cache hit for {variable}")
-            count("timeseries.cache_hit")
-            return cached
-            
-        view = self._view_config(view_name)
-        fields = resolve_schema_fields(view.schema, group_path)
-
-        variable = variable or view.defaults.display_variable
-        lat_field = fields.lat if fields else None
-        lon_field = fields.lon if fields else None
-        time_field = fields.time if fields else None
-        depth_field = fields.vertical if fields else None
-        entity_field = fields.entity if fields else None
-
-        if not variable:
-            return {"status": "error", "reason": "No default display variable configured"}
-
-        if not lat_field or not lon_field or not time_field:
-            return {
-                "status": "error",
-                "reason": "lat/lon/time mapping is not fully configured for this group",
-            }
-
-        node = self._get_group(view_name, group_path)
-        ds = node.dataset
-        if variable not in ds:
-            return {"status": "error", "reason": f"Variable '{variable}' not found"}
-
-        lat_var = ds.get(lat_field)
-        lon_var = ds.get(lon_field)
-        if lat_var is None or lon_var is None:
-            return {"status": "error", "reason": f"{lat_field}/{lon_field} not found"}
-
-        with stage("ts.coords"):
-            if time_field and time_field in lat_var.dims:
-                lat_var = lat_var.isel({time_field: 0})
-            if time_field and time_field in lon_var.dims:
-                lon_var = lon_var.isel({time_field: 0})
-            if depth_field and depth_field in lat_var.dims:
-                lat_var = lat_var.isel({depth_field: 0})
-            if depth_field and depth_field in lon_var.dims:
-                lon_var = lon_var.isel({depth_field: 0})
-
-            lats = np.array(lat_var.values, dtype=float).ravel()
-            lons = np.array(lon_var.values, dtype=float).ravel()
-            available_min = 0
-            available_max = max(len(lats) - 1, 0)
-            print(f"[fetch_ts][backend] Available entity index range: {available_min}..{available_max}")
-            idx: int
-            if entity_index is not None:
-                idx = int(entity_index)
-                print(f"[fetch_ts][backend] Using provided entity_index={idx}")
-            else:
-                dist = (lats - lat) ** 2 + (lons - lon) ** 2
-                idx = int(np.nanargmin(dist))
-                print(f"[fetch_ts][backend] Resolved nearest entity_index={idx}")
-
-            if idx < available_min or idx > available_max:
-                return {
-                    "status": "error",
-                    "reason": f"entity_index {idx} is out of range for available entities {available_min}..{available_max}",
-                }
-
-        with stage("ts.read"):
-            entity_names = None
-            if entity_field and entity_field in ds:
-                entity_arr = ds[entity_field]
-                entity_names = np.array(entity_arr.values, dtype=str).ravel()
-
-            data_var = ds[variable]
-            if entity_field and entity_field in data_var.dims:
-                data_var = data_var.isel({entity_field: idx})
-
-            times = ds[time_field]
-            time_values = pd.to_datetime(times.values).astype(str).tolist()
-
-            values = np.array(data_var.values, dtype=float)
-            if values.ndim == 1:
-                series = [_to_json_floats(values)]
-            else:
-                series = [_to_json_floats(values[:, i]) for i in range(values.shape[1])]
-
-            if depth_field and depth_field in ds:
-                depths = ds[depth_field]
-                depth_values = np.array(depths.values, dtype=float).tolist()
-            else:
-                depth_values = [np.nan] * max(len(series), 1)
-
-        with stage("ts.convert"):
-            result = {
-                "status": "success",
-                "times": time_values,
-                "depths": _to_json_floats(depth_values),
-                "series": series,
-                "variable": variable,
-                "borehole_index": idx,
-                "borehole_name": entity_names[idx] if entity_names is not None else None,
-            }
-        
-        # Cache the result in the dictionary captured at request start.
-        cache[cache_key] = result
-        return result
 
 
 def _to_json_floats(values: Any) -> list:

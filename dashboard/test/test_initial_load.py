@@ -64,7 +64,7 @@ def startup(monkeypatch):
         }),
         site=_Read({
             "borehole_index": 8, "borehole_name": "BH-8", "depths": [0.0],
-            "times": ["2025-01-01", "2025-01-02"], "series": [[2.0, 3.0]],
+            "times": ["2025-01-01", "2025-01-02"],
         }),
     )
 
@@ -226,12 +226,6 @@ def test_startup_loads_each_pane_without_a_raw_history_scan(
         client.get_timeseries_window_data,
         raising=False,
     )
-    monkeypatch.setattr(
-        fake_client,
-        "get_timeseries_data",
-        lambda *a, **k: pytest.fail("legacy history reader"),
-        raising=False,
-    )
     overview_started, release = threading.Event(), threading.Event()
     if not delay_overview:
         release.set()
@@ -291,7 +285,7 @@ def test_startup_loads_each_pane_without_a_raw_history_scan(
             keys = {key for key, _ in store.reads if key.startswith("temp/c/")}
             full = 2 * ((ds.sizes["time"] + 15) // 16)
             assert 0 < len(keys) < full
-            assert startup.selections[0].sites[0]["series"] == []
+            assert "series" not in startup.selections[0].sites[0]
             print(
                 f"local startup delayed_overview={delay_overview} shell={shell_ready:.3f}s first={ready} samples={counts} "
                 f"measurement_GETs={reads} bytes={size} distinct_chunks={len(keys)}/{full}"

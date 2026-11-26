@@ -70,7 +70,6 @@ def fetch_registered_site_payload(
 
     times = pd.to_datetime(figure.get("times", []))
     depths = np.array(figure.get("depths", []), dtype=float)
-    series = [np.array(values, dtype=float) for values in figure.get("series", [])]
     resolved_index = int(figure.get("borehole_index", entity_index))
     if not len(depths):
         timer.stop()
@@ -85,7 +84,6 @@ def fetch_registered_site_payload(
     timer.stop()
     return {
         "resolved_index": resolved_index,
-        "series": series,
         "times": times,
         "depths": depths,
         **_site_metadata(figure),
@@ -261,7 +259,6 @@ def build_timeseries_views(
 
         times = pd.to_datetime(fig.get("times", []))
         depths = np.array(fig.get("depths", []), dtype=float)
-        series = [np.array(values, dtype=float) for values in fig.get("series", [])]
         entity_index = int(fig.get("borehole_index", 0))
         borehole_name = fig.get("borehole_name")
 
@@ -270,13 +267,12 @@ def build_timeseries_views(
             exists = any(s["entity_index"] == entity_index for s in selection_state.sites)
             if exists:
                 # In-place refresh on a variable change: preserve identity, checked
-                # depths and table position.  If the new variable yields no series,
+                # depths and table position.  If the new variable has no depths,
                 # blank the site (empty depths) so no stale old-variable data is
                 # drawn, and report it as no-data via the None return.
                 if not len(depths):
                     selection_state.update_site_data(
                         entity_index,
-                        series=[],
                         times=pd.to_datetime([]),
                         depths=np.array([]),
                     )
@@ -284,7 +280,6 @@ def build_timeseries_views(
                     return None
                 selection_state.update_site_data(
                     entity_index,
-                    series=series,
                     times=times,
                     depths=depths,
                     **_site_metadata(fig),
@@ -294,7 +289,6 @@ def build_timeseries_views(
                     entity_index=entity_index,
                     site_id=site_id,
                     depths=depths,
-                    series=series,
                     times=times,
                     **_site_metadata(fig),
                 )
@@ -606,7 +600,6 @@ def build_timeseries_views(
         with stage("selection.update"):
             filled = selection_state.fill_site(
                 entity_index,
-                series=payload["series"],
                 times=payload["times"],
                 depths=payload["depths"],
                 **_site_metadata(payload),

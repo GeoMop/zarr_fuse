@@ -35,8 +35,8 @@ _WAIT = 0.15  # sleep after last event to let debounce settle
 
 def _two_site_state():
     state = SelectionState()
-    state.add_site(0, "BH-1", [0.0, 1.0], [[1, 2], [3, 4]], ["2020-01-01", "2020-01-02"])
-    state.add_site(1, "BH-2", [1.0, 2.0], [[5, 6], [7, 8]], ["2020-01-01", "2020-01-02"])
+    state.add_site(0, "BH-1", [0.0, 1.0], ["2020-01-01", "2020-01-02"])
+    state.add_site(1, "BH-2", [1.0, 2.0], ["2020-01-01", "2020-01-02"])
     return state
 
 
@@ -297,7 +297,7 @@ class TestValidationPhase2:
         _time.sleep(0.003)
 
         # add_site triggers _cancel_panel_bump
-        state.add_site(2, "BH-3", [0.0], [[1]], ["2020-01-01"])
+        state.add_site(2, "BH-3", [0.0], ["2020-01-01"])
         v_after_add = state.version
         assert v_after_add > v_before, "add_site must bump version"
 
@@ -326,11 +326,11 @@ class TestValidationPhase2:
         assert len(state.sites) == 0 and len(state._checked) == 0
 
         sites_backup = [
-            (s["entity_index"], s["site_id"], s["depths"], s["series"], s["times"])
+            (s["entity_index"], s["site_id"], s["depths"], s["times"])
             for s in _two_site_state().sites
         ]
-        for entity_index, site_id, depths, series, times in sites_backup:
-            state.add_site(entity_index, site_id, depths, series, times)
+        for entity_index, site_id, depths, times in sites_backup:
+            state.add_site(entity_index, site_id, depths, times)
         state.restore_checked(saved_checked)
 
         # The exact set of site ids/depths is preserved even though re-add

@@ -91,7 +91,6 @@ def test_missing_overview_keeps_unknown_depth_selectable(setup_right):
         1,
         "B",
         [0, 3],
-        [],
         pd.DatetimeIndex(["2024-01-01", "2024-02-01"]),
         single_trace=False,
         availability=None,
@@ -100,7 +99,6 @@ def test_missing_overview_keeps_unknown_depth_selectable(setup_right):
     assert ("B", 0.0) in state.checked_combinations()
     state.update_site_data(
         1,
-        [],
         state.sites[-1]["times"],
         [0, 3],
         single_trace=False,

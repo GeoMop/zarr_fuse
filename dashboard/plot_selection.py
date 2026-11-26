@@ -161,20 +161,14 @@ class SelectionState(param.Parameterized):
         return self._site_has_depth(site_id, depth_value)
 
     def site_depth_all_nan(self, site_id: str, depth_value: float) -> bool:
-        """Return ``True`` if *site_id*'s series at *depth_value* is all NaN."""
+        """Return ``True`` if the overview reports no finite values for this site and depth."""
         for site in self._sites:
             if site["site_id"] == site_id:
                 depths_arr = np.asarray(site["depths"]).ravel()
                 for i, d in enumerate(depths_arr):
                     if float(d) == float(depth_value):
-                        if "single_trace" in site:
-                            availability = site.get("availability")
-                            return availability is not None and not bool(availability[i])
-                        series = site.get("series", [])
-                        if i < len(series):
-                            arr = np.asarray(series[i]).ravel()
-                            return len(arr) > 0 and np.all(np.isnan(arr))
-                        return True
+                        availability = site.get("availability")
+                        return availability is not None and not bool(availability[i])
                 return False
         return False
 
@@ -213,7 +207,16 @@ class SelectionState(param.Parameterized):
 
     # ── mutations ────────────────────────────────────────────────────
 
-    def add_site(self, entity_index, site_id, depths, series, times, **metadata):
+    def add_site(
+        self,
+        entity_index: int,
+        site_id: str,
+        depths: Any,
+        times: Any,
+        *,
+        availability: Sequence[bool] | None = None,
+        single_trace: bool | None = None,
+    ) -> None:
         """Register a new site and auto-check its finite depths.
 
         If an entity with the same *entity_index* already exists, the new
@@ -232,9 +235,9 @@ class SelectionState(param.Parameterized):
             "entity_index": int(entity_index),
             "site_id": str(site_id),
             "depths": depths_arr,
-            "series": series,
             "times": times,
-            **metadata,
+            "availability": availability,
+            "single_trace": single_trace if single_trace is not None else len(depths_arr) == 1,
         })
 
         for dv in finite_depths:
@@ -278,7 +281,7 @@ class SelectionState(param.Parameterized):
 
         Used by the map-tap flow so the selected borehole appears in the
         plot-selection table immediately, before the (deferred) timeseries
-        fetch lands.  The pending site holds empty depths/series/times and no
+        fetch lands.  The pending site holds empty depths and timestamps and no
         checked cells, keeps *version* untouched (plots unchanged) and bumps
         only *layout_version* (table rebuild).  Call ``fill_site`` once the
         data arrives.
@@ -292,14 +295,13 @@ class SelectionState(param.Parameterized):
             "entity_index": int(entity_index),
             "site_id": str(site_id),
             "depths": np.array([], dtype=float),
-            "series": [],
             "times": pd.to_datetime([]),
         })
         self.layout_version += 1
-    def fill_site(self, entity_index, series, times, depths, **metadata) -> bool:
+    def fill_site(self, entity_index, times, depths, **metadata) -> bool:
         """Populate a pending site (from ``register_site``) with fetched data.
 
-        Stores the series/times/depths and auto-checks the finite depths,
+        Stores the site metadata and auto-checks the finite depths,
         mirroring ``add_site`` bookkeeping without rebuilding the table for a
         brand-new row.  Bumps *version* (redraw plots) and, when the depth set
         changes, *layout_version* (adds the depth columns to the table).
@@ -315,7 +317,7 @@ class SelectionState(param.Parameterized):
         if site is None:
             return False
 
-        depth_changed = self._set_site_data(site, series, times, depths, **metadata)
+        depth_changed = self._set_site_data(site, times, depths, **metadata)
 
         self._check_site_depths(site)
 
@@ -343,22 +345,19 @@ class SelectionState(param.Parameterized):
     def _set_site_data(
         self,
         site: dict[str, Any],
-        series: Any,
         times: Any,
         depths: Any | None,
         *,
-        availability=None,
+        availability: Sequence[bool] | None = None,
         single_trace: bool | None = None,
     ) -> bool:
         availability_changed = not np.array_equal(site.get("availability"), availability)
         site["times"] = times
-        site["series"] = series
         if single_trace is not None:
             site["single_trace"] = single_trace
-            site["availability"] = availability
         else:
             site.pop("single_trace", None)
-            site.pop("availability", None)
+        site["availability"] = availability
 
         if depths is None:
             return availability_changed
@@ -373,8 +372,8 @@ class SelectionState(param.Parameterized):
         self._reconcile_checked(site, old_depth_count)
         return True
 
-    def update_site_data(self, entity_index, series, times, depths=None, **metadata) -> bool:
-        """Replace an existing site's series/times in place.
+    def update_site_data(self, entity_index, times, depths=None, **metadata) -> bool:
+        """Replace an existing site's metadata in place.
 
         The site's identity, checked depths and row/column position are
         preserved.  Only *version* is bumped unless the depth set changed, in
@@ -385,7 +384,7 @@ class SelectionState(param.Parameterized):
         if site is None:
             return False
 
-        depth_changed = self._set_site_data(site, series, times, depths, **metadata)
+        depth_changed = self._set_site_data(site, times, depths, **metadata)
         if depth_changed:
             self.layout_version += 1
         self._bump_version()
@@ -420,13 +419,12 @@ class SelectionState(param.Parameterized):
             if payload is None:
                 failed.append(entity_index)
                 depth_changed = self._set_site_data(
-                    site, [], pd.to_datetime([]), None, single_trace=site.get("single_trace"),
+                    site, pd.to_datetime([]), None, single_trace=site.get("single_trace"),
                 ) or depth_changed
             else:
-                pending = len(site["depths"]) == 0 and len(site["series"]) == 0
+                pending = len(site["depths"]) == 0
                 changed = self._set_site_data(
                     site,
-                    payload["series"],
                     payload["times"],
                     payload["depths"],
                     availability=payload.get("availability"),

@@ -42,7 +42,6 @@ def _make_client(dataset: xr.Dataset, display_variable: str = "temp") -> LocalCl
     client.base_dir = None
     client._nodes = {}
     client._map_data_cache = {}
-    client._timeseries_cache = {}
     view = _make_view(display_variable=display_variable)
     client._view_config = lambda view_name: view
     client._get_group = lambda view_name, group_path: SimpleNamespace(dataset=dataset)

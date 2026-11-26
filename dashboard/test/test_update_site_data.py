@@ -12,13 +12,11 @@ def _make_state():
     state.add_site(
         entity_index=0, site_id="BH-1",
         depths=[0.0, 1.0, 2.0],
-        series=[[1, 2, 3], [4, 5, 6], [7, 8, 9]],
         times=["2020-01-01", "2020-01-02", "2020-01-03"],
     )
     state.add_site(
         entity_index=1, site_id="BH-2",
         depths=[1.0, 2.0, 3.0],
-        series=[[1, 2, 3], [4, 5, 6], [7, 8, 9]],
         times=["2020-01-01", "2020-01-02", "2020-01-03"],
     )
     return state
@@ -32,14 +30,12 @@ class TestUpdateSiteData:
 
         ok = state.update_site_data(
             entity_index=0,
-            series=[[10, 11, 12], [13, 14, 15], [16, 17, 18]],
             times=["2020-02-01", "2020-02-02", "2020-02-03"],
             depths=[0.0, 1.0, 2.0],
         )
 
         assert ok is True
         assert [(s["entity_index"], s["site_id"]) for s in state.sites] == before
-        assert state.sites[0]["series"][0][0] == 10
         assert state.sites[0]["times"][0] == "2020-02-01"
         assert state.checked_combinations() == checked_before
 
@@ -51,7 +47,6 @@ class TestUpdateSiteData:
 
         state.update_site_data(
             entity_index=1,
-            series=[[0] * 3, [0] * 3, [0] * 3],
             times=["2020-02-01", "2020-02-02", "2020-02-03"],
             depths=[1.0, 2.0, 3.0],
         )
@@ -69,7 +64,6 @@ class TestUpdateSiteData:
 
         state.update_site_data(
             entity_index=0,
-            series=[[1, 2, 3], [4, 5, 6]],
             times=["2020-02-01", "2020-02-02", "2020-02-03"],
             depths=[1.0, 2.0],
         )
@@ -84,28 +78,22 @@ class TestUpdateSiteData:
         state = _make_state()
         ok = state.update_site_data(
             entity_index=99,
-            series=[[1, 2, 3]],
             times=["2020-02-01"],
             depths=[1.0],
         )
         assert ok is False
 
-    def test_all_nan_series_preserves_combos_and_bumps_version(self):
+    def test_unavailable_depths_preserve_combos_and_bumps_version(self):
         # A variable whose data is entirely NaN must still replace the site's
         # data, keep every checked combo intact, and bump version so the plots
         # re-render (blank) instead of retaining stale old-variable data.
         state = _make_state()
         checked_before = state.checked_combinations()
         v0 = state.version
-        nan_series = [
-            np.array([np.nan, np.nan, np.nan]),
-            np.array([np.nan, np.nan, np.nan]),
-            np.array([np.nan, np.nan, np.nan]),
-        ]
 
         ok = state.update_site_data(
             entity_index=0,
-            series=nan_series,
+            availability=[False, False, False],
             times=["2020-02-01", "2020-02-02", "2020-02-03"],
             depths=[0.0, 1.0, 2.0],
         )
@@ -113,14 +101,13 @@ class TestUpdateSiteData:
         assert ok is True
         assert state.version > v0
         assert state.checked_combinations() == checked_before
-        assert np.all(np.isnan(state.sites[0]["series"][0]))
+        assert all(state.site_depth_all_nan("BH-1", depth) for depth in [0, 1, 2])
 
     def test_counts_stay_consistent_after_depth_change(self):
         # _valid_count / _checked_count must reflect the pruned depth set.
         state = _make_state()
         state.update_site_data(
             entity_index=0,
-            series=[[1, 2, 3], [4, 5, 6]],
             times=["2020-02-01", "2020-02-02", "2020-02-03"],
             depths=[1.0, 2.0],
         )
@@ -140,12 +127,10 @@ class TestUpdateSitesData:
         times = ["2020-03-01", "2020-03-02", "2020-03-03"]
         updates = [
             (0, {
-                "series": [[10] * 3, [20] * 3, [30] * 3],
                 "times": times,
                 "depths": [0.0, 1.0, 2.0],
             }),
             (1, {
-                "series": [[40] * 3, [50] * 3, [60] * 3],
                 "times": times,
                 "depths": [1.0, 2.0, 3.0],
             }),
@@ -158,7 +143,7 @@ class TestUpdateSitesData:
         assert state.layout_version == l0
         assert [(s["entity_index"], s["site_id"]) for s in state.sites] == identities
         assert state.checked_combinations() == checked_before
-        assert [s["series"][0][0] for s in state.sites] == [10, 40]
+        assert [s["times"] for s in state.sites] == [times, times]
 
     def test_none_payload_clears_data_but_preserves_depths_and_checks(self):
         state = _make_state()
@@ -171,7 +156,6 @@ class TestUpdateSitesData:
         assert failed == [1]
         assert state.version == v0 + 1
         assert state.layout_version == l0
-        assert state.sites[1]["series"] == []
         assert len(state.sites[1]["times"]) == 0
         assert list(state.sites[1]["depths"]) == depths_before[1]
         assert state.checked_combinations() == checked_before
@@ -182,12 +166,10 @@ class TestUpdateSitesData:
         times = ["2020-03-01", "2020-03-02", "2020-03-03"]
         updates = [
             (0, {
-                "series": [[10] * 3, [20] * 3],
                 "times": times,
                 "depths": [1.0, 2.0],
             }),
             (1, {
-                "series": [[30] * 3, [40] * 3],
                 "times": times,
                 "depths": [2.0, 3.0],
             }),

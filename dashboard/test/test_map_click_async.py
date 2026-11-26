@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pandas as pd
@@ -14,7 +15,7 @@ from dashboard import perf_summary, profiling
 from dashboard.multi_time_views import MapClickOperation, build_timeseries_views
 from dashboard.plot_selection import SelectionState
 
-_TIMES = pd.date_range("2020-01-01", periods=3)
+_START = datetime(2020, 1, 1)
 
 
 @pytest.fixture
@@ -125,15 +126,11 @@ class _FakeDocument:
             self.run_next_tick()
 
 
-def _response(entity_index: int, value: float = 1.0) -> dict:
+def _response(entity_index: int, time_offset: float = 0) -> dict:
     return {
         "status": "success",
-        "times": _TIMES,
+        "times": pd.date_range(_START + timedelta(seconds=time_offset), periods=3),
         "depths": [0.0, 1.0],
-        "series": [
-            [value, value + 1, value + 2],
-            [value * 2, value * 2 + 1, value * 2 + 2],
-        ],
         "borehole_index": entity_index,
         "borehole_name": f"BH-{entity_index}",
     }
@@ -195,7 +192,7 @@ def test_interactive_click_returns_before_fetch_completes() -> None:
 
         assert selected == 7
         assert operation.active is True
-        assert state.sites[0]["series"] == []
+        assert len(state.sites[0]["times"]) == 0
         assert not gate.entered.is_set(), "fetch must not block the click callback"
 
         await _wait_for_event(gate.entered)
@@ -222,15 +219,15 @@ def test_cluster_registers_all_rows_and_fills_progressively() -> None:
 
         assert selected == 7
         assert [s["entity_index"] for s in state.sites] == [7, 8]
-        assert all(s["series"] == [] for s in state.sites)
+        assert all(len(s["times"]) == 0 for s in state.sites)
 
         await _wait_for_event(gates[7].entered)
         gates[7].release.set()
         await _wait_for_callbacks(doc, 1)
         doc.run_next_tick()
 
-        assert state.sites[0]["series"] != []
-        assert state.sites[1]["series"] == []
+        assert len(state.sites[0]["times"]) > 0
+        assert len(state.sites[1]["times"]) == 0
         assert operation.active is True
 
         await _wait_for_event(gates[8].entered)
@@ -238,7 +235,7 @@ def test_cluster_registers_all_rows_and_fills_progressively() -> None:
         await _wait_for_callbacks(doc, 2)
         doc.drain()
 
-        assert all(s["series"] != [] for s in state.sites)
+        assert all(len(s["times"]) > 0 for s in state.sites)
         assert operation.active is False
         assert client.max_active == 1
         assert client.calls == [7, 8]
@@ -273,8 +270,8 @@ def test_repeated_click_is_ignored_while_active() -> None:
 def test_reload_invalidates_inflight_request_and_replaces_client() -> None:
     async def scenario() -> None:
         old_gate = _Gate()
-        old_client = _BackgroundClient({7: _response(7, value=10.0)}, {7: old_gate})
-        new_client = _BackgroundClient({7: _response(7, value=20.0)})
+        old_client = _BackgroundClient({7: _response(7, time_offset=10)}, {7: old_gate})
+        new_client = _BackgroundClient({7: _response(7, time_offset=20)})
         clients = [old_client]
         generation = [0]
         data = _FakeData()
@@ -309,7 +306,7 @@ def test_reload_invalidates_inflight_request_and_replaces_client() -> None:
                 await asyncio.sleep(0.01)
         assert not doc.callbacks
 
-        assert state.sites[0]["series"] == [], "stale result must be discarded"
+        assert len(state.sites[0]["times"]) == 0, "stale result must be discarded"
         assert operation.active is False
         assert loading.visible, "stale completion must leave the new operation's spinner alone"
 
@@ -317,7 +314,7 @@ def test_reload_invalidates_inflight_request_and_replaces_client() -> None:
         await _wait_for_callbacks(doc, 2)
         doc.drain()
 
-        assert state.sites[0]["series"] != []
+        assert state.sites[0]["times"][0] == datetime(2020, 1, 1, second=20)
         assert old_client.calls == [7]
         assert new_client.calls == [7]
         assert operation.active is False
@@ -338,9 +335,9 @@ def test_result_is_applied_only_from_document_callback() -> None:
         gate.release.set()
         await _wait_for_callbacks(doc, 1)
 
-        assert state.sites[0]["series"] == [], "worker must not touch SelectionState"
+        assert len(state.sites[0]["times"]) == 0, "worker must not touch SelectionState"
         doc.run_next_tick()
-        assert state.sites[0]["series"] != []
+        assert len(state.sites[0]["times"]) > 0
 
         await _wait_for_callbacks(doc, 1)
         doc.drain()
@@ -365,7 +362,7 @@ def test_async_path_works_with_profiling_enabled(monkeypatch) -> None:
         await _wait_for_callbacks(doc, 2)
         doc.drain()
 
-        assert state.sites[0]["series"] != []
+        assert len(state.sites[0]["times"]) > 0
         assert operation.active is False
 
     asyncio.run(scenario())
@@ -394,7 +391,7 @@ def test_suspended_map_click_does_not_absorb_unrelated_activity(
         await _wait_for_callbacks(doc, 2)
         doc.drain()
 
-        assert state.sites[0]["series"] != []
+        assert len(state.sites[0]["times"]) > 0
         assert operation.active is False
 
     asyncio.run(scenario())
@@ -438,7 +435,7 @@ def test_apply_failure_is_reported_and_marks_operation_error(
         doc.drain()
 
         assert failures == [[7]]
-        assert state.sites[0]["series"] == []
+        assert len(state.sites[0]["times"]) == 0
         assert operation.active is False
 
     asyncio.run(scenario())
@@ -480,6 +477,6 @@ def test_fetch_error_reports_failure_and_cleans_up(failure: str) -> None:
         assert failures == [[7]]
         assert operation.active is False
         assert loading.visible is False
-        assert state.sites[0]["series"] == []
+        assert len(state.sites[0]["times"]) == 0
 
     asyncio.run(scenario())

@@ -70,7 +70,7 @@ def setup_right(tmp_path, monkeypatch):
         },
     )
     state = SelectionState()
-    state.add_site(0, "A", [0.0, 3.0], [np.full(len(times), -1.0)] * 2, times)
+    state.add_site(0, "A", [0.0, 3.0], times)
     data = SimpleNamespace(
         client=client, view_name="view", group_path="/", display_variable="temp"
     )
