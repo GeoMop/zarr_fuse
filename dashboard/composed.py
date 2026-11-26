@@ -34,6 +34,7 @@ from dashboard.plot_selection import (
     resolve_available_dimensions,
 )
 from dashboard.profiling import log_message, operation, session, time_stage
+from dashboard.right_timeseries import RightWindow
 from dashboard.sidebar import _flatten_nodes, build_sidebar
 
 logger = logging.getLogger(__name__)
@@ -170,7 +171,16 @@ def build_dashboard():
     _build_stage = time_stage("build_dashboard")
     print(f"[session] build_dashboard started session_id={session_id}", flush=True)
 
+    right_window: RightWindow | None = None
+
+    def _retire_right_window(*, session_destroyed: bool = False) -> None:
+        nonlocal right_window
+        if right_window is not None:
+            right_window.close(session_destroyed=session_destroyed)
+            right_window = None
+
     def _on_session_destroyed(session_context):
+        _retire_right_window(session_destroyed=True)
         # Idempotent: finishes an initial_load left open by a failed build.
         _load_op.finish(status="error")
         sid = session_context.id if session_context is not None else session_id
@@ -281,6 +291,7 @@ def build_dashboard():
     def _invalidate_requests() -> None:
         """Retire site loads before changing the request context."""
         nonlocal _map_click_generation
+        _retire_right_window()
         _map_click_generation += 1
         if variable_switch_task is not None:
             variable_switch_task.cancel()
@@ -622,6 +633,7 @@ def build_dashboard():
     bottom_right = _placeholder_root("stretch_both", "Loading day timeseries...")
 
     def refresh_views(rebuild_map: bool = True, *, variable_metadata: dict | None = None):
+        nonlocal right_window
         with time_stage("refresh_views", rebuild_map=rebuild_map):
             if rebuild_map:
                 new_map_view, new_map_state = build_map_view(data, tap_stream)
@@ -634,6 +646,8 @@ def build_dashboard():
                 # rebuild (only the timeseries plots need to redraw).
                 new_map_state = map_state
 
+            _retire_right_window()
+            right_window = RightWindow(pn.state.curdoc, data)
             new_line_left, new_line_mid, new_line_right, new_on_map_tap, new_fetch_site = build_timeseries_views(
                 data,
                 new_map_state,
@@ -644,6 +658,7 @@ def build_dashboard():
                 map_click_generation=_map_click_generation_value,
                 map_click_failure=_show_refresh_error,
                 variable_metadata=variable_metadata,
+                right_window=right_window,
             )
 
             map_handlers["on_map_tap"] = new_on_map_tap
@@ -756,6 +771,7 @@ def build_dashboard():
 
     async def _populate() -> None:
         """Read the initial group and populate each pane as its data becomes available."""
+        nonlocal right_window
         nonlocal structure, store_selector, node_select, variable_selector
         nonlocal variable_metadata, node_hint, store_info, reload_button
         nonlocal selection_state, map_state
@@ -899,6 +915,7 @@ def build_dashboard():
 
                 line_roots = (bottom_left, bottom_mid, bottom_right)
                 try:
+                    right_window = RightWindow(pn.state.curdoc, data)
                     left, mid, right, on_map_tap, fetch_site_entity = build_timeseries_views(
                         data,
                         map_state,
@@ -910,6 +927,7 @@ def build_dashboard():
                         map_click_failure=_show_refresh_error,
                         initial_site=initial_site,
                         variable_metadata=metadata_task.result() if metadata_task is not None else {},
+                        right_window=right_window,
                     )
                 except Exception as exc:  # noqa: BLE001 - leave the map and table visible
                     report_failure("Timeseries", exc, *line_roots)

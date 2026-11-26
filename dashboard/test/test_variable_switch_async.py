@@ -249,6 +249,7 @@ def _build_dashboard(monkeypatch, fetch, *, real_map_clicks: bool = False, metad
     def fake_build_timeseries_views(*args, **kwargs):
         captured["refresh_count"] += 1
         captured["refresh_metadata"] = kwargs.get("variable_metadata")
+        captured["right_window"] = kwargs["right_window"]
         if real_map_clicks:
             left, mid, right, on_map_tap, fetch_site = multi_time_views.build_timeseries_views(
                 *args, **kwargs
@@ -369,12 +370,14 @@ def test_background_fetch_applies_once_on_document_thread(monkeypatch) -> None:
     state = captured["selection_state"]
     doc = captured["doc"]
     refresh_before = captured["refresh_count"]
+    right_before = captured["right_window"]
     map_builds_before = captured["map_build_count"]
     old_plot_updates = []
     state.param.watch(old_plot_updates.append, "version")
 
     async def scenario() -> None:
         _select(captured, "new (u)")
+        assert right_before._closed
         assert not gate.entered.is_set(), "switch callback must not block on fetch"
 
         await _wait_for(gate.entered.is_set)
@@ -390,6 +393,7 @@ def test_background_fetch_applies_once_on_document_thread(monkeypatch) -> None:
 
     assert [s["series"][0][0] for s in state.sites] == [17, 18]
     assert captured["refresh_count"] == refresh_before + 1
+    assert captured["right_window"] is not right_before
     assert captured["map_build_count"] == map_builds_before
     assert old_plot_updates == []
     assert captured["calls"] == [("new", 7), ("new", 8)]

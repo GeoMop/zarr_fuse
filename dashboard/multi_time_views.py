@@ -13,6 +13,7 @@ from dashboard.config import _resolve_fields_for_group_raw
 from dashboard.debug_log import debug
 from dashboard.perf_summary import Timer, count, measure_operation, stage
 from dashboard.profiling import log_message, operation, time_stage
+from dashboard.right_timeseries import RightWindow, SiteWindow
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +206,7 @@ def build_timeseries_views(
     map_click_failure=None,
     initial_site: dict | None = None,
     variable_metadata: dict | None = None,
+    right_window: RightWindow | None = None,
 ):
     if map_click_client is None:
         map_click_client = lambda: data.client
@@ -212,6 +214,8 @@ def build_timeseries_views(
         map_click_state = MapClickOperation()
     if map_click_generation is None:
         map_click_generation = lambda: 0
+    if right_window is None:
+        right_window = RightWindow(pn.state.curdoc, data)
 
     _build_stage = time_stage("build_timeseries_views")
     view_config = data.client.get_view(data.view_name)
@@ -525,12 +529,13 @@ def build_timeseries_views(
             plot.state.y_range.end = ylim[1]
         return _hook
 
-    def _make_xrange_hook(xlim, bounds=None, max_interval_ms=None):
+    def _make_xrange_hook(xlim, bounds=None, max_interval_ms=None, reset=None):
         def _hook(plot, element):
             plot.state.x_range.start = xlim[0]
             plot.state.x_range.end = xlim[1]
-            plot.state.x_range.reset_start = xlim[0]
-            plot.state.x_range.reset_end = xlim[1]
+            reset_start, reset_end = xlim if reset is None else reset
+            plot.state.x_range.reset_start = reset_start
+            plot.state.x_range.reset_end = reset_end
             if bounds is not None:
                 plot.state.x_range.bounds = bounds
             if max_interval_ms is not None:
@@ -566,8 +571,6 @@ def build_timeseries_views(
     _left_ylim_version = None
     _mid_ylim_cache = None
     _mid_ylim_key = None
-    _right_ylim_cache = None
-    _right_ylim_key = None
     _overlay_cache = {}
     _overlay_version = None
     _left_curves: dict[tuple[int, int], hv.Overlay] = {}
@@ -576,17 +579,123 @@ def build_timeseries_views(
     _full_meta: dict[tuple[int, int], tuple[str, str]] = {}
     _left_reset_key = [None]  # (version, center) tuple per view
     _mid_reset_key = [None]
-    _right_reset_key = [None]
-    _marker_state = {"left": [None, None], "mid": [None, None], "right": [None, None]}
+    _marker_state = {"left": [None, None], "mid": [None, None]}
     # [last_key, last_adopted_x_range] per view: when the (version, center)
     # key changes the marker window re-anchors to xlim, and a live x_range is
     # only adopted when it differs from the stored baseline (a real pan/zoom).
+
+    right_anchor = right_reported = right_visible = None
+
+    def right_overlay(times, center, x_range, selected_combos):
+        """Resolve the viewport and build curves and markers from loaded windows."""
+        nonlocal right_anchor, right_reported, right_visible
+        home = clamp_range(center, right_span, times)
+        reported = None
+        if x_range is not None:
+            try:
+                endpoints = [
+                    pd.Timestamp(value, unit="ms")
+                    if isinstance(value, (int, float, np.number))
+                    else pd.Timestamp(value)
+                    for value in x_range
+                ]
+                reported = _resolve_marker_window(endpoints, None, times)
+            except (TypeError, ValueError, OverflowError):
+                pass  # A range can be incomplete while Bokeh initializes its axes.
+        anchor = (selection_state.version, center, home)
+        if anchor != right_anchor:
+            right_anchor = anchor
+            right_visible = home
+        elif reported is not None and reported != right_reported:
+            # Browser range events round to milliseconds; ignore an echo of our range.
+            if any(
+                abs(new - old) > pd.Timedelta(milliseconds=1)
+                for new, old in zip(reported, right_visible)
+            ):
+                right_visible = reported
+        right_reported = reported
+        xlim = right_visible
+        sites = {site["entity_index"]: site for site in selection_state.sites}
+        depths_by_site = {}
+        for entity, depth in selected_combos:
+            if depth < len(sites[entity]["series"]):
+                depths_by_site.setdefault(entity, []).append(depth)
+        requests = tuple(
+            SiteWindow(entity, tuple(depths), len(sites[entity]["series"]) == 1)
+            for entity, depths in depths_by_site.items()
+        )
+        traces, status = right_window.request(
+            xlim, requests, time_dim, fields_config.get("vertical")
+        )
+        return (*build_right_curves(xlim, requests, sites, traces), xlim, home, status)
+
+    def build_right_curves(xlim, requests, sites, traces):
+        curves, markers, extrema = [], [], []
+        shapes = getattr(selection_state, "_row_shapes", {})
+        colors = getattr(selection_state, "_col_colors", {})
+        for request in requests:
+            site = sites[request.entity]
+            for depth in request.depths:
+                trace = traces.get((request.entity, depth))
+                if trace is None:
+                    continue
+                trace_times, values = trace
+                if trace_times.tz is not None:
+                    trace_times = trace_times.tz_convert("UTC").tz_localize(None)
+                visible = (trace_times >= xlim[0]) & (trace_times <= xlim[1])
+                if not visible.any():
+                    continue
+                depth_value = site["depths"][depth]
+                site_id = site["site_id"]
+                label = f"{site_id} @ {depth_value:.2f}"
+                row_key = (
+                    site_id if selection_state.row_dim == "entity" else depth_value
+                )
+                col_key = (
+                    depth_value if selection_state.col_dim == "vertical" else site_id
+                )
+                color = colors.get(str(col_key), "#000000")
+                data_frame = pd.DataFrame(
+                    {time_dim: trace_times[visible], y_axis_label: values[visible]}
+                )
+                curves.append(
+                    hv.Curve(data_frame, time_dim, y_axis_label, label=label).opts(
+                        color=color
+                    )
+                )
+                finite = values[visible & np.isfinite(values)]
+                if finite.size:
+                    extrema.extend((finite.min(), finite.max()))
+                marker_times = pd.date_range(*xlim, periods=5)
+                marker_y = np.interp(
+                    marker_times.as_unit("ns").asi8,
+                    trace_times.as_unit("ns").asi8,
+                    values,
+                    left=np.nan,
+                    right=np.nan,
+                )
+                markers.append(
+                    hv.Scatter(
+                        (marker_times, marker_y), time_dim, y_axis_label, label=label
+                    ).opts(
+                        color=color, marker=shapes.get(str(row_key), "circle"), size=8
+                    )
+                )
+
+        ylim = None
+        if extrema:
+            low, high = float(min(extrema)), float(max(extrema))
+            padding = (high - low) * 0.1 or 1.0
+            ylim = (low - padding, high + padding)
+        if not curves:
+            empty = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
+            curves.append(hv.Curve(empty, time_dim, y_axis_label))
+        return hv.Overlay(curves + markers), ylim
 
     def create_timeseries_view(center=None, view="left", x_range=None, **_):
         nonlocal _center_time
         nonlocal _left_ylim_cache, _left_ylim_version
         nonlocal _mid_ylim_cache, _mid_ylim_key
-        nonlocal _right_ylim_cache, _right_ylim_key
         nonlocal _overlay_cache, _overlay_version
         nonlocal _marker_state
         _view_timer = Timer("create_timeseries_view")
@@ -601,6 +710,8 @@ def build_timeseries_views(
             None,
         )
         if times is None or len(times) == 0:
+            if view == "right":
+                right_window.clear_selection()
             empty_df = pd.DataFrame({time_dim: pd.to_datetime([]), y_axis_label: []})
             return hv.Overlay([hv.Curve(empty_df, time_dim, y_axis_label)])
 
@@ -609,6 +720,8 @@ def build_timeseries_views(
         elif _center_time is None:
             _center_time = times.min() + 0.95 * (times.max() - times.min())
         center_time = _center_time
+        status = ""
+        right_home = None
 
         if view == "left":
             xlim = (times.min(), times.max())
@@ -624,30 +737,29 @@ def build_timeseries_views(
                 _mid_ylim_key = _mid_key
             ylim = _mid_ylim_cache
         else:
-            xlim = clamp_range(center_time, right_span, times)
-            _right_key = (selection_state.version, center_time)
-            if _right_key != _right_ylim_key:
-                _right_ylim_cache = _compute_ylim(times, selected_combos, xlim)
-                _right_ylim_key = _right_key
-            ylim = _right_ylim_cache
+            with stage("timeseries.right_window.plot"):
+                overlay, ylim, xlim, right_home, status = right_overlay(
+                    times, center_time, x_range, selected_combos
+                )
 
-        if _overlay_version != selection_state.version:
-            with stage("ts.overlay"):
-                _overlay_cache["left"] = build_timeseries_overlay(view="left")
-                _overlay_cache["full"] = build_timeseries_overlay(view="full")
-            _overlay_version = selection_state.version
-        overlay = _overlay_cache["left"] if view == "left" else _overlay_cache["full"]
-        marker_window = None
-        _marker_key = (selection_state.version, center)
-        _marker_adapt = _marker_state[view]
-        if _marker_adapt[0] != _marker_key:
-            _marker_adapt[0] = _marker_key
-            _marker_adapt[1] = x_range
-        elif x_range is not None and x_range != _marker_adapt[1]:
-            _marker_adapt[1] = x_range
-            marker_window = x_range
-        with stage("ts.markers"):
-            overlay = overlay * build_marker_overlay(view=view, x_range=marker_window, xlim=xlim)
+        if view != "right":
+            if _overlay_version != selection_state.version:
+                with stage("ts.overlay"):
+                    _overlay_cache["left"] = build_timeseries_overlay(view="left")
+                    _overlay_cache["full"] = build_timeseries_overlay(view="full")
+                _overlay_version = selection_state.version
+            overlay = _overlay_cache["left"] if view == "left" else _overlay_cache["full"]
+            marker_window = None
+            _marker_key = (selection_state.version, center)
+            _marker_adapt = _marker_state[view]
+            if _marker_adapt[0] != _marker_key:
+                _marker_adapt[0] = _marker_key
+                _marker_adapt[1] = x_range
+            elif x_range is not None and x_range != _marker_adapt[1]:
+                _marker_adapt[1] = x_range
+                marker_window = x_range
+            with stage("ts.markers"):
+                overlay = overlay * build_marker_overlay(view=view, x_range=marker_window, xlim=xlim)
         overlay = overlay * hv.VLine(center_time).opts(color="red", line_width=2)
         debug(
             "[ylim] view=%s xlim=(%s, %s) ylim=%s",
@@ -656,7 +768,7 @@ def build_timeseries_views(
             xlim[1],
             ylim,
         )
-        if ylim is None:
+        if ylim is None and view != "right":
             full_xlim = (times.min(), times.max())
             ylim = _compute_ylim(times, selected_combos, full_xlim)
             debug("[ylim] fallback to full range: %s", ylim)
@@ -667,13 +779,19 @@ def build_timeseries_views(
         elif view == "right":
             max_interval_ms = int(right_span.total_seconds() * 1000)
         hooks = []
-        _view_reset = {"left": _left_reset_key, "mid": _mid_reset_key, "right": _right_reset_key}[view]
-        current_key = (selection_state.version, center)
-        if x_range is None or _view_reset[0] != current_key:
-            hooks.append(_make_xrange_hook(xlim, bounds=full_bounds, max_interval_ms=max_interval_ms))
+        if view == "right":
+            hooks.append(_make_xrange_hook(xlim, bounds=full_bounds,
+                                           max_interval_ms=max_interval_ms, reset=right_home))
             if ylim:
                 hooks.append(_make_yrange_hook(ylim))
-            _view_reset[0] = current_key
+        else:
+            _view_reset = _left_reset_key if view == "left" else _mid_reset_key
+            current_key = (selection_state.version, center)
+            if x_range is None or _view_reset[0] != current_key:
+                hooks.append(_make_xrange_hook(xlim, bounds=full_bounds, max_interval_ms=max_interval_ms))
+                if ylim:
+                    hooks.append(_make_yrange_hook(ylim))
+                _view_reset[0] = current_key
 
         def _apply_axis_theme(plot, element):
             p = plot.state
@@ -689,7 +807,7 @@ def build_timeseries_views(
         _view_timer.stop()
         return overlay.opts(
             responsive=True,
-            title=f"{metric_label} over Time ({site_label})",
+            title=f"{metric_label} over Time ({site_label})" + (f" — {status}" if status else ""),
             tools=["hover", "xwheel_zoom", "xpan", "tap", "reset"],
             active_tools=["xwheel_zoom", "xpan"],
             show_legend=False,
@@ -728,11 +846,12 @@ def build_timeseries_views(
             center=center, view="right", x_range=x_range
         ),
         streams=[
-            streams.Params(selection_state, parameters=["version"]),
+            right_window.watch_selection(selection_state),
             right_tap,
             center_stream,
             borehole_stream,
             right_range_x,
+            right_window.changed,
         ],
     )
 

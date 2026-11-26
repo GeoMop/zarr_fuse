@@ -23,7 +23,7 @@ from dashboard.multi_time_views import build_timeseries_views
 from dashboard.plot_selection import SelectionState
 
 _TIMES = pd.date_range("2022-01-01", "2026-12-31", freq="D")
-_VIEWS = ("left", "mid", "right")
+_VIEWS = ("left", "mid")
 
 
 class _FakeClient:
@@ -55,7 +55,7 @@ class _FakeData:
 
 
 def _build_views() -> dict[str, hv.DynamicMap]:
-    """Build the three timeseries views for one site with a multi-year series."""
+    """Build the legacy views for one site with a multi-year series."""
     values = np.sin(np.arange(len(_TIMES)) / 30.0) * 5 + 10
     state = SelectionState()
     state.add_site(
@@ -71,10 +71,10 @@ def _build_views() -> dict[str, hv.DynamicMap]:
         "lons": [11.0],
         "marker_meta": [{"entity_index": 7, "site_id": "BH-7"}],
     }
-    left, mid, right, _on_map_tap, _fetch_site = build_timeseries_views(
+    left, mid, _right, _on_map_tap, _fetch_site = build_timeseries_views(
         data, map_state, state
     )
-    return {"left": left, "mid": mid, "right": right}
+    return {"left": left, "mid": mid}
 
 
 def _as_timestamp(value: Any) -> pd.Timestamp:
@@ -143,10 +143,10 @@ def _build_two_site_views():
             {"entity_index": 8, "site_id": "BH-8"},
         ],
     }
-    left, mid, right, _on_map_tap, _fetch_site = build_timeseries_views(
+    left, mid, _right, _on_map_tap, _fetch_site = build_timeseries_views(
         data, map_state, state
     )
-    return state, {"left": left, "mid": mid, "right": right}
+    return state, {"left": left, "mid": mid}
 
 
 def _numeric_values(plot: Any) -> list[float]:

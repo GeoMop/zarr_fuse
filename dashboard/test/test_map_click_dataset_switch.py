@@ -125,7 +125,7 @@ def _build_dashboard(monkeypatch) -> dict[str, object]:
     fake_pn = SimpleNamespace(
         state=SimpleNamespace(
             curdoc=None,
-            on_session_destroyed=lambda callback: None,
+            on_session_destroyed=lambda callback: captured.__setitem__("destroy", callback),
             onload=lambda callback: captured.__setitem__("populate", callback),
             add_timeout=lambda *args, **kwargs: None,
         ),
@@ -181,6 +181,7 @@ def _build_dashboard(monkeypatch) -> dict[str, object]:
         data, map_state, selection_state=None, render_spinner=None, **kwargs
     ):
         captured["map_click_client"] = kwargs["map_click_client"]
+        captured["right_window"] = kwargs["right_window"]
 
         def fake_on_map_tap(x, y, loading=None, doc=None):
             tap_calls.append((x, y))
@@ -233,18 +234,24 @@ def test_dataset_switch_replaces_background_client(monkeypatch) -> None:
     store_selector = captured["store_selector"]
 
     client_a = factory()
+    right_a = captured["right_window"]
     client_a.cache["A"] = "obsolete"
 
     store_selector.value = "B"
     client_b = factory()
     assert client_b is not client_a
     assert client_b.cache == {}
+    assert right_a._closed
+    assert captured["right_window"] is not right_a
 
     store_selector.value = "A"
     client_a_again = factory()
     assert client_a_again is not client_a
     assert client_a_again is not client_b
     assert client_a_again.cache == {}
+    right_a_again = captured["right_window"]
+    captured["destroy"](None)
+    assert right_a_again._closed
 
 
 @pytest.mark.parametrize(
