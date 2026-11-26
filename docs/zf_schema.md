@@ -25,6 +25,15 @@ but also dictionaries and lists.
 The root node ATTRS could contain [special variables](./store_vars.md) (all in uppercase) configuring the storage instance, 
 namely S3 connection details. 
 
+### Schema version
+A schema stored to an IceChunk repository (`zf.open_repository`) is identified by the root ATTRS:
+- `SCHEMA_FAMILY` name of the schema family, e.g. `hlavo_wells`, fixed for the repository
+- `SCHEMA_VERSION` string `"<major>.<minor>"`, the integer major is fixed for the repository,
+  the minor is any string, e.g. `"1.2"` or `"1.experimental-grid"`
+
+A commit that changes the schema needs a new `SCHEMA_VERSION`, the repository tags its snapshot `schema/<version>`.
+Another family or major version needs a new repository.
+
 ## VARS
 The VARS dictionary defines variables of the dataset stored in the node.
 Each variable is defined by its own dictionary of properties.

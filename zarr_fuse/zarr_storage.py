@@ -162,12 +162,21 @@ def _zarr_store_open(store_options: Dict[str, Any]) -> zarr.storage.StoreLike:
         store_url = store_url[len('zip://'):]
         return zarr.storage.ZipStore(store_url)
     else:
-        if store_url.startswith('file://'):
-            store_url = store_url[len('file://'):]
-        path = Path(store_url)
-        if not path.is_absolute():
-            path = store_options.get('WORKDIR', ".") / path
-        return zarr.storage.LocalStore(path)
+        return zarr.storage.LocalStore(_local_store_path(store_options))
+
+
+def _local_store_path(store_options: Dict[str, Any]) -> Path:
+    store_url = store_options['STORE_URL']
+    if store_url.startswith('file://'):
+        store_url = store_url[len('file://'):]
+    path = Path(store_url)
+    if not path.is_absolute():
+        path = store_options.get('WORKDIR', ".") / path
+    return path
+
+
+SECRET_OPTIONS = {'S3_ACCESS_KEY', 'S3_SECRET_KEY'}
+STORE_OPTIONS = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS', 'WORKDIR', 'MODE', 'LOGGER', *SECRET_OPTIONS}
 
 
 def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Dict[str, Any]:
@@ -177,21 +186,18 @@ def _zarr_fuse_options(schema: Optional[zarr_schema.NodeSchema], **kwargs) -> Di
     - overwrite by schema ATTRS is provided
     - overwrite by evironment variables
     """
-    interpreted_attrs = {'STORE_URL', 'S3_ENDPOINT_URL','S3_OPTIONS', 'WORKDIR', 'MODE', 'LOGGER'}
-    secret_attrs = {'S3_ACCESS_KEY', 'S3_SECRET_KEY'}
-    interpreted_attrs = interpreted_attrs.union(secret_attrs)
-    options = {key:kwargs[key] for key in interpreted_attrs if key in kwargs}
+    options = {key:kwargs[key] for key in STORE_OPTIONS if key in kwargs}
 
     if schema is not None:
-        schema_options = {key:schema.ds.ATTRS[key] for key in interpreted_attrs if key in schema.ds.ATTRS}
+        schema_options = {key:schema.ds.ATTRS[key] for key in STORE_OPTIONS if key in schema.ds.ATTRS}
         # Warning for leaking secrets
-        for key in secret_attrs:
+        for key in SECRET_OPTIONS:
             if key in schema_options:
                 schema.ds.warn(f"Possible secrete leak in schema.", subkeys=['ATTRS', 'key'])
         options.update(schema_options)
 
     e_key = lambda key: f"ZF_{key}"  # Environment variable key prefix
-    env_options = {key:os.environ[e_key(key)] for key in interpreted_attrs if e_key(key) in os.environ}
+    env_options = {key:os.environ[e_key(key)] for key in STORE_OPTIONS if e_key(key) in os.environ}
     options.update(env_options)
     logger_option = options.get('LOGGER', None)
     if logger_option not in {'local', 'default', None}:
@@ -258,7 +264,13 @@ def remove_store(schema: zarr_schema.NodeSchema | Path, **kwargs):
     #store.delete_dir("")
 
 
-def open_store(schema: zarr_schema.NodeSchema | Path | str | dict, **kwargs):
+def _option_logger(options: Dict[str, Any]) -> Optional[logging.Logger]:
+    if options.get('LOGGER') == 'local':
+        return RaisingLogger("local zarr_fuse logger")
+    return None
+
+
+def open_node(schema: zarr_schema.NodeSchema | Path | str | dict, **kwargs):
     """
     Open existing or create a new ZARR store according to given schema.
     'schema': Could be schema dict or YAML string or Path object to YAML file.
@@ -278,10 +290,13 @@ def open_store(schema: zarr_schema.NodeSchema | Path | str | dict, **kwargs):
         raise ZFOptionError(f"{str(e)}. Opening store for schema {schema}.")
 
     mode = options.get('MODE', 'a')
-    logger = None
-    if options.get('LOGGER') == 'local':
-        logger = RaisingLogger("local zarr_fuse logger")
-    return Node("", store, new_schema = node_schema, mode=mode, logger=logger)
+    return Node("", store, new_schema = node_schema, mode=mode, logger=_option_logger(options))
+
+
+def open_store(schema: zarr_schema.NodeSchema | Path | str | dict, **kwargs):
+    """Deprecated, use `open_node`."""
+    warnings.warn("open_store is deprecated, use open_node.", DeprecationWarning, stacklevel=2)
+    return open_node(schema, **kwargs)
 
 class Node:
     """
@@ -449,28 +464,39 @@ class Node:
     def __init__(self, name, store, parent=None,
                  new_schema:zarr_schema.NodeSchema=None,
                  mode="a",
-                 logger=None):
+                 logger=None,
+                 repo=None,
+                 session=None):
         """
         Parameters:
           name (str): The name of the node. For the root node, use an empty string ("").
           store (MutableMapping): The underlying Zarr store.
           parent (Node, optional): Parent node.
+          repo (ZFRepository, optional), session (icechunk.Session, optional):
+              The repository and the session of a repository root Node, its children share them.
         """
         self.name = name
         self.store = store
         self._logger = logger
-        if store.read_only:
-            mode = 'r'
-        else:
+        self.parent = parent
+        self.repo = repo if parent is None else parent.repo
+        self.session = session if parent is None else parent.session
+        if not store.read_only:
             # Make sure group exists.
             zarr_root_dict = zarr.open_group(self.store).store
-
-        self.mode = mode
-        self.parent = parent
+        if parent is None and session is not None:
+            # Serialized schemas of the repository nodes by their group path.
+            self.structures = repo.stored_schema(session).get('nodes', {})
+        self._mode = mode
 
         self.children = self._make_consistent(new_schema)
         # This calls self._update_schema_ds() implicitely.
 
+    @property
+    def mode(self):
+        # A session turns read-only by its commit, its store objects keep the original flag.
+        read_only = self.store.read_only if self.session is None else self.session.read_only
+        return 'r' if read_only else self._mode
 
     @cached_property
     def logger(self):
@@ -478,6 +504,9 @@ class Node:
             return self._logger
         if self.mode == 'r':
             return RaisingLogger(get_logger(store=None, path=self.group_path))
+        elif self.session is not None:
+            # IceChunk store accepts only zarr keys, the log files go to stderr.
+            return get_logger(store=None, path=self.group_path)
         else:
             zarr_root_dict = zarr.open_group(self.store).store
             return get_logger(zarr_root_dict, self.group_path)
@@ -496,7 +525,8 @@ class Node:
         """
         path = self.group_path.strip(self.PATH_SEP)
         root_group = zarr.open_group(self.store, path=path, mode='r')
-        sub_groups = list(root_group.groups())
+        # Names starting with '__' are reserved, e.g. '__zf__' of a repository.
+        sub_groups = [(name, group) for name, group in root_group.groups() if not name.startswith('__')]
         return sub_groups
 
     # def _add_node(self, name):
@@ -517,6 +547,12 @@ class Node:
 
         return children dict
         """
+        if self.store.read_only:
+            # Nothing can be reconciled, keep the stored tree and schema.
+            return {
+                key: Node(key, self.store, parent=self, logger=self.logger)
+                for key, _ in self._storage_group_paths()
+            }
 
         if new_node_schema is None:
             # node in storage but not in schema
@@ -590,6 +626,25 @@ class Node:
     def __getitem__(self, key):
         return self.children[key]
 
+    def commit(self, message: str, **kwargs) -> 'Node':
+        """
+        Commit the repository session, kwargs go to `icechunk.Session.commit`.
+        This Node turns read-only, its session keeps the committed snapshot.
+        Return: root Node of a new writable session on the same branch.
+        """
+        if self.parent is not None:
+            raise ValueError(f"Only the root node can commit, not '{self.group_path}'.")
+        branch = self.session.branch
+        self.repo.commit_session(self.session, self.structures, message, **kwargs)
+        return self.repo.open(branch, mode='a')
+
+    def at(self, branch: str | None = None, *, tag: str | None = None, snapshot: str | None = None) -> 'Node':
+        """The same node in another state of the repository, read-only."""
+        node = self.repo.open(branch, tag=tag, snapshot=snapshot)
+        for key in self._path_list:
+            node = node[key]
+        return node
+
     @property
     def root(self):
         """
@@ -642,7 +697,11 @@ class Node:
         Original schema tree is spread over the storage groups represented by Nodes.
         :return:
         """
-        node_schema = zarr_schema.deserialize(self.dataset.attrs['__structure__'], source_description='<storage schema>')
+        if self.session is None:
+            structure = self.dataset.attrs['__structure__']
+        else:
+            structure = self.root.structures[self.group_path]
+        node_schema = zarr_schema.deserialize(structure, source_description='<storage schema>')
         return node_schema.ds
 
 
@@ -793,6 +852,8 @@ class Node:
 
         # Create the group if it does not exist.
         grp = zarr.open_group(self.store, path=rel_path, mode="a")
+        if self.session is not None:
+            self.root.structures[self.group_path] = ds.attrs.pop('__structure__')
 
         # ds.to_zarr does not write the attrs, either because of mode != "w" or
         # due to non-consolidated metadata.
@@ -800,7 +861,7 @@ class Node:
         # works as long as we do not allow to modify dataset schema
         grp.attrs.update(ds.attrs)
         written_ds = self.write_ds(ds, mode="r+", region="auto")
-        assert '__structure__' in written_ds.attrs
+        assert self.session is not None or '__structure__' in written_ds.attrs
         return written_ds
 
     def _coerce_encoding(self, ds):
@@ -842,7 +903,11 @@ class Node:
         """
         merge_attrs = dict(self.schema.ATTRS)
         merge_attrs.update(attrs)
-        merge_attrs["__structure__"] = zarr_schema.serialize(self.schema)
+        if self.session is None:
+            merge_attrs["__structure__"] = zarr_schema.serialize(self.schema)
+        else:
+            # A repository stores the node schemas once, see `ZFRepository.commit_session`.
+            merge_attrs.pop("__structure__", None)
 
         return merge_attrs
 

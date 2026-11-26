@@ -425,16 +425,25 @@ pressure.session.status()
 
   * `family + major + minor + hash`? 
   AGENT: this is sufficient, however family.major.minor must be unique as well as the hash.
+  Resolved: root ATTRS `SCHEMA_FAMILY` and `SCHEMA_VERSION` (`<major>.<minor>`), a changed hash needs
+  a version without the `schema/<version>` tag, an unchanged hash keeps the stored version.
   
 * Should the complete schema remain duplicated in every snapshot through `__structure__`, or should snapshots contain an identifier plus some repository-level schema registry?
   AGENT: Idealy store it in an own chunk, so it will be stored unce unless changed, that is kind of JSON/YAML file versioning. What IceChunk supports? How it deals with attributes?
+  Resolved: IceChunk writes the metadata and attributes of all nodes into every snapshot, unchanged chunks are
+  only referenced. The node schemas are stored together in the chunk of `__zf__/schema`, rewritten only when
+  the schema changes, the nodes have no `__structure__` attribute.
   
 * What should be authoritative if schema information stored in snapshot attributes and repository-level metadata disagree?
   AGENT: We should prevent this at least when the zarr-fuse level operations are used. We can not exclude this if someone uses IceChunk layer dirrectly. 
+  Resolved: no separate registry, the commit metadata and the `schema/<version>` tags are derived from the
+  stored schema by `ZFRepository.commit_session`.
   
   
 * Should schema hashes be based on canonical serialized YAML/JSON representation?
   AGENT: I'm not sure, hashing the Python representation of the schema would be better as we can first compute the hash and then serialize together with metadata.
+  Resolved: SHA-256 of the canonical JSON of the node schemas in the Python representation, without the
+  storage options, the library `VERSION` and the version labels.
 
 ### Compatibility policy
 
