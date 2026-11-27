@@ -4,45 +4,61 @@
 
 ![Raw data → Curated by ingress → Merged data in Zarr → Dashboard](docs/images/data-processing.png)
 
-**zarr-fuse** is a Python library and collection of web applications for collaborative collection of scientific datasets
-and their publication under [FAIR principles](...). 
+**zarr-fuse** is a Python library and web application for the collaborative collection and publication of scientific
+datasets according to the [FAIR principles](https://www.gofair.foundation/fair-principles).
 
-1. Data "manager" can setup a formal schema for the target merged dataset and data checking and transformation pipeline
-from predefined filters or by own code in Python. 
-2. Individual contributors can either provide continuous data streams or
-upload data contributions manualy over a web interface that follows predefined schemas.
-3. Dataset contribution is curated, checked and finaly merged to the target dataset. 
-4. You can overview the target or intermediate datasets using a ZF-view dashboard component and
-   posibly fix  the source data or processing pipeline as all datasets are versioned and 
-   referencable by persistent identifiers.
+**Development status.** Version 1.0 is targeted for June 2027. The features below describe the planned release.
+Use current releases for evaluation only.
 
-**Do not deploy yet!** Project still under active development, version 1.0 will be ready at June 2027.
-   
+1. **Define the dataset.** A data steward creates the data schemas and configures the data curation pipelines using
+   built-in filters or custom Python code.
+2. **Contribute data.** Contributors can upload files through a web interface generated from the input data schema.
+   Continuous data streams can be set up for instruments and services.
+3. **Curation and merge.** `Ingress` automatically standardizes incoming data and checks it against the input schema.
+   The configured pipeline can then merge each contribution into the common dataset while preserving links to the
+   original dataset.
+4. **Inspect and revise.** Use the ZF-view dashboard to review merged or intermediate datasets. Fix the data or adjust
+   the pipeline, then rerun the pipeline.
 
-### Raw data
+### Define the dataset
 
-Inputs can include sensor readings, field records, and model outputs. The ingress service accepts uploads such as CSV
-or JSON files and can fetch data from configured sources on a schedule.
+A schema records what each quantity means, how it is indexed, which units to use, and which values are allowed. The
+data steward uses it to define a common target for sources that report the same quantity in different formats or units.
+Each source can have its own input schema and processing settings, with custom Python steps for instrument-specific
+formats.
 
-### Curated by ingress
+### Contribute data
 
-A project defines a *schema*, a file that specifies the expected quantities, coordinates, and units. The processing
-pipeline converts tabular data to the agreed names and units and checks rules such as required coordinates and allowed
-value ranges. An optional filter helps process late or out-of-order batches by the time recorded in the data.
+A monitoring station can send readings as they arrive, the ingress service can fetch a weather feed on a schedule, and a
+field team can submit a CSV after a campaign. These routes let teams combine long-running monitoring with occasional
+field measurements in the same dataset.
 
-### Merged data in Zarr
+### Curation and merge
+
+The pipeline can convert depths reported in centimetres to metres and check that each measurement has a borehole
+identifier. A time filter can order late arrivals by observation time, and processing logs help the team trace failed
+checks back to a contribution. See [Ingress](ingress_server/README.md).
 
 | Data model | Example dataset |
 | --- | --- |
-| **xarray** organizes related quantities as a dataset of arrays with named axes, called *dimensions*. The *coordinates* give those axes meaningful labels, such as timestamps, borehole names, or depths in metres. Rock temperature can vary with time, borehole, and depth, while a borehole's longitude depends only on the borehole. These labels let researchers select a particular site and date range, and let zarr-fuse place updates at the corresponding coordinates. **Zarr** is the storage format. It saves arrays in blocks called *chunks*, so readers can load the parts needed for a particular analysis. | ![Multidimensional dataset](docs/images/example_schema.png)  |
+| **xarray** labels the axes. **Zarr** stores the arrays in chunks. | ![Multidimensional dataset][example-schema] |
 
-### Dashboard
+Temperature and pore pressure can share named dimensions such as time, borehole, and depth. The coordinates are the
+labels along those axes, such as actual timestamps or depths in metres. Each variable uses the dimensions it needs.
+zarr-fuse uses the coordinate labels to place new observations, and Zarr's chunks let readers load a subset such as
+one week of data from one borehole.
 
-The **dashboard** opens configured datasets from the store and provides an interactive map and time-series plots. In
-the Bukov monitoring example, researchers can choose boreholes on a map and compare temperatures at selected depths.
-This gives the team a quick way to see which series are available and spot gaps or unusual patterns worth investigating.
+### Inspect and revise
 
-[Features, use cases, and technical concepts](docs/features.md)
+In the Bukov monitoring example, researchers can select boreholes on a map and compare temperature series at chosen
+depths. Gaps or unexpected patterns give the team a place to start investigating. See [ZF-view](dashboard/README.md).
+
+The planned Icechunk snapshot history will let the team compare dataset states before and after a correction.
+Persistent data and view identifiers will let the team refer to the exact dataset version and dashboard view used in
+an analysis. For publication, teams can deposit that dataset version with its provenance and descriptive metadata in a
+research data repository.
+
+[example-schema]: docs/images/example_schema.png
 
 ## Install
 
