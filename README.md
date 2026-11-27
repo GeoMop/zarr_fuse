@@ -1,59 +1,48 @@
 # zarr-fuse
-Prototype project for collecting, dynamic fusion, viewing and publishing of sciantific datasets.
 
-Implemented features:
-- allow definition of a scientific dataset using a simple YAML based language
-- allow merging individual contributions to the dataset,
-  converting to common structure
-- example visualization container web app
+## Overview
 
-Near term future:
-- test more complex updates, non-continuous arrays
-  Coords are not automaticaly sorted !!
-  Updating tables could have different time stepping in each update!!
-  Merge with sort preserved
-  Allow to intepolate table to common coordinates with given time step.
-- Refactor schema of single ds to a dedicated class
-- method to get schema of whole dataset
-- review of the schema YAML syntax
-- full support for remote (S3) storage, keys management, CESNET specialities
-- unify design of plotting classes
+![Raw data → Curated by ingress → Merged data in Zarr → Dashboard](docs/images/data-processing.png)
 
-Changes in SCHEMA:
-- move complete COORD spec into COORDS, Undrestand coords as extendet VARS
+**zarr-fuse** is a Python library and collection of web applications for collaborative collection of scientific datasets
+and their publication under [FAIR principles](...). 
 
+1. Data "manager" can setup a formal schema for the target merged dataset and data checking and transformation pipeline
+from predefined filters or by own code in Python. 
+2. Individual contributors can either provide continuous data streams or
+upload data contributions manualy over a web interface that follows predefined schemas.
+3. Dataset contribution is curated, checked and finaly merged to the target dataset. 
+4. You can overview the target or intermediate datasets using a ZF-view dashboard component and
+   posibly fix  the source data or processing pipeline as all datasets are versioned and 
+   referencable by persistent identifiers.
 
-Contemplated features:
-- move to TileDB backend with native support for checkpointing/versioning and sparse dimensions
-  [ChatGPT research](https://chatgpt.com/share/68173f9f-3748-8004-ab29-4cedd87ce136)
-- test support for vast datasets and parallel IO
+**Do not deploy yet!** Project still under active development, version 1.0 will be ready at June 2027.
+   
 
-- generic data collection schemas
-  - container accepting instrument data SEND requests, then writes using instument descriptions schema
-  - container or local script updating the storage with given CSV, the source should be defined in the dataset schema.
-  - container scrap the data, again source should be defined in the dataset schema.
-- checking the dataset constraints
-- data transforms
-- allow selection of subdatasets by various criteria
-- expressing data source metadata
-- versioning of individual contributions
-- ZENODO export /import (with metadata)
-- person authentication
-- automatized collection of metadata from the format definition and definition of data sources and persons
-- generic data visualization building blocks for web apps
+### Raw data
 
-- Documentation of raw data collection and merging process.
-- Reproducible publication on ZENODO under FAIR principles.
-- Metadata schemata: DublinCore, Data Cite, DCAT, DDI (TODO: review)
+Inputs can include sensor readings, field records, and model outputs. The ingress service accepts uploads such as CSV
+or JSON files and can fetch data from configured sources on a schedule.
 
-Expected usecases:
-- Continuous collection of weather data from yr.no forecast to form a consistent dataset of historical data.
-  Allow visualization of different quantities at different locations over different time ranges.
+### Curated by ingress
 
-- Manual and automatic updates of collected weather data, sensor data and Kalman inversion results.
-  Manual updates of the measured data, automatic updates from Kalman inversions.
+A project defines a *schema*, a file that specifies the expected quantities, coordinates, and units. The processing
+pipeline converts tabular data to the agreed names and units and checks rules such as required coordinates and allowed
+value ranges. An optional filter helps process late or out-of-order batches by the time recorded in the data.
 
-Different techniques and tools will be tried to achieve these goals.
+### Merged data in Zarr
+
+| Data model | Example dataset |
+| --- | --- |
+| **xarray** organizes related quantities as a dataset of arrays with named axes, called *dimensions*. The *coordinates* give those axes meaningful labels, such as timestamps, borehole names, or depths in metres. Rock temperature can vary with time, borehole, and depth, while a borehole's longitude depends only on the borehole. These labels let researchers select a particular site and date range, and let zarr-fuse place updates at the corresponding coordinates. **Zarr** is the storage format. It saves arrays in blocks called *chunks*, so readers can load the parts needed for a particular analysis. | ![Multidimensional dataset](docs/images/example_schema.png)  |
+
+### Dashboard
+
+The **dashboard** opens configured datasets from the store and provides an interactive map and time-series plots. In
+the Bukov monitoring example, researchers can choose boreholes on a map and compare temperatures at selected depths.
+This gives the team a quick way to see which series are available and spot gaps or unusual patterns worth investigating.
+
+[Features, use cases, and technical concepts](docs/features.md)
 
 ## Install
 

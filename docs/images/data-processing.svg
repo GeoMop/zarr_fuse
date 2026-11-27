@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="896"
+   height="104"
+   viewBox="0 0 896 104"
+   role="img"
+   aria-labelledby="title description"
+   version="1.1"
+   id="svg363"
+   sodipodi:docname="data-processing.svg"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
+   inkscape:export-filename="data-processing.png"
+   inkscape:export-xdpi="600"
+   inkscape:export-ydpi="600"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview365"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     showgrid="false"
+     inkscape:zoom="1.625"
+     inkscape:cx="544"
+     inkscape:cy="51.692308"
+     inkscape:window-width="1866"
+     inkscape:window-height="1048"
+     inkscape:window-x="54"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg363" />
+  <title
+     id="title">zarr-fuse data processing</title>
+  <desc
+     id="description">
+    Raw data from measurements and models are filtered and checked against a schema by the ingress service.
+    Contributions are merged by their coordinates in Zarr and explored through maps and time series in the dashboard.
+  </desc>
+  <defs
+     id="defs313">
+    <marker
+       id="arrow"
+       markerWidth="6"
+       markerHeight="6"
+       refX="5"
+       refY="3"
+       orient="auto">
+      <path
+         d="M0 0L6 3L0 6Z"
+         fill="#526478"
+         id="path310" />
+    </marker>
+  </defs>
+  <g
+     fill="none"
+     stroke="#526478"
+     stroke-width="2"
+     marker-end="url(#arrow)"
+     id="g321">
+    <path
+       d="M207 52H237"
+       id="path315" />
+    <path
+       d="M431 52H461"
+       id="path317" />
+    <path
+       d="M655 52H685"
+       id="path319" />
+  </g>
+  <rect
+     x="20"
+     y="10"
+     width="184"
+     height="84"
+     rx="12"
+     fill="#f2f6fa"
+     stroke="#9caec0"
+     id="rect323"
+     style="font-weight:700;font-size:17px;font-family:system-ui, sans-serif;text-anchor:middle" />
+  <text
+     x="112"
+     y="75"
+     id="text325"
+     style="font-weight:700;font-size:17px;font-family:system-ui, sans-serif;text-anchor:middle;fill:#142d41"><tspan
+       style="font-weight:normal"
+       id="tspan664">Raw data (CSV,..)</tspan></text>
+  <rect
+     x="244"
+     y="10"
+     width="184"
+     height="84"
+     rx="12"
+     fill="#eaf7f3"
+     stroke="#77aea0"
+     id="rect327"
+     style="font-weight:700;font-size:17px;font-family:system-ui, sans-serif;text-anchor:middle" />
+  <text
+     x="336"
+     y="75"
+     id="text329"
+     style="font-weight:700;font-size:17px;font-family:system-ui, sans-serif;text-anchor:middle;fill:#142d41"><tspan
+   style="font-weight:normal"
+   id="tspan662">Curated by</tspan> <tspan
+   style="font-weight:bold"
+   id="tspan660">Ingress</tspan></text>
+  <rect
+     x="468"
+     y="10"
+     width="184"
+     height="84"
+     rx="12"
+     fill="#eaf3fb"
+     stroke="#83a9cb"
+     id="rect331"
+     style="font-weight:700;font-size:17px;font-family:system-ui, sans-serif;text-anchor:middle" />
+  <text
+     x="560"
+     y="75"
+     id="text333"
+     style="font-weight:700;font-size:17px;font-family:system-ui, sans-serif;text-anchor:middle;fill:#142d41"><tspan
+       style="font-weight:normal"
+       id="tspan670">Merged data</tspan></text>
+  <rect
+     x="692"
+     y="10"
+     width="184"
+     height="84"
+     rx="12"
+     fill="#f2eff9"
+     stroke="#a699c2"
+     id="rect335"
+     style="font-weight:700;font-size:17px;font-family:system-ui, sans-serif;text-anchor:middle" />
+  <text
+     x="784"
+     y="75"
+     id="text337"
+     style="font-weight:700;font-size:17px;font-family:system-ui, sans-serif;text-anchor:middle;fill:#142d41">ZF-view <tspan
+   style="font-weight:normal"
+   id="tspan668">dashboard</tspan></text>
+  <g
+     fill="none"
+     stroke-width="1.8"
+     stroke-linecap="round"
+     stroke-linejoin="round"
+     aria-hidden="true"
+     id="g361">
+    <g
+       stroke="#35546f"
+       transform="translate(112 0)"
+       id="g343">
+      <path
+         d="M-8 27H3L8 32V50H-8Z M3 27V32H8 M-4 38H4 M-4 43H4"
+         id="path341" />
+    </g>
+    <g
+       stroke="#226c5b"
+       transform="translate(336 0)"
+       id="g347">
+      <path
+         d="M-11 28H11L3 38V47L-3 50V38Z"
+         id="path345" />
+    </g>
+    <g
+       stroke="#2e628f"
+       transform="translate(560 0)"
+       id="g353">
+      <ellipse
+         cy="31"
+         rx="10"
+         ry="4"
+         id="ellipse349" />
+      <path
+         d="M-10 31V47C-10 53 10 53 10 47V31 M-10 39C-10 45 10 45 10 39"
+         id="path351" />
+    </g>
+    <g
+       stroke="#635085"
+       transform="translate(784 0)"
+       id="g359">
+      <rect
+         x="-13"
+         y="27"
+         width="26"
+         height="23"
+         rx="2"
+         id="rect355" />
+      <path
+         d="M-13 33H13 M-8 45L-3 40L2 43L8 37"
+         id="path357" />
+    </g>
+  </g>
+</svg>
