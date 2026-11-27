@@ -22,43 +22,77 @@ Use current releases for evaluation only.
 
 ### Define the dataset
 
-A schema records what each quantity means, how it is indexed, which units to use, and which values are allowed. The
-data steward uses it to define a common target for sources that report the same quantity in different formats or units.
-Each source can have its own input schema and processing settings, with custom Python steps for instrument-specific
-formats.
+A schema records what each quantity means, how it is indexed, which units to use, and which values are allowed. Data
+stewards use schemas to define the structure of datasets and configure pipelines to validate, standardize, curate,
+transform, or merge contributions as the common dataset grows.
 
 ### Contribute data
 
-A monitoring station can send readings as they arrive, the ingress service can fetch a weather feed on a schedule, and a
-field team can submit a CSV after a campaign. These routes let teams combine long-running monitoring with occasional
-field measurements in the same dataset.
+The `ingress` service can fetch data such as weather forecasts from online sources or receive measurements sent by a
+monitoring station. Scientists can also upload individual measurements or data from an in situ campaign.
+These routes let teams combine long-running monitoring with occasional field measurements in the same dataset.
+All raw data are stored for future processing or reprocessing.
 
 ### Curation and merge
 
-The pipeline can convert depths reported in centimetres to metres and check that each measurement has a borehole
-identifier. A time filter can order late arrivals by observation time, and processing logs help the team trace failed
-checks back to a contribution. See [Ingress](ingress_server/README.md).
+The curation workflow uses readers for different input formats and processes the data in a common form, a
+multidimensional [xarray dataset][xarray]. In such a dataset, variables can share axes or use different ones.
+Coordinates label positions along those axes with values such as timestamps and site names, as shown in the left
+figure below.
 
-| Data model | Example dataset |
+A pandas [DataFrame][pandas] is a table-shaped special case, with variables in columns and individual observations in
+rows. Tables are flexible for small datasets and useful for sparse observations because they can list only the
+combinations that were measured. **Pivoting** turns coordinate columns into array axes and places each value at its
+coordinates, as shown in the right figure.
+
+Readers usually return raw data as a DataFrame. The workflow then uses the schema and predefined filters to
+standardise units, variable names, category labels, and data types. Other filters can interpolate data, reorder
+contributions, pivot tables, and merge datasets. All filters also run checks against the dataset schemas and report
+errors and their sources in a shared log.
+
+zarr-fuse uses [Icechunk][icechunk] to track versions of raw data and of intermediate and merged datasets. It currently
+supports S3-compatible remote storage. Adding support for Azure and Google Cloud storage should be straightforward.
+Parallel reads and writes are possible for large datasets and computationally intensive applications.
+See the [feature guide](docs/features.md).
+
+| Multidimensional dataset | DataFrame to array |
 | --- | --- |
-| **xarray** labels the axes. **Zarr** stores the arrays in chunks. | ![Multidimensional dataset][example-schema] |
+| <img src="docs/images/example_schema.png" width="340" alt="Dataset axes"> | ![Table pivot][table-to-array] |
 
-Temperature and pore pressure can share named dimensions such as time, borehole, and depth. The coordinates are the
-labels along those axes, such as actual timestamps or depths in metres. Each variable uses the dimensions it needs.
-zarr-fuse uses the coordinate labels to place new observations, and Zarr's chunks let readers load a subset such as
-one week of data from one borehole.
+[xarray]: https://docs.xarray.dev/en/stable/user-guide/data-structures.html#dataset
+[pandas]: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.html
+[icechunk]: https://icechunk.io/en/stable/
+[table-to-array]: docs/images/table-to-array.png
 
 ### Inspect and revise
 
-In the Bukov monitoring example, researchers can select boreholes on a map and compare temperature series at chosen
-depths. Gaps or unexpected patterns give the team a place to start investigating. See [ZF-view](dashboard/README.md).
+The `ZF-view` dashboard lets researchers inspect own currated contributions as well as the merged datasets in a generic graphing web application. Notably, the overview of the error logs and detailed inspection of running and completed workflows enables post-mortem debugging, fixing raw data or processing workflow and rerun the processing. See [ZF-view](dashboard/README.md).
 
-The planned Icechunk snapshot history will let the team compare dataset states before and after a correction.
-Persistent data and view identifiers will let the team refer to the exact dataset version and dashboard view used in
-an analysis. For publication, teams can deposit that dataset version with its provenance and descriptive metadata in a
-research data repository.
+### FAIR publishing
+The system is build for easy dataset publication on public repositories like Zenodo. The schema and individual contributions can hold metadata. A simplified metadata handling and semiautomatic publication of better documented and fully machine readable datasets isplaned for the end of 2027.
 
-[example-schema]: docs/images/example_schema.png
+## Alternative tools
+
+These open-source tools cover different parts of the workflow planned for zarr-fuse 1.0.
+
+- **Grist Core** gives collaborators a spreadsheet-like interface for editing linked tables, with formulas and access
+  rules. It suits projects whose data fit in rows and columns. Merging those tables into multidimensional arrays
+  requires a separate processing step. [Grist Core](https://github.com/gristlabs/grist-core)
+- **OpenRefine** helps researchers clean messy tables interactively, for example by grouping spelling variants of the
+  same category. Recurring ingestion and updates to a shared dataset require a separate workflow.
+  [OpenRefine manual](https://openrefine.org/docs/manual/transforming/)
+- **Pangeo** brings together xarray, Dask, Zarr, and Jupyter for large-scale array analysis. A team can use the same
+  data model as zarr-fuse and choose its own analysis tools. Shared contribution forms, schema checks, and a dataset
+  dashboard require project-specific integration. [Pangeo ecosystem](https://pangeo.io/#ecosystem)
+- **Galaxy** lets researchers build and rerun analyses in a browser and share the history of each run. Maintaining a
+  shared Zarr dataset from ongoing contributions would require a collection and merge workflow tailored to the project.
+  [Galaxy](https://galaxyproject.org/)
+- **TileDB Embedded** stores dense and sparse multidimensional arrays and can read earlier versions. Its native sparse
+  arrays suit measurements that cover only a small fraction of possible coordinate combinations. Collection, curation,
+  and visualisation need additional tools. [TileDB Embedded](https://github.com/TileDB-Inc/TileDB)
+- **Dataverse** publishes research datasets with descriptive metadata, version histories, and citable identifiers such
+  as DOIs. It suits archiving a dataset release. Continuous collection and merging take place upstream.
+  [Dataverse dataset guide](https://guides.dataverse.org/en/latest/user/dataset-management.html)
 
 ## Install
 
