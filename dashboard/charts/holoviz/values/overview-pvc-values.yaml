@@ -1,0 +1,13 @@
+# Mount an existing claim populated with the dashboard's time-series overviews.
+frontend:
+  extraEnv:
+    - name: ZF_TIMESERIES_OVERVIEW_DIR
+      value: /opt/dashboard/overviews
+  extraVolumes:
+    - name: timeseries-overviews
+      persistentVolumeClaim:
+        claimName: dashboard-overviews
+  extraVolumeMounts:
+    - name: timeseries-overviews
+      mountPath: /opt/dashboard/overviews
+      readOnly: true

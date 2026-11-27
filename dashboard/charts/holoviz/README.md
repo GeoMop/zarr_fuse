@@ -31,6 +31,44 @@ helm upgrade "$RELEASE" "$CHART" \
 
 The dashboard is served at `https://zarr-fuse-<release>.dyn.cloud.e-infra.cz`.
 
+## Year-scale time-series plots
+
+The year pane reads precomputed Zarr overviews from a directory visible to the frontend pod. If the
+directory is unset or the matching overview is missing, the year pane prompts users to zoom. The
+month and day panes read raw windows directly from the measurement store.
+
+1. Populate a persistent volume claim in the dashboard namespace. Run the overview builder with
+   the dashboard's view configuration and source credentials in a job or environment where the
+   claim is mounted writable. For Bukov, run this from the repository root with `VIEWS` set to the
+   matching `zf_view.yaml` and `OVERVIEW_DIR` set to the mounted directory:
+
+   ```bash
+   for variable in rock_temp air_temp air_humidity; do
+     python -m dashboard.scripts.build_timeseries_overview \
+       "$VIEWS" bukov_endpoint bukov "$variable" "$OVERVIEW_DIR"
+   done
+   ```
+
+2. Add `--values "$CHART/values/overview-pvc-values.yaml"` to the Helm upgrade above. The example mounts
+   a claim named `dashboard-overviews` read-only in the frontend. Set `claimName` to your claim name
+   and make the files readable by the frontend user (UID and GID `11233` by default). If the release
+   already uses the extra environment or volume lists, merge the example entries into those lists.
+   For the reusable GitHub Actions workflow, the equivalent input is
+   `extra-helm-args: --values holoviz/values/overview-pvc-values.yaml`.
+
+3. Set `DEPLOYMENT` to the dashboard's Kubernetes Deployment name. Check the mounted directory
+   inside the frontend pod, then open the year pane:
+
+   ```bash
+   kubectl -n "$NAMESPACE" exec "deployment/$DEPLOYMENT" -c frontend -- \
+     sh -c 'ls -d "${ZF_TIMESERIES_OVERVIEW_DIR:?}"/*.zarr'
+   ```
+
+The overview filenames identify a specific source URI, group, variable, and coordinate snapshot.
+Regenerate the files when the time axis grows. If you set `ZF_TIMESERIES_OVERVIEW_REVISION`, use the
+same value for generation and serving. After publishing new files to an existing mount, click
+**Reload Data** to refresh the dashboard's cached lookups.
+
 ## Values
 
 | Key | Default | Purpose |
