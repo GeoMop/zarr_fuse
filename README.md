@@ -55,14 +55,19 @@ supports S3-compatible remote storage. Adding support for Azure and Google Cloud
 Parallel reads and writes are possible for large datasets and computationally intensive applications.
 See the [feature guide](docs/features.md).
 
-| Multidimensional dataset | DataFrame to array |
-| --- | --- |
-| <img src="docs/images/example_schema.png" width="340" alt="Dataset axes"> | ![Table pivot][table-to-array] |
+<p align="center">
+  <img src="docs/images/example_schema.png" width="59%"
+       alt="Temperature and pore pressure indexed by time, borehole, and depth">
+  &nbsp;
+  <img src="docs/images/table-to-array.png" width="33%"
+       alt="Pivoting a table of observations into an array with gaps for missing values">
+  <br>
+  <em>Multidimensional dataset (left) · DataFrame to array (right)</em>
+</p>
 
 [xarray]: https://docs.xarray.dev/en/stable/user-guide/data-structures.html#dataset
 [pandas]: https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.html
 [icechunk]: https://icechunk.io/en/stable/
-[table-to-array]: docs/images/table-to-array.png
 
 ### Inspect and revise
 
